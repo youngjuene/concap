@@ -4,8 +4,7 @@ Every experiment variant is scored identically on the validation pairs
 through the one shared ``completion_logps`` interface; the validation report,
 the per-experiment winner selection (max validation accuracy, lexical
 variant-id tie-break), the ranking, the selection report, and the lock
-manifest all have one home. Only selected variants reach the lock, the test,
-and the study.
+manifest all have one home. Only selected variants reach the lock.
 """
 
 from __future__ import annotations
@@ -57,7 +56,6 @@ def publish_selection(
     preprocessing_hash: str,
     evaluation_version: str,
     metric_versions: Mapping[str, str],
-    study_interface_version: str,
     selection_note: str,
 ) -> SelectionOutcome:
     """Score every variant, publish validation/selection reports, and lock."""
@@ -119,7 +117,7 @@ def publish_selection(
     )
     # Selection: one winning variant per experiment and track (max validation
     # accuracy, lexical variant-id tie-break), then experiments ranked by their
-    # winner. Only selected variants reach the lock, the test, and the study.
+    # winner. Only selected variants reach the lock.
     selected_variants: dict[str, dict[str, str]] = {}
     for track in TRACKS:
         selected_variants[track] = {}
@@ -176,7 +174,6 @@ def publish_selection(
         preprocessing_hash=preprocessing_hash,
         evaluation_version=evaluation_version,
         metric_versions=metric_versions,
-        study_interface_version=study_interface_version,
         selection_report_hash=selection_artifact,
     )
     lock_artifact = publisher.publish(

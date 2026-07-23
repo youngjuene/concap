@@ -1,8 +1,8 @@
 """Caption contracts and the executable study contract.
 
 `schema` owns the shared normative vocabularies (tracks, splits, annotation
-choices, pair categories, claim statuses, the nine-condition experiment
-matrix) and the study-contract validator. `visual` and `audio` own the
+choices, pair categories, the nine-condition experiment matrix) and the
+study-contract validator. `visual` and `audio` own the
 per-track caption contracts: deterministic compliance checks and cross-modal
 lexical screens.
 """

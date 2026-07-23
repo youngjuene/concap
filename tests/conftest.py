@@ -18,7 +18,6 @@ from dpo.core.identity import sha256_bytes
 from dpo.data.derive_pairs import derive_pair_all, derive_pair_strict
 from dpo.data.derive_sft import derive_sft
 from dpo.data.split import ClipInput, SplitManifest, assign_splits
-from dpo.evidence.claim_ledger import Claim, ClaimLedger
 from dpo.pipeline.run_matrix import OfflineMatrixRunner
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -38,7 +37,6 @@ class PreferenceWorld:
     contract: StudyContract
     clips: tuple[ClipInput, ...]
     manifest: SplitManifest
-    ledgers: dict[str, ClaimLedger]
     pool: FrozenCandidatePool
     audits: dict[str, ResolvedCandidateAudit]
     annotations: tuple[RawAnnotation, ...]
@@ -65,40 +63,10 @@ def build_world(contract: StudyContract, *, track: str = "visual") -> Preference
     train_clips = list(manifest.assignments["train"])[:6]
     candidates = []
     audit_rows = []
-    ledgers: dict[str, ClaimLedger] = {}
     for rank, clip_id in enumerate(train_clips):
         subject = _SUBJECTS[rank % len(_SUBJECTS)]
         target = _OBJECTS[rank % len(_OBJECTS)]
         site = f"site{rank:02d}x"
-        ledger = ClaimLedger(
-            clip_id=clip_id,
-            track=track,
-            audit_version="audit/v1",
-            prohibited_cross_modal_claims=(),
-            claims=(
-                Claim(
-                    claim_id=f"claim-{rank}-a",
-                    type="object",
-                    canonical_form=f"{subject} at the {target}",
-                    start_ms=0,
-                    end_ms=4000,
-                    support_sources=("detector",),
-                    support_confidence=0.9,
-                    human_status="supported",
-                ),
-                Claim(
-                    claim_id=f"claim-{rank}-b",
-                    type="action",
-                    canonical_form=f"{subject} crossing slowly",
-                    start_ms=0,
-                    end_ms=6000,
-                    support_sources=("detector",),
-                    support_confidence=0.7,
-                    human_status="contradicted",
-                ),
-            ),
-        )
-        ledgers[clip_id] = ledger
         records = build_candidate_records(
             clip_id=clip_id,
             track=track,
@@ -112,7 +80,7 @@ def build_world(contract: StudyContract, *, track: str = "visual") -> Preference
         )
         candidates.extend(records)
         for record in records:
-            audit_rows.append(audit_candidate(record, contract=contract.tracks[track], ledger=ledger))
+            audit_rows.append(audit_candidate(record, contract=contract.tracks[track]))
     audits = dict(resolve_audits(audit_rows, []))
     pairs = sample_pairs(
         candidates,
@@ -163,7 +131,6 @@ def build_world(contract: StudyContract, *, track: str = "visual") -> Preference
         contract=contract,
         clips=clips,
         manifest=manifest,
-        ledgers=ledgers,
         pool=pool,
         audits=audits,
         annotations=tuple(annotations),

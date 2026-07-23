@@ -1,10 +1,10 @@
 """Confound-aware pair sampling over the audited candidate pool.
 
-The sampler considers semantic distance, length difference, evidence-error
-difference, modality-purity difference, lexical overlap, candidate source, and
-estimated difficulty. Near-duplicate captions are excluded, length confounds
-are flagged rather than silently kept, and category assignment is
-deterministic so a frozen pool always regenerates the same pairs.
+The sampler considers semantic distance, length difference, modality-purity
+difference, lexical overlap, candidate source, and estimated difficulty.
+Near-duplicate captions are excluded, length confounds are flagged rather
+than silently kept, and category assignment is deterministic so a frozen pool
+always regenerates the same pairs.
 """
 
 from __future__ import annotations
@@ -25,8 +25,6 @@ class PairFeatures:
     lexical_overlap: float
     semantic_distance: float
     length_difference: int
-    evidence_error_difference: int
-    coverage_difference: int
     modality_purity_difference: int
     length_confounded: bool
     difficulty: float
@@ -36,8 +34,6 @@ class PairFeatures:
             "lexical_overlap": self.lexical_overlap,
             "semantic_distance": self.semantic_distance,
             "length_difference": self.length_difference,
-            "evidence_error_difference": self.evidence_error_difference,
-            "coverage_difference": self.coverage_difference,
             "modality_purity_difference": self.modality_purity_difference,
             "length_confounded": self.length_confounded,
             "difficulty": self.difficulty,
@@ -81,31 +77,14 @@ def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
     return len(left & right) / len(union)
 
 
-def _supported_order(text: str, supported_tokens: frozenset[str]) -> tuple[str, ...]:
-    seen: list[str] = []
-    for token in (word.casefold() for word in caption_words(text)):
-        if token in supported_tokens and token not in seen:
-            seen.append(token)
-    return tuple(seen)
-
-
 def _categorize(
-    first: CandidateRecord,
-    second: CandidateRecord,
     features: PairFeatures,
     first_audit: ResolvedCandidateAudit,
     second_audit: ResolvedCandidateAudit,
-    supported_tokens: frozenset[str],
 ) -> str:
-    if features.modality_purity_difference > 0 or features.evidence_error_difference >= 2:
+    if features.modality_purity_difference > 0:
         return "factuality_contrast"
-    if features.coverage_difference >= 2:
-        return "coverage_contrast"
-    first_order = _supported_order(first.text, supported_tokens)
-    second_order = _supported_order(second.text, supported_tokens)
-    if set(first_order) == set(second_order) and len(first_order) >= 2 and first_order != second_order:
-        return "temporal_contrast"
-    if features.length_confounded and features.coverage_difference <= 1:
+    if features.length_confounded:
         return "specificity_contrast"
     if first_audit.acceptable != second_audit.acceptable:
         return "quality_contrast"
@@ -126,26 +105,17 @@ def pair_features(
     second_tokens = content_tokens(second.text)
     overlap = _jaccard(first_tokens, second_tokens)
     length_difference = abs(len(caption_words(first.text)) - len(caption_words(second.text)))
-    error_difference = abs(
-        first_audit.deterministic.unsupported_token_count - second_audit.deterministic.unsupported_token_count
-    )
-    coverage_difference = abs(
-        first_audit.deterministic.supported_overlap - second_audit.deterministic.supported_overlap
-    )
     purity_difference = abs(int(first_audit.modality_violation) - int(second_audit.modality_violation))
-    # A pair is hard when the candidates are lexically close and their audit
-    # profiles are close; it is easy when either axis separates them.
-    separation = min(
-        1.0,
-        error_difference / 4 + coverage_difference / 4 + purity_difference + length_difference / 10,
-    )
+    # A pair is hard when the candidates are lexically close and neither the
+    # modality-purity screen nor a length gap separates them: separation is
+    # 1.0 on any purity difference, otherwise length_difference / 10 capped at
+    # 1.0, and difficulty = overlap * (1 - separation), clamped to [0, 1].
+    separation = min(1.0, purity_difference + length_difference / 10)
     difficulty = max(0.0, min(1.0, overlap * (1.0 - separation)))
     return PairFeatures(
         lexical_overlap=overlap,
         semantic_distance=1.0 - overlap,
         length_difference=length_difference,
-        evidence_error_difference=error_difference,
-        coverage_difference=coverage_difference,
         modality_purity_difference=purity_difference,
         length_confounded=length_difference >= length_confound_words,
         difficulty=difficulty,
@@ -176,11 +146,6 @@ def sample_pairs(
         if len(tracks) != 1:
             raise CandidateError(f"clip {clip_id!r} mixes candidate tracks; pairs are single-track")
         track = next(iter(tracks))
-        supported_tokens = frozenset(
-            token
-            for record in clip_candidates
-            for token in audits[record.candidate_id].deterministic.supported_tokens
-        )
         candidate_pairs: list[PairRecord] = []
         for first, second in combinations(clip_candidates, 2):
             first_audit = audits[first.candidate_id]
@@ -188,7 +153,7 @@ def sample_pairs(
             features = pair_features(first, second, first_audit, second_audit)
             if features.lexical_overlap >= near_duplicate_jaccard:
                 continue
-            category = _categorize(first, second, features, first_audit, second_audit, supported_tokens)
+            category = _categorize(features, first_audit, second_audit)
             pair_hash = semantic_hash(
                 {
                     "clip_id": clip_id,
@@ -248,8 +213,6 @@ def parse_pair_record(value: Mapping[str, object]) -> PairRecord:
         "lexical_overlap",
         "semantic_distance",
         "length_difference",
-        "evidence_error_difference",
-        "coverage_difference",
         "modality_purity_difference",
         "length_confounded",
         "difficulty",
@@ -282,8 +245,6 @@ def parse_pair_record(value: Mapping[str, object]) -> PairRecord:
             lexical_overlap=_num("lexical_overlap"),
             semantic_distance=_num("semantic_distance"),
             length_difference=_int("length_difference"),
-            evidence_error_difference=_int("evidence_error_difference"),
-            coverage_difference=_int("coverage_difference"),
             modality_purity_difference=_int("modality_purity_difference"),
             length_confounded=bool(confounded),
             difficulty=_num("difficulty"),

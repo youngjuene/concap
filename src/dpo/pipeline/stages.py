@@ -59,28 +59,8 @@ STAGES: dict[str, PipelineStage] = {
             "Compute and freeze the immutable group-level splits",
         ),
         PipelineStage(
-            "evidence",
-            ("dpo.clip-registry/v1",),
-            (
-                "dpo.provider-visual-evidence-parsed/v1",
-                "dpo.provider-audio-evidence-parsed/v1",
-            ),
-            ("corpus", "tracks", "models"),
-            "Extract modality-isolated evidence through the pinned provider boundary",
-        ),
-        PipelineStage(
-            "claims",
-            (
-                "dpo.provider-visual-evidence-parsed/v1",
-                "dpo.provider-audio-evidence-parsed/v1",
-            ),
-            ("dpo.claim-ledger/v1",),
-            ("tracks",),
-            "Propose claims and apply human audits",
-        ),
-        PipelineStage(
             "candidates",
-            ("dpo.claim-ledger/v1",),
+            ("dpo.clip-registry-shard/v1",),
             ("dpo.frozen-candidate-pool/v1",),
             ("candidates", "pairs", "tracks", "models"),
             "Generate, audit, pair, and freeze the candidate pool",
@@ -125,32 +105,6 @@ STAGES: dict[str, PipelineStage] = {
             ("dpo.lock-manifest/v1",),
             FULL_CONTRACT,
             "Freeze configuration before any test access",
-        ),
-        PipelineStage(
-            "test",
-            ("dpo.lock-manifest/v1", "dpo.clip-registry-shard/v1"),
-            (
-                "dpo.test-reservation/v1",
-                "dpo.test-resume/v1",
-                "dpo.test-finalization/v1",
-                "dpo.test-metrics/v1",
-            ),
-            ("test_once", "validation", "training", "tracks"),
-            "Reserve-before-read confirmatory test, exactly once",
-        ),
-        PipelineStage(
-            "study",
-            ("dpo.lock-manifest/v1",),
-            ("dpo.study-export/v1", "dpo.study-results/v1"),
-            ("study", "validation", "training", "tracks"),
-            "Blinded incomplete-block human study export and results",
-        ),
-        PipelineStage(
-            "analysis",
-            ("dpo.study-results/v1", "dpo.test-metrics/v1"),
-            ("dpo.analysis-report/v1",),
-            ("analysis",),
-            "Bradley-Terry, clip-clustered bootstrap, and robustness analysis",
         ),
     )
 }

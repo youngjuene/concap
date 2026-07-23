@@ -37,6 +37,7 @@ REVISION_RE = re.compile(r"(?:[0-9a-f]{40}|sha256:[0-9a-f]{64})\Z")
 TRACKS = ("visual", "audio")
 SPLITS = ("train", "validation", "test", "study")
 EXECUTION_CLASSES = ("synthetic_canary", "live")
+TERMINAL_STATES = ("offline", "release")
 TERMINAL_VALUES = ("pending", "blocked_pending_external_operation", "complete")
 
 # Annotation response options (binary forced choice alone is insufficient).
@@ -56,9 +57,7 @@ REASON_TAGS = (
 PAIR_CATEGORIES = (
     "quality_contrast",
     "factuality_contrast",
-    "coverage_contrast",
     "specificity_contrast",
-    "temporal_contrast",
     "style_contrast",
     "ambiguous_near_tie",
 )
@@ -67,32 +66,9 @@ CANDIDATE_SOURCES = (
     "greedy",
     "sample",
     "alt_decoding",
-    "evidence_synthetic",
     "controlled_error",
 )
-CHALLENGE_SOURCES = frozenset({"evidence_synthetic", "controlled_error"})
-
-CLAIM_STATUSES = ("supported", "unsupported", "uncertain", "contradicted", "not_applicable")
-VISUAL_CLAIM_TYPES = (
-    "object",
-    "attribute",
-    "action",
-    "spatial_relation",
-    "motion",
-    "camera_motion",
-    "scene_change",
-    "ocr_text",
-)
-AUDIO_CLAIM_TYPES = (
-    "sound_event",
-    "speech_presence",
-    "music",
-    "acoustic_scene",
-    "foreground_background",
-    "temporal_change",
-    "silence",
-    "transient",
-)
+CHALLENGE_SOURCES = frozenset({"controlled_error"})
 
 OBJECTIVE_NAMES = ("sft", "dpo", "ipo", "cdpo", "rdpo", "drdpo", "wdpo")
 TRAINING_VIEWS = ("sft", "pair_strict", "pair_all")
@@ -384,14 +360,6 @@ class StudyContract:
     @property
     def robustness(self) -> Mapping[str, Any]:
         return self.section("robustness")
-
-    @property
-    def analysis(self) -> Mapping[str, Any]:
-        return self.section("analysis")
-
-    @property
-    def study(self) -> Mapping[str, Any]:
-        return self.section("study")
 
 
 # ---------------------------------------------------------------------------
@@ -732,30 +700,6 @@ def _validate_validation(value: object) -> None:
     _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
 
 
-def _validate_test_once(value: object) -> None:
-    table = _table(value, "test_once", {"policy", "resume_identical_only", "authority_db"})
-    if _string(table["policy"], "test_once.policy") != "reserve-before-read":
-        raise ContractError("test_once.policy must be 'reserve-before-read'")
-    if not _boolean(table["resume_identical_only"], "test_once.resume_identical_only"):
-        raise ContractError("test_once.resume_identical_only must be true")
-    if _string(table["authority_db"], "test_once.authority_db") != "test.sqlite":
-        raise ContractError("test_once.authority_db must be 'test.sqlite'")
-
-
-def _validate_study(value: object) -> None:
-    table = _table(
-        value,
-        "study",
-        {"design", "exposures_per_model_pair", "protocol_hash", "consent_hash", "retention_days"},
-    )
-    if _string(table["design"], "study.design") != "balanced_incomplete_block":
-        raise ContractError("study.design must be 'balanced_incomplete_block'")
-    _integer(table["exposures_per_model_pair"], "study.exposures_per_model_pair", minimum=1)
-    _hash(table["protocol_hash"], "study.protocol_hash")
-    _hash(table["consent_hash"], "study.consent_hash")
-    _integer(table["retention_days"], "study.retention_days", minimum=1)
-
-
 def _validate_robustness(value: object) -> None:
     table = _table(value, "robustness", {"flip_rates", "flip_seed"})
     rates = table["flip_rates"]
@@ -770,27 +714,17 @@ def _validate_robustness(value: object) -> None:
     _integer(table["flip_seed"], "robustness.flip_seed", minimum=0)
 
 
-def _validate_analysis(value: object) -> None:
-    table = _table(value, "analysis", {"bootstrap_samples", "seed", "correction"})
-    _integer(table["bootstrap_samples"], "analysis.bootstrap_samples", minimum=1)
-    _integer(table["seed"], "analysis.seed", minimum=0)
-    if _string(table["correction"], "analysis.correction") != "benjamini_hochberg":
-        raise ContractError("analysis.correction must be 'benjamini_hochberg'")
-
-
 def _validate_terminal_states(value: object, execution_class: str) -> None:
-    table = _table(value, "terminal_states", {"offline", "release", "study"})
-    for key in ("offline", "release", "study"):
+    table = _table(value, "terminal_states", set(TERMINAL_STATES))
+    for key in TERMINAL_STATES:
         state = _string(table[key], f"terminal_states.{key}")
         if state not in TERMINAL_VALUES:
             raise ContractError(f"terminal_states.{key} must be one of {sorted(TERMINAL_VALUES)}")
-    if execution_class == "synthetic_canary":
-        for key in ("release", "study"):
-            if table[key] != "blocked_pending_external_operation":
-                raise ContractError(
-                    f"terminal_states.{key} must stay blocked_pending_external_operation"
-                    " in a synthetic_canary contract"
-                )
+    if execution_class == "synthetic_canary" and table["release"] != "blocked_pending_external_operation":
+        raise ContractError(
+            "terminal_states.release must stay blocked_pending_external_operation"
+            " in a synthetic_canary contract"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -817,10 +751,7 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
             "training",
             "experiments",
             "validation",
-            "test_once",
-            "study",
             "robustness",
-            "analysis",
             "terminal_states",
         },
         {"backends"},
@@ -834,13 +765,8 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
     _validate_corpus(root["corpus"])
     tracks_table = _table(root["tracks"], "tracks", set(TRACKS))
     tracks = {track: _validate_track(track, tracks_table[track]) for track in TRACKS}
-    models = _table(
-        root["models"],
-        "models",
-        {"seed", "evidence_visual", "evidence_audio"},
-    )
-    for name in sorted(models):
-        _model(models[name], f"models.{name}", with_init_seed=name == "seed")
+    models = _table(root["models"], "models", {"seed"})
+    _model(models["seed"], "models.seed", with_init_seed=True)
     if "backends" in root:
         _validate_backends(root["backends"])
     _validate_candidates(root["candidates"])
@@ -852,10 +778,7 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
     for experiment_id in EXPERIMENT_IDS:
         _validate_experiment(experiment_id, experiments[experiment_id])
     _validate_validation(root["validation"])
-    _validate_test_once(root["test_once"])
-    _validate_study(root["study"])
     _validate_robustness(root["robustness"])
-    _validate_analysis(root["analysis"])
     _validate_terminal_states(root["terminal_states"], execution_class)
     return StudyContract(
         raw=raw,

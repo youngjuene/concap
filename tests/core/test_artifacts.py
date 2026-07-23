@@ -18,7 +18,6 @@ from dpo.core.artifacts import (
     RequestSpec,
 )
 from dpo.core.identity import canonical_bytes, semantic_hash, sha256_bytes
-from dpo.pipeline.lock import LockManifest, TestOnceResolver
 
 CONTRACT_ID = sha256_bytes(b"test-contract")
 LOCK_ID = sha256_bytes(b"test-lock")
@@ -152,49 +151,48 @@ def test_training_purpose_rejects_protected_ancestry(tmp_path: Path) -> None:
         )
 
 
-def test_protected_test_payload_requires_fenced_capability(tmp_path: Path) -> None:
+def test_protected_payloads_fail_closed_and_require_fenced_capability(tmp_path: Path) -> None:
     store = ArtifactStore.create(tmp_path / "store")
-    _publish_registry(store, {"clip-a": "train", "clip-b": "test"})
-    shard_rows = _registry_rows({"clip-b": "test"})
+    roles = {"clip-a": "train", "clip-b": "test", "clip-c": "study"}
+    _publish_registry(store, roles)
     registry_id = semantic_hash(
-        {
-            "schema": "dpo.clip-registry/v1",
-            "contract_id": CONTRACT_ID,
-            "clips": _registry_rows({"clip-a": "train", "clip-b": "test"}),
-        }
+        {"schema": "dpo.clip-registry/v1", "contract_id": CONTRACT_ID, "clips": _registry_rows(roles)}
     )
-    shard = store.publish(
-        _request(
-            "dpo.clip-registry-shard/v1",
-            parameters={"operation": "shard", "registry_id": registry_id},
-        ),
-        canonical_bytes(shard_rows[0]),
-        row_count=1,
-        clips={"clip-b"},
-    )
+
+    def _shard(clip_id: str, role: str) -> str:
+        manifest = store.publish(
+            _request(
+                "dpo.clip-registry-shard/v1",
+                parameters={"operation": "shard", "registry_id": registry_id, "clip_id": clip_id},
+            ),
+            canonical_bytes(_registry_rows({clip_id: role})[0]),
+            row_count=1,
+            clips={clip_id},
+        )
+        return manifest.artifact_id
+
+    # Test-role bytes fail closed: with the confirmatory phase out of the
+    # default pipeline there is no capability path, so no read is possible.
+    test_shard = _shard("clip-b", "test")
     with pytest.raises(AccessDenied):
-        store.read_payload(shard.artifact_id)
-    lock = LockManifest(
-        document={"decoding_hash": "d", "evaluation_version": "e", "statistical_plan_hash": "s"},
-        lock_id=sha256_bytes(b"lock-manifest"),
-    )
-    resolver = TestOnceResolver(str(tmp_path / "store" / "test.sqlite"))
-    reservation = resolver.reserve(lock, test_split_hash=sha256_bytes(b"split"))
-    resolver.mark_first_read(reservation)
-    authority = ProtectedAccessAuthority(tmp_path / "store" / "test.sqlite")
-    capability = authority.reserve(
-        scope="confirmatory-test", semantic_hash=reservation.semantic_hash, roles={"test"}
-    )
+        store.read_payload(test_shard)
+    # Study-role bytes require a fenced capability bound to one semantic hash.
+    study_shard = _shard("clip-c", "study")
+    with pytest.raises(AccessDenied):
+        store.read_payload(study_shard)
+    reservation_semantic = sha256_bytes(b"study-read")
+    authority = ProtectedAccessAuthority(tmp_path / "store" / "study.sqlite")
+    capability = authority.reserve(scope="human-study", semantic_hash=reservation_semantic, roles={"study"})
     payload = store.read_payload(
-        shard.artifact_id,
+        study_shard,
         capability=capability,
         authority=authority,
-        semantic_hash=reservation.semantic_hash,
+        semantic_hash=reservation_semantic,
     )
-    assert json.loads(payload)["clip_id"] == "clip-b"
+    assert json.loads(payload)["clip_id"] == "clip-c"
     with pytest.raises(AccessDenied):
         store.read_payload(
-            shard.artifact_id,
+            study_shard,
             capability=capability,
             authority=authority,
             semantic_hash=sha256_bytes(b"other-semantic"),

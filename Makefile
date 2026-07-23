@@ -1,11 +1,10 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks providers-check smoke canary live-boundary-smoke golden
+.PHONY: sync check test lint typecheck locks smoke canary live-boundary-smoke golden
 
 sync:
 	uv sync --dev
-	uv sync --project providers
 
 test:
 	uv run pytest
@@ -19,16 +18,11 @@ typecheck:
 
 locks:
 	uv lock --check
-	uv lock --check --project providers
-
-providers-check:
-	uv run --project providers python -m compileall -q providers/src
-	uv run --project providers python -c "from dpo_providers.file_adapter import FileAdapter; assert FileAdapter.__name__ == 'FileAdapter'"
 
 golden:
 	uv run python scripts/regenerate_golden.py
 
-check: lint typecheck test locks providers-check
+check: lint typecheck test locks
 
 smoke: canary live-boundary-smoke
 
@@ -44,7 +38,7 @@ canary:
 live-boundary-smoke:
 	@tmp="$$(mktemp -d)"; out="$$tmp/live-boundary.json"; \
 	set +e; \
-	uv run dpo evidence run --workspace "$$tmp/artifacts" --contract configs/study/canary.toml \
+	uv run dpo train run --workspace "$$tmp/artifacts" --contract configs/study/canary.toml \
 	  --track visual --invoke-external > "$$out"; status="$$?"; \
 	set -e; \
 	[ "$$status" -eq 3 ]; \

@@ -2,10 +2,11 @@
 
 One (track, split) collection of audited candidate records becomes one frozen
 candidate pool here: deterministic pair sampling under the contract's bounds,
-the freeze, and the artifact publish parented on every clip's claim ledger.
-Candidate generation and audit resolution happen upstream — the offline
-canary synthesizes them, a live runner records real generations and human
-audit decisions.
+the freeze, and the artifact publish parented on every clip's locked registry
+shard (per-clip shards carry exactly one split role, so the pool's ancestry
+stays role-clean). Candidate generation and audit resolution happen upstream
+— the offline canary synthesizes them, a live runner records real generations
+and human audit decisions.
 """
 
 from __future__ import annotations
@@ -29,9 +30,9 @@ def publish_frozen_pool(
     split: str,
     candidates: Sequence[CandidateRecord],
     audits: Mapping[str, ResolvedCandidateAudit],
-    ledger_artifact_ids: Mapping[str, str],
+    shard_artifact_ids: Mapping[str, str],
     dataset_version: str,
-    evidence_audit_version: str,
+    audit_version: str,
 ) -> tuple[FrozenCandidatePool, str]:
     """Sample pairs, freeze the pool for one (track, split), and publish it."""
     pairs = sample_pairs(
@@ -45,7 +46,7 @@ def publish_frozen_pool(
     pool = freeze_pool(
         dataset_version=dataset_version,
         track=track,
-        evidence_audit_version=evidence_audit_version,
+        evidence_audit_version=audit_version,
         candidates=candidates,
         pairs=pairs,
     )
@@ -54,7 +55,7 @@ def publish_frozen_pool(
         "dpo.frozen-candidate-pool/v1",
         pool.document(),
         parents=tuple(
-            ParentEdge(ledger_artifact_ids[clip_id], "claim-ledger") for clip_id in sorted(split_clips)
+            ParentEdge(shard_artifact_ids[clip_id], "clip-shard") for clip_id in sorted(split_clips)
         ),
         stage="candidates",
         parameters={"operation": "candidates-freeze", "track": track, "split": split},

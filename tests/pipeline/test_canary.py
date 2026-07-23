@@ -12,7 +12,9 @@ def test_canary_cold_then_warm_is_cached_with_zero_provider_calls(tmp_path: Path
     cold = run_canary(tmp_path / "store", CANARY_CONTRACT)
     assert cold.report["status"] == "offline_milestone_complete"
     assert not cold.cached
-    assert cold.provider_calls > 0
+    # The trimmed default pipeline is provider-free even on a cold run; the
+    # field stays in the result so the CLI/Makefile assertions keep working.
+    assert cold.provider_calls == 0
     assert cold.report["oracles"] == {
         "leakage": "protected_exposure_rejected",
         "tamper": "payload_corruption_detected",

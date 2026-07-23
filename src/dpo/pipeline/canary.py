@@ -1,16 +1,15 @@
 """The offline end-to-end canary: every stage, real artifacts, no live data.
 
 One command proves the executable boundary of the whole pipeline on synthetic
-fixtures — contract lock through corpus, evidence, claims, candidates,
-annotation, views, the nine-condition matrix, validation and selection, the
-configuration lock, the fenced test-once read, the blinded study export, and
-analysis — all content-addressed. A warm rerun in the same workspace reuses
-every artifact and makes zero provider calls.
+fixtures — contract lock through corpus, candidates, annotation, views, the
+nine-condition matrix, validation and selection, and the configuration lock —
+all content-addressed. A warm rerun in the same workspace reuses every
+artifact and makes zero provider calls.
 
 The stage bodies live in the shared ``*_stage`` modules; this module holds
 only the synthetic fixture generators, the orchestration that calls the
 shared stages in pipeline order, and the canary's own assertions (the
-adversarial test-once probes and the integrity oracles).
+integrity oracles).
 """
 
 from __future__ import annotations
@@ -20,10 +19,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from dpo.analysis.bradley_terry import PairwiseOutcome
 from dpo.annotation.aggregate import PairAggregate
 from dpo.annotation.raw_annotations import RawAnnotation
-from dpo.candidates.audit import CandidateAudit, ResolvedCandidateAudit, audit_candidate, resolve_audits
+from dpo.candidates.audit import (
+    CandidateAudit,
+    ResolvedCandidateAudit,
+    audit_candidate,
+    content_tokens,
+    resolve_audits,
+)
 from dpo.candidates.candidate_records import (
     CandidateRecord,
     CollectionPolicy,
@@ -41,30 +45,15 @@ from dpo.contracts.study_contract import (
 from dpo.core.artifacts import ArtifactStore, ArtifactTampered, ParentEdge, ProtectedExposure
 from dpo.core.identity import repo_lock_hash, semantic_hash, sha256_bytes
 from dpo.data.split import ClipInput
-from dpo.evidence.audio_evidence import parse_audio_evidence
-from dpo.evidence.claim_ledger import ClaimAudit, ClaimLedger, apply_audits, propose_claims
-from dpo.evidence.providers import (
-    NO_RETRY_POLICY,
-    AdapterIdentity,
-    EvidenceRunner,
-    FixtureAdapter,
-    capability_schema_hash,
-)
-from dpo.evidence.visual_evidence import parse_visual_evidence
 from dpo.models.base import MediaBatch
 from dpo.models.tiny import synthetic_media
-from dpo.pipeline.analysis_stage import publish_analysis_report
 from dpo.pipeline.annotation_stage import ingest_annotations
 from dpo.pipeline.candidate_stage import publish_frozen_pool
-from dpo.pipeline.confirmatory_stage import run_confirmatory_test
 from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
-from dpo.pipeline.evidence_stage import publish_claim_ledger
 from dpo.pipeline.experiments import expand_experiment
-from dpo.pipeline.lock import LockError, TestOnceResolver, TestReservation, test_split_semantic_hash
 from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM, OfflineMatrixRunner
 from dpo.pipeline.selection_stage import publish_selection
-from dpo.pipeline.study_stage import publish_study_export
 from dpo.pipeline.training_stage import publish_training_matrix
 from dpo.pipeline.view_stage import TrackViews, publish_track_views
 
@@ -127,52 +116,6 @@ def _clip_terms(clip_id: str, track: str) -> dict[str, str]:
     other = _AUDIO_EVENTS[(_bank_index(clip_id, "event", len(_AUDIO_EVENTS)) + 7) % len(_AUDIO_EVENTS)]
     wrong = _AUDIO_EVENTS[(_bank_index(clip_id, "event", len(_AUDIO_EVENTS)) + 3) % len(_AUDIO_EVENTS)]
     return {"first": quality, "second": event, "third": other, "wrong": wrong}
-
-
-# fmt: off
-def _evidence_item(
-    kind: str, label: str, start_ms: int, end_ms: int,
-    confidence: float, salience: float, foreground: bool | None = None,
-) -> dict[str, object]:
-    item: dict[str, object] = {
-        "kind": kind, "label": label, "start_ms": start_ms, "end_ms": end_ms,
-        "confidence": confidence, "salience": salience,
-    }
-    if foreground is not None:
-        item["foreground"] = foreground
-    return item
-# fmt: on
-
-
-def _fixture_response(clip_id: str, track: str) -> str:
-    terms = _clip_terms(clip_id, track)
-    first, second, third, wrong = terms["first"], terms["second"], terms["third"], terms["wrong"]
-    if track == "visual":
-        document: dict[str, object] = {
-            "language": "en",
-            "clip_id": clip_id,
-            "frame_timestamps_ms": [0, 2000, 4000, 6000],
-            "scene_boundaries_ms": [3000],
-            "items": [
-                _evidence_item("object", f"{first} at the {third}", 0, 4000, 0.9, 0.9),
-                _evidence_item("action", f"{first} {second} the {third}", 1000, 6000, 0.8, 0.8),
-                _evidence_item("object", f"a {wrong} nearby", 5000, 7000, 0.3, 0.2),
-            ],
-        }
-    else:
-        document = {
-            "language": "en",
-            "clip_id": clip_id,
-            "speech_present": False,
-            "music_present": False,
-            "low_activity_spans_ms": [[6000, 7000]],
-            "items": [
-                _evidence_item("sound_event", f"{first} {second}", 0, 4000, 0.9, 0.9, foreground=True),
-                _evidence_item("sound_event", f"a {third} behind", 2000, 6000, 0.7, 0.5, foreground=False),
-                _evidence_item("sound_event", f"a {wrong} outside", 5000, 7000, 0.3, 0.2, foreground=False),
-            ],
-        }
-    return json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _candidate_bank(clip_id: str, track: str) -> dict[str, list[str]]:
@@ -255,14 +198,22 @@ def _annotator_hash(index: int) -> str:
     return sha256_bytes(f"annotator-{index}".encode())
 
 
-def _quality_score(audit: ResolvedCandidateAudit) -> float:
-    deterministic = audit.deterministic
-    return (
-        2.0 * deterministic.supported_overlap
-        - 1.0 * deterministic.unsupported_token_count
-        - 4.0 * deterministic.contradicted_overlap
-        - 4.0 * float(deterministic.cross_modal_violation)
-    )
+def _quality_score(candidate: CandidateRecord, audit: ResolvedCandidateAudit) -> float:
+    """Deterministic synthetic preference signal for the fixture annotators.
+
+    The fixture's controlled-error captions contain the clip's known wrong
+    term; a synthetic "human" dispreference for that term plus the audit's
+    structural gates stand in for real judgment.
+    """
+    wrong = _clip_terms(candidate.clip_id, candidate.track)["wrong"]
+    score = 0.0
+    if wrong in content_tokens(candidate.text):
+        score -= 3.0
+    if not audit.acceptable:
+        score -= 2.0
+    if audit.modality_violation:
+        score -= 4.0
+    return score
 
 
 def _synthetic_annotations(
@@ -279,8 +230,8 @@ def _synthetic_annotations(
     # drift far enough on small fixtures to trip the position-bias exclusion.
     decisive_counts = dict.fromkeys(range(3), 0)
     for pair_index, pair in enumerate(pool.pairs):
-        score_a = _quality_score(audits[pair.candidate_a])
-        score_b = _quality_score(audits[pair.candidate_b])
+        score_a = _quality_score(pool.candidate(pair.candidate_a), audits[pair.candidate_a])
+        score_b = _quality_score(pool.candidate(pair.candidate_b), audits[pair.candidate_b])
         decisive = abs(score_a - score_b) >= 0.5
         for annotator in range(3):
             if decisive:
@@ -345,7 +296,7 @@ def _synthetic_annotations(
 
 
 def _synthetic_media(track: str, clip_ids: Sequence[str]) -> MediaBatch:
-    """The canary's media fixture for scoring, test metrics, and the study."""
+    """The canary's media fixture for scoring and validation metrics."""
     return synthetic_media(track, clip_ids, media_dim=DEFAULT_MEDIA_DIM)
 
 
@@ -355,7 +306,6 @@ class _TrackData:
     audits: dict[str, dict[str, ResolvedCandidateAudit]]
     annotations: dict[str, tuple[RawAnnotation, ...]]
     aggregates: dict[str, tuple[PairAggregate, ...]]
-    ledgers: dict[str, ClaimLedger]
     pool_artifacts: dict[str, str]
     view_artifacts: dict[str, str]
 
@@ -379,6 +329,8 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
             report = json.loads(store.read_payload(report_id))
             return CanaryResult(artifact_id=report_id, report=report, cached=True, provider_calls=0)
     publisher = ArtifactPublisher(store, contract, lock_id)
+    # The trimmed default pipeline is provider-free; the field stays so the
+    # CLI and Makefile zero-provider assertions keep their contract.
     provider_calls = 0
 
     contract_lock_id = publisher.publish(
@@ -396,13 +348,7 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
     train_clips = list(manifest.assignments["train"])
     validation_clips = list(manifest.assignments["validation"])
     test_clips = list(manifest.assignments["test"])
-    study_clips = list(manifest.assignments["study"])
 
-    evidence_runner = EvidenceRunner(
-        store,
-        contract_id=publisher.contract_id_for("evidence", None),
-        prompt_contracts={track: contract.tracks[track].prompt for track in TRACKS},
-    )
     policy = CollectionPolicy(
         policy_id="C0",
         checkpoint_hash=str(contract.raw["models"]["seed"]["lock_hash"]),
@@ -411,65 +357,15 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
     generation_seed = int(str(contract.candidates["generation_seed"]))
     track_data: dict[str, _TrackData] = {}
     for track in TRACKS:
-        capability = "visual_evidence" if track == "visual" else "audio_evidence"
-        derivative_index = 0 if track == "visual" else 1
-        model_section = contract.raw["models"][f"evidence_{track}"]
         pools: dict[str, FrozenCandidatePool] = {}
         audits_by_split: dict[str, dict[str, ResolvedCandidateAudit]] = {}
         annotations_by_split: dict[str, tuple[RawAnnotation, ...]] = {}
         aggregates_by_split: dict[str, tuple[PairAggregate, ...]] = {}
-        ledgers: dict[str, ClaimLedger] = {}
         pool_artifact_ids: dict[str, str] = {}
         by_split_candidates: dict[str, list[CandidateRecord]] = {"train": [], "validation": []}
         by_split_audits: dict[str, list[CandidateAudit]] = {"train": [], "validation": []}
-        ledger_artifact_ids: dict[str, str] = {}
         for clip_id in (*train_clips, *validation_clips):
             role = role_of(clip_id)
-            clip = next(item for item in clips if item.clip_id == clip_id)
-            # fmt: off
-            adapter = FixtureAdapter(
-                AdapterIdentity(
-                    capability=capability,
-                    implementation=str(model_section["implementation"]),
-                    model=str(model_section["model_id"]), revision=str(model_section["revision"]),
-                    prompt_hash=sha256_bytes(contract.tracks[track].prompt.encode()),
-                    schema_hash=capability_schema_hash(capability),
-                    lock_hash=str(model_section["lock_hash"]), credential_env="DPO_FIXTURE",
-                ),
-                _fixture_response(clip_id, track),
-            )
-            run = evidence_runner.run(
-                adapter, clip_id=clip_id, track=track,
-                media_hash=clip.derivative_hashes[derivative_index],
-                seed=int(str(contract.corpus["split_seed"])), parser_version="parser/v1",
-                decoding={"temperature": 0.0, "top_p": 1.0, "max_tokens": 256},
-                retry_policy=NO_RETRY_POLICY, role_exposure={role},
-            )
-            # fmt: on
-            provider_calls += adapter.calls
-            parsed = (
-                parse_visual_evidence(dict(run.parsed), provider=adapter.identity.model)
-                if track == "visual"
-                else parse_audio_evidence(dict(run.parsed), provider=adapter.identity.model)
-            )
-            proposed = propose_claims(parsed, track=track)
-            ledger = ClaimLedger(
-                clip_id=clip_id,
-                track=track,
-                claims=proposed,
-                prohibited_cross_modal_claims=(),
-                audit_version="audit/v1",
-            )
-            terms = _clip_terms(clip_id, track)
-            decisions = []
-            for claim in ledger.claims:
-                status = "contradicted" if terms["wrong"] in claim.canonical_form else "supported"
-                decisions.append(ClaimAudit(claim_id=claim.claim_id, auditor_id="auditor-01", status=status))
-            ledger = apply_audits(ledger, decisions)
-            ledgers[clip_id] = ledger
-            ledger_artifact_ids[clip_id] = publish_claim_ledger(
-                publisher, ledger=ledger, parsed_artifact_id=run.parsed_artifact_id, role=role
-            )
             records = build_candidate_records(
                 clip_id=clip_id,
                 track=track,
@@ -484,17 +380,15 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
             )
             by_split_candidates[role].extend(records)
             for record in records:
-                by_split_audits[role].append(
-                    audit_candidate(record, contract=contract.tracks[track], ledger=ledger)
-                )
+                by_split_audits[role].append(audit_candidate(record, contract=contract.tracks[track]))
         for split in ("train", "validation"):
             resolved_audits = dict(resolve_audits(by_split_audits[split], []))
             # fmt: off
             pool, pool_artifact_ids[split] = publish_frozen_pool(
                 publisher, contract, track=track, split=split,
                 candidates=by_split_candidates[split], audits=resolved_audits,
-                ledger_artifact_ids=ledger_artifact_ids,
-                dataset_version="canary/v1", evidence_audit_version="audit/v1",
+                shard_artifact_ids=shard_ids,
+                dataset_version="canary/v1", audit_version="audit/v1",
             )
             annotations, attention_expected = _synthetic_annotations(
                 pool, resolved_audits,
@@ -515,7 +409,6 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
             audits=audits_by_split,
             annotations=annotations_by_split,
             aggregates=aggregates_by_split,
-            ledgers=ledgers,
             pool_artifacts=pool_artifact_ids,
             view_artifacts={},
         )
@@ -573,66 +466,10 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
         processor_hash=semantic_hash({"processor": "tiny-byte/v1"}),
         preprocessing_hash=semantic_hash({"media": "synthetic/v1", "media_dim": DEFAULT_MEDIA_DIM}),
         evaluation_version="evaluation/v1",
-        metric_versions={"compliance": "v1", "preference": "v1", "factuality": "v1"},
-        study_interface_version="study-export/v1",
+        metric_versions={"compliance": "v1", "preference": "v1"},
         selection_note="canary selection: validation preference accuracy, lexical tie-break",
     )
     # fmt: on
-    lock_manifest = selection.lock_manifest
-
-    # Test-once: reserve, fence, one official protected read, generate, finalize.
-    def canary_test_probes(resolver: TestOnceResolver, reservation: TestReservation) -> None:
-        # Adversarial probes between reserve and first read: an identical
-        # reservation must resume; any other semantic must be rejected.
-        resumed = resolver.reserve(lock_manifest, test_split_hash=test_split_semantic_hash(test_clips))
-        if resumed != reservation:
-            raise CanaryError("an identical test reservation must resume, not fork")
-        try:
-            resolver.reserve(lock_manifest, test_split_hash=semantic_hash({"other": True}))
-        except LockError:
-            pass
-        else:
-            raise CanaryError("a different test semantic must be rejected after reservation")
-
-    # fmt: off
-    confirmatory = run_confirmatory_test(
-        publisher, contract, database_path=Path(workspace) / "test.sqlite",
-        lock_manifest=lock_manifest, lock_artifact_id=selection.lock_artifact_id,
-        test_clips=test_clips, shard_ids=shard_ids, policies=runner.policies,
-        selected_variants=selection.selected_variants, canonical_seed=canonical_seed,
-        media_provider=_synthetic_media, probe=canary_test_probes,
-    )
-
-    # Blinded study export and a synthetic analysis pass.
-    exports, study_export_artifact = publish_study_export(
-        publisher, contract, lock_artifact_id=selection.lock_artifact_id,
-        study_clips=study_clips, clips=clips, shard_ids=shard_ids, policies=runner.policies,
-        selected_variants=selection.selected_variants, canonical_seed=canonical_seed,
-        media_provider=_synthetic_media,
-    )
-    # fmt: on
-    outcomes: list[PairwiseOutcome] = []
-    for track in TRACKS:
-        export = exports[track]
-        for task in export.tasks:
-            identities = export.randomization[task.task_id]
-            flip = int(semantic_hash({"outcome": task.task_id}).removeprefix("sha256:")[:2], 16) % 3
-            winner = None if flip == 2 else str(identities["model_a"] if flip == 0 else identities["model_b"])
-            outcomes.append(
-                PairwiseOutcome(
-                    model_a=str(identities["model_a"]),
-                    model_b=str(identities["model_b"]),
-                    winner=winner,
-                    clip_id=task.clip_id,
-                )
-            )
-    analysis_artifact = publish_analysis_report(
-        publisher,
-        contract,
-        outcomes=outcomes,
-        study_export_artifact_id=study_export_artifact,
-        study_clips=study_clips,
-    )
 
     # Integrity oracles: the store must fail closed on leakage and tampering.
     try:
@@ -666,7 +503,6 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
         "schema": REPORT_TYPE,
         "status": "offline_milestone_complete",
         "release": "blocked_pending_external_operation",
-        "study_recruitment": "blocked_pending_external_operation",
         "clips": len(clips),
         "splits": {split: len(manifest.assignments[split]) for split in manifest.assignments},
         "matrix_cells": len(cells),
@@ -678,11 +514,7 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
     report_id = publisher.publish(
         REPORT_TYPE,
         report,
-        parents=(
-            ParentEdge(selection.lock_artifact_id, "lock-manifest"),
-            ParentEdge(confirmatory.finalization_artifact_id, "test-finalization"),
-            ParentEdge(analysis_artifact, "analysis-report"),
-        ),
+        parents=(ParentEdge(selection.lock_artifact_id, "lock-manifest"),),
         stage="*",
         parameters={"operation": "canary-report"},
         attributes={

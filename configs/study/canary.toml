@@ -48,18 +48,6 @@ implementation = "dpo.models.tiny.TinyAdapter"
 lock_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
 init_seed = 0
 
-[models.evidence_visual]
-model_id = "fixture/visual-evidence"
-revision = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
-implementation = "dpo.evidence.providers.FixtureAdapter"
-lock_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
-
-[models.evidence_audio]
-model_id = "fixture/audio-evidence"
-revision = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
-implementation = "dpo.evidence.providers.FixtureAdapter"
-lock_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
-
 [candidates]
 source_policy = "C0"
 per_clip = 4
@@ -192,28 +180,10 @@ top_p = 1.0
 max_new_tokens = 48
 bootstrap_samples = 200
 
-[test_once]
-policy = "reserve-before-read"
-resume_identical_only = true
-authority_db = "test.sqlite"
-
-[study]
-design = "balanced_incomplete_block"
-exposures_per_model_pair = 2
-protocol_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
-consent_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
-retention_days = 30
-
 [robustness]
 flip_rates = [0.0, 0.1, 0.2, 0.3]
 flip_seed = 13
 
-[analysis]
-bootstrap_samples = 500
-seed = 20260722
-correction = "benjamini_hochberg"
-
 [terminal_states]
 offline = "pending"
 release = "blocked_pending_external_operation"
-study = "blocked_pending_external_operation"

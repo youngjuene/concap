@@ -1,8 +1,8 @@
 """The dpo command line: JSON in, JSON out, fail closed.
 
 Every command prints exactly one JSON document. Exit codes: 0 success, 2
-domain/usage error, 3 blocked pending an external operation (live providers,
-real GPU training, recruitment). Commands that publish take content-addressed
+domain/usage error, 3 blocked pending an external operation (real GPU
+training, live model scoring). Commands that publish take content-addressed
 artifact ids as inputs and reject any input from a different contract.
 """
 
@@ -30,15 +30,9 @@ from dpo.core.safety import DestructivePathError
 from dpo.data.derive_pairs import ViewError
 from dpo.data.leakage_audit import LeakageError
 from dpo.data.split import ClipInput, SplitError
-from dpo.evidence.records import EvidenceError
 from dpo.pipeline.canary import CanaryError, run_canary
 from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
-from dpo.pipeline.lock import (
-    LockError,
-    TestOnceResolver,
-    parse_lock_manifest,
-    test_split_semantic_hash,
-)
+from dpo.pipeline.lock import LockError
 from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.stages import STAGES, StageError, allowed_contract_ids, lineage_edges, stage
 
@@ -53,7 +47,6 @@ DOMAIN_ERRORS = (
     CanaryError,
     ContractError,
     DestructivePathError,
-    EvidenceError,
     LeakageError,
     LockError,
     SplitError,
@@ -62,10 +55,8 @@ DOMAIN_ERRORS = (
 )
 
 DEFERRED_GATES = {
-    "evidence": "live evidence providers must publish approved pinned artifacts",
     "train": "real GPU training requires a published backend authority and a CUDA lease",
     "evaluate": "live model scoring requires a published backend authority",
-    "study": "recruitment requires protocol/consent approval and a deployment attestation",
 }
 
 
@@ -334,38 +325,6 @@ def _corpus_lock_splits(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def _test_reserve(arguments: argparse.Namespace) -> int:
-    operation = _operation(arguments)
-    _require_types(operation, set(stage("test").input_artifact_types), minimum=2)
-    lock_inputs = [
-        manifest for manifest in operation.manifests if manifest.artifact_type == "dpo.lock-manifest/v1"
-    ]
-    shards = [
-        manifest for manifest in operation.manifests if manifest.artifact_type == "dpo.clip-registry-shard/v1"
-    ]
-    if len(lock_inputs) != 1 or not shards:
-        raise ArtifactError("test reserve requires one lock manifest and the test shards")
-    for shard in shards:
-        if shard.role_exposure != frozenset({"test"}):
-            raise ArtifactError(
-                f"shard {shard.artifact_id} is not a test-role shard; only the test split may be reserved"
-            )
-    lock_document = json.loads(operation.store.read_payload(lock_inputs[0].artifact_id))
-    lock = parse_lock_manifest(lock_document)
-    test_split_hash = test_split_semantic_hash(clip for shard in shards for clip in shard.semantic["clips"])
-    resolver = TestOnceResolver(str(Path(arguments.workspace) / "test.sqlite"))
-    reservation = resolver.reserve(lock, test_split_hash=test_split_hash)
-    _emit(
-        {
-            "status": "reserved",
-            "operation": "test-reserve",
-            "reservation": resolver.authority_record(reservation),
-            "lock_id": lock.lock_id,
-        }
-    )
-    return 0
-
-
 def _blocked(command: str) -> Handler:
     def handler(arguments: argparse.Namespace) -> int:
         del arguments
@@ -439,18 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
     lock_splits.add_argument("--artifact-id", action="append", required=True)
     lock_splits.set_defaults(handler=_corpus_lock_splits)
 
-    test = commands.add_parser("test", help="test-once reservation authority")
-    test_actions = test.add_subparsers(dest="action", required=True)
-    # Resume IS reserve: the identical-only rule lives in TestOnceResolver, which
-    # returns the existing reservation for an identical semantic and rejects any other.
-    for action_name, handler in (("reserve", _test_reserve), ("resume", _test_reserve)):
-        action = test_actions.add_parser(action_name)
-        action.add_argument("--workspace", required=True)
-        action.add_argument("--contract", required=True)
-        action.add_argument("--artifact-id", action="append", required=True)
-        action.set_defaults(handler=handler)
-
-    for command_name in ("evidence", "train", "evaluate", "study"):
+    for command_name in ("train", "evaluate"):
         blocked = commands.add_parser(command_name, help=f"live boundary: {DEFERRED_GATES[command_name]}")
         blocked_actions = blocked.add_subparsers(dest="action", required=True)
         run = blocked_actions.add_parser("run")

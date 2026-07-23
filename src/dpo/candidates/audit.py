@@ -1,11 +1,11 @@
-"""Candidate-level factuality and modality audit.
+"""Candidate-level compliance and modality audit.
 
 The deterministic checks here (contract compliance, cross-modal lexicon
-screen, ledger-form matching) are recall aids and hard structural gates. Claim
-semantics stay with the human audit: a candidate whose deterministic screens
-pass can still be rejected by a human decision, and a lexical flag can be
-overturned by one. Human decisions arrive as `CandidateAuditDecision` records
-with auditor provenance.
+screen) are recall aids and hard structural gates. Content semantics stay
+with the human audit: a candidate whose deterministic screens pass can still
+be rejected by a human decision, and a lexical flag can be overturned by one.
+Human decisions arrive as `CandidateAuditDecision` records with auditor
+provenance.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from dpo.contracts.audio_caption import check_audio_caption
 from dpo.contracts.captions import ComplianceReport, caption_words
 from dpo.contracts.study_contract import CaptionContract
 from dpo.contracts.visual_caption import check_visual_caption
-from dpo.evidence.claim_ledger import ClaimLedger
 
 _STOP_WORDS = frozenset(
     {
@@ -56,24 +55,12 @@ class CandidateAudit:
 
     candidate_id: str
     compliance: ComplianceReport
-    supported_tokens: tuple[str, ...]
-    supported_overlap: int
-    unsupported_token_count: int
-    contradicted_overlap: int
     cross_modal_violation: bool
-
-    @property
-    def unsupported_claim_count(self) -> int:
-        return self.unsupported_token_count
 
     def document(self) -> dict[str, object]:
         return {
             "candidate_id": self.candidate_id,
             "compliance": self.compliance.document(),
-            "supported_tokens": list(self.supported_tokens),
-            "supported_overlap": self.supported_overlap,
-            "unsupported_token_count": self.unsupported_token_count,
-            "contradicted_overlap": self.contradicted_overlap,
             "cross_modal_violation": self.cross_modal_violation,
             "audit_kind": "deterministic",
         }
@@ -104,50 +91,19 @@ class CandidateAuditDecision:
         }
 
 
-def audit_candidate(
-    candidate: CandidateRecord,
-    *,
-    contract: CaptionContract,
-    ledger: ClaimLedger,
-) -> CandidateAudit:
-    """Deterministic screen of one candidate against contract and ledger."""
+def audit_candidate(candidate: CandidateRecord, *, contract: CaptionContract) -> CandidateAudit:
+    """Deterministic screen of one candidate against the caption contract."""
     if candidate.track != contract.track:
         raise CandidateError("candidate track does not match the caption contract")
-    if ledger.track != candidate.track or ledger.clip_id != candidate.clip_id:
-        raise CandidateError("claim ledger does not belong to this candidate's clip/track")
     compliance = (
         check_visual_caption(candidate.text, contract)
         if candidate.track == "visual"
         else check_audio_caption(candidate.text, contract)
     )
-    caption_tokens = content_tokens(candidate.text)
-    supported_tokens: set[str] = set()
-    contradicted_assertions = 0
-    for claim in ledger.claims:
-        claim_tokens = content_tokens(claim.canonical_form)
-        if claim.human_status == "supported":
-            supported_tokens |= claim_tokens
-        elif (
-            # A candidate asserts a contradicted claim only when it mentions the
-            # claim's full canonical form; sharing one subject word with it is
-            # not an assertion.
-            claim.human_status == "contradicted" and claim_tokens and claim_tokens <= caption_tokens
-        ):
-            contradicted_assertions += 1
-    prohibited_assertions = sum(
-        1
-        for prohibited in ledger.prohibited_cross_modal_claims
-        if content_tokens(prohibited) and content_tokens(prohibited) <= caption_tokens
-    )
-    matched_tokens = caption_tokens & supported_tokens
     return CandidateAudit(
         candidate_id=candidate.candidate_id,
         compliance=compliance,
-        supported_tokens=tuple(sorted(matched_tokens)),
-        supported_overlap=len(matched_tokens),
-        unsupported_token_count=len(caption_tokens - supported_tokens),
-        contradicted_overlap=contradicted_assertions,
-        cross_modal_violation=bool(compliance.modality_flags) or prohibited_assertions > 0,
+        cross_modal_violation=bool(compliance.modality_flags),
     )
 
 
@@ -167,9 +123,11 @@ class ResolvedCandidateAudit:
 
     @property
     def critical_hallucination(self) -> bool:
+        # Without an evidence ledger there is no deterministic hallucination
+        # signal; this is a human-only decision and fails open to False.
         if self.human is not None:
             return self.human.critical_hallucination
-        return self.deterministic.contradicted_overlap > 0
+        return False
 
     @property
     def modality_violation(self) -> bool:
