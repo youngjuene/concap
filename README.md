@@ -1,175 +1,118 @@
 # ConCap: Comparative Preference Alignment for Audiovisual Congruence Captioning
 
-ConCap is a reproducible pipeline (package: `dpo`) for comparing nine
-preference-alignment conditions (SEED, SFT, DPO, IPO, CDPO, RDPO, DRDPO,
-WDPO, SFT_DPO) on two independent captioning tracks — **visual captions**
-from video with the audio removed, and **audio captions** from the audio
-stream alone — using **one frozen human-preference dataset**. Every production
-input is a typed, content-addressed artifact; arbitrary paths to datasets,
-checkpoints, provider responses, or protected payloads are rejected.
+ConCap (package: `dpo`) is a pipeline with three jobs, in order:
 
-The pipeline order is normative and deliberately puts candidate construction
-and preference collection BEFORE any experimental fine-tuning:
+1. **Collect** human caption preferences through a local web UI: prepared
+   video clips are shown muted (visual track) or as audio — with a per-clip
+   opt-in to unmuted video — under two selectable captions.
+2. **Train** the comparison matrix on the collected preferences: SFT plus
+   seven preference objectives (DPO, IPO, cDPO, rDPO, Dr.DPO, wDPO, and
+   SFT-to-DPO warm start), with in-contract hyperparameter sweeps.
+3. **Track** the results: per-variant validation accuracy, winner selection,
+   and a locked configuration, all as content-addressed artifacts.
 
-```text
-contract
---> corpus / immutable group-level splits
---> modality-isolated evidence + claim ledger
---> audited candidate construction (frozen policy C0)
---> frozen candidate pool
---> human preference collection
---> preference audit + derived dataset views
-    --> SEED    task-capable seed          (never trained)
-    --> SFT     chosen-only SFT            (D_sft)
-    --> DPO     direct DPO                 (D_pair_strict, from SEED)
-    --> IPO     direct IPO                 (D_pair_strict, from SEED)
-    --> CDPO    direct cDPO                (D_pair_strict, from SEED)
-    --> RDPO    direct rDPO                (D_pair_strict, from SEED)
-    --> DRDPO   direct Dr.DPO              (D_pair_strict, from SEED)
-    --> WDPO    direct wDPO                (strict or metadata view, from SEED)
-    --> SFT_DPO SFT-to-DPO                 (same pair view as DPO, from SFT)
---> common validation and model selection
---> configuration lock
---> test-once
---> confirmatory human study (blinded incomplete block)
---> statistical analysis (Bradley-Terry, clip-clustered bootstrap)
-```
-
-The initialization rules are code-owned (`dpo.contracts.study_contract.EXPERIMENT_MATRIX`):
-DPO, IPO, CDPO, RDPO, DRDPO, and WDPO start from SEED with a frozen SEED
-reference; SFT_DPO is the explicit warm-start condition (SEED → SFT → SFT_DPO)
-with a frozen SFT reference; a study contract can set hyperparameters but can
-never move an experiment's initialization, reference, or objective family.
+Every input is a typed, content-addressed artifact; one study contract owns
+every result-affecting knob; the same commands run the synthetic canary and
+(once the GPU backend is wired) the real study.
 
 ## 0. Install and verify
 
 Requirements: Linux, Python 3.11, `uv >= 0.11`, Git. Real training
-additionally requires NVIDIA drivers compatible with the locked CUDA/PyTorch
-stack (two RTX 3090-class GPUs are the reference setup).
+additionally requires the locked CUDA/PyTorch stack (two RTX 3090-class GPUs
+are the reference setup).
 
 ```bash
 uv sync --dev
-uv sync --project providers
-make check      # ruff + mypy --strict + pytest + lockfile checks
+make check      # ruff + mypy --strict + pytest + lockfile check
+make smoke      # offline end-to-end canary + fail-closed live boundary
 ```
 
-## 1. Run the offline end-to-end canary first
-
-```bash
-make smoke
-```
-
-`make smoke` is the complete check: it runs a cold canary in a fresh
-workspace, a warm canary in the same workspace, verifies every artifact, and
-asserts that the warm run reuses the same report artifact with
-`provider_calls: 0`. It also exercises one live boundary and expects JSON
-status `blocked_pending_external_operation` with no side effects.
-
-Nothing else is required. If you want a persistent workspace to inspect
-afterward (`dpo artifact trace`, `dpo artifact gc`, reading payloads) instead
-of `make smoke`'s throwaway directory, run the underlying commands yourself:
+`make smoke` is the complete health check: a cold canary executes every
+pipeline stage on synthetic fixtures with the tiny CPU backend (all matrix
+cells train with real optimizer steps), a warm rerun must reuse the same
+report artifact with zero recomputation, and the live train gate must refuse
+with exit 3 and no side effects. For a persistent, inspectable workspace run
+the underlying commands yourself:
 
 ```bash
 uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
 uv run dpo artifact verify --workspace artifacts/canary --all
 ```
 
-The cold canary executes every stage of the diagram above on synthetic
-fixtures with the tiny CPU backend — all 18 matrix cells (9 experiments x 2
-tracks) train with real optimizer steps. Two integrity oracles must also
-pass: a training artifact with test ancestry is rejected, and payload
-corruption is detected.
-
-## 2. The study contract
-
-`configs/study/canary.toml` is the synthetic-canary contract. For live work,
-copy it, set `execution_class = "live"`, and replace every fixture model,
-hash, and policy with an approved immutable value. Never edit a locked
-contract after seeing results.
+## 1. Collect preferences
 
 ```bash
-uv run dpo contract validate --contract configs/study/canary.toml
-uv run dpo contract lock --contract configs/study/canary.toml --out runs/contract.lock.json
+# Corpus: one JSONL row per clip (media_hash, derivatives, optional
+# audio_presentation = "audio_only" | "unmuted_video").
+uv run dpo corpus ingest      --workspace "$W" --contract "$C" --input data/clips.jsonl
+uv run dpo corpus lock-splits --workspace "$W" --contract "$C" --artifact-id "$INGEST_ID"
+
+# Caption pairs: generated by the contract's frozen seed policy C0.
+uv run dpo candidates generate --workspace "$W" --contract "$C" \
+  --artifact-id "$REGISTRY_ID" --track visual --split train --dataset-version study/v1
+
+# Annotator session: tasks with randomized display order, repeats, and
+# attention checks per the contract's [annotation] fractions.
+uv run dpo annotation export-tasks --workspace "$W" --contract "$C" \
+  --artifact-id "$POOL_ID" --artifact-id "$REGISTRY_ID" \
+  --out-tasks tasks.json --out-answers answers.json     # answers.json is restricted
+
+uv run dpo annotation serve --tasks tasks.json --media-dir media/ --out responses/
+
+# After each annotator saves:
+uv run dpo annotation ingest --workspace "$W" --contract "$C" \
+  --artifact-id "$POOL_ID" --split train --tasks tasks.json --answers answers.json \
+  --responses responses/responses-alice.json --responses responses/responses-bob.json
 ```
 
-The contract owns every result-affecting knob: split seed and fractions, both
-caption contracts (prompt, 8-30 word bounds, clip duration), the seed model
-identity and init seed, the C0 decoding mixture, generation seed, and
-challenge composition, pair-sampling bounds, annotation quality thresholds
-and preregistered exclusion rules, view gates (agreement/confidence/strength),
-training seeds (at least 3) and budgets, per-experiment hyperparameters
-(beta, epsilon, beta_prime, the wDPO stage toggles and pinned revision),
-frozen validation decoding (also used for the study export), the test-once
-policy, the study design, synthetic flip rates, and the statistical plan.
-The backend TOMLs under `configs/gemma4/` carry runtime concerns only
-(model pin, quantization, gradient checkpointing); an optional `[backends]`
-section pins their hashes for provenance.
+The UI serves each clip by its track and per-clip flag — muted video for
+visual captions, audio-only (default) or unmuted video for audio captions —
+and every judgment records which presentation it saw, so any cross-modal
+contamination stays measurable. Choices are recorded against the displayed
+order and resolved to canonical candidates exactly once at ingest;
+reliability screening (attention checks, repeat consistency, position bias,
+response time) applies the contract's preregistered exclusion rules before
+aggregation.
 
-**Sweep axes.** A sweepable hyperparameter (`beta`, `epsilon`, `beta_prime`)
-may be a list: `beta = [0.1, 0.3]` expands the experiment into one trained
-variant per value inside one workspace. Every variant is validated
-identically; selection picks one winner per experiment and track (recorded
-with its hyperparameters in the selection report) and only winners reach the
-lock, the test, and the study. Because artifact identities are stage-scoped
-(see Reproducibility below), extending a sweep axis recomputes only the new
-cells and their downstream reports; corpus, evidence, candidate, and
-annotation artifacts — the expensive live-class stages — are reused untouched.
+## 2. Run the experiments
 
-## 3. Splits before anything else
+The nine-condition matrix is code-owned
+(`dpo.contracts.study_contract.EXPERIMENT_MATRIX`): the preference arms start
+from the frozen SEED reference, SFT_DPO warm-starts from SFT, and a contract
+can set hyperparameters but can never move an experiment's initialization,
+reference, or objective family. One frozen preference dataset regenerates
+every training view (`D_sft`, `D_pair_strict`, `D_pair_all`) bit-identically.
+
+The contract owns every result-affecting knob — seed model identity and init
+seed, the C0 decoding mixture and generation seed, view gates, training
+seeds and budgets, and per-experiment hyperparameters. **Sweep axes**: a
+sweepable knob (`beta`, `epsilon`, `beta_prime`) may be a list
+(`beta = [0.1, 0.3]`); each value trains as its own variant, every variant is
+validated identically, and selection picks one winner per experiment and
+track. Because artifact identities are stage-scoped, extending a sweep axis
+recomputes only the new cells — collected preferences are never touched.
+
+Real GPU training is a fail-closed gate until the Gemma backend is wired:
 
 ```bash
-uv run dpo corpus ingest --workspace "$STORE" --contract "$CONTRACT" \
-  --input data/clips.jsonl | tee runs/01-ingest.json
-uv run dpo corpus lock-splits --workspace "$STORE" --contract "$CONTRACT" \
-  --artifact-id "$INGEST_ID" | tee runs/02-registry.json
+uv run dpo train run --workspace "$W" --contract "$C" ...   # exit 3 today
 ```
 
-Clip rows carry `clip_id`, `source_video_id`, `media_hash`, `start_ms`,
-`end_ms`, `derivative_hashes` (muted-video and audio-only derivatives), an
-optional `link_group` (near-duplicate/continuity assertions from an external
-detector, with provenance), and an optional `asserted_role` that can only
-confirm — never override — the seeded assignment. All clips of one source
-video and all link-grouped clips land in one split; visual and audio tracks
-share the clip's assignment; the split manifest (with its sha256) is
-embedded in the registry artifact and printed by the command.
+The backend TOMLs under `configs/gemma4/` carry runtime shape only (model
+pin, quantization, gradient checkpointing); the contract can pin their
+hashes via `[backends]`.
 
-## 4. Live boundaries fail closed
-
-Live evidence extraction, real Gemma training, live scoring, and study
-recruitment are typed external gates: they exit with code 3 and
-`blocked_pending_external_operation`, never a partial local imitation.
+## 3. Track the results
 
 ```bash
-uv run dpo evidence run --workspace "$STORE" --contract "$CONTRACT" \
-  --track visual --invoke-external   # exit 3 until a pinned provider publishes artifacts
+uv run dpo report show --workspace "$W"
 ```
 
-The real backend is Gemma 4 QLoRA (`configs/gemma4/12b.toml` for the visual
-track, `configs/gemma4/e4b.toml` for the audio track; language-model LoRA
-only, media towers frozen, `world_size=1`). The offline comparison uses the
-deterministic tiny backend in `dpo.models.tiny` — the same trainers, the
-same objectives, the same artifact discipline.
-
-## 5. Test-once and the human study
-
-Before any test payload is readable: validation completes, the selection
-report is approved, and the lock manifest freezes checkpoints, processor,
-preprocessing, generation configuration, metric versions, the study
-interface, exclusion criteria, and the statistical plan.
-
-```bash
-uv run dpo test reserve --workspace "$STORE" --contract "$CONTRACT" \
-  --artifact-id "$LOCK_MANIFEST_ID" --artifact-id "$TEST_SHARD_1" ...
-```
-
-One semantic hash (lock manifest + test split + generation + evaluation +
-analysis) gets one reservation; only an identical resume is permitted.
-Corrupted files, hardware failures, and deterministic crashes justify a
-resume; a low score, an unexpected ranking, or a desire to change decoding do
-not. The study export produces blinded incomplete-block tasks over all 36
-model pairs with balanced exposures, randomized A/B position, clip-disjoint
-participant blocks, and a blinding scan; model identity exists only in the
-restricted randomization manifest.
+prints every validation report (per-variant accuracy by track and
+experiment), selection report (ranking, selected variants with their
+hyperparameters), and lock manifest in the workspace. Artifacts are the
+ground truth — `dpo artifact trace` walks any result back through its full
+lineage.
 
 ## Repository structure
 
@@ -181,51 +124,49 @@ src/dpo/
 │                  # visual_caption / audio_caption compliance screens
 ├── data/          # split manifest, D_sft / D_pair_strict / D_pair_all,
 │                  # noise calibration, flip manifests, weighting, leakage audit
-├── evidence/      # visual_evidence / audio_evidence schemas, claim ledger,
-│                  # pinned providers
-├── candidates/    # candidate_records + C0 policy, deterministic audits,
-│                  # pair sampler, freeze
-├── annotation/    # raw_annotations, aggregation, reliability + exclusions
+├── candidates/    # candidate_records + C0 policy, generation, evidence-free
+│                  # audits, pair sampler, freeze
+├── annotation/    # raw_annotations, collection_tasks, webapp (FastAPI UI),
+│                  # aggregation, reliability + exclusions
 ├── models/        # shared completion logprob, modality-isolated batches,
 │                  # visual_media / audio_media builders, tiny CPU backend,
 │                  # gemma4/ (adapter, backend_config, tokenization safety)
 ├── objectives/    # base protocol + dpo, ipo, cdpo, rdpo, drdpo, wdpo, sft
 ├── trainers/      # one preference trainer for every preference arm,
 │                  # SFT trainer, diagnostics
-├── evaluation/    # compliance, preference accuracy, factuality, track metrics,
-│                  # caption_generation, blinded study export
-├── analysis/      # Bradley-Terry, clip-cluster bootstrap + BH, robustness
+├── evaluation/    # compliance, preference accuracy, caption_generation
+├── analysis/      # Bradley-Terry, clip-cluster bootstrap (future
+│                  # confirmatory phase; not wired into the default pipeline)
 └── pipeline/      # stage registry (artifact types + contract slices),
-                   # publishing (the one artifact publisher), shared stage
-                   # modules (corpus / evidence / candidate / annotation /
-                   # view / training / selection / confirmatory / study /
-                   # analysis _stage) used by canary and live runners alike,
-                   # experiment resolution + sweep expansion, matrix runner,
-                   # lock manifest + test-once resolver, offline canary
+                   # publishing, per-stage modules (corpus/candidate/
+                   # annotation/view/training/selection), sweep expansion,
+                   # matrix runner, lock manifest, offline canary
 ```
 
 File naming follows one rule: every basename is globally unique and says what
-the module contains. `uv run dpo stage list` prints the stage registry and
-the artifact-typed lineage; the CLI validates its inputs against the same
-registry, so documentation cannot drift from enforcement.
+the module contains. `uv run dpo stage list` prints the stage registry; the
+CLI validates its inputs against the same registry, so documentation cannot
+drift from enforcement.
 
 ## Reproducibility and integrity
 
 - Artifact identities are hashes of semantic manifests — never timestamps,
-  paths, hosts, or PIDs; execution facts live in separate receipts. Each
-  stage's identity covers exactly the contract sections it declares in the
-  stage registry, so an unrelated contract tweak cannot invalidate it.
-- One frozen raw preference dataset regenerates every trained experiment's
-  view bit-identically; aggregation-rule changes create a new view version,
-  never a new raw collection.
+  paths, hosts, or PIDs. Each stage's identity covers exactly the contract
+  sections it declares in the registry, so an unrelated tweak cannot
+  invalidate it.
 - A training artifact cannot have validation, test, or study exposure
-  anywhere in its recursive ancestry (enforced at publish time).
+  anywhere in its recursive ancestry (enforced at publish time); test and
+  study split payloads stay sealed behind fenced capabilities.
 - Golden tests snapshot one training step per objective
   (`tests/golden/golden_values.json`; regenerate deliberately with
   `make golden` and review the diff).
 - wDPO is experimental: pinned to `arxiv_2603.07211v1`, with placeholder
   scalar maps documented in `dpo/objectives/wdpo.py` that must be
   re-verified against the pinned official code before any confirmatory run.
+- The heavier confirmatory machinery (automated evidence auditing with claim
+  ledgers, the one-shot test reservation, the blinded final human study) was
+  deliberately removed from the default path and is recoverable from git
+  history when that phase starts.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the invariants and claim
 limits.
