@@ -59,28 +59,26 @@ make check      # ruff + mypy --strict + pytest + lockfile checks
 make smoke
 ```
 
-`make smoke` runs a cold canary in a fresh workspace, a warm canary in the
-same workspace, verifies every artifact, and checks that the warm run reuses
-the same report artifact with `provider_calls: 0`. It also exercises one live
-boundary and expects JSON status `blocked_pending_external_operation` with no
-side effects. Equivalent manual commands:
+`make smoke` is the complete check: it runs a cold canary in a fresh
+workspace, a warm canary in the same workspace, verifies every artifact, and
+asserts that the warm run reuses the same report artifact with
+`provider_calls: 0`. It also exercises one live boundary and expects JSON
+status `blocked_pending_external_operation` with no side effects.
+
+Nothing else is required. If you want a persistent workspace to inspect
+afterward (`dpo artifact trace`, `dpo artifact gc`, reading payloads) instead
+of `make smoke`'s throwaway directory, run the underlying commands yourself:
 
 ```bash
 uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
 uv run dpo artifact verify --workspace artifacts/canary --all
 ```
 
-The cold canary executes every stage on synthetic fixtures with the tiny CPU
-backend: contract lock, corpus ingest, immutable splits, pinned fixture
-evidence for both tracks, audited claim ledgers, frozen per-split candidate
-pools, synthetic annotation (repeats, attention checks, counterbalanced
-display), reliability screening, derived views (`D_sft`, `D_pair_strict`,
-`D_pair_all`, noise calibration, shared flip manifests), the leakage audit,
-all 18 matrix cells (9 experiments x 2 tracks) with real optimizer steps,
-validation scoring and selection, the configuration lock, a fenced test-once
-read, a blinded study export, and a Bradley-Terry analysis. Two integrity
-oracles must also pass: a training artifact with test ancestry is rejected,
-and payload corruption is detected.
+The cold canary executes every stage of the diagram above on synthetic
+fixtures with the tiny CPU backend — all 18 matrix cells (9 experiments x 2
+tracks) train with real optimizer steps. Two integrity oracles must also
+pass: a training artifact with test ancestry is rejected, and payload
+corruption is detected.
 
 ## 2. The study contract
 
@@ -112,11 +110,10 @@ may be a list: `beta = [0.1, 0.3]` expands the experiment into one trained
 variant per value inside one workspace. Every variant is validated
 identically; selection picks one winner per experiment and track (recorded
 with its hyperparameters in the selection report) and only winners reach the
-lock, the test, and the study. Artifact identities are keyed per pipeline
-stage on exactly the contract sections that stage reads — and per training
-cell on its resolved variant — so extending a sweep axis recomputes only the
-new cells and their downstream reports; corpus, evidence, candidate, and
-annotation artifacts (the expensive live-class stages) are reused untouched.
+lock, the test, and the study. Because artifact identities are stage-scoped
+(see Reproducibility below), extending a sweep axis recomputes only the new
+cells and their downstream reports; corpus, evidence, candidate, and
+annotation artifacts — the expensive live-class stages — are reused untouched.
 
 ## 3. Splits before anything else
 
@@ -133,8 +130,8 @@ optional `link_group` (near-duplicate/continuity assertions from an external
 detector, with provenance), and an optional `asserted_role` that can only
 confirm — never override — the seeded assignment. All clips of one source
 video and all link-grouped clips land in one split; visual and audio tracks
-share the clip's assignment; the PRD-shaped split manifest (with its sha256)
-is embedded in the registry artifact and printed by the command.
+share the clip's assignment; the split manifest (with its sha256) is
+embedded in the registry artifact and printed by the command.
 
 ## 4. Live boundaries fail closed
 
@@ -148,10 +145,9 @@ uv run dpo evidence run --workspace "$STORE" --contract "$CONTRACT" \
 ```
 
 The real backend is Gemma 4 QLoRA (`configs/gemma4/12b.toml` for the visual
-track, `configs/gemma4/e4b.toml` for the audio track — runtime shape only;
-every training hyperparameter comes from the study contract; language-model
-LoRA only, media towers frozen, `world_size=1`). The offline comparison uses
-the deterministic tiny backend in `dpo.models.tiny` — the same trainers, the
+track, `configs/gemma4/e4b.toml` for the audio track; language-model LoRA
+only, media towers frozen, `world_size=1`). The offline comparison uses the
+deterministic tiny backend in `dpo.models.tiny` — the same trainers, the
 same objectives, the same artifact discipline.
 
 ## 5. Test-once and the human study
@@ -175,7 +171,7 @@ model pairs with balanced exposures, randomized A/B position, clip-disjoint
 participant blocks, and a blinding scan; model identity exists only in the
 restricted randomization manifest.
 
-## Repository structure (PRD section 22, adapted)
+## Repository structure
 
 ```text
 src/dpo/
@@ -200,16 +196,18 @@ src/dpo/
 │                  # caption_generation, blinded study export
 ├── analysis/      # Bradley-Terry, clip-cluster bootstrap + BH, robustness
 └── pipeline/      # stage registry (artifact types + contract slices),
-                   # publishing (the one artifact publisher), corpus_stage,
+                   # publishing (the one artifact publisher), shared stage
+                   # modules (corpus / evidence / candidate / annotation /
+                   # view / training / selection / confirmatory / study /
+                   # analysis _stage) used by canary and live runners alike,
                    # experiment resolution + sweep expansion, matrix runner,
                    # lock manifest + test-once resolver, offline canary
 ```
 
 File naming follows one rule: every basename is globally unique and says what
-the module contains. `uv run dpo stage list` prints the stage registry and the
-artifact-typed lineage; the CLI validates its inputs against the same
-registry, and artifact cache identities derive from its declared contract
-slices, so documentation cannot drift from enforcement.
+the module contains. `uv run dpo stage list` prints the stage registry and
+the artifact-typed lineage; the CLI validates its inputs against the same
+registry, so documentation cannot drift from enforcement.
 
 ## Reproducibility and integrity
 
