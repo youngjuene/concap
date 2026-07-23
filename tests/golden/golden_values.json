@@ -1,0 +1,43 @@
+{
+  "CDPO": {
+    "final_loss": 0.581527,
+    "margin_mean": 2.753662,
+    "steps": 18.0
+  },
+  "DPO": {
+    "final_loss": 0.510735,
+    "margin_mean": 2.990795,
+    "steps": 18.0
+  },
+  "DRDPO": {
+    "final_loss": 0.389129,
+    "margin_mean": 3.925571,
+    "steps": 18.0
+  },
+  "IPO": {
+    "final_loss": 12.512669,
+    "margin_mean": 1.444349,
+    "steps": 18.0
+  },
+  "RDPO": {
+    "final_loss": 0.40053,
+    "margin_mean": 3.182661,
+    "steps": 18.0
+  },
+  "SEED": {
+    "steps": 0.0
+  },
+  "SFT": {
+    "steps": 8.0
+  },
+  "SFT_DPO": {
+    "final_loss": 0.556687,
+    "margin_mean": 3.070026,
+    "steps": 18.0
+  },
+  "WDPO": {
+    "final_loss": 0.469091,
+    "margin_mean": 4.334651,
+    "steps": 18.0
+  }
+}

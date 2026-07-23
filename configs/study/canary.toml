@@ -1,0 +1,219 @@
+# Synthetic-canary study contract: fixture identities only, no live data.
+# For live work, copy this file, set execution_class = "live", and replace
+# every fixture model, hash, and policy with an approved immutable value.
+# Never edit a locked contract after seeing results.
+
+schema_version = 1
+study_id = "dpo-caption-canary-v1"
+execution_class = "synthetic_canary"
+
+[corpus]
+group_key = "source_video_id"
+split_seed = 20260722
+adjacency_guard_ms = 2000
+
+[corpus.split_fractions]
+train = 0.55
+validation = 0.15
+test = 0.15
+study = 0.15
+
+[tracks.visual]
+contract_version = "visual-caption/v1"
+language = "en"
+min_words = 4
+max_words = 30
+min_clip_ms = 5000
+max_clip_ms = 15000
+prompt = "Describe in one short English sentence the salient objects, actions, spatial relations, and scene changes that are clearly depicted."
+prompt_hash = "sha256:cd2512bf8730ddb61da66faf10c7ae85692dde7244a2db1ff8efb88c7d787530"
+include_ocr = false
+include_camera_motion = false
+
+[tracks.audio]
+contract_version = "audio-caption/v1"
+language = "en"
+min_words = 4
+max_words = 30
+min_clip_ms = 5000
+max_clip_ms = 15000
+prompt = "Describe in one short English sentence the salient events, their ordering, and the overall setting that can be perceived from the recording."
+prompt_hash = "sha256:f3bde1f2848477a43378d6eb84cdd07be61a319eb701f501962dbfd7c75f61d2"
+transcribe_speech = false
+
+[models.seed]
+model_id = "fixture/tiny-caption-model"
+revision = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+implementation = "dpo.models.tiny.TinyAdapter"
+lock_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+init_seed = 0
+
+[models.evidence_visual]
+model_id = "fixture/visual-evidence"
+revision = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+implementation = "dpo.evidence.providers.FixtureAdapter"
+lock_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+
+[models.evidence_audio]
+model_id = "fixture/audio-evidence"
+revision = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+implementation = "dpo.evidence.providers.FixtureAdapter"
+lock_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+
+[candidates]
+source_policy = "C0"
+per_clip = 4
+challenge_fraction_min = 0.2
+challenge_fraction_max = 0.3
+controlled_error_rate = 0.25
+max_new_tokens = 48
+generation_seed = 1
+
+[[candidates.decoding]]
+name = "greedy"
+temperature = 0.0
+top_p = 1.0
+count = 1
+
+[[candidates.decoding]]
+name = "sample"
+temperature = 0.7
+top_p = 0.9
+count = 2
+
+[[candidates.decoding]]
+name = "controlled_error"
+temperature = 0.7
+top_p = 0.9
+count = 1
+
+[pairs]
+per_clip_min = 3
+per_clip_max = 6
+seed = 7
+near_duplicate_jaccard = 0.9
+
+[annotation]
+judgments_per_pair = 3
+repeat_fraction = 0.12
+attention_fraction = 0.05
+collection_version = "1.0"
+min_response_ms = 1500
+max_position_bias = 0.2
+min_attention_pass = 0.8
+
+[views.sft]
+min_agreement = 0.6
+min_confidence = 3.0
+
+[views.pair_strict]
+min_agreement = 0.6
+min_strength = 2.0
+
+[views.weighting]
+strategy = "inverse_pair_count"
+cap_per_clip = 6
+
+[training]
+seeds = [1, 2, 3]
+canonical_seed = 1
+world_size = 1
+precision = "fp32"
+max_completion_tokens = 128
+epochs = 2.0
+learning_rate = 0.005
+sft_learning_rate = 0.01
+batch_size = 4
+gradient_accumulation_steps = 1
+max_grad_norm = 1.0
+
+[training.lora]
+rank = 16
+alpha = 32
+dropout = 0.05
+targets = ["mixer", "head"]
+
+[experiments.SEED]
+objective = "none"
+
+[experiments.SEED.gate]
+max_invalid_output_rate = 0.5
+min_event_hit_rate = 0.0
+require_logprob_support = true
+
+[experiments.SFT]
+objective = "sft"
+
+[experiments.DPO]
+objective = "dpo"
+beta = 0.1
+
+[experiments.IPO]
+objective = "ipo"
+beta = 0.1
+
+[experiments.CDPO]
+objective = "cdpo"
+beta = 0.1
+epsilon = 0.1
+
+[experiments.RDPO]
+objective = "rdpo"
+beta = 0.1
+epsilon = 0.1
+epsilon_mode = "estimated"
+
+[experiments.DRDPO]
+objective = "drdpo"
+beta = 0.1
+beta_prime = 0.5
+
+[experiments.WDPO]
+objective = "wdpo"
+beta = 0.1
+flip_warmup_ratio = 0.1
+flip_budget = 0.25
+tail_quantile = 0.8
+max_tail_cap = 0.5
+cap_floor = 0.0
+enable_correction = true
+enable_winsorization = true
+paper_revision = "arxiv_2603.07211v1"
+code_commit = ""
+view = "pair_strict"
+
+[experiments.SFT_DPO]
+objective = "dpo"
+beta = 0.1
+
+[validation]
+temperature = 0.0
+top_p = 1.0
+max_new_tokens = 48
+bootstrap_samples = 200
+
+[test_once]
+policy = "reserve-before-read"
+resume_identical_only = true
+authority_db = "test.sqlite"
+
+[study]
+design = "balanced_incomplete_block"
+exposures_per_model_pair = 2
+protocol_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+consent_hash = "sha256:2c924b344bdf2e8c75527659272387f4b0ec6f7260dcfae93e56cbf2e3fca7e0"
+retention_days = 30
+
+[robustness]
+flip_rates = [0.0, 0.1, 0.2, 0.3]
+flip_seed = 13
+
+[analysis]
+bootstrap_samples = 500
+seed = 20260722
+correction = "benjamini_hochberg"
+
+[terminal_states]
+offline = "pending"
+release = "blocked_pending_external_operation"
+study = "blocked_pending_external_operation"

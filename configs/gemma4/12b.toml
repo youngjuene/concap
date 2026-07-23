@@ -1,0 +1,19 @@
+# Gemma 4 12B backend for the VISUAL caption track (frame input). Runtime and
+# hardware concerns only — every result-affecting hyperparameter (learning
+# rates, epochs, batch geometry, LoRA topology, seeds, precision) lives in the
+# study contract, which pins this file's hash for provenance.
+# Hardware target: one RTX 3090 (24 GB), QLoRA.
+
+[model]
+model_id = "google/gemma-4-12B-it"
+revision = "0e2b1058541244490925fbacf8972041435691ac"
+media_inputs = "visual"
+
+[quantization]
+load_in_4bit = true
+quant_type = "nf4"
+double_quant = true
+compute_dtype = "bfloat16"
+
+[runtime]
+gradient_checkpointing = true

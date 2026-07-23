@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.py[cod]
+
+# Large or generated experiment artifacts (repo root only — src/dpo/data
+# and tests/data are source directories and must stay tracked)
+/artifacts/
+/data/
+/runs/
+/wandb/
+
+# Machine-local tool state
+.claude/settings.local.json

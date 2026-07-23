@@ -1,0 +1,19 @@
+# Gemma 4 E4B backend for the AUDIO caption track (audio tower input). Runtime
+# and hardware concerns only — every result-affecting hyperparameter (learning
+# rates, epochs, batch geometry, LoRA topology, seeds, precision) lives in the
+# study contract, which pins this file's hash for provenance.
+# Hardware target: one RTX 3090 (24 GB), QLoRA.
+
+[model]
+model_id = "google/gemma-4-E4B-it"
+revision = "a4c2d58be94dda072b918d9db64ee85c8ed34e3f"
+media_inputs = "audio"
+
+[quantization]
+load_in_4bit = true
+quant_type = "nf4"
+double_quant = true
+compute_dtype = "bfloat16"
+
+[runtime]
+gradient_checkpointing = true
