@@ -51,6 +51,7 @@ def _registry_rows(roles: dict[str, str]) -> list[dict[str, object]]:
             "end_ms": 5000,
             "group_id": f"grp-{clip_id}",
             "derivative_hashes": [sha256_bytes(f"deriv-{clip_id}".encode())],
+            "audio_presentation": None,
             "role": role,
         }
         for clip_id, role in sorted(roles.items())

@@ -123,6 +123,7 @@ def build_world(contract: StudyContract, *, track: str = "visual") -> Preference
                     replay_count=1,
                     response_time_ms=9000,
                     collection_version="1.0",
+                    presentation="muted_video",
                 )
             )
             counter += 1

@@ -31,6 +31,7 @@ def _annotation(**overrides: object) -> RawAnnotation:
         "replay_count": 1,
         "response_time_ms": 5000,
         "collection_version": "1.0",
+        "presentation": "muted_video",
     }
     base.update(overrides)
     return RawAnnotation(**base)  # type: ignore[arg-type]

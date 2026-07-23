@@ -84,6 +84,7 @@ LOCKED_CLIP_FIELDS = frozenset(
         "end_ms",
         "group_id",
         "derivative_hashes",
+        "audio_presentation",
         "role",
     }
 )

@@ -14,7 +14,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from dpo.contracts.study_contract import SPLITS
+from dpo.contracts.study_contract import AUDIO_PRESENTATIONS, SPLITS
 from dpo.core.identity import semantic_hash
 
 HASH_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -37,6 +37,8 @@ class ClipInput:
     derivative_hashes: tuple[str, ...]
     link_group: str | None = None
     asserted_role: str | None = None
+    # Audio-track presentation opt-in: None means the default audio_only.
+    audio_presentation: str | None = None
 
     def __post_init__(self) -> None:
         if not self.clip_id.strip() or not self.source_video_id.strip():
@@ -50,6 +52,10 @@ class ClipInput:
             raise SplitError(f"clip {self.clip_id!r}: interval must satisfy 0 <= start < end")
         if self.asserted_role is not None and self.asserted_role not in SPLITS:
             raise SplitError(f"clip {self.clip_id!r}: asserted role must be one of {sorted(SPLITS)}")
+        if self.audio_presentation is not None and self.audio_presentation not in AUDIO_PRESENTATIONS:
+            raise SplitError(
+                f"clip {self.clip_id!r}: audio_presentation must be one of {sorted(AUDIO_PRESENTATIONS)}"
+            )
 
     def document(self) -> dict[str, object]:
         """The one serialized clip-row shape every producer publishes."""
@@ -62,6 +68,7 @@ class ClipInput:
             "derivative_hashes": list(self.derivative_hashes),
             "link_group": self.link_group,
             "asserted_role": self.asserted_role,
+            "audio_presentation": self.audio_presentation,
         }
 
     @classmethod
@@ -71,6 +78,7 @@ class ClipInput:
             raise SplitError("clip row derivative_hashes must be an array")
         link_group = value.get("link_group")
         asserted_role = value.get("asserted_role")
+        audio_presentation = value.get("audio_presentation")
         return cls(
             clip_id=str(value.get("clip_id", "")),
             source_video_id=str(value.get("source_video_id", "")),
@@ -80,6 +88,7 @@ class ClipInput:
             derivative_hashes=tuple(str(item) for item in derivatives),
             link_group=None if link_group is None else str(link_group),
             asserted_role=None if asserted_role is None else str(asserted_role),
+            audio_presentation=None if audio_presentation is None else str(audio_presentation),
         )
 
 
@@ -224,6 +233,7 @@ def registry_rows(manifest: SplitManifest, clips: Sequence[ClipInput]) -> list[d
                     "end_ms": clip.end_ms,
                     "group_id": manifest.groups[clip.clip_id],
                     "derivative_hashes": list(clip.derivative_hashes),
+                    "audio_presentation": clip.audio_presentation,
                     "role": split,
                 }
             )

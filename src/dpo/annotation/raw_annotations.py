@@ -8,7 +8,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from dpo.candidates.freeze import FrozenCandidatePool
-from dpo.contracts.study_contract import CHOICES, REASON_TAGS, TIE_SUBTYPES, TRACKS
+from dpo.contracts.study_contract import (
+    CHOICES,
+    PRESENTATIONS,
+    REASON_TAGS,
+    TIE_SUBTYPES,
+    TRACKS,
+)
 
 HASH_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
@@ -43,6 +49,7 @@ class RawAnnotation:
     replay_count: int
     response_time_ms: int
     collection_version: str
+    presentation: str
     is_attention_check: bool = False
     repeat_of: str | None = None
 
@@ -90,6 +97,12 @@ class RawAnnotation:
             raise AnnotationError("annotator_id_hash must be a sha256 hash")
         if self.replay_count < 0 or self.response_time_ms < 0:
             raise AnnotationError("replay_count and response_time_ms must be non-negative")
+        if self.presentation not in PRESENTATIONS:
+            raise AnnotationError(f"presentation must be one of {sorted(PRESENTATIONS)}")
+        if self.track == "visual" and self.presentation != "muted_video":
+            raise AnnotationError("visual-track judgments are always made on the muted video")
+        if self.track == "audio" and self.presentation == "muted_video":
+            raise AnnotationError("audio-track judgments use audio_only or unmuted_video")
 
     def canonical_choice(self) -> str:
         """Resolve the displayed choice against display_order to canonical ids.
@@ -128,6 +141,7 @@ class RawAnnotation:
             "replay_count": self.replay_count,
             "response_time_ms": self.response_time_ms,
             "collection_version": self.collection_version,
+            "presentation": self.presentation,
             "is_attention_check": self.is_attention_check,
             "repeat_of": self.repeat_of,
         }
@@ -150,6 +164,7 @@ _FIELDS = {
     "replay_count",
     "response_time_ms",
     "collection_version",
+    "presentation",
     "is_attention_check",
     "repeat_of",
 }
@@ -198,6 +213,7 @@ def parse_annotation(value: Mapping[str, object]) -> RawAnnotation:
         replay_count=integer_fields["replay_count"],
         response_time_ms=integer_fields["response_time_ms"],
         collection_version=str(value["collection_version"]),
+        presentation=str(value["presentation"]),
         is_attention_check=bool(value["is_attention_check"]),
         repeat_of=None if repeat_of is None else str(repeat_of),
     )

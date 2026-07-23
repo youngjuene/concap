@@ -258,6 +258,7 @@ def _synthetic_annotations(
                 preference_strength=strength, confidence=4, reason_tags=("factual_support",),
                 annotator_id_hash=_annotator_hash(annotator), replay_count=1,
                 response_time_ms=8000, collection_version=collection_version,
+                presentation="muted_video" if pair.track == "visual" else "audio_only",
             )
             # fmt: on
             annotations.append(annotation)
@@ -287,6 +288,7 @@ def _synthetic_annotations(
                     choice="a_better", tie_subtype=None, preference_strength=5, confidence=5,
                     reason_tags=(), annotator_id_hash=_annotator_hash(annotator), replay_count=1,
                     response_time_ms=6000, collection_version=collection_version,
+                    presentation="muted_video" if pair.track == "visual" else "audio_only",
                     is_attention_check=True,
                 )
             )

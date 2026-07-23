@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caption preference collection</title>
+<style>
+  :root {
+    --ink: #1e2430;
+    --muted: #66707f;
+    --line: #d7dce4;
+    --panel: #f4f6f9;
+    --accent: #2456c4;
+    --accent-soft: #e8eefc;
+    --ok: #1a7f4b;
+    --bad: #b3372c;
+    --page: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8ebf1;
+      --muted: #9aa4b2;
+      --line: #3a4150;
+      --panel: #232834;
+      --accent: #7ba3f7;
+      --accent-soft: #2a3450;
+      --ok: #58c389;
+      --bad: #e07b6f;
+      --page: #171b23;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--page);
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.9rem 1.25rem;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+  #progress-text { color: var(--muted); font-variant-numeric: tabular-nums; }
+  main { max-width: 58rem; margin: 0 auto; padding: 1.25rem; }
+  progress { width: 100%; height: 6px; accent-color: var(--accent); }
+  #media-panel { margin: 1rem 0; text-align: center; }
+  #media-panel video, #media-panel audio {
+    max-width: 100%;
+    border-radius: 8px;
+    background: #000;
+  }
+  #media-panel audio { background: transparent; width: 100%; }
+  #media-note { color: var(--muted); font-size: 0.85rem; min-height: 1.2rem; margin: 0.25rem 0 0; }
+  .question { font-weight: 600; margin: 1rem 0 0.5rem; }
+  #captions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .caption-box {
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    padding: 1rem;
+    min-height: 7rem;
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    cursor: pointer;
+    overflow-wrap: anywhere;
+  }
+  .caption-box .slot { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 0.4rem; }
+  .caption-box.selected { border-color: var(--accent); background: var(--accent-soft); }
+  #alt-choices { display: flex; gap: 0.75rem; margin-top: 0.75rem; }
+  .alt {
+    font: inherit;
+    color: inherit;
+    padding: 0.5rem 1rem;
+    border: 2px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    cursor: pointer;
+  }
+  .alt.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .block { margin-top: 1rem; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 10px; }
+  .block[hidden] { display: none; }
+  .block legend, .block .label { font-size: 0.85rem; color: var(--muted); padding: 0 0.25rem; }
+  .scale { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
+  .scale label, #reason-tags label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+  .scale .ends { color: var(--muted); font-size: 0.8rem; align-self: center; }
+  #reason-tags { display: flex; gap: 0.5rem 1.25rem; flex-wrap: wrap; margin-top: 0.25rem; }
+  fieldset { border: none; margin: 0; padding: 0; }
+  #tie-subtype { font: inherit; margin-top: 0.25rem; padding: 0.3rem; }
+  .actions { margin: 1.25rem 0; display: flex; justify-content: flex-end; }
+  .primary {
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    padding: 0.6rem 1.6rem;
+    cursor: pointer;
+  }
+  .primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  #save-screen input {
+    font: inherit;
+    color: inherit;
+    background: var(--panel);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    width: 100%;
+    max-width: 24rem;
+  }
+  #confirmation { font-weight: 600; }
+  #confirmation.ok { color: var(--ok); }
+  #confirmation.bad { color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Caption preference collection</h1>
+  <div id="progress-text"></div>
+</header>
+<main>
+  <progress id="progress-bar" value="0" max="1"></progress>
+
+  <section id="task-screen" hidden>
+    <div id="media-panel"></div>
+    <p id="media-note"></p>
+
+    <p class="question">Which caption better matches the clip?</p>
+    <div id="captions">
+      <button type="button" class="caption-box" id="cap-left">
+        <span class="slot">Caption A (left)</span><span id="cap-left-text"></span>
+      </button>
+      <button type="button" class="caption-box" id="cap-right">
+        <span class="slot">Caption B (right)</span><span id="cap-right-text"></span>
+      </button>
+    </div>
+    <div id="alt-choices">
+      <button type="button" class="alt" id="choice-tie">Tie</button>
+      <button type="button" class="alt" id="choice-both">Both unacceptable</button>
+    </div>
+
+    <fieldset class="block" id="strength-block" hidden>
+      <legend>How strong is your preference? (required)</legend>
+      <div class="scale" id="strength-scale"><span class="ends">slight</span></div>
+    </fieldset>
+
+    <div class="block" id="tie-block" hidden>
+      <span class="label">What kind of tie is this?</span><br>
+      <select id="tie-subtype"><option value="">(unspecified)</option></select>
+    </div>
+
+    <fieldset class="block" id="confidence-block">
+      <legend>How confident are you? (required)</legend>
+      <div class="scale" id="confidence-scale"><span class="ends">unsure</span></div>
+    </fieldset>
+
+    <fieldset class="block">
+      <legend>Why? (tick any that apply)</legend>
+      <div id="reason-tags"></div>
+    </fieldset>
+
+    <div class="actions"><button type="button" class="primary" id="next" disabled>Next</button></div>
+  </section>
+
+  <section id="save-screen" hidden>
+    <h2>All tasks answered</h2>
+    <p>Enter your name and save your responses. The name is hashed before it enters the dataset.</p>
+    <p><label>Annotator name<br><input id="annotator" autocomplete="name"></label></p>
+    <div class="actions"><button type="button" class="primary" id="save" disabled>Save responses</button></div>
+    <p id="confirmation"></p>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const el = (id) => document.getElementById(id);
+let tasks = [];
+let index = 0;
+const results = [];
+let renderedAt = 0;
+let playEvents = 0;
+const state = { choice: null, tieSubtype: null, strength: null, confidence: null, reasons: new Set() };
+
+function buildScale(containerId, name, onPick) {
+  const container = el(containerId);
+  for (let value = 1; value <= 5; value += 1) {
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = name;
+    radio.value = String(value);
+    radio.addEventListener("change", () => { onPick(value); refresh(); });
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(String(value)));
+    container.appendChild(label);
+  }
+  const high = document.createElement("span");
+  high.className = "ends";
+  high.textContent = name === "strength" ? "decisive" : "certain";
+  container.appendChild(high);
+}
+
+function buildStatic(meta) {
+  buildScale("strength-scale", "strength", (value) => { state.strength = value; });
+  buildScale("confidence-scale", "confidence", (value) => { state.confidence = value; });
+  const subtype = el("tie-subtype");
+  for (const value of meta.tie_subtypes) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value.replaceAll("_", " ");
+    subtype.appendChild(option);
+  }
+  subtype.addEventListener("change", () => { state.tieSubtype = subtype.value || null; refresh(); });
+  const reasons = el("reason-tags");
+  for (const tag of meta.reason_tags) {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = tag;
+    box.addEventListener("change", () => {
+      if (box.checked) { state.reasons.add(tag); } else { state.reasons.delete(tag); }
+    });
+    label.appendChild(box);
+    label.appendChild(document.createTextNode(tag.replaceAll("_", " ")));
+    reasons.appendChild(label);
+  }
+}
+
+function decisive() { return state.choice === "a_better" || state.choice === "b_better"; }
+
+function valid() {
+  if (state.choice === null || state.confidence === null) { return false; }
+  if (decisive()) { return state.strength !== null; }
+  return state.strength === null;
+}
+
+function refresh() {
+  el("cap-left").classList.toggle("selected", state.choice === "a_better");
+  el("cap-right").classList.toggle("selected", state.choice === "b_better");
+  el("choice-tie").classList.toggle("selected", state.choice === "tie");
+  el("choice-both").classList.toggle("selected", state.choice === "both_unacceptable");
+  el("strength-block").hidden = !decisive();
+  el("tie-block").hidden = state.choice !== "tie";
+  el("next").disabled = !valid();
+}
+
+function pickChoice(choice) {
+  state.choice = choice;
+  if (decisive()) {
+    state.tieSubtype = null;
+    el("tie-subtype").value = "";
+  } else {
+    state.strength = null;
+    for (const radio of document.querySelectorAll('input[name="strength"]')) { radio.checked = false; }
+    if (choice !== "tie") { state.tieSubtype = null; el("tie-subtype").value = ""; }
+  }
+  refresh();
+}
+
+function buildMedia(task) {
+  const panel = el("media-panel");
+  panel.innerHTML = "";
+  el("media-note").textContent = "";
+  playEvents = 0;
+  const source = "/media/" + encodeURIComponent(task.clip_id)
+    + "?presentation=" + encodeURIComponent(task.presentation);
+  let element;
+  if (task.presentation === "audio_only") {
+    element = document.createElement("audio");
+  } else {
+    element = document.createElement("video");
+    element.playsInline = true;
+    element.setAttribute("playsinline", "");
+    if (task.presentation === "muted_video") {
+      element.muted = true;
+      element.setAttribute("muted", "");
+      // The judgment is silent-video-only: re-force the muted attribute so
+      // the player's unmute control can never surface the soundtrack.
+      element.addEventListener("volumechange", () => { if (!element.muted) { element.muted = true; } });
+    }
+  }
+  element.controls = true;
+  element.preload = "auto";
+  element.src = source;
+  element.addEventListener("play", () => { playEvents += 1; });
+  element.addEventListener("error", () => {
+    el("media-note").textContent = "Media unavailable for this clip (" + task.clip_id + ").";
+  });
+  panel.appendChild(element);
+}
+
+function resetState() {
+  state.choice = null;
+  state.tieSubtype = null;
+  state.strength = null;
+  state.confidence = null;
+  state.reasons.clear();
+  for (const input of document.querySelectorAll('#task-screen input[type="radio"]')) { input.checked = false; }
+  for (const input of document.querySelectorAll('#task-screen input[type="checkbox"]')) { input.checked = false; }
+  el("tie-subtype").value = "";
+}
+
+function renderTask() {
+  const task = tasks[index];
+  el("progress-text").textContent = "Task " + (index + 1) + " of " + tasks.length;
+  el("progress-bar").value = index;
+  el("progress-bar").max = tasks.length;
+  buildMedia(task);
+  el("cap-left-text").textContent = task.display[0].text;
+  el("cap-right-text").textContent = task.display[1].text;
+  resetState();
+  refresh();
+  renderedAt = performance.now();
+}
+
+function nextTask() {
+  if (!valid()) { return; }
+  const task = tasks[index];
+  results.push({
+    task_id: task.task_id,
+    choice: state.choice,
+    tie_subtype: state.choice === "tie" ? state.tieSubtype : null,
+    preference_strength: decisive() ? state.strength : null,
+    confidence: state.confidence,
+    reason_tags: Array.from(state.reasons).sort(),
+    response_time_ms: Math.max(0, Math.round(performance.now() - renderedAt)),
+    replay_count: Math.max(0, playEvents - 1),
+  });
+  index += 1;
+  if (index < tasks.length) {
+    renderTask();
+  } else {
+    el("task-screen").hidden = true;
+    el("save-screen").hidden = false;
+    el("progress-bar").value = tasks.length;
+    el("progress-text").textContent = tasks.length + " of " + tasks.length + " answered";
+  }
+}
+
+async function saveResponses() {
+  const name = el("annotator").value.trim();
+  if (!name) { return; }
+  const confirmation = el("confirmation");
+  el("save").disabled = true;
+  confirmation.className = "";
+  confirmation.textContent = "Saving…";
+  try {
+    const reply = await fetch("/api/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schema: "dpo.collection-responses/v1",
+        annotator: name,
+        responses: results,
+      }),
+    });
+    const data = await reply.json();
+    if (reply.ok) {
+      confirmation.className = "ok";
+      confirmation.textContent = "Saved " + data.responses + " responses to " + data.saved;
+    } else {
+      confirmation.className = "bad";
+      confirmation.textContent = "Save failed: " + (data.detail || data.error || reply.status);
+      el("save").disabled = false;
+    }
+  } catch (error) {
+    confirmation.className = "bad";
+    confirmation.textContent = "Save failed: " + error;
+    el("save").disabled = false;
+  }
+}
+
+async function boot() {
+  const [meta, doc] = await Promise.all([
+    fetch("/api/meta").then((reply) => reply.json()),
+    fetch("/api/tasks").then((reply) => reply.json()),
+  ]);
+  tasks = doc.tasks;
+  buildStatic(meta);
+  el("cap-left").addEventListener("click", () => pickChoice("a_better"));
+  el("cap-right").addEventListener("click", () => pickChoice("b_better"));
+  el("choice-tie").addEventListener("click", () => pickChoice("tie"));
+  el("choice-both").addEventListener("click", () => pickChoice("both_unacceptable"));
+  el("next").addEventListener("click", nextTask);
+  el("save").addEventListener("click", saveResponses);
+  el("annotator").addEventListener("input", () => {
+    el("save").disabled = !el("annotator").value.trim() || el("confirmation").className === "ok";
+  });
+  el("task-screen").hidden = false;
+  renderTask();
+}
+
+boot();
+</script>
+</body>
+</html>

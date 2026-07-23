@@ -40,6 +40,13 @@ EXECUTION_CLASSES = ("synthetic_canary", "live")
 TERMINAL_STATES = ("offline", "release")
 TERMINAL_VALUES = ("pending", "blocked_pending_external_operation", "complete")
 
+# How a clip is presented to an annotator. The visual track is always the
+# muted video; the audio track is audio-only by default, with an explicit
+# per-clip opt-in to unmuted video — every judgment records which one it saw,
+# so any cross-modal contamination stays measurable.
+PRESENTATIONS = ("muted_video", "audio_only", "unmuted_video")
+AUDIO_PRESENTATIONS = ("audio_only", "unmuted_video")
+
 # Annotation response options (binary forced choice alone is insufficient).
 CHOICES = ("a_better", "b_better", "tie", "both_unacceptable")
 TIE_SUBTYPES = ("both_good", "both_acceptable", "both_bad", "indistinguishable")
