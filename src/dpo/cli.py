@@ -26,7 +26,12 @@ from dpo.annotation.raw_annotations import AnnotationError
 from dpo.candidates.audit import audit_candidate, resolve_audits
 from dpo.candidates.candidate_records import CandidateError
 from dpo.candidates.freeze import parse_frozen_pool
-from dpo.candidates.generation import TINY_IMPLEMENTATION, generate_c0_candidates
+from dpo.candidates.generation import (
+    GEMMA_IMPLEMENTATION,
+    TINY_IMPLEMENTATION,
+    generate_c0_candidates,
+    generate_c0_candidates_gemma,
+)
 from dpo.contracts.study_contract import ContractError, StudyContract, load_contract
 from dpo.core.access import AccessDenied
 from dpo.core.artifacts import (
@@ -459,12 +464,30 @@ def _annotation_serve(arguments: argparse.Namespace) -> int:
 def _candidates_generate(arguments: argparse.Namespace) -> int:
     contract = load_contract(arguments.contract)
     implementation = str(contract.raw["models"]["seed"]["implementation"])
-    if implementation != TINY_IMPLEMENTATION:
+    if implementation == TINY_IMPLEMENTATION:
+        if arguments.backend_config or arguments.media_dir:
+            raise ArtifactError("the tiny seed backend takes no --backend-config/--media-dir")
+    elif implementation == GEMMA_IMPLEMENTATION:
+        if not arguments.backend_config or not arguments.media_dir:
+            raise ArtifactError("the Gemma seed backend requires --backend-config and --media-dir")
+        import torch
+
+        if not torch.cuda.is_available():
+            _emit(
+                {
+                    "status": "blocked_pending_external_operation",
+                    "command": "candidates generate",
+                    "gate": "Gemma seed-model generation requires a CUDA device",
+                    "side_effects": False,
+                }
+            )
+            return 3
+    else:
         _emit(
             {
                 "status": "blocked_pending_external_operation",
                 "command": "candidates generate",
-                "gate": "live seed-model generation requires the wired GPU backend",
+                "gate": f"seed-model implementation {implementation!r} has no wired generation backend",
                 "side_effects": False,
             }
         )
@@ -478,7 +501,16 @@ def _candidates_generate(arguments: argparse.Namespace) -> int:
     )
     if not split_clips:
         raise ArtifactError(f"the clip registry assigns no clips to split {arguments.split!r}")
-    candidates = generate_c0_candidates(operation.contract, track=arguments.track, clip_ids=split_clips)
+    if implementation == TINY_IMPLEMENTATION:
+        candidates = generate_c0_candidates(operation.contract, track=arguments.track, clip_ids=split_clips)
+    else:
+        candidates = generate_c0_candidates_gemma(
+            operation.contract,
+            track=arguments.track,
+            clip_ids=split_clips,
+            backend_config_path=Path(arguments.backend_config),
+            media_dir=Path(arguments.media_dir),
+        )
     caption_contract = operation.contract.tracks[arguments.track]
     audits = resolve_audits([audit_candidate(record, contract=caption_contract) for record in candidates], [])
     shard_rows = _registry_shard_rows(
@@ -635,6 +667,8 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--track", required=True, choices=["visual", "audio"])
     generate.add_argument("--split", required=True, choices=["train", "validation"])
     generate.add_argument("--dataset-version", required=True)
+    generate.add_argument("--backend-config")
+    generate.add_argument("--media-dir")
     generate.set_defaults(handler=_candidates_generate)
 
     annotation = commands.add_parser(

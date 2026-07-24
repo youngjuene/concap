@@ -126,11 +126,14 @@ class GemmaCaptionAdapter:
                 return_tensors="pt",
             )
             device = next(model.parameters()).device
+            sampling: dict[str, Any] = (
+                {"do_sample": True, "temperature": temperature, "top_p": top_p}
+                if temperature > 0
+                else {"do_sample": False}
+            )
             generated = model.generate(
                 **{key: value.to(device) for key, value in encoded.items()},
-                do_sample=temperature > 0,
-                temperature=max(temperature, 1e-5),
-                top_p=top_p,
+                **sampling,
                 max_new_tokens=max_new_tokens,
             )
             prompt_length = int(encoded["input_ids"].shape[1])
