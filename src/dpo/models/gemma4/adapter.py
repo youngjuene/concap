@@ -18,7 +18,7 @@ from dpo.contracts.study_contract import CaptionContract, ContractError
 from dpo.models.base import CompletionBatch, MediaBatch, ModalityIsolationError
 from dpo.models.gemma4.backend_config import BackendConfig
 from dpo.models.gemma4.prompt import assistant_message, prompt_messages
-from dpo.models.gemma4.tokenization import prompt_and_full_ids
+from dpo.models.gemma4.tokenization import prompt_and_full_encodings
 from dpo.models.logprob import completion_logprobs
 
 
@@ -88,19 +88,20 @@ class GemmaCaptionAdapter:
         if media.track != self.track:
             raise ModalityIsolationError(f"{self.track} adapter received a {media.track} media batch")
         model, processor = self._require_loaded()
+        device = next(model.parameters()).device
         logps = []
         for clip_id, text in zip(media.clip_ids, completions.texts, strict=True):
-            prompt_ids, full_ids = prompt_and_full_ids(
+            prompt_length, encoding = prompt_and_full_encodings(
                 processor, self._messages(clip_id), assistant_message(text)
             )
-            device = next(model.parameters()).device
-            input_ids = torch.tensor([full_ids], dtype=torch.long, device=device)
-            logits = model(input_ids=input_ids).logits
+            # The WHOLE encoding goes to the forward pass: input ids alone would
+            # silently score the completion without any media conditioning.
+            tensors = {key: value.to(device) for key, value in encoding.items()}
+            logits = model(**tensors).logits
+            input_ids = tensors["input_ids"]
             completion_mask = torch.zeros_like(input_ids)
-            completion_mask[0, len(prompt_ids) :] = 1
-            logps.append(
-                completion_logprobs(logits.to("cpu"), input_ids.to("cpu"), completion_mask.to("cpu"))[0]
-            )
+            completion_mask[0, prompt_length:] = 1
+            logps.append(completion_logprobs(logits.float(), input_ids, completion_mask)[0].to("cpu"))
         return torch.stack(logps)
 
     def generate(

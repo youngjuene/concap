@@ -48,7 +48,7 @@ def _apply_text_only_template(processor: Any) -> None:
     rendering. On E4B the scaffold is absent and this is a no-op. If the
     template ever changes shape so the substring no longer matches, the strip
     silently no-ops; callers that supervise completions must prove the
-    strict-prefix invariant per row (see ``tokenization.prompt_and_full_ids``).
+    strict-prefix invariant per row (see ``tokenization.prompt_and_full_encodings``).
     """
     template = getattr(processor, "chat_template", None) or getattr(
         getattr(processor, "tokenizer", None), "chat_template", None

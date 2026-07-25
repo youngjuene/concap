@@ -51,3 +51,30 @@ def test_gemma_generates_real_audio_captions(tmp_path: Path) -> None:
     texts = {record.text for record in records}
     assert len(texts) > 1
     assert all(record.source_kind in {"greedy", "sample", "controlled_error"} for record in records)
+
+
+@pytest.mark.skipif(not _LIVE, reason="set DPO_RUN_LIVE=1 on a CUDA machine with the cached model")
+def test_gemma_completion_scoring_is_media_conditioned(tmp_path: Path) -> None:
+    """The adapter must pass the full media encoding to the forward pass: the
+    same completion over different audio must score differently."""
+    from dpo.contracts.study_contract import load_contract
+    from dpo.models.audio_media import build_audio_media
+    from dpo.models.base import CompletionBatch
+    from dpo.models.gemma4.adapter import GemmaCaptionAdapter
+    from dpo.models.gemma4.backend_config import load_config
+
+    clip_ids = ["cond-clip-a", "cond-clip-b"]
+    for index, clip_id in enumerate(clip_ids):
+        _write_sine(tmp_path / f"{clip_id}.wav", frequency=262.0 * (index + 1))
+    files = {clip_id: tmp_path / f"{clip_id}.wav" for clip_id in clip_ids}
+    adapter = GemmaCaptionAdapter(
+        config=load_config("configs/gemma4/e4b.toml"),
+        contract=load_contract("configs/study/canary.toml").tracks["audio"],
+        media_resolver=lambda clip_id: files[clip_id],
+    )
+    completion = CompletionBatch(texts=("A steady tone plays throughout the recording.",))
+    scores = [
+        float(adapter.completion_logps(build_audio_media([clip_id], torch.zeros(1, 1600)), completion)[0])
+        for clip_id in clip_ids
+    ]
+    assert abs(scores[0] - scores[1]) > 1e-4
