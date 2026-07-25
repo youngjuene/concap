@@ -35,6 +35,12 @@ prompt_hash = "sha256:cd2512bf8730ddb61da66faf10c7ae85692dde7244a2db1ff8efb88c7d
 #   32 (the processor default) -> ~2340-token prompts, OOM even across two GPUs
 # Raise it only with headroom to match; it is result-affecting, so changing it
 # changes the contract hash and retrains the cells that read it.
+# Two levers were measured and do NOT buy more frames: gradient checkpointing
+# is already active (49 modules) and forcing it again changes nothing, and E4B
+# is not a lighter visual backend than 12B — its embeddings leave it at 16.3 GB
+# resident after k-bit preparation (12B: 9.7 GB), so it OOMs one step sooner.
+# Untested lever if more frames are ever needed: smaller frame resolution,
+# which cuts patches per frame rather than frames per clip.
 video_frames = 2
 include_ocr = false
 include_camera_motion = false
