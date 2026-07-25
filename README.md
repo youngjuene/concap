@@ -12,8 +12,9 @@ ConCap (package: `dpo`) is a pipeline with three jobs, in order:
    and a locked configuration, all as content-addressed artifacts.
 
 Every input is a typed, content-addressed artifact; one study contract owns
-every result-affecting knob; the same commands run the synthetic canary and
-(once the GPU backend is wired) the real study.
+every result-affecting knob; and the same commands run the synthetic canary on
+CPU and the real study on GPU — which backend executes is a contract field,
+not a different code path.
 
 ## 0. Install and verify
 
@@ -30,9 +31,9 @@ make smoke      # offline end-to-end canary + fail-closed live boundary
 `make smoke` is the complete health check: a cold canary executes every
 pipeline stage on synthetic fixtures with the tiny CPU backend (all matrix
 cells train with real optimizer steps), a warm rerun must reuse the same
-report artifact with zero recomputation, and the live train gate must refuse
-with exit 3 and no side effects. For a persistent, inspectable workspace run
-the underlying commands yourself:
+report artifact with zero recomputation, and the remaining live gate
+(`evaluate`) must refuse with exit 3 and no side effects. For a persistent,
+inspectable workspace run the underlying commands yourself:
 
 ```bash
 uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
@@ -92,11 +93,40 @@ validated identically, and selection picks one winner per experiment and
 track. Because artifact identities are stage-scoped, extending a sweep axis
 recomputes only the new cells — collected preferences are never touched.
 
-Real GPU training is a fail-closed gate until the Gemma backend is wired:
-
 ```bash
-uv run dpo train run --workspace "$W" --contract "$C" ...   # exit 3 today
+# Derive every training view from the frozen preferences, per track.
+uv run dpo views derive --workspace "$W" --contract "$C" \
+  --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" --artifact-id "$VALIDATION_POOL" \
+  --artifact-id "$TRAIN_ANNOTATIONS" --artifact-id "$VALIDATION_ANNOTATIONS" --track visual
+
+# Train every matrix cell. Resumable: rerunning skips finished cells.
+uv run dpo train run --workspace "$W" --contract "$C" \
+  --artifact-id "$VIEW_IDS..." --checkpoint-dir runs/checkpoints \
+  --backend-config configs/gemma4/12b.toml --backend-config configs/gemma4/e4b.toml \
+  --media-dir media/
+
+# Score every variant, pick one winner per experiment and track, lock.
+uv run dpo select run --workspace "$W" --contract "$C" \
+  --artifact-id "$VIEW_IDS..." --artifact-id "$CELL_IDS..." \
+  --checkpoint-dir runs/checkpoints --backend-config ... --media-dir media/
 ```
+
+Which backend runs is the contract's `models.seed.implementation`: the
+deterministic tiny CPU backend needs no `--backend-config`/`--media-dir` and
+runs the whole pipeline offline; the Gemma backend requires one backend TOML
+per track plus the media directory, and verifies the CUDA device, the
+contract's `[backends]` hash pins, and full media coverage **before** touching
+the store. LoRA comes from the contract's `[training.lora]` and every attach
+is checked to keep all trainable parameters inside the language model — the
+media towers stay frozen (peft cannot wrap their `Gemma4ClippableLinear`
+modules, so this guard is load-bearing, not decorative).
+
+Training is **resumable by content**: each cell writes its adapter plus a
+`cell.json` holding the semantic hash of everything it trained from, so a
+crash resumes where it stopped and a changed view or hyperparameter retrains
+exactly the cells it affects. Reference log-probabilities are precomputed and
+the reference released before the policy trains, so a second model never
+occupies device memory.
 
 The backend TOMLs under `configs/gemma4/` carry runtime shape only (model
 pin, quantization, gradient checkpointing); the contract can pin their
@@ -130,7 +160,8 @@ src/dpo/
 │                  # aggregation, reliability + exclusions
 ├── models/        # shared completion logprob, modality-isolated batches,
 │                  # visual_media / audio_media builders, tiny CPU backend,
-│                  # gemma4/ (adapter, backend_config, tokenization safety)
+│                  # gemma4/ (adapter, backend_config, tokenization safety,
+│                  # training_backend = real QLoRA with the frozen-tower guard)
 ├── objectives/    # base protocol + dpo, ipo, cdpo, rdpo, drdpo, wdpo, sft
 ├── trainers/      # one preference trainer for every preference arm,
 │                  # SFT trainer, diagnostics
@@ -140,7 +171,8 @@ src/dpo/
 └── pipeline/      # stage registry (artifact types + contract slices),
                    # publishing, per-stage modules (corpus/candidate/
                    # annotation/view/training/selection), sweep expansion,
-                   # matrix runner, lock manifest, offline canary
+                   # live_runner (resumable matrix over a backend seam),
+                   # offline matrix runner, lock manifest, offline canary
 ```
 
 File naming follows one rule: every basename is globally unique and says what

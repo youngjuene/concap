@@ -58,9 +58,24 @@ labels only). Clip-level weighting keeps pair-rich clips from dominating.
 
 All preference methods share one completion-only sequence log-probability
 implementation (`dpo.models.logprob`): prompt tokens and padding masked,
-float32 log-softmax with NaN/overflow guards. One preference trainer serves
-every preference arm through the objective registry; references are frozen
-structurally and receive no gradients (tested).
+float32 log-softmax with NaN/overflow guards. On a multimodal backend the
+whole processor encoding reaches the forward pass, so a completion is scored
+conditioned on its clip's media — scoring from token ids alone would be
+silently media-blind and is regression-tested against that. One preference
+trainer serves every preference arm through the objective registry;
+references are frozen structurally and receive no gradients (tested).
+
+One matrix runner drives every backend through a single seam
+(`pipeline.live_runner`): the deterministic CPU backend and the real QLoRA
+backend execute identical matrix semantics, asserted cell-for-cell against
+the offline runner. Cells are resumable by content — each writes its adapter
+plus the semantic hash of everything it trained from, so a crash resumes and
+a changed input retrains exactly what it affects. Reference log-probabilities
+are precomputed and the reference released before the policy trains, so no
+second model occupies device memory. On the real backend every LoRA attach is
+checked to keep all trainable parameters inside the language model: the media
+towers must stay frozen for the comparison to mean anything, and the tower
+modules are ones the adapter library cannot wrap.
 
 The matrix is code-owned: the six direct preference arms initialize from
 SEED against a frozen SEED reference on `D_pair_strict` (wDPO may use the
