@@ -35,12 +35,23 @@ prompt_hash = "sha256:cd2512bf8730ddb61da66faf10c7ae85692dde7244a2db1ff8efb88c7d
 #   32 (the processor default) -> ~2340-token prompts, OOM even across two GPUs
 # Raise it only with headroom to match; it is result-affecting, so changing it
 # changes the contract hash and retrains the cells that read it.
-# Two levers were measured and do NOT buy more frames: gradient checkpointing
-# is already active (49 modules) and forcing it again changes nothing, and E4B
-# is not a lighter visual backend than 12B — its embeddings leave it at 16.3 GB
-# resident after k-bit preparation (12B: 9.7 GB), so it OOMs one step sooner.
-# Untested lever if more frames are ever needed: smaller frame resolution,
-# which cuts patches per frame rather than frames per clip.
+# Every lever for affording more frames was measured and is closed:
+#   - gradient checkpointing is already active (49 modules); forcing it again
+#     changes nothing,
+#   - E4B is not a lighter visual backend (16.3 GB resident after k-bit prep
+#     against 12B's 9.7 GB), so it OOMs one step sooner,
+#   - frame resolution does not matter: the processor emits exactly 70 soft
+#     tokens per frame at any input size, and 70 is the floor of the allowed
+#     max_soft_tokens {70, 140, 280, 560, 1120}.
+# Visual sequence length is therefore frames x 70 + text, and the frame count
+# is the only lever. The remaining untried option is a preparation path that
+# avoids upcasting the 2 GB embedding to fp32 (which also makes activations
+# fp32); it needs care, not a patch.
+#
+# STUDY IMPLICATION: two frames over a five-second clip is two stills. The
+# visual caption contract asks for actions and scene changes, which two stills
+# barely evidence. If motion matters, the lever is SHORTER CLIPS (min_clip_ms /
+# max_clip_ms below) so the same two frames cover less time — or more VRAM.
 video_frames = 2
 include_ocr = false
 include_camera_motion = false
