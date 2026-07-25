@@ -27,6 +27,15 @@ min_clip_ms = 5000
 max_clip_ms = 15000
 prompt = "Describe in one short English sentence the salient objects, actions, spatial relations, and scene changes that are clearly depicted."
 prompt_hash = "sha256:cd2512bf8730ddb61da66faf10c7ae85692dde7244a2db1ff8efb88c7d787530"
+# Frames sampled per clip: how much of a clip the model actually sees, and
+# the dominant term in the training sequence length. Measured end to end on
+# one RTX 3090 (24 GB) with Gemma 4 12B, batch 1 + accumulation:
+#   2 frames -> SFT 16.2 GB, DPO 21.4 GB, SFT_DPO 21.4 GB  (whole matrix fits)
+#   4 frames -> SFT 20.7 GB, DPO out of memory
+#   32 (the processor default) -> ~2340-token prompts, OOM even across two GPUs
+# Raise it only with headroom to match; it is result-affecting, so changing it
+# changes the contract hash and retrains the cells that read it.
+video_frames = 2
 include_ocr = false
 include_camera_motion = false
 

@@ -12,9 +12,8 @@ supervised span.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
-
-from dpo.models.gemma4.prompt import CHAT_TEMPLATE_KWARGS
 
 
 class TokenizationError(ValueError):
@@ -33,7 +32,11 @@ def _encoded_ids(encoded: Any) -> list[int]:
 
 
 def prompt_and_full_encodings(
-    processor: Any, prompt: list[dict[str, Any]], completion: list[dict[str, Any]]
+    processor: Any,
+    prompt: list[dict[str, Any]],
+    completion: list[dict[str, Any]],
+    *,
+    template_kwargs: Mapping[str, Any],
 ) -> tuple[int, Any]:
     """(prompt length, full prompt+completion encoding) under one template.
 
@@ -50,14 +53,14 @@ def prompt_and_full_encodings(
         add_generation_prompt=True,
         return_dict=True,
         return_tensors="pt",
-        **CHAT_TEMPLATE_KWARGS,
+        **template_kwargs,
     )
     full_encoding = processor.apply_chat_template(
         list(prompt) + list(completion),
         tokenize=True,
         return_dict=True,
         return_tensors="pt",
-        **CHAT_TEMPLATE_KWARGS,
+        **template_kwargs,
     )
     prompt_ids = _encoded_ids(prompt_encoding)
     full_ids = _encoded_ids(full_encoding)

@@ -17,7 +17,7 @@ import torch
 from dpo.contracts.study_contract import CaptionContract, ContractError
 from dpo.models.base import CompletionBatch, MediaBatch, ModalityIsolationError
 from dpo.models.gemma4.backend_config import BackendConfig
-from dpo.models.gemma4.prompt import CHAT_TEMPLATE_KWARGS, assistant_message, prompt_messages
+from dpo.models.gemma4.prompt import assistant_message, prompt_messages, template_kwargs
 from dpo.models.gemma4.tokenization import prompt_and_full_encodings
 from dpo.models.logprob import completion_logprobs
 
@@ -139,7 +139,10 @@ class GemmaCaptionAdapter:
         logps = []
         for clip_id, text in zip(media.clip_ids, completions.texts, strict=True):
             prompt_length, encoding = prompt_and_full_encodings(
-                processor, self._messages(clip_id), assistant_message(text)
+                processor,
+                self._messages(clip_id),
+                assistant_message(text),
+                template_kwargs=template_kwargs(self.contract),
             )
             # The WHOLE encoding goes to the forward pass: input ids alone would
             # silently score the completion without any media conditioning.
@@ -174,7 +177,7 @@ class GemmaCaptionAdapter:
                 return_tensors="pt",
                 # The same template rendering as scoring, or a generated caption
                 # would come from a different prompt than the one it is scored under.
-                **CHAT_TEMPLATE_KWARGS,
+                **template_kwargs(self.contract),
             )
             sampling: dict[str, Any] = (
                 {"do_sample": True, "temperature": temperature, "top_p": top_p}

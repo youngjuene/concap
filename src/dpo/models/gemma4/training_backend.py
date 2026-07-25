@@ -212,6 +212,19 @@ class GemmaBackend:
         peft_model = self._peft.get(track)
         return self.base(track) if peft_model is None else peft_model
 
+    @staticmethod
+    def _repair_active(peft_model: Any) -> None:
+        """Keep ``active_adapter`` naming an adapter that still exists.
+
+        Every peft forward resolves ``peft_config[active_adapter]``, including
+        the SEED pass that runs with the adapter layers disabled. Deleting the
+        adapter that happened to be active leaves that name dangling, so the
+        next forward raises KeyError instead of scoring the base model.
+        """
+        names = list(peft_model.peft_config)
+        if names and peft_model.active_adapter not in peft_model.peft_config:
+            peft_model.set_adapter(names[-1])
+
     def _touch(self, track: str, name: str) -> None:
         resident = self._resident.setdefault(track, [])
         if name in resident:
@@ -228,6 +241,14 @@ class GemmaBackend:
         peft_model = self._peft.get(track)
         if peft_model is not None and name in peft_model.peft_config:
             peft_model.delete_adapter(name)
+            # peft leaves ``active_adapter`` naming a deleted adapter, and the
+            # next attribute lookup then raises KeyError. Hand activation to a
+            # surviving adapter, or fall back to the bare base.
+            survivors = [other for other in resident if other in peft_model.peft_config]
+            if survivors:
+                peft_model.set_adapter(survivors[-1])
+            else:
+                peft_model.base_model.disable_adapter_layers()
         # The wrapper itself stays for the lifetime of the track: re-wrapping a
         # base that already carries LoRA layers would double-inject them.
         gc.collect()
@@ -269,6 +290,12 @@ class GemmaBackend:
         peft_model = self._peft.get(track)
         if attachment is None:
             if peft_model is not None:
+                if not peft_model.peft_config:
+                    # No adapter survives to name; the pristine base IS the SEED.
+                    self._peft.pop(track, None)
+                    self._resident.pop(track, None)
+                    return self.base(track), self.processor(track)
+                self._repair_active(peft_model)
                 peft_model.base_model.disable_adapter_layers()
             return self._model(track), self.processor(track)
         if attachment.name not in self._resident.setdefault(track, []):

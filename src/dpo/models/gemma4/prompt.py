@@ -16,6 +16,18 @@ from dpo.contracts.study_contract import CaptionContract, ContractError
 CHAT_TEMPLATE_KWARGS: dict[str, bool] = {"enable_thinking": False}
 
 
+def template_kwargs(contract: CaptionContract) -> dict[str, Any]:
+    """Chat-template kwargs for one track: thinking off, frames per the contract.
+
+    Scoring and generation must render a prompt the same way, so both go
+    through here; the frame budget only exists on the visual track.
+    """
+    kwargs: dict[str, Any] = dict(CHAT_TEMPLATE_KWARGS)
+    if contract.video_frames:
+        kwargs["num_frames"] = contract.video_frames
+    return kwargs
+
+
 def system_message(contract: CaptionContract) -> dict[str, Any]:
     return {"role": "system", "content": contract.prompt}
 

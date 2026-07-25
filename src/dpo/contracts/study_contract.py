@@ -280,6 +280,11 @@ class CaptionContract:
     max_clip_ms: int
     prompt: str
     prompt_hash: str
+    # Frames sampled per clip on the visual track (0 on the audio track). It
+    # decides how much of a clip the model sees, so it is contract-owned like
+    # any other result-affecting knob — and it dominates the training
+    # sequence length, so it is also what makes a visual cell fit or not.
+    video_frames: int
     include_ocr: bool
     include_camera_motion: bool
     transcribe_speech: bool
@@ -405,7 +410,11 @@ def _validate_track(track: str, value: object) -> CaptionContract:
         "prompt",
         "prompt_hash",
     }
-    optional = {"include_ocr", "include_camera_motion"} if track == "visual" else {"transcribe_speech"}
+    if track == "visual":
+        keys.add("video_frames")
+        optional = {"include_ocr", "include_camera_motion"}
+    else:
+        optional = {"transcribe_speech"}
     table = _table(value, f"tracks.{track}", keys, optional)
     language = _string(table["language"], f"tracks.{track}.language")
     if language != "en":
@@ -431,6 +440,9 @@ def _validate_track(track: str, value: object) -> CaptionContract:
         for token in ("visual", "frame", "image", "see", "watch"):
             if token in lowered:
                 raise ContractError(f"tracks.audio.prompt must not reference visual evidence ({token!r})")
+    video_frames = (
+        _integer(table["video_frames"], f"tracks.{track}.video_frames", minimum=1) if track == "visual" else 0
+    )
     return CaptionContract(
         track=track,
         contract_version=contract_version,
@@ -441,6 +453,7 @@ def _validate_track(track: str, value: object) -> CaptionContract:
         max_clip_ms=max_clip,
         prompt=prompt,
         prompt_hash=prompt_hash,
+        video_frames=video_frames,
         include_ocr=bool(table.get("include_ocr", False)),
         include_camera_motion=bool(table.get("include_camera_motion", False)),
         transcribe_speech=bool(table.get("transcribe_speech", False)),
