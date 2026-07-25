@@ -11,6 +11,7 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
   # accelerate is required by transformers' device_map loading path.
   "accelerate==1.14.0",
+  "av>=18.0.0",
   "bitsandbytes==0.49.2",
   "fastapi>=0.139.2",
   "librosa>=0.11.0",

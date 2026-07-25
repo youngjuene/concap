@@ -9,7 +9,7 @@ the shared completion-only log-probability implementation.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 import torch
@@ -17,7 +17,7 @@ import torch
 from dpo.contracts.study_contract import CaptionContract, ContractError
 from dpo.models.base import CompletionBatch, MediaBatch, ModalityIsolationError
 from dpo.models.gemma4.backend_config import BackendConfig
-from dpo.models.gemma4.prompt import assistant_message, prompt_messages
+from dpo.models.gemma4.prompt import CHAT_TEMPLATE_KWARGS, assistant_message, prompt_messages
 from dpo.models.gemma4.tokenization import prompt_and_full_encodings
 from dpo.models.logprob import completion_logprobs
 
@@ -26,6 +26,54 @@ class BackendPending(RuntimeError):
     """Raised when the real backend is unavailable; status is blocked, not proxied."""
 
     status = "blocked_pending_external_operation"
+
+
+def _compute_dtype(model: Any) -> torch.dtype:
+    """The model's floating-point compute dtype (weights are mixed with uint8)."""
+    for parameter in model.parameters():
+        if parameter.is_floating_point():
+            dtype: torch.dtype = parameter.dtype
+            return dtype
+    return torch.float32
+
+
+def _to_model(model: Any, encoding: Mapping[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Move one processor encoding onto the model's device and compute dtype.
+
+    The processor emits media features in float32 while the towers hold
+    bfloat16 weights, so the features must be cast or the first tower
+    LayerNorm raises a dtype mismatch. Integer tensors (ids, masks, position
+    ids) are moved but never cast — casting them would corrupt them.
+    """
+    device = next(model.parameters()).device
+    dtype = _compute_dtype(model)
+    return {
+        key: (value.to(device=device, dtype=dtype) if value.is_floating_point() else value.to(device))
+        for key, value in encoding.items()
+    }
+
+
+def _response_text(processor: Any, tokens: torch.Tensor) -> str:
+    """The caption a generation actually asserts, with its channels resolved.
+
+    Gemma 4 answers on a channel-structured response: it opens a thought
+    channel and then gives the answer. Decoding with ``skip_special_tokens``
+    drops the channel MARKERS but keeps their literal text, so a caption comes
+    back as ``"thought\\n<answer>"`` — contaminating every candidate and every
+    training target. The processor's own ``parse_response`` resolves the
+    channels; the plain decode is only a fallback for a response it cannot
+    parse.
+    """
+    decoded = str(processor.decode(tokens, skip_special_tokens=False))
+    try:
+        parsed = processor.parse_response(decoded)
+    except Exception:  # noqa: BLE001 - a malformed response must not kill a run
+        parsed = None
+    if isinstance(parsed, Mapping):
+        content = parsed.get("content")
+        if isinstance(content, str):
+            return content.strip()
+    return str(processor.decode(tokens, skip_special_tokens=True)).strip()
 
 
 class GemmaCaptionAdapter:
@@ -88,7 +136,6 @@ class GemmaCaptionAdapter:
         if media.track != self.track:
             raise ModalityIsolationError(f"{self.track} adapter received a {media.track} media batch")
         model, processor = self._require_loaded()
-        device = next(model.parameters()).device
         logps = []
         for clip_id, text in zip(media.clip_ids, completions.texts, strict=True):
             prompt_length, encoding = prompt_and_full_encodings(
@@ -96,7 +143,7 @@ class GemmaCaptionAdapter:
             )
             # The WHOLE encoding goes to the forward pass: input ids alone would
             # silently score the completion without any media conditioning.
-            tensors = {key: value.to(device) for key, value in encoding.items()}
+            tensors = _to_model(model, encoding)
             logits = model(**tensors).logits
             input_ids = tensors["input_ids"]
             completion_mask = torch.zeros_like(input_ids)
@@ -125,22 +172,22 @@ class GemmaCaptionAdapter:
                 add_generation_prompt=True,
                 return_dict=True,
                 return_tensors="pt",
+                # The same template rendering as scoring, or a generated caption
+                # would come from a different prompt than the one it is scored under.
+                **CHAT_TEMPLATE_KWARGS,
             )
-            device = next(model.parameters()).device
             sampling: dict[str, Any] = (
                 {"do_sample": True, "temperature": temperature, "top_p": top_p}
                 if temperature > 0
                 else {"do_sample": False}
             )
             generated = model.generate(
-                **{key: value.to(device) for key, value in encoded.items()},
+                **_to_model(model, encoded),
                 **sampling,
                 max_new_tokens=max_new_tokens,
             )
             prompt_length = int(encoded["input_ids"].shape[1])
-            outputs.append(
-                str(processor.decode(generated[0][prompt_length:], skip_special_tokens=True)).strip()
-            )
+            outputs.append(_response_text(processor, generated[0][prompt_length:]))
         return outputs
 
     def trainable_parameters(self) -> Iterator[torch.nn.Parameter]:
