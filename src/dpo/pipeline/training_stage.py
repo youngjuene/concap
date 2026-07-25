@@ -14,8 +14,9 @@ from typing import Protocol
 
 from dpo.contracts.study_contract import EXPERIMENT_IDS, TRACKS, StudyContract
 from dpo.core.artifacts import ParentEdge
+from dpo.core.identity import semantic_hash
 from dpo.data.derive_pairs import StrictPair
-from dpo.pipeline.experiments import ExperimentVariant
+from dpo.pipeline.experiments import ExperimentVariant, expand_experiment, resolve_experiment
 from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.run_matrix import CellResult
 
@@ -31,6 +32,64 @@ class MatrixCellRunner(Protocol):
         seed: int,
         variant: ExperimentVariant | None = None,
     ) -> CellResult: ...
+
+
+def training_cell_slice(
+    contract: StudyContract,
+    *,
+    experiment_id: str,
+    variant_id: str,
+    track: str,
+    hyperparameters: Mapping[str, object],
+    training_view: str | None,
+) -> dict[str, object]:
+    """The per-variant cache identity of one training cell.
+
+    Published cells key on exactly this, so extending a sweep axis leaves every
+    sibling variant's request identity untouched. It has one construction site
+    so a consumer can recompute the identity of a cell it is given.
+    """
+    return {
+        "training": dict(contract.raw["training"]),
+        "models_seed": dict(contract.raw["models"]["seed"]),
+        "track_contract": dict(contract.raw["tracks"][track]),
+        "experiment": {
+            "experiment_id": experiment_id,
+            "variant_id": variant_id,
+            "hyperparameters": dict(hyperparameters),
+            "training_view": training_view,
+        },
+    }
+
+
+def training_cell_contract_ids(contract: StudyContract) -> frozenset[str]:
+    """Every contract identity a matrix cell of this contract may legitimately carry.
+
+    Cells key on their resolved variant rather than on a stage-wide contract
+    slice, so a consumer of published cells (validation, selection) recomputes
+    the whole legitimate set here instead of widening the stage registry.
+    """
+    canonical_seed = int(str(contract.training["canonical_seed"]))
+    identities = set()
+    for experiment_id in EXPERIMENT_IDS:
+        for variant in expand_experiment(contract, experiment_id):
+            for track in TRACKS:
+                resolved = resolve_experiment(
+                    contract, experiment_id, track=track, seed=canonical_seed, variant=variant
+                )
+                identities.add(
+                    semantic_hash(
+                        training_cell_slice(
+                            contract,
+                            experiment_id=experiment_id,
+                            variant_id=variant.variant_id,
+                            track=track,
+                            hyperparameters=resolved.hyperparameters,
+                            training_view=resolved.training_view,
+                        )
+                    )
+                )
+    return frozenset(identities)
 
 
 def publish_training_matrix(
@@ -70,17 +129,14 @@ def publish_training_matrix(
                     # Per-variant cache identity: the cell keys on exactly what it
                     # trained from, so extending a sweep axis leaves every sibling
                     # variant's request identity untouched.
-                    slice_override={
-                        "training": dict(contract.raw["training"]),
-                        "models_seed": dict(contract.raw["models"]["seed"]),
-                        "track_contract": dict(contract.raw["tracks"][track]),
-                        "experiment": {
-                            "experiment_id": experiment_id,
-                            "variant_id": variant.variant_id,
-                            "hyperparameters": dict(cell.hyperparameters),
-                            "training_view": cell.training_view,
-                        },
-                    },
+                    slice_override=training_cell_slice(
+                        contract,
+                        experiment_id=experiment_id,
+                        variant_id=variant.variant_id,
+                        track=track,
+                        hyperparameters=cell.hyperparameters,
+                        training_view=cell.training_view,
+                    ),
                     parameters={
                         "operation": "train-cell",
                         "experiment_id": experiment_id,

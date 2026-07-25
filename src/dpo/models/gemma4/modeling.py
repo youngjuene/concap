@@ -1,6 +1,14 @@
+"""Loading and preparing the pinned Gemma 4 checkpoint for QLoRA work.
+
+Everything here is runtime shape: the quantized base, the processor with its
+chat template normalized, the k-bit training preparation, and the guard that
+keeps every trainable parameter inside the text language model.
+"""
+
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from typing import Any
 
 from dpo.models.gemma4.backend_config import BackendConfig
@@ -86,3 +94,43 @@ def load_quantized_base(config: BackendConfig) -> Any:
     text_config = getattr(model.config, "text_config", None)
     (text_config if text_config is not None else model.config).use_cache = False
     return model
+
+
+def prepare_quantized_model(model: Any, *, gradient_checkpointing: bool) -> Any:
+    """The one k-bit preparation: non-reentrant checkpointing, casts, grad hooks."""
+    from peft import prepare_model_for_kbit_training
+
+    return prepare_model_for_kbit_training(  # type: ignore[no-untyped-call]
+        model,
+        use_gradient_checkpointing=gradient_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+    )
+
+
+def trainable_parameter_names(model: Any) -> list[str]:
+    return [name for name, parameter in model.named_parameters() if parameter.requires_grad]
+
+
+def assert_text_only_lora_scope(model: Any, names: Iterable[str] | None = None) -> list[str]:
+    """Prove every trainable parameter lives in the text language model.
+
+    This is the runtime enforcement of the frozen-towers invariant, and it must
+    run after every LoRA attach. The vision and audio towers of Gemma 4 contain
+    modules peft cannot wrap (``Gemma4ClippableLinear``; peft issues #3129/#3130,
+    unfixed on the pinned peft), so a targets pattern that escapes the language
+    model either crashes or — worse — silently trains a tower we require frozen.
+    An empty trainable set is equally a failure: it means the pattern matched
+    nothing and the "training" run would be a no-op.
+    """
+    trainable = list(names) if names is not None else trainable_parameter_names(model)
+    if not trainable:
+        raise ModelSetupError("no trainable LoRA parameters were found")
+    invalid = [name for name in trainable if "language_model" not in name]
+    if invalid:
+        preview = ", ".join(invalid[:5])
+        raise ModelSetupError(f"trainable parameters escaped the text language model: {preview}")
+    forbidden = [name for name in trainable if "vision" in name or "audio" in name]
+    if forbidden:
+        preview = ", ".join(forbidden[:5])
+        raise ModelSetupError(f"vision/audio parameters became trainable: {preview}")
+    return trainable

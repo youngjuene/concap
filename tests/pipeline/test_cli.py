@@ -39,7 +39,8 @@ def test_stage_list_exposes_the_lineage(capsys: pytest.CaptureFixture[str]) -> N
 def test_live_boundaries_exit_3_without_side_effects(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    for command in ("train", "evaluate"):
+    # Training and selection are wired; live model scoring is still a gate.
+    for command in ("evaluate",):
         code, document = _run(
             capsys,
             command,

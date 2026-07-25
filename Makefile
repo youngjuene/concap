@@ -38,7 +38,7 @@ canary:
 live-boundary-smoke:
 	@tmp="$$(mktemp -d)"; out="$$tmp/live-boundary.json"; \
 	set +e; \
-	uv run dpo train run --workspace "$$tmp/artifacts" --contract configs/study/canary.toml \
+	uv run dpo evaluate run --workspace "$$tmp/artifacts" --contract configs/study/canary.toml \
 	  --track visual --invoke-external > "$$out"; status="$$?"; \
 	set -e; \
 	[ "$$status" -eq 3 ]; \

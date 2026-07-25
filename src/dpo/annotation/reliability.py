@@ -9,8 +9,10 @@ decision reproducible.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from dpo.annotation.raw_annotations import AnnotationError, RawAnnotation
 
@@ -160,6 +162,60 @@ def build_reliability_report(
         excluded_annotation_ids=tuple(sorted(excluded_set)),
         retained_count=retained,
         excluded_count=len(excluded_set),
+    )
+
+
+def parse_reliability_report(payload: bytes | str | Mapping[str, Any]) -> ReliabilityReport:
+    """Rebuild a published screening decision; the inverse of ``document()``.
+
+    A later stage must retain exactly the annotations this report excluded, and
+    the exclusion rules read attention-check expectations that no published
+    artifact carries. Reusing the decision is therefore the only way to keep the
+    derived views identical to the ones the annotation stage implied.
+    """
+    if isinstance(payload, (bytes, str)):
+        try:
+            document = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise AnnotationError("reliability report payload is not valid JSON") from exc
+    else:
+        document = dict(payload)
+    expected = {"schema", "annotators", "excluded_annotation_ids", "retained_count", "excluded_count"}
+    if not isinstance(document, dict) or set(document) != expected:
+        raise AnnotationError("reliability report payload has an unexpected field set")
+    if document["schema"] != "dpo.reliability-report/v1":
+        raise AnnotationError("reliability report schema is unknown")
+    rows = document["annotators"]
+    excluded_ids = document["excluded_annotation_ids"]
+    if not isinstance(rows, list) or not isinstance(excluded_ids, list):
+        raise AnnotationError("reliability report annotators/exclusions must be arrays")
+    annotators = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise AnnotationError("reliability report annotator rows must be objects")
+        reasons = row["exclusion_reasons"]
+        if not isinstance(reasons, list):
+            raise AnnotationError("reliability report exclusion_reasons must be an array")
+        annotators.append(
+            AnnotatorReport(
+                annotator_id_hash=str(row["annotator_id_hash"]),
+                judgment_count=int(row["judgment_count"]),
+                attention_check_count=int(row["attention_check_count"]),
+                attention_pass_rate=float(row["attention_pass_rate"]),
+                repeat_count=int(row["repeat_count"]),
+                repeat_consistency=float(row["repeat_consistency"]),
+                left_choice_rate=float(row["left_choice_rate"]),
+                position_bias=float(row["position_bias"]),
+                fast_response_count=int(row["fast_response_count"]),
+                excluded=bool(row["excluded"]),
+                exclusion_reasons=tuple(str(reason) for reason in reasons),
+            )
+        )
+    return ReliabilityReport(
+        annotators=tuple(annotators),
+        excluded_annotation_ids=tuple(str(value) for value in excluded_ids),
+        retained_count=int(document["retained_count"]),
+        excluded_count=int(document["excluded_count"]),
     )
 
 

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from dpo.annotation.aggregate import aggregate_all
 from dpo.annotation.collection_tasks import (
     annotations_from_responses,
     attention_expectations,
@@ -23,16 +24,31 @@ from dpo.annotation.collection_tasks import (
     build_collection_tasks,
 )
 from dpo.annotation.raw_annotations import AnnotationError
+from dpo.annotation.reliability import (
+    ReliabilityReport,
+    parse_reliability_report,
+    retained_annotations,
+)
 from dpo.candidates.audit import audit_candidate, resolve_audits
 from dpo.candidates.candidate_records import CandidateError
 from dpo.candidates.freeze import parse_frozen_pool
 from dpo.candidates.generation import (
+    AUDIO_MEDIA_SUFFIXES,
     GEMMA_IMPLEMENTATION,
     TINY_IMPLEMENTATION,
+    VIDEO_MEDIA_SUFFIXES,
     generate_c0_candidates,
     generate_c0_candidates_gemma,
+    resolve_media_files,
+    verify_backend_pin,
 )
-from dpo.contracts.study_contract import ContractError, StudyContract, load_contract
+from dpo.contracts.study_contract import (
+    EXPERIMENT_IDS,
+    TRACKS,
+    ContractError,
+    StudyContract,
+    load_contract,
+)
 from dpo.core.access import AccessDenied
 from dpo.core.artifacts import (
     GC_ROOT_TYPES,
@@ -40,18 +56,35 @@ from dpo.core.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
-from dpo.core.identity import canonical_bytes, repo_lock_hash
+from dpo.core.identity import canonical_bytes, repo_lock_hash, semantic_hash, sha256_file
 from dpo.core.safety import DestructivePathError
 from dpo.data.derive_pairs import ViewError
 from dpo.data.leakage_audit import LeakageError
-from dpo.data.split import ClipInput, SplitError
+from dpo.data.split import ClipInput, SplitError, parse_split_manifest
 from dpo.pipeline.annotation_stage import ingest_annotations
 from dpo.pipeline.canary import CanaryError, run_canary
 from dpo.pipeline.candidate_stage import publish_frozen_pool
 from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
+from dpo.pipeline.experiments import expand_experiment
+from dpo.pipeline.live_runner import (
+    LiveMatrixRunner,
+    TinyBackend,
+    TrainingBackend,
+    load_checkpoint_policies,
+)
 from dpo.pipeline.lock import LockError, parse_lock_manifest
 from dpo.pipeline.publishing import ArtifactPublisher
+from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM
+from dpo.pipeline.selection_stage import publish_selection
+from dpo.pipeline.stage_inputs import (
+    collect_matrix_cells,
+    collect_view_inputs,
+    parse_annotations,
+    request_parameters,
+)
 from dpo.pipeline.stages import STAGES, StageError, allowed_contract_ids, lineage_edges, stage
+from dpo.pipeline.training_stage import publish_training_matrix, training_cell_contract_ids
+from dpo.pipeline.view_stage import publish_track_views
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -72,7 +105,6 @@ DOMAIN_ERRORS = (
 )
 
 DEFERRED_GATES = {
-    "train": "real GPU training requires a published backend authority and a CUDA lease",
     "evaluate": "live model scoring requires a published backend authority",
 }
 
@@ -104,10 +136,15 @@ class _Operation:
         return ArtifactPublisher(self.store, self.contract, repo_lock_hash())
 
 
-def _operation(arguments: argparse.Namespace) -> _Operation:
+def _operation(arguments: argparse.Namespace, *, with_training_cells: bool = False) -> _Operation:
     store = ArtifactStore.create(arguments.workspace)
     contract = load_contract(arguments.contract)
     allowed = allowed_contract_ids(contract.raw, contract.contract_hash)
+    if with_training_cells:
+        # Matrix cells key on their resolved variant, not on a stage-wide slice;
+        # recomputing the legitimate set proves a given cell came from this
+        # contract instead of widening what any artifact may carry.
+        allowed = allowed | training_cell_contract_ids(contract)
     manifests = []
     for artifact_id in getattr(arguments, "artifact_id", None) or []:
         manifest = store.verify(artifact_id)
@@ -546,6 +583,422 @@ def _candidates_generate(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _corpus_clips(store: ArtifactStore, registry: ArtifactManifest) -> list[ClipInput]:
+    """The full corpus behind a locked registry, read from its ingest ancestor.
+
+    The leakage audit is a whole-corpus check (one source video, one split), so
+    it needs every clip row — including the protected roles, whose registry
+    shards stay sealed. The registry's own corpus-ingest parent carries exactly
+    the rows the splits were computed from and asserts no role at all.
+    """
+    for parent in registry.parents:
+        manifest = store.verify(parent.artifact_id)
+        if manifest.artifact_type != "dpo.corpus-ingest/v1":
+            continue
+        payload = json.loads(store.read_payload(manifest.artifact_id))
+        rows = payload["rows"]
+        if not isinstance(rows, list):
+            raise ArtifactError("corpus-ingest payload rows must be an array")
+        return [ClipInput.from_document(row) for row in rows]
+    raise ArtifactError(
+        f"clip registry {registry.artifact_id} has no corpus-ingest ancestor;"
+        " the whole-corpus leakage audit cannot run"
+    )
+
+
+def _split_of(manifest: ArtifactManifest, parameters: Mapping[str, object]) -> str:
+    split = parameters.get("split")
+    if not isinstance(split, str) or split not in {"train", "validation"}:
+        raise ArtifactError(f"artifact {manifest.artifact_id} does not declare a train/validation split")
+    return split
+
+
+def _reliability_report_for(store: ArtifactStore, annotations_artifact_id: str) -> ReliabilityReport:
+    """The published screening decision for one raw-annotations artifact.
+
+    Views must retain exactly the annotations the annotation stage retained, and
+    the exclusion decision needs the attention-check expectations that live only
+    in the restricted answers document. Reading the published report — the one
+    artifact parented on these annotations — reuses the decision instead of
+    approximating it.
+    """
+    matches = [
+        artifact_id
+        for artifact_id in store.find_by_type("dpo.reliability-report/v1")
+        if any(
+            parent.artifact_id == annotations_artifact_id
+            for parent in store.verify_metadata(artifact_id).parents
+        )
+    ]
+    if len(matches) != 1:
+        raise ArtifactError(
+            f"expected exactly one reliability report for annotations {annotations_artifact_id};"
+            f" found {len(matches)}"
+        )
+    return parse_reliability_report(store.read_payload(matches[0]))
+
+
+def _claim(found: dict[str, str], split: str, manifest: ArtifactManifest, *, kind: str) -> bool:
+    """Record one (split -> artifact) claim, refusing a conflicting second one."""
+    existing = found.get(split)
+    if existing is not None and existing != manifest.artifact_id:
+        raise ArtifactError(f"two different {kind} artifacts were given for split {split!r}")
+    found[split] = manifest.artifact_id
+    return existing is None
+
+
+def _views_derive(arguments: argparse.Namespace) -> int:
+    operation = _operation(arguments)
+    accepted = set(stage("views").input_artifact_types) | {"dpo.clip-registry/v1"}
+    _require_types(operation, accepted, minimum=5)
+    track = arguments.track
+    registry = _find_manifest(operation, "dpo.clip-registry/v1")
+    attributes = registry.semantic["attributes"]
+    if not isinstance(attributes, Mapping) or "split_manifest" not in attributes:
+        raise ArtifactError(f"clip registry {registry.artifact_id} carries no split manifest")
+    split_manifest = parse_split_manifest(attributes["split_manifest"])
+    clips = _corpus_clips(operation.store, registry)
+    pools = {}
+    pool_artifacts: dict[str, str] = {}
+    annotations: dict[str, str] = {}
+    for manifest in operation.manifests:
+        if manifest.artifact_type == "dpo.frozen-candidate-pool/v1":
+            attributes = manifest.semantic["attributes"]
+            if not isinstance(attributes, Mapping) or str(attributes.get("track")) != track:
+                continue
+            split = _split_of(manifest, attributes)
+            if _claim(pool_artifacts, split, manifest, kind="frozen pool"):
+                pools[split] = parse_frozen_pool(operation.store.read_payload(manifest.artifact_id))
+        elif manifest.artifact_type == "dpo.raw-annotations/v1":
+            parameters = request_parameters(manifest)
+            if str(parameters.get("track")) != track:
+                continue
+            _claim(annotations, _split_of(manifest, parameters), manifest, kind="raw annotations")
+    missing = [
+        f"{kind} for {split}"
+        for kind, found in (("frozen pool", pool_artifacts), ("raw annotations", annotations))
+        for split in ("train", "validation")
+        if split not in found
+    ]
+    if missing:
+        raise ArtifactError(f"track {track!r} is missing its {missing[0]} artifact")
+    aggregates = {}
+    retained = {}
+    for split, artifact_id in annotations.items():
+        rows = parse_annotations(operation.store.read_payload(artifact_id))
+        report = _reliability_report_for(operation.store, artifact_id)
+        kept = retained_annotations(rows, report)
+        retained[split] = kept
+        aggregates[split] = aggregate_all(
+            kept, minimum_judgments=int(str(operation.contract.annotation["judgments_per_pair"]))
+        )
+    caption_contract = operation.contract.tracks[track]
+    audits = dict(
+        resolve_audits(
+            [audit_candidate(record, contract=caption_contract) for record in pools["train"].candidates],
+            [],
+        )
+    )
+    views = publish_track_views(
+        operation.publisher(),
+        operation.contract,
+        track=track,
+        manifest=split_manifest,
+        clips=clips,
+        train_pool=pools["train"],
+        validation_pool=pools["validation"],
+        train_pool_artifact_id=pool_artifacts["train"],
+        validation_pool_artifact_id=pool_artifacts["validation"],
+        train_aggregates=aggregates["train"],
+        validation_aggregates=aggregates["validation"],
+        train_annotations=retained["train"],
+        train_audits=audits,
+    )
+    _emit(
+        {
+            "status": "published",
+            "operation": "views-derive",
+            "track": track,
+            "artifacts": views.artifact_ids,
+            "rows": {
+                "sft": len(views.sft_rows),
+                "pair_strict": len(views.strict_pairs),
+                "pair_all": len(views.metadata_pairs),
+                "validation_pairs": len(views.validation_pairs),
+            },
+        }
+    )
+    return 0
+
+
+@dataclass(frozen=True)
+class _BackendChoice:
+    """The resolved live-training backend and the inputs it needs."""
+
+    implementation: str
+    configs: dict[str, Any]
+    media_dir: Path | None
+
+    @property
+    def name(self) -> str:
+        return "tiny" if self.implementation == TINY_IMPLEMENTATION else "gemma"
+
+
+def _resolve_backend(
+    contract: StudyContract, arguments: argparse.Namespace, *, command: str
+) -> _BackendChoice | None:
+    """Gate the backend before any store mutation; None means blocked (exit 3)."""
+    implementation = str(contract.raw["models"]["seed"]["implementation"])
+    backend_configs = [str(path) for path in (arguments.backend_config or [])]
+    media_dir = arguments.media_dir
+    if implementation == TINY_IMPLEMENTATION:
+        if backend_configs or media_dir:
+            raise ArtifactError("the tiny seed backend takes no --backend-config/--media-dir")
+        return _BackendChoice(implementation=implementation, configs={}, media_dir=None)
+    if implementation != GEMMA_IMPLEMENTATION:
+        _emit(
+            {
+                "status": "blocked_pending_external_operation",
+                "command": command,
+                "gate": f"seed-model implementation {implementation!r} has no wired training backend",
+                "side_effects": False,
+            }
+        )
+        return None
+    if not backend_configs or not media_dir:
+        raise ArtifactError("the Gemma seed backend requires --backend-config and --media-dir")
+    from dpo.models.gemma4.backend_config import load_config
+    from dpo.models.gemma4.training_backend import resolve_lora_targets
+
+    # A contract that cannot express a Gemma LoRA scope fails here, on any
+    # machine, rather than after an operator has found a GPU.
+    resolve_lora_targets(contract)
+    import torch
+
+    if not torch.cuda.is_available():
+        _emit(
+            {
+                "status": "blocked_pending_external_operation",
+                "command": command,
+                "gate": "Gemma training and scoring require a CUDA device",
+                "side_effects": False,
+            }
+        )
+        return None
+    configs: dict[str, Any] = {}
+    for path in backend_configs:
+        config = load_config(path)
+        track = config.model.media_inputs
+        verify_backend_pin(contract, track=track, backend_config_path=Path(path))
+        if track in configs:
+            raise ArtifactError(f"two backend configs serve track {track!r}")
+        configs[track] = config
+    absent = [track for track in TRACKS if track not in configs]
+    if absent:
+        raise ArtifactError(f"no --backend-config serves track {absent[0]!r}; the matrix trains every track")
+    return _BackendChoice(implementation=implementation, configs=configs, media_dir=Path(str(media_dir)))
+
+
+def _build_backend(contract: StudyContract, choice: _BackendChoice) -> TrainingBackend:
+    if choice.implementation == TINY_IMPLEMENTATION:
+        return TinyBackend(contract=contract)
+    from dpo.models.gemma4.training_backend import GemmaBackend
+
+    assert choice.media_dir is not None
+    return GemmaBackend(contract=contract, configs=choice.configs, media_dir=choice.media_dir)
+
+
+def _require_media_coverage(choice: _BackendChoice, clips_by_track: Mapping[str, set[str]]) -> None:
+    if choice.media_dir is None:
+        return
+    for track, clip_ids in sorted(clips_by_track.items()):
+        resolve_media_files(choice.media_dir, sorted(clip_ids), track=track)
+
+
+def _selection_identity(contract: StudyContract, choice: _BackendChoice) -> dict[str, str]:
+    """The processor/preprocessing identities the lock manifest freezes.
+
+    Tiny: the byte tokenizer and the synthetic media generator, exactly as the
+    canary records them. Gemma: the pinned checkpoint plus the hash of the
+    backend config that produced the processor, and the media-file convention
+    (one directory, one file per clip by suffix) that preprocessing consists of.
+    """
+    if choice.implementation == TINY_IMPLEMENTATION:
+        return {
+            "processor_hash": semantic_hash({"processor": "tiny-byte/v1"}),
+            "preprocessing_hash": semantic_hash({"media": "synthetic/v1", "media_dim": DEFAULT_MEDIA_DIM}),
+        }
+    return {
+        "processor_hash": semantic_hash(
+            {
+                "processor": "gemma4-chat-template/v1",
+                "tracks": {
+                    track: {
+                        "model_id": config.model.model_id,
+                        "revision": config.model.revision,
+                        "backend_config_hash": sha256_file(config.source_path),
+                    }
+                    for track, config in sorted(choice.configs.items())
+                },
+            }
+        ),
+        "preprocessing_hash": semantic_hash(
+            {
+                "media": "media-directory/v1",
+                "audio_suffixes": list(AUDIO_MEDIA_SUFFIXES),
+                "video_suffixes": list(VIDEO_MEDIA_SUFFIXES),
+            }
+        ),
+    }
+
+
+def _train_run(arguments: argparse.Namespace) -> int:
+    contract = load_contract(arguments.contract)
+    choice = _resolve_backend(contract, arguments, command="train run")
+    if choice is None:
+        return 3
+    operation = _operation(arguments)
+    _require_types(operation, set(stage("train").input_artifact_types), minimum=2)
+    views = collect_view_inputs(
+        operation.store, operation.manifests, required=("sft", "pair_strict", "pair_all")
+    )
+    _require_media_coverage(
+        choice,
+        {
+            track: {row.clip_id for row in views.sft_rows.get(track, ())}
+            | {row.clip_id for row in views.strict_pairs.get(track, ())}
+            | {row.clip_id for row in views.metadata_pairs.get(track, ())}
+            for track in TRACKS
+        },
+    )
+    canonical_seed = int(str(contract.training["canonical_seed"]))
+    runner = LiveMatrixRunner(
+        contract=contract,
+        backend=_build_backend(contract, choice),
+        checkpoint_dir=Path(arguments.checkpoint_dir),
+        strict_pairs=views.strict_pairs,
+        metadata_pairs=views.metadata_pairs,
+        sft_rows=views.sft_rows,
+    )
+    variants_by_experiment = {
+        experiment_id: expand_experiment(contract, experiment_id) for experiment_id in EXPERIMENT_IDS
+    }
+    cells, cell_artifacts = publish_training_matrix(
+        operation.publisher(),
+        contract,
+        runner=runner,
+        variants_by_experiment=variants_by_experiment,
+        canonical_seed=canonical_seed,
+        view_artifacts=views.artifact_ids,
+        strict_pairs=views.strict_pairs,
+    )
+    _emit(
+        {
+            "status": "published",
+            "operation": "train-run",
+            "backend": choice.name,
+            "checkpoint_dir": str(Path(arguments.checkpoint_dir).resolve()),
+            "cells": len(cells),
+            "cells_trained": runner.trained_count,
+            "cells_resumed": runner.resumed_count,
+            "matrix": [
+                {
+                    "experiment_id": experiment_id,
+                    "variant_id": variant_id,
+                    "track": track,
+                    "artifact_id": cell_artifacts[(experiment_id, variant_id, track)],
+                    "steps": cells[(experiment_id, variant_id, track)].steps,
+                    "resumed": runner.was_resumed(experiment_id, variant_id, track, canonical_seed),
+                }
+                for (experiment_id, variant_id, track) in sorted(cells)
+            ],
+        }
+    )
+    return 0
+
+
+def _select_run(arguments: argparse.Namespace) -> int:
+    contract = load_contract(arguments.contract)
+    choice = _resolve_backend(contract, arguments, command="select run")
+    if choice is None:
+        return 3
+    operation = _operation(arguments, with_training_cells=True)
+    _require_types(
+        operation,
+        set(stage("validate").input_artifact_types)
+        | set(stage("train").input_artifact_types)
+        | {"dpo.validation-pairs/v1"},
+        minimum=2,
+    )
+    views = collect_view_inputs(
+        operation.store, operation.manifests, required=("pair_strict", "validation_pairs")
+    )
+    cells, cell_artifacts = collect_matrix_cells(operation.store, operation.manifests)
+    _require_media_coverage(
+        choice,
+        {track: {row.clip_id for row in views.validation_pairs.get(track, ())} for track in TRACKS},
+    )
+    canonical_seed = int(str(contract.training["canonical_seed"]))
+    backend = _build_backend(contract, choice)
+    policies, _ = load_checkpoint_policies(backend, arguments.checkpoint_dir)
+    variants_by_experiment = {
+        experiment_id: expand_experiment(contract, experiment_id) for experiment_id in EXPERIMENT_IDS
+    }
+    # Selection compares the whole matrix: every variant of every experiment on
+    # every track must be both published and materializable, or the ranking
+    # would silently be over a subset.
+    for experiment_id, variants in sorted(variants_by_experiment.items()):
+        for variant in variants:
+            for track in TRACKS:
+                key = (experiment_id, variant.variant_id, track)
+                if key not in cells:
+                    raise ArtifactError(f"no matrix-cell artifact was given for cell {key}")
+                if (*key, canonical_seed) not in policies:
+                    raise ArtifactError(
+                        f"checkpoint directory has no policy for cell {key};"
+                        " run `dpo train run` with the same --checkpoint-dir first"
+                    )
+    identity = _selection_identity(contract, choice)
+    selection = publish_selection(
+        operation.publisher(),
+        contract,
+        variants_by_experiment=variants_by_experiment,
+        canonical_seed=canonical_seed,
+        validation_pairs=views.validation_pairs,
+        strict_pairs=views.strict_pairs,
+        policies=policies,
+        seed_adapters={track: backend.seed_adapter(track) for track in TRACKS},
+        media_provider=backend.media_batch,
+        view_artifacts=views.artifact_ids,
+        cells=cells,
+        cell_artifacts=cell_artifacts,
+        processor_hash=identity["processor_hash"],
+        preprocessing_hash=identity["preprocessing_hash"],
+        evaluation_version="evaluation/v1",
+        metric_versions={"compliance": "v1", "preference": "v1"},
+        selection_note=(
+            f"{choice.name} backend selection: validation preference accuracy, lexical tie-break"
+        ),
+    )
+    _emit(
+        {
+            "status": "published",
+            "operation": "select-run",
+            "backend": choice.name,
+            "ranking": selection.ranking,
+            "selected_variants": selection.selected_variants,
+            "validation_accuracy": selection.validation_reports,
+            "artifacts": {
+                "validation_report": selection.validation_artifact_id,
+                "selection_report": selection.selection_artifact_id,
+                "lock_manifest": selection.lock_artifact_id,
+            },
+            "lock_id": selection.lock_manifest.lock_id,
+        }
+    )
+    return 0
+
+
 def _report_show(arguments: argparse.Namespace) -> int:
     store = ArtifactStore.open(arguments.workspace)
 
@@ -699,13 +1152,44 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8765)
     serve.set_defaults(handler=_annotation_serve)
 
+    views = commands.add_parser("views", help="derive every training view of one track")
+    views_actions = views.add_subparsers(dest="action", required=True)
+    derive = views_actions.add_parser("derive")
+    derive.add_argument("--workspace", required=True)
+    derive.add_argument("--contract", required=True)
+    derive.add_argument("--artifact-id", action="append", required=True)
+    derive.add_argument("--track", required=True, choices=["visual", "audio"])
+    derive.set_defaults(handler=_views_derive)
+
+    train = commands.add_parser("train", help="run and publish every experiment-matrix cell")
+    train_actions = train.add_subparsers(dest="action", required=True)
+    train_run = train_actions.add_parser("run")
+    train_run.add_argument("--workspace", required=True)
+    train_run.add_argument("--contract", required=True)
+    train_run.add_argument("--artifact-id", action="append", required=True)
+    train_run.add_argument("--checkpoint-dir", required=True)
+    train_run.add_argument("--backend-config", action="append")
+    train_run.add_argument("--media-dir")
+    train_run.set_defaults(handler=_train_run)
+
+    select = commands.add_parser("select", help="score every variant, select winners, and lock")
+    select_actions = select.add_subparsers(dest="action", required=True)
+    select_run = select_actions.add_parser("run")
+    select_run.add_argument("--workspace", required=True)
+    select_run.add_argument("--contract", required=True)
+    select_run.add_argument("--artifact-id", action="append", required=True)
+    select_run.add_argument("--checkpoint-dir", required=True)
+    select_run.add_argument("--backend-config", action="append")
+    select_run.add_argument("--media-dir")
+    select_run.set_defaults(handler=_select_run)
+
     report = commands.add_parser("report", help="show published validation/selection/lock reports")
     report_actions = report.add_subparsers(dest="action", required=True)
     report_show = report_actions.add_parser("show")
     report_show.add_argument("--workspace", required=True)
     report_show.set_defaults(handler=_report_show)
 
-    for command_name in ("train", "evaluate"):
+    for command_name in DEFERRED_GATES:
         blocked = commands.add_parser(command_name, help=f"live boundary: {DEFERRED_GATES[command_name]}")
         blocked_actions = blocked.add_subparsers(dest="action", required=True)
         run = blocked_actions.add_parser("run")

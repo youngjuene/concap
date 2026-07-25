@@ -15,8 +15,8 @@ from dpo.candidates.freeze import FrozenCandidatePool, freeze_pool
 from dpo.candidates.pair_sampler import sample_pairs
 from dpo.contracts.study_contract import StudyContract, load_contract
 from dpo.core.identity import sha256_bytes
-from dpo.data.derive_pairs import derive_pair_all, derive_pair_strict
-from dpo.data.derive_sft import derive_sft
+from dpo.data.derive_pairs import MetadataPair, StrictPair, derive_pair_all, derive_pair_strict
+from dpo.data.derive_sft import SftExample, derive_sft
 from dpo.data.split import ClipInput, SplitManifest, assign_splits
 from dpo.pipeline.run_matrix import OfflineMatrixRunner
 
@@ -144,15 +144,22 @@ def world(contract: StudyContract) -> PreferenceWorld:
     return build_world(contract)
 
 
-def build_offline_runner(
-    world: PreferenceWorld, contract: StudyContract | None = None
-) -> OfflineMatrixRunner:
-    """One matrix runner over the world's train views, thresholds from the contract.
+@dataclass(frozen=True)
+class DerivedViews:
+    """The world's train views under one contract's gates, per track."""
 
-    Shared by the golden harness and the matrix tests so both always exercise
-    the same derived training views — a threshold change cannot silently
-    diverge them. ``contract`` overrides the world's contract (e.g. a sweep
-    mutation of the canary contract) while reusing the world's frozen data.
+    strict_pairs: dict[str, tuple[StrictPair, ...]]
+    metadata_pairs: dict[str, tuple[MetadataPair, ...]]
+    sft_rows: dict[str, tuple[SftExample, ...]]
+
+
+def derive_world_views(world: PreferenceWorld, contract: StudyContract | None = None) -> DerivedViews:
+    """Derive the world's training views exactly as the views stage would.
+
+    Shared by the golden harness, the matrix tests, and the live-runner tests so
+    they always exercise the same derived views — a threshold change cannot
+    silently diverge them. ``contract`` overrides the world's contract (e.g. a
+    sweep mutation of the canary contract) while reusing the world's frozen data.
     """
     active = contract if contract is not None else world.contract
     views = active.views
@@ -177,9 +184,42 @@ def build_offline_runner(
         min_agreement=float(str(sft_gate["min_agreement"])),
         min_confidence=float(str(sft_gate["min_confidence"])),
     )
-    return OfflineMatrixRunner(
-        contract=active,
+    return DerivedViews(
         strict_pairs={"visual": strict},
         metadata_pairs={"visual": meta},
         sft_rows={"visual": sft_rows},
     )
+
+
+def build_offline_runner(
+    world: PreferenceWorld, contract: StudyContract | None = None
+) -> OfflineMatrixRunner:
+    """One offline matrix runner over the world's train views."""
+    active = contract if contract is not None else world.contract
+    derived = derive_world_views(world, active)
+    return OfflineMatrixRunner(
+        contract=active,
+        strict_pairs=derived.strict_pairs,
+        metadata_pairs=derived.metadata_pairs,
+        sft_rows=derived.sft_rows,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _release_device_memory(request: pytest.FixtureRequest):
+    """Free CUDA memory after every live test.
+
+    Live tests each load a multi-gigabyte checkpoint; without this the second
+    one in a session inherits the first one's allocations and dies of OOM on a
+    24 GB card. Production is unaffected (one CLI command, one process).
+    """
+    yield
+    if request.node.get_closest_marker("live") is None:
+        return
+    import gc
+
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
