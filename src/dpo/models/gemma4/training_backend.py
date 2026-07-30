@@ -36,9 +36,9 @@ from dpo.models.gemma4.adapter import GemmaCaptionAdapter
 from dpo.models.gemma4.backend_config import BackendConfig
 from dpo.models.gemma4.modeling import (
     assert_text_only_lora_scope,
+    load_base_model,
     load_processor,
-    load_quantized_base,
-    prepare_quantized_model,
+    prepare_base_model,
 )
 from dpo.models.visual_media import build_visual_media
 
@@ -166,9 +166,10 @@ class GemmaBackend:
         model = self._base.get(track)
         if model is None:
             config = self.config_for(track)
-            model = prepare_quantized_model(
-                load_quantized_base(config),
+            model = prepare_base_model(
+                load_base_model(config),
                 gradient_checkpointing=config.runtime.gradient_checkpointing,
+                quantized=config.quantization.load_in_4bit,
             )
             self._base[track] = model
         return model

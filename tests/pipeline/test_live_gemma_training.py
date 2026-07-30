@@ -62,7 +62,7 @@ def test_the_live_contract_resolves_a_language_model_scope() -> None:
     # Cheap enough to run without a GPU: proves the fixture contract is the one
     # the guard would accept, so a skipped live test still pins its shape.
     assert resolve_lora_targets(_live_contract()) == LANGUAGE_MODEL_TARGETS
-    with Path("configs/gemma4/e4b.toml").open("rb") as handle:
+    with Path("configs/gemma4/e4b-audio.toml").open("rb") as handle:
         assert tomllib.load(handle)["model"]["media_inputs"] == "audio"
 
 
@@ -73,7 +73,7 @@ def test_gemma_sft_cell_trains_one_step_and_saves_a_distinct_checkpoint(tmp_path
     contract = _live_contract()
     backend = GemmaBackend(
         contract=contract,
-        configs={"audio": load_config("configs/gemma4/e4b.toml")},
+        configs={"audio": load_config("configs/gemma4/e4b-audio.toml")},
         media_dir=tmp_path,
     )
     rows = tuple(

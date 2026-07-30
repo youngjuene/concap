@@ -71,10 +71,13 @@ class QuantizationSettings:
             double_quant=_boolean(values, "double_quant"),
             compute_dtype=str(values.get("compute_dtype", "")),
         )
-        if not settings.load_in_4bit:
-            raise ConfigError("Gemma 4 training setup requires 4-bit QLoRA")
-        if settings.quant_type != "nf4":
-            raise ConfigError("quantization.quant_type must be nf4")
+        # 4-bit is the default and what the 24 GB budget was measured against,
+        # but it is no longer mandatory: nf4 destroys Gemma 4's audio captioning
+        # (measured — see configs/gemma4/e4b-audio.toml), and bf16 is the only known
+        # working audio configuration. A backend that opts out states so
+        # explicitly and carries its own memory budget.
+        if settings.load_in_4bit and settings.quant_type != "nf4":
+            raise ConfigError("quantization.quant_type must be nf4 when load_in_4bit is set")
         if settings.compute_dtype != "bfloat16":
             raise ConfigError("quantization.compute_dtype must be bfloat16 on the RTX 3090 setup")
         return settings

@@ -1,0 +1,33 @@
+# Gemma 4 E4B backend for the VISUAL caption track (frame input). Runtime and
+# hardware concerns only — every result-affecting hyperparameter (learning
+# rates, epochs, batch geometry, LoRA topology, seeds, precision) lives in the
+# study contract, which pins this file's hash for provenance.
+# Hardware target: one RTX 3090 (24 GB).
+#
+# E4B rather than 12B, so ONE checkpoint serves both tracks and a cross-track
+# difference cannot be confounded with model identity. Measured on the same six
+# clips at the same two-frame budget: E4B's captions are comparably specific to
+# 12B's, and it actually satisfies the contract's scene-changes clause — it
+# reports the transition between the two sampled frames, which 12B silently
+# drops. E4B also carries the larger vision tower (169.3M vs 12B's encoder-free
+# 49.9M patch projection); 12B's advantage is language-model size, which this
+# study does not trade for cross-track comparability.
+#
+# bf16 to match the audio backend. The visual track captions correctly under
+# nf4 too, but running the two tracks at different precisions would reintroduce
+# exactly the asymmetry the shared checkpoint is here to remove.
+
+[model]
+model_id = "google/gemma-4-E4B-it"
+revision = "a4c2d58be94dda072b918d9db64ee85c8ed34e3f"
+media_inputs = "visual"
+
+[quantization]
+# Inert while load_in_4bit is false; kept so flipping it back needs no other edit.
+load_in_4bit = false
+quant_type = "nf4"
+double_quant = true
+compute_dtype = "bfloat16"
+
+[runtime]
+gradient_checkpointing = true

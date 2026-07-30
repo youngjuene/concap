@@ -115,10 +115,10 @@ class GemmaCaptionAdapter:
             raise BackendPending(
                 "real Gemma backend requires a CUDA device; run the tiny offline backend for canary work"
             )
-        from dpo.models.gemma4.modeling import load_processor, load_quantized_base
+        from dpo.models.gemma4.modeling import load_base_model, load_processor
 
         self._processor = load_processor(self.config)
-        model = load_quantized_base(self.config)
+        model = load_base_model(self.config)
         if self.adapter_dir is not None:
             from peft import PeftModel
 

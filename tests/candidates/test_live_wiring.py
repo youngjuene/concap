@@ -85,7 +85,7 @@ def test_gemma_generation_rejects_wrong_implementation_and_track(tmp_path: Path)
         )
     # Track/backend mismatch fails before any media or model work.
     contract = _gemma_contract()
-    backend = Path("configs/gemma4/e4b.toml")
+    backend = Path("configs/gemma4/e4b-audio.toml")
     with pytest.raises(CandidateError, match="media_inputs"):
         generate_c0_candidates_gemma(
             contract,
@@ -142,7 +142,7 @@ def test_cli_requires_live_arguments_and_gates_on_cuda(
     import torch
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    code = main(base + ["--backend-config", "configs/gemma4/e4b.toml", "--media-dir", str(tmp_path)])
+    code = main(base + ["--backend-config", "configs/gemma4/e4b-audio.toml", "--media-dir", str(tmp_path)])
     assert code == 3
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "blocked_pending_external_operation"

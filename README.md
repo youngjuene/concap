@@ -43,6 +43,14 @@ uv run dpo artifact verify --workspace artifacts/canary --all
 ## 1. Collect preferences
 
 ```bash
+# Media: one file per clip per track, named {clip_id}.mp4 / {clip_id}.wav, plus
+# the clip rows to ingest. --media-source source stages the pristine footage
+# instead of a render (use it when a render burns a caption into the frame,
+# which would anchor an annotator who is judging captions); --mute drops the
+# audio stream so visual-track isolation holds in the file, not just the player.
+uv run python scripts/stage_media.py --condition-dir data/video/c3_video \
+  --source-dir data/source --track visual --out media/ --rows data/clips.jsonl
+
 # Corpus: one JSONL row per clip (media_hash, derivatives, optional
 # audio_presentation = "audio_only" | "unmuted_video").
 uv run dpo corpus ingest      --workspace "$W" --contract "$C" --input data/clips.jsonl
@@ -102,7 +110,7 @@ uv run dpo views derive --workspace "$W" --contract "$C" \
 # Train every matrix cell. Resumable: rerunning skips finished cells.
 uv run dpo train run --workspace "$W" --contract "$C" \
   --artifact-id "$VIEW_IDS..." --checkpoint-dir runs/checkpoints \
-  --backend-config configs/gemma4/12b.toml --backend-config configs/gemma4/e4b.toml \
+  --backend-config configs/gemma4/e4b-visual.toml --backend-config configs/gemma4/e4b-audio.toml \
   --media-dir media/
 
 # Score every variant, pick one winner per experiment and track, lock.
