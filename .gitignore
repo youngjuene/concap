@@ -15,3 +15,7 @@ __pycache__/
 
 # Machine-local tool state
 .claude/settings.local.json
+# uv writes this; pyproject's requires-python is the authoritative pin and the
+# per-run receipts record the exact interpreter, so this would only add a third,
+# coarser copy that can disagree with both.
+.python-version
