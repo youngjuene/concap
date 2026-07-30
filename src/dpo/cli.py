@@ -325,6 +325,7 @@ def _read_clip_rows(path: str) -> list[ClipInput]:
                 "derivative_hashes",
                 "link_group",
                 "asserted_role",
+                "audio_presentation",
             }
             unknown = sorted(set(value) - allowed)
             if unknown:
