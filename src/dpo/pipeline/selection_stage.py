@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import torch
 
-from dpo.contracts.study_contract import EXPERIMENT_IDS, TRACKS, StudyContract
+from dpo.contracts.study_contract import EXPERIMENT_IDS, StudyContract
 from dpo.core.artifacts import ParentEdge
 from dpo.data.derive_pairs import StrictPair
 from dpo.evaluation.preference_accuracy import ScoredPair, evaluate_preferences
@@ -61,7 +61,7 @@ def publish_selection(
     """Score every variant, publish validation/selection reports, and lock."""
     # Common validation scoring: every experiment variant is scored identically.
     validation_reports: dict[str, dict[str, dict[str, float]]] = {}
-    for track in TRACKS:
+    for track in contract.tracks:
         seed_adapter = seed_adapters[track]
         sft_adapter = policies[("SFT", "base", track, canonical_seed)]
         report_by_experiment: dict[str, dict[str, float]] = {}
@@ -105,21 +105,22 @@ def publish_selection(
         "dpo.validation-report/v1",
         {"schema": "dpo.validation-report/v1", "accuracy": validation_reports},
         parents=tuple(
-            ParentEdge(view_artifacts[track]["validation_pairs"], "validation-pairs") for track in TRACKS
+            ParentEdge(view_artifacts[track]["validation_pairs"], "validation-pairs")
+            for track in contract.tracks
         )
         + tuple(ParentEdge(artifact_id, "matrix-cell") for artifact_id in cell_artifacts.values()),
         stage="validate",
         parameters={"operation": "validate"},
-        clips={row.clip_id for track in TRACKS for row in validation_pairs[track]}
-        | {row.clip_id for track in TRACKS for row in strict_pairs[track]},
+        clips={row.clip_id for track in contract.tracks for row in validation_pairs[track]}
+        | {row.clip_id for track in contract.tracks for row in strict_pairs[track]},
         role_exposure={"train", "validation"},
-        selection_exposure={row.clip_id for track in TRACKS for row in validation_pairs[track]},
+        selection_exposure={row.clip_id for track in contract.tracks for row in validation_pairs[track]},
     )
     # Selection: one winning variant per experiment and track (max validation
     # accuracy, lexical variant-id tie-break), then experiments ranked by their
     # winner. Only selected variants reach the lock.
     selected_variants: dict[str, dict[str, str]] = {}
-    for track in TRACKS:
+    for track in contract.tracks:
         selected_variants[track] = {}
         for experiment_id in EXPERIMENT_IDS:
             per_variant = validation_reports[track][experiment_id]
@@ -134,7 +135,7 @@ def publish_selection(
                 experiment_id,
             ),
         )
-        for track in TRACKS
+        for track in contract.tracks
     }
     selection_artifact = publisher.publish(
         "dpo.selection-report/v1",
@@ -149,7 +150,7 @@ def publish_selection(
                     )
                     for experiment_id in EXPERIMENT_IDS
                 }
-                for track in TRACKS
+                for track in contract.tracks
             },
             "canonical_seed": canonical_seed,
             "note": selection_note,
@@ -166,7 +167,7 @@ def publish_selection(
                 track: cells[
                     (experiment_id, selected_variants[track][experiment_id], track)
                 ].checkpoint_signature
-                for track in TRACKS
+                for track in contract.tracks
             }
             for experiment_id in EXPERIMENT_IDS
         },

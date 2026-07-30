@@ -37,7 +37,7 @@ from dpo.candidates.candidate_records import (
     GenerationConfig,
     build_candidate_records,
 )
-from dpo.contracts.study_contract import StudyContract
+from dpo.contracts.study_contract import CaptionContract, StudyContract
 from dpo.core.identity import semantic_hash, sha256_file
 from dpo.models.tiny import TinyAdapter, synthetic_media
 
@@ -134,6 +134,21 @@ def _collect_records(
     return tuple(records)
 
 
+def _declared_track(contract: StudyContract, track: str) -> CaptionContract:
+    """The contract's caption contract for ``track``, or a clear domain error.
+
+    A contract may declare one track, so asking for the other is a usage error
+    with a name — not a KeyError escaping as a traceback past the CLI's
+    one-JSON-document-per-command guarantee.
+    """
+    caption = contract.tracks.get(track)
+    if caption is None:
+        raise CandidateError(
+            f"this contract does not declare track {track!r}; it declares {sorted(contract.tracks)}"
+        )
+    return caption
+
+
 def generate_c0_candidates(
     contract: StudyContract, *, track: str, clip_ids: Sequence[str]
 ) -> tuple[CandidateRecord, ...]:
@@ -144,7 +159,7 @@ def generate_c0_candidates(
     max_new_tokens = int(str(contract.candidates["max_new_tokens"]))
     adapter = TinyAdapter(
         track=track,
-        prompt=contract.tracks[track].prompt,
+        prompt=_declared_track(contract, track).prompt,
         media_dim=MEDIA_DIM,
         seed=int(str(seed_model["init_seed"])),
     )
@@ -238,7 +253,7 @@ def generate_c0_candidates_gemma(
     files = resolve_media_files(media_dir, clip_ids, track=track)
     adapter = GemmaCaptionAdapter(
         config=config,
-        contract=contract.tracks[track],
+        contract=_declared_track(contract, track),
         media_resolver=lambda clip_id: files[clip_id],
     )
     max_new_tokens = int(str(contract.candidates["max_new_tokens"]))

@@ -1,14 +1,17 @@
 # Live smoke contract over the collected street-scene stimulus set.
 #
-# Scope: Gemma 4 E4B on both tracks, over one corpus in which every clip
-# carries both modalities — a muted mp4 for the visual track and a 16 kHz wav
-# for the audio track, both demuxed from the same pristine source clip.
+# Scope: Gemma 4 E4B on the AUDIO caption track only — see the note where
+# [tracks.visual] would be. Preferences are collected by the two authors on
+# captions of audio events; the trained model then supplies the captions for a
+# separate user study, which measures their effect on participants under three
+# soundtrack conditions and is a different instrument entirely.
 #
-# It is staged from the uncaptioned source pool rather than from the c1..c4
-# condition renders because the training matrix trains every track from one
-# registry, while c1 (video+audio) and c3 (muted video) sample disjoint
-# footage — no single condition directory can supply both modalities for the
-# same clip. The condition renders remain the annotator-facing stimuli.
+# Media is staged from the uncaptioned source pool rather than from the c1..c4
+# condition renders: the renders that carry captions burn them into the frame,
+# and a caption-free render either has no audio (c3) or is a different clip from
+# the one c3 sampled. The condition renders remain the user study's stimuli.
+# Each staged clip still carries both a muted mp4 and a 16 kHz wav, so the same
+# corpus can serve a visual arm without re-staging if one is ever added.
 #
 # This contract exercises C0 candidate generation on real media; it is NOT a
 # study contract and its results must not be reported.
@@ -40,30 +43,17 @@ validation = 0.15
 test = 0.15
 study = 0.15
 
-[tracks.visual]
-contract_version = "visual-caption/v1"
-language = "en"
-min_words = 4
-max_words = 30
-min_clip_ms = 5000
-max_clip_ms = 15000
-# Diverges from canary.toml deliberately (see the header note). E4B uses both
-# sampled frames and reports the transition between them, which is what the
-# scene-changes clause asks for — but it narrates the sampling: "the first
-# image shows ... the second image depicts ...". That describes the
-# presentation rather than the scene, is what the modality_purity reason tag
-# exists to catch, and pushed one caption in six past max_words. The added
-# sentence keeps the transition and drops the frame talk.
-prompt = "Describe in one short English sentence the salient objects, actions, spatial relations, and scene changes that are clearly depicted. Write about the scene itself, never about frames, images, or the recording; express any change as a transition within the scene."
-prompt_hash = "sha256:9eee7b583086fcd542150d5abd57d7aa0a0bdc1d351ca75dfc6e159a835590ad"
-# See configs/study/canary.toml for the full frame-budget measurements: the
-# processor emits 70 soft tokens per frame at any input resolution, so the
-# frame count is the only lever and two frames is what the whole training
-# matrix fits into on one 24 GB card. These clips are 10.5 s, so two frames
-# are roughly five seconds apart.
-video_frames = 2
-include_ocr = false
-include_camera_motion = false
+# NO [tracks.visual]. This study collects preferences on audio captions only,
+# and the captions it judges must describe audio events — never the visual scene
+# on its own. Declaring the visual track would make scene captions generable,
+# and `dpo train run` would then require visual views that no one will annotate.
+# Leaving it undeclared makes `candidates generate --track visual` fail on this
+# contract, so the exclusion is enforced rather than remembered.
+#
+# A measured visual track does exist in git history (prompt_hash
+# sha256:9eee7b58..., video_frames = 2, and the wording that stops E4B narrating
+# "the first image shows ..."); restore that block and [backends.visual] if a
+# visual arm is ever added.
 
 [tracks.audio]
 contract_version = "audio-caption/v1"
@@ -87,11 +77,11 @@ prompt = "Describe in one short English sentence the salient events, their order
 prompt_hash = "sha256:c5e37310a3c6f8c89adb8958e7932927ff421ee12f453dd32fe34f2d3dc4c3bd"
 transcribe_speech = false
 
-# One seed policy, and since 2026-07-30 it is correct for both tracks: the
-# [backends] pins below both name this same checkpoint. This entry used to
-# describe the audio backend only, which made splitting the seed model per
-# track a prerequisite for any reportable run; consolidating on E4B removed
-# that prerequisite instead of paying it.
+# One seed policy, and it names the one track this contract declares, so the
+# entry is exactly true. It used to describe the audio backend while the visual
+# track silently ran a different checkpoint, which made splitting the seed model
+# per track a prerequisite for any reportable run; consolidating on E4B and then
+# declaring one track removed that prerequisite instead of paying it.
 [models.seed]
 model_id = "google/gemma-4-E4B-it"
 revision = "a4c2d58be94dda072b918d9db64ee85c8ed34e3f"
@@ -101,12 +91,9 @@ implementation = "dpo.models.gemma4.adapter.GemmaCaptionAdapter"
 lock_hash = "sha256:61c8ddc3b872ee97afb43a7bd067d001da1c73bd8ac27ccfb24d3fe2cf8ad8c0"
 init_seed = 0
 
-# Provenance pins: the runtime configs these tracks are allowed to load. Both
-# name E4B, so the seed policy below is now literally true of both tracks and
-# a cross-track difference cannot be a checkpoint difference.
-[backends.visual]
-config_hash = "sha256:cf78268946a1e4c5619495f321f5ae7e5b451e0a7be480a9c21bc9f7dbc229a4"
-
+# Provenance pin: the runtime config this track is allowed to load. One entry,
+# because one track is declared — a [backends.visual] here would be refused as
+# serving a track this contract does not declare.
 [backends.audio]
 config_hash = "sha256:ae9a3338e5419c749d684543501fff9c5b7c288e64a4655f8b22834aed3e83d1"
 

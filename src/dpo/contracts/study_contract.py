@@ -798,8 +798,16 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
     if execution_class not in EXECUTION_CLASSES:
         raise ContractError(f"execution_class must be one of {sorted(EXECUTION_CLASSES)}")
     _validate_corpus(root["corpus"])
-    tracks_table = _table(root["tracks"], "tracks", set(TRACKS))
-    tracks = {track: _validate_track(track, tracks_table[track]) for track in TRACKS}
+    # A study may collect and train one caption track. Requiring both forced a
+    # single-track study to generate, annotate, and train a track it does not
+    # report — and for an audio-caption study that means producing captions of
+    # the visual scene, which is exactly what such a study excludes. At least
+    # one track is still mandatory: a contract with none trains nothing.
+    tracks_table = _table(root["tracks"], "tracks", set(), set(TRACKS))
+    declared = [track for track in TRACKS if track in tracks_table]
+    if not declared:
+        raise ContractError(f"tracks: declare at least one of {sorted(TRACKS)}")
+    tracks = {track: _validate_track(track, tracks_table[track]) for track in declared}
     models = _table(root["models"], "models", {"seed"})
     _model(models["seed"], "models.seed", with_init_seed=True)
     if "backends" in root:

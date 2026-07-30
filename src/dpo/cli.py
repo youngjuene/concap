@@ -45,7 +45,6 @@ from dpo.candidates.generation import (
 from dpo.contracts.study_contract import (
     AUDIO_PRESENTATIONS,
     EXPERIMENT_IDS,
-    TRACKS,
     ContractError,
     StudyContract,
     load_contract,
@@ -806,9 +805,18 @@ def _resolve_backend(
         if track in configs:
             raise ArtifactError(f"two backend configs serve track {track!r}")
         configs[track] = config
-    absent = [track for track in TRACKS if track not in configs]
+    # The matrix trains the tracks the CONTRACT declares, not every track that
+    # exists, so a single-track study needs exactly one backend config.
+    absent = [track for track in contract.tracks if track not in configs]
     if absent:
-        raise ArtifactError(f"no --backend-config serves track {absent[0]!r}; the matrix trains every track")
+        raise ArtifactError(
+            f"no --backend-config serves track {absent[0]!r}; the matrix trains every declared track"
+        )
+    extra = [track for track in configs if track not in contract.tracks]
+    if extra:
+        raise ArtifactError(
+            f"--backend-config serves track {extra[0]!r}, which this contract does not declare"
+        )
     return _BackendChoice(implementation=implementation, configs=configs, media_dir=Path(str(media_dir)))
 
 
@@ -881,7 +889,7 @@ def _train_run(arguments: argparse.Namespace) -> int:
             track: {row.clip_id for row in views.sft_rows.get(track, ())}
             | {row.clip_id for row in views.strict_pairs.get(track, ())}
             | {row.clip_id for row in views.metadata_pairs.get(track, ())}
-            for track in TRACKS
+            for track in contract.tracks
         },
     )
     canonical_seed = int(str(contract.training["canonical_seed"]))
@@ -949,7 +957,7 @@ def _select_run(arguments: argparse.Namespace) -> int:
     cells, cell_artifacts = collect_matrix_cells(operation.store, operation.manifests)
     _require_media_coverage(
         choice,
-        {track: {row.clip_id for row in views.validation_pairs.get(track, ())} for track in TRACKS},
+        {track: {row.clip_id for row in views.validation_pairs.get(track, ())} for track in contract.tracks},
     )
     canonical_seed = int(str(contract.training["canonical_seed"]))
     backend = _build_backend(contract, choice)
@@ -962,7 +970,7 @@ def _select_run(arguments: argparse.Namespace) -> int:
     # would silently be over a subset.
     for experiment_id, variants in sorted(variants_by_experiment.items()):
         for variant in variants:
-            for track in TRACKS:
+            for track in contract.tracks:
                 key = (experiment_id, variant.variant_id, track)
                 if key not in cells:
                     raise ArtifactError(f"no matrix-cell artifact was given for cell {key}")
@@ -980,7 +988,7 @@ def _select_run(arguments: argparse.Namespace) -> int:
         validation_pairs=views.validation_pairs,
         strict_pairs=views.strict_pairs,
         policies=policies,
-        seed_adapters={track: backend.seed_adapter(track) for track in TRACKS},
+        seed_adapters={track: backend.seed_adapter(track) for track in contract.tracks},
         media_provider=backend.media_batch,
         view_artifacts=views.artifact_ids,
         cells=cells,
