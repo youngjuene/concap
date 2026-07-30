@@ -78,8 +78,13 @@ max_clip_ms = 15000
 # presentation and collapses diversity — two of four generations for one clip
 # came back byte-identical and candidate_records.py rejected the pool. Naming
 # the presentation in the instruction is what puts it in the output.
-prompt = "Describe in one short English sentence the salient events, their ordering, and the overall setting that can clearly be heard. Write about the scene itself, never about the recording, the audio, or the clip; express the ordering as events following one another in the scene."
-prompt_hash = "sha256:c4597b59b2d3104b199499b770855192dd0e2584034b3d23c5ea95e1e020df35"
+#
+# For the same reason this wording avoids "scene": it is in
+# VISUAL_CLAIM_LEXICON, so an instruction containing it steers the model
+# straight into the audit's visual-claim screen. Every word here is checked
+# against that lexicon.
+prompt = "Describe in one short English sentence the salient events, their ordering, and the overall setting that can clearly be heard. Write about what is happening, never about the recording, the audio, or the clip; express the ordering as events following one another."
+prompt_hash = "sha256:c5e37310a3c6f8c89adb8958e7932927ff421ee12f453dd32fe34f2d3dc4c3bd"
 transcribe_speech = false
 
 # One seed policy, and since 2026-07-30 it is correct for both tracks: the
@@ -139,7 +144,13 @@ seed = 7
 near_duplicate_jaccard = 0.9
 
 [annotation]
-judgments_per_pair = 3
+# Two annotators (the authors), so two judgments is the ceiling, not a choice.
+# Note what this does to the view filters: agreement is modal/total, which for
+# two raters is either 0.5 or 1.0, so min_agreement = 0.6 below means UNANIMITY.
+# That is the only sensible rule for a pair of raters — there is no middle
+# value to threshold — but it makes inter-rater agreement the retention rate
+# directly, so a 70% agreement rate keeps 70% of pairs and no more.
+judgments_per_pair = 2
 repeat_fraction = 0.12
 attention_fraction = 0.05
 collection_version = "1.0"

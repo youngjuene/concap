@@ -40,10 +40,18 @@ EXECUTION_CLASSES = ("synthetic_canary", "live")
 TERMINAL_STATES = ("offline", "release")
 TERMINAL_VALUES = ("pending", "blocked_pending_external_operation", "complete")
 
-# How a clip is presented to an annotator. The visual track is always the
-# muted video; the audio track is audio-only by default, with an explicit
-# per-clip opt-in to unmuted video — every judgment records which one it saw,
-# so any cross-modal contamination stays measurable.
+# How a clip is presented to a PREFERENCE annotator — someone choosing between
+# two candidate captions. Every judgment records which presentation it saw, so
+# any cross-modal contamination stays measurable.
+#
+# This vocabulary is not the downstream user study's condition set. That study
+# measures the effect of a trained model's captions on participants and is a
+# different instrument with a different response schema; a caption condition
+# there does not have to be expressible here.
+#
+# The visual track is always the muted video, and the audio track must be able
+# to hear something — a preference judgment about an audio caption made in
+# silence is unverifiable, not a condition.
 PRESENTATIONS = ("muted_video", "audio_only", "unmuted_video")
 AUDIO_PRESENTATIONS = ("audio_only", "unmuted_video")
 
@@ -540,7 +548,14 @@ def _validate_annotation(value: object) -> None:
             "min_attention_pass",
         },
     )
-    _integer(table["judgments_per_pair"], "annotation.judgments_per_pair", minimum=3)
+    # Three or more gives a majority that resolves a split; two does not, and
+    # `agreement` (modal/total) can then only be 0.5 or 1.0, so any
+    # min_agreement above 0.5 means unanimity and every disagreed pair is
+    # dropped rather than adjudicated. That is a defensible rule for two expert
+    # annotators — a pair they split on is genuinely ambiguous and would train
+    # noise — but it makes inter-rater agreement the retention rate exactly, so
+    # a contract choosing 2 is accepting a smaller, cleaner view.
+    _integer(table["judgments_per_pair"], "annotation.judgments_per_pair", minimum=2)
     _number(table["repeat_fraction"], "annotation.repeat_fraction", minimum=0.0, maximum=0.5)
     _number(table["attention_fraction"], "annotation.attention_fraction", minimum=0.0, maximum=0.5)
     _string(table["collection_version"], "annotation.collection_version")
