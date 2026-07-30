@@ -43,6 +43,7 @@ from dpo.candidates.generation import (
     verify_backend_pin,
 )
 from dpo.contracts.study_contract import (
+    AUDIO_PRESENTATIONS,
     EXPERIMENT_IDS,
     TRACKS,
     ContractError,
@@ -422,6 +423,17 @@ def _annotation_export_tasks(arguments: argparse.Namespace) -> int:
         operation.store, registry_manifest, lambda entry: str(entry["clip_id"]) in pool_clips
     )
     presentations = audio_presentations_from_registry([row for _, row in shard_rows.values()])
+    if arguments.presentation is not None:
+        # Serve every audio clip under one presentation regardless of what its
+        # registry row opted into, so a session's presentation can be chosen at
+        # export time without rewriting clip rows and re-ingesting the corpus.
+        if arguments.presentation not in AUDIO_PRESENTATIONS:
+            raise ArtifactError(
+                f"--presentation must be one of {sorted(AUDIO_PRESENTATIONS)}; got {arguments.presentation!r}"
+            )
+        if pool.track != "audio":
+            raise ArtifactError("--presentation overrides the audio-track presentation only")
+        presentations = dict.fromkeys(presentations, arguments.presentation)
     tasks_document, answers_document = build_collection_tasks(
         operation.contract, pool, audio_presentations=presentations
     )
@@ -1135,6 +1147,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_tasks.add_argument("--artifact-id", action="append", required=True)
     export_tasks.add_argument("--out-tasks", required=True)
     export_tasks.add_argument("--out-answers", required=True)
+    export_tasks.add_argument(
+        "--presentation",
+        choices=sorted(AUDIO_PRESENTATIONS),
+        help="export every audio-track clip under this presentation (one between-subjects condition)",
+    )
     export_tasks.set_defaults(handler=_annotation_export_tasks)
     annotation_ingest = annotation_actions.add_parser("ingest")
     annotation_ingest.add_argument("--workspace", required=True)
