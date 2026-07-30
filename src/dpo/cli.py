@@ -881,7 +881,10 @@ def _train_run(arguments: argparse.Namespace) -> int:
     operation = _operation(arguments)
     _require_types(operation, set(stage("train").input_artifact_types), minimum=2)
     views = collect_view_inputs(
-        operation.store, operation.manifests, required=("sft", "pair_strict", "pair_all")
+        operation.store,
+        operation.manifests,
+        required=("sft", "pair_strict", "pair_all"),
+        tracks=sorted(contract.tracks),
     )
     _require_media_coverage(
         choice,
@@ -952,7 +955,10 @@ def _select_run(arguments: argparse.Namespace) -> int:
         minimum=2,
     )
     views = collect_view_inputs(
-        operation.store, operation.manifests, required=("pair_strict", "validation_pairs")
+        operation.store,
+        operation.manifests,
+        required=("pair_strict", "validation_pairs"),
+        tracks=sorted(contract.tracks),
     )
     cells, cell_artifacts = collect_matrix_cells(operation.store, operation.manifests)
     _require_media_coverage(

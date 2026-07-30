@@ -1,6 +1,7 @@
-# RETIRED as of 2026-07-30: the live contract pins e4b-visual.toml instead, so
-# one checkpoint serves both tracks and cross-track differences cannot be
-# confounded with model identity. Kept because it is a valid backend and the
+# RETIRED as of 2026-07-30. The live contract declares the audio track only and
+# pins e4b-audio.toml; a study wanting a visual arm should pin e4b-visual.toml,
+# so that one checkpoint serves both tracks and a cross-track difference cannot
+# be confounded with model identity. Kept because it is a valid backend and the
 # only 12B pin we have. Do not reach for it on the audio track — 12B is
 # encoder-free with a 2.5M raw-waveform audio path trained on speech, and it
 # hallucinates speech on non-speech audio at every precision; see

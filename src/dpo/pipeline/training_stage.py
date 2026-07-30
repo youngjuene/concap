@@ -1,6 +1,7 @@
 """Shared train-stage implementation: run and publish every matrix cell.
 
-Every experiment variant trains on both tracks at the canonical seed through
+Every experiment variant trains on each track the contract declares, at the
+canonical seed, through
 one runner interface, and each cell is published with per-variant cache
 identity: the ``slice_override`` keys the cell on exactly what it trained
 from, so extending a sweep axis recomputes only the new cells and leaves

@@ -4,8 +4,8 @@
 # study contract, which pins this file's hash for provenance.
 # Hardware target: one RTX 3090 (24 GB).
 #
-# E4B rather than 12B, so ONE checkpoint serves both tracks and a cross-track
-# difference cannot be confounded with model identity. Measured on the same six
+# E4B rather than 12B, so a study declaring both tracks runs ONE checkpoint and
+# a cross-track difference cannot be confounded with model identity. Measured on the same six
 # clips at the same two-frame budget: E4B's captions are comparably specific to
 # 12B's, and it actually satisfies the contract's scene-changes clause — it
 # reports the transition between the two sampled frames, which 12B silently

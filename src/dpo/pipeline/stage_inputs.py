@@ -265,8 +265,14 @@ def collect_view_inputs(
     manifests: Sequence[ArtifactManifest],
     *,
     required: Sequence[str],
+    tracks: Sequence[str],
 ) -> TrackViewInputs:
-    """Parse the given view artifacts, one set per track, requiring ``required``."""
+    """Parse the given view artifacts, one set per track, requiring ``required``.
+
+    ``tracks`` is what the contract declares, not every track that exists: a
+    single-track study publishes views for one track and must not be told the
+    other is missing.
+    """
     inputs = TrackViewInputs()
     for manifest in manifests:
         key = VIEW_KEYS.get(manifest.artifact_type)
@@ -286,14 +292,19 @@ def collect_view_inputs(
             inputs.metadata_pairs[track] = parse_metadata_pairs(payload)
         else:
             inputs.validation_pairs[track] = parse_strict_pairs(payload, schema=VALIDATION_PAIRS_TYPE)
-    for track in TRACKS:
+    for track in tracks:
         present = inputs.artifact_ids.get(track, {})
         missing = [key for key in required if key not in present]
         if missing:
             raise ArtifactError(
                 f"track {track!r} is missing its {missing[0]!r} view artifact;"
-                " every track of the matrix must be published before this stage"
+                " every track this contract declares must be published before this stage"
             )
+    undeclared = sorted(set(inputs.artifact_ids) - set(tracks))
+    if undeclared:
+        raise ArtifactError(
+            f"a view artifact was given for track {undeclared[0]!r}, which this contract does not declare"
+        )
     return inputs
 
 
