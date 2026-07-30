@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -93,6 +94,21 @@ class TinyAdapter:
     @property
     def track(self) -> str:
         return self._track
+
+    @contextmanager
+    def module_mode(self, *, training: bool) -> Iterator[None]:
+        """Honoured for protocol parity; the tiny model has no mode-dependent layers.
+
+        No dropout and no gradient checkpointing, so train and eval compute the
+        same thing. The flag is still applied so a fixture cannot pass here and
+        then behave differently on the real backend.
+        """
+        previous = bool(self.model.training)
+        self.model.train(training)
+        try:
+            yield
+        finally:
+            self.model.train(previous)
 
     def _require_track(self, media: MediaBatch) -> None:
         if media.track != self._track:

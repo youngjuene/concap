@@ -10,6 +10,7 @@ the shared completion-only log-probability implementation.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 import torch
@@ -107,6 +108,24 @@ class GemmaCaptionAdapter:
     @property
     def track(self) -> str:
         return self.contract.track
+
+    @contextmanager
+    def module_mode(self, *, training: bool) -> Iterator[None]:
+        """Set the loaded module's mode recursively, restoring it on exit.
+
+        ``model.train(flag)`` is recursive, which is the point: the top-level
+        flag can read True while every decoder layer sits in eval mode, and in
+        that state checkpointing is skipped and dropout is a no-op with nothing
+        raised. Restoring the previous top-level flag recursively also
+        normalizes any such disagreement rather than putting it back.
+        """
+        model, _ = self._require_loaded()
+        previous = bool(model.training)
+        model.train(training)
+        try:
+            yield
+        finally:
+            model.train(previous)
 
     def _require_loaded(self) -> tuple[Any, Any]:
         if self._model is not None and self._processor is not None:

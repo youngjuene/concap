@@ -9,6 +9,7 @@ completions physically cannot receive different media inputs.
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -121,6 +122,21 @@ class ModelAdapter(Protocol):
     def trainable_parameters(self) -> Iterator[torch.nn.Parameter]: ...
 
     def state_signature(self) -> str: ...
+
+    def module_mode(self, *, training: bool) -> AbstractContextManager[None]:
+        """Put the underlying module in train or eval mode for the block.
+
+        A policy and its frozen reference are the SAME module — the reference is
+        that module with its adapter layers disabled — so the mode cannot be a
+        property of either object. Callers set it around each forward instead:
+        training for a policy pass, eval for reference scoring, generation, and
+        signatures. Two things depend on getting this right. Gradient
+        checkpointing is gated per decoder layer on ``self.training``, so a
+        module left in eval mode silently skips it and the activation cost is
+        several times higher; and dropout in eval mode is a pass-through, so a
+        contract's LoRA dropout never applies. Neither failure raises.
+        """
+        ...
 
 
 def ensure_single_track(batches: Sequence[MediaBatch]) -> str:

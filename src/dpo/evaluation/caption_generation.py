@@ -26,13 +26,17 @@ def generate_captions(
     """
     if tuple(media.clip_ids) != tuple(clip_ids):
         raise ValueError("media batch clips do not match the requested clip list")
-    texts = adapter.generate(
-        media,
-        temperature=temperature,
-        top_p=top_p,
-        max_new_tokens=max_new_tokens,
-        seed=seed,
-    )
+    # Eval mode: a validation caption must come from the weights as they will be
+    # shipped, so dropout must not perturb the decode. The comparison across
+    # variants is only fair if every one of them is sampled the same way.
+    with adapter.module_mode(training=False):
+        texts = adapter.generate(
+            media,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            seed=seed,
+        )
     return tuple(
         GeneratedCaption(clip_id=clip_id, text=text) for clip_id, text in zip(clip_ids, texts, strict=True)
     )
