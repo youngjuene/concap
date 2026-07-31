@@ -157,12 +157,10 @@ min_strength = 2.0
 
 [views.weighting]
 strategy = "inverse_pair_count"
-cap_per_clip = 6
 
 [training]
 seeds = [1, 2, 3]
 canonical_seed = 1
-world_size = 1
 # The live QLoRA backend computes in bfloat16; the canary's fp32 is a
 # fixture-only setting.
 precision = "bf16"
@@ -244,12 +242,8 @@ beta = 0.1
 temperature = 0.0
 top_p = 1.0
 max_new_tokens = 48
-bootstrap_samples = 200
 
 [robustness]
 flip_rates = [0.0, 0.1, 0.2, 0.3]
 flip_seed = 13
 
-[terminal_states]
-offline = "pending"
-release = "blocked_pending_external_operation"

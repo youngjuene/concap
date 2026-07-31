@@ -572,11 +572,16 @@ def _validate_views(value: object) -> None:
     strict = _table(table["pair_strict"], "views.pair_strict", {"min_agreement", "min_strength"})
     _number(strict["min_agreement"], "views.pair_strict.min_agreement", minimum=0.0, maximum=1.0)
     _number(strict["min_strength"], "views.pair_strict.min_strength", minimum=1.0, maximum=5.0)
-    weighting = _table(table["weighting"], "views.weighting", {"strategy", "cap_per_clip"})
+    weighting = _table(table["weighting"], "views.weighting", {"strategy"}, {"cap_per_clip"})
     strategy = _string(weighting["strategy"], "views.weighting.strategy")
     if strategy not in {"inverse_pair_count", "cap", "none"}:
         raise ContractError("views.weighting.strategy must be inverse_pair_count, cap, or none")
-    _integer(weighting["cap_per_clip"], "views.weighting.cap_per_clip", minimum=1)
+    # Only the "cap" strategy reads cap_per_clip; requiring it under the other
+    # strategies forced every contract to carry an inert knob.
+    if strategy == "cap" and "cap_per_clip" not in weighting:
+        raise ContractError("views.weighting.strategy 'cap' requires cap_per_clip")
+    if "cap_per_clip" in weighting:
+        _integer(weighting["cap_per_clip"], "views.weighting.cap_per_clip", minimum=1)
 
 
 def _validate_training(value: object) -> None:
@@ -594,7 +599,6 @@ def _validate_training(value: object) -> None:
         {
             "seeds",
             "canonical_seed",
-            "world_size",
             "precision",
             "max_completion_tokens",
             "epochs",
@@ -605,6 +609,10 @@ def _validate_training(value: object) -> None:
             "max_grad_norm",
             "lora",
         },
+        # No stage reads training.world_size (receipts record the WORLD_SIZE
+        # env var instead) and only 1 was ever accepted; legal to state, never
+        # required.
+        {"world_size"},
     )
     seeds = _integers(table["seeds"], "training.seeds")
     if len(seeds) < 3 or len(set(seeds)) != len(seeds):
@@ -612,7 +620,7 @@ def _validate_training(value: object) -> None:
     canonical = _integer(table["canonical_seed"], "training.canonical_seed", minimum=0)
     if canonical not in seeds:
         raise ContractError("training.canonical_seed must be one of training.seeds")
-    if _integer(table["world_size"], "training.world_size", minimum=1) != 1:
+    if "world_size" in table and _integer(table["world_size"], "training.world_size", minimum=1) != 1:
         raise ContractError("training.world_size must be 1 (one process per GPU; DDP is out of scope)")
     if _string(table["precision"], "training.precision") not in {"bf16", "fp32"}:
         raise ContractError("training.precision must be bf16 or fp32")
@@ -727,12 +735,17 @@ def _validate_validation(value: object) -> None:
     table = _table(
         value,
         "validation",
-        {"temperature", "top_p", "max_new_tokens", "bootstrap_samples"},
+        {"temperature", "top_p", "max_new_tokens"},
+        # Nothing reads bootstrap_samples yet — dpo.analysis.bootstrap, its
+        # intended consumer, has no command wired to it. Accepted for forward
+        # compatibility, not required.
+        {"bootstrap_samples"},
     )
     _number(table["temperature"], "validation.temperature", minimum=0.0)
     _number(table["top_p"], "validation.top_p", exclusive_minimum=0.0, maximum=1.0)
     _integer(table["max_new_tokens"], "validation.max_new_tokens", minimum=1)
-    _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
+    if "bootstrap_samples" in table:
+        _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
 
 
 def _validate_robustness(value: object) -> None:
@@ -787,9 +800,10 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
             "experiments",
             "validation",
             "robustness",
-            "terminal_states",
         },
-        {"backends"},
+        # backends pins are only meaningful for live runs; terminal_states is
+        # display metadata no pipeline stage reads, so a contract may omit it.
+        {"backends", "terminal_states"},
     )
     if _integer(root["schema_version"], "schema_version") != 1:
         raise ContractError("schema_version must be 1")
@@ -822,7 +836,8 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
         _validate_experiment(experiment_id, experiments[experiment_id])
     _validate_validation(root["validation"])
     _validate_robustness(root["robustness"])
-    _validate_terminal_states(root["terminal_states"], execution_class)
+    if "terminal_states" in root:
+        _validate_terminal_states(root["terminal_states"], execution_class)
     return StudyContract(
         raw=raw,
         contract_hash=semantic_hash(raw),
