@@ -7,24 +7,21 @@ designing against no data — which is exactly how the dead knobs this repo just
 shed came to exist. Revisit this file once Phase 2 lands (see
 `docs/study-runbook.md` for the sequence).
 
-## 1. `dpo report analyze` — the results-comparison command
+## 1. `dpo report analyze` — DONE (read-only), publication deferred
 
-**What exists:** `src/dpo/analysis/` — `fit_bradley_terry` (per-experiment
-strength from pairwise outcomes), `clip_cluster_bootstrap` (CIs that respect
-clip clustering), `benjamini_hochberg` (multiplicity across the nine
-experiments), `flip_curve` and `sliced_preference_reports` (robustness). All
-tested in `tests/analysis/`, none reachable from the CLI.
+Wired ahead of schedule: the validation report now persists the per-pair
+scores selection was already computing (`selection_stage.py`), and
+`dpo report analyze` computes clip-clustered bootstrap CIs per experiment,
+exact paired sign tests vs SEED with BH correction, a Bradley-Terry fit over
+per-pair contests between the selected variants, and the preregistered
+natural-noise slices for the ranked winner (`analysis/compare.py`).
+`validation.bootstrap_samples` is restored to the live contract as its resample
+count. Verified against the canary end to end.
 
-**The wiring:** a `report analyze` action that consumes the published
-validation report plus the per-pair scored data, and emits the comparison the
-study actually reports: experiment ranking with bootstrap CIs, BH-corrected
-significance across experiments, and accuracy sliced by difficulty/agreement.
-`dpo report show` already prints raw per-variant accuracy; `analyze` is the
-inferential layer on top.
-
-**Also restore then:** `validation.bootstrap_samples` — made optional and
-dropped from the live contract while nothing read it; when `analyze` lands,
-its resample count should come from the contract again, not a CLI flag.
+**Still deferred, deliberately:** publishing the result as a
+`dpo.analysis-report/v1` artifact. The command is read-only until the authors
+have seen the shape on real Phase-2 data; promotion is a stage entry plus a
+publish call once the shape settles.
 
 ## 2. Flip-manifest consumers — close the robustness loop
 
@@ -62,7 +59,7 @@ on this corpus (34 of 48 clips would fall below `per_clip_min`).
 | symbol | intended for | note |
 | --- | --- | --- |
 | `load_config_text` (`models/gemma4/backend_config.py`) | the `evaluate` live-scoring boundary: parsing an artifact-resolved backend config without a file path | `dpo evaluate` is a pure exit-3 gate today. Wire only if external/live scoring is ever actually needed — for this study, `select run` + `study export` may make it permanently unnecessary. |
-| `compute_report_fields` (`pipeline/experiments.py`) | report enrichment | fold into `report analyze` or delete. |
+| `compute_report_fields` (`pipeline/experiments.py`) | report enrichment | RESOLVED: folded into `report analyze` (per-experiment `comparison_modes`). |
 | `transcribe_generation` (`candidates/generation.py`) + the `transcribe_speech` track knob | speech transcription during candidate generation | dead pair: the knob is `false` in every contract and the function has no caller. Street audio is non-speech, so likely delete both — but that changes the `[tracks]` schema surface, so do it alongside the next corpus regeneration, never mid-study. |
 
 ## Not wiring, but blocks reporting

@@ -242,6 +242,9 @@ beta = 0.1
 temperature = 0.0
 top_p = 1.0
 max_new_tokens = 48
+# Read by `dpo report analyze` as the clip-clustered bootstrap resample count.
+# (Removed once as a dead knob; restored the day its consumer was wired.)
+bootstrap_samples = 200
 
 [robustness]
 flip_rates = [0.0, 0.1, 0.2, 0.3]

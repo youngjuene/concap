@@ -27,8 +27,7 @@ def _pool(clip_texts: dict[str, list[str]], *, version: str):
                 track="visual",
                 policy=_POLICY,
                 generations=[
-                    ("greedy" if index == 0 else "sample", text, _CONFIG)
-                    for index, text in enumerate(texts)
+                    ("greedy" if index == 0 else "sample", text, _CONFIG) for index, text in enumerate(texts)
                 ],
             )
         )
@@ -46,8 +45,8 @@ def test_cross_pool_dedup_drops_both_sides_of_a_collision() -> None:
     near = "A person is speaking into a microphone in a room."
     pool_a = _pool(
         {
-            "clip-a1": [near, "Traffic hums along a wet boulevard.", "Rain patters on the awnings.", "Extra one."],
-            "clip-a2": ["Bicycles rattle over bricks.", "A tram bell rings twice.", "Gulls cry overhead.", "Extra two."],
+            "clip-a1": [near, "Traffic hums along a wet boulevard.", "Rain patters here.", "Extra one."],
+            "clip-a2": ["Bicycles rattle over bricks.", "A tram bell rings.", "Gulls cry.", "Extra two."],
         },
         version="train/v1",
     )

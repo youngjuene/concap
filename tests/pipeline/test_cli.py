@@ -142,6 +142,34 @@ def test_report_show_lists_the_published_reports(capsys: pytest.CaptureFixture[s
     assert str(reports["locks"][0]["lock_id"]).startswith("sha256:")
 
 
+def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    from dpo.pipeline.canary import run_canary
+
+    run_canary(tmp_path / "store", CANARY_CONTRACT)
+    code, document = _run(
+        capsys,
+        "report",
+        "analyze",
+        "--workspace",
+        str(tmp_path / "store"),
+        "--contract",
+        str(CANARY_CONTRACT),
+    )
+    assert code == 0
+    tracks = document["analysis"]["tracks"]
+    assert set(tracks) == {"visual", "audio"}
+    for track_document in tracks.values():
+        experiments = track_document["experiments"]
+        assert set(experiments) == set(track_document["bradley_terry"]["ranking"])
+        for experiment_id, entry in experiments.items():
+            low, high = entry["accuracy_ci95"]
+            assert low <= entry["accuracy"] <= high
+            if experiment_id != "SEED":
+                assert "bh_significant" in entry["vs_seed"]
+        assert experiments["SFT_DPO"]["comparison_modes"] == ["pipeline", "compute_matched"]
+        assert set(track_document["top_slices"]) == {"easy", "high_agreement", "low_agreement", "near_tie"}
+
+
 def _locked_corpus(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> tuple[str, dict[str, object]]:
     clips_path = tmp_path / "clips.jsonl"
     rows = [

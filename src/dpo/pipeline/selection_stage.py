@@ -61,12 +61,15 @@ def publish_selection(
     """Score every variant, publish validation/selection reports, and lock."""
     # Common validation scoring: every experiment variant is scored identically.
     validation_reports: dict[str, dict[str, dict[str, float]]] = {}
+    validation_scores: dict[str, dict[str, dict[str, list[dict[str, object]]]]] = {}
     for track in contract.tracks:
         seed_adapter = seed_adapters[track]
         sft_adapter = policies[("SFT", "base", track, canonical_seed)]
         report_by_experiment: dict[str, dict[str, float]] = {}
+        scores_by_experiment: dict[str, dict[str, list[dict[str, object]]]] = {}
         for experiment_id in EXPERIMENT_IDS:
             report_by_variant: dict[str, float] = {}
+            scores_by_variant: dict[str, list[dict[str, object]]] = {}
             for variant in variants_by_experiment[experiment_id]:
                 policy_adapter = policies[(experiment_id, variant.variant_id, track, canonical_seed)]
                 reference_adapter = sft_adapter if experiment_id == "SFT_DPO" else seed_adapter
@@ -99,11 +102,29 @@ def publish_selection(
                 beta = float(str(hyper["beta"])) if "beta" in hyper else 1.0
                 preference_report = evaluate_preferences(scored, beta=beta)
                 report_by_variant[variant.variant_id] = preference_report.accuracy
+                # The per-pair scores are what any inferential comparison needs
+                # (clip-clustered CIs, paired tests, Bradley-Terry); dropping
+                # them here would force the expensive scoring pass to be redone.
+                scores_by_variant[variant.variant_id] = [
+                    {
+                        "pair_id": pair.pair_id,
+                        "clip_id": pair.clip_id,
+                        "policy_chosen_logp": pair.policy_chosen_logp,
+                        "policy_rejected_logp": pair.policy_rejected_logp,
+                        "ref_chosen_logp": pair.ref_chosen_logp,
+                        "ref_rejected_logp": pair.ref_rejected_logp,
+                        "difficulty": pair.difficulty,
+                        "agreement": pair.agreement,
+                    }
+                    for pair in scored
+                ]
             report_by_experiment[experiment_id] = report_by_variant
+            scores_by_experiment[experiment_id] = scores_by_variant
         validation_reports[track] = report_by_experiment
+        validation_scores[track] = scores_by_experiment
     validation_artifact = publisher.publish(
         "dpo.validation-report/v1",
-        {"schema": "dpo.validation-report/v1", "accuracy": validation_reports},
+        {"schema": "dpo.validation-report/v1", "accuracy": validation_reports, "scores": validation_scores},
         parents=tuple(
             ParentEdge(view_artifacts[track]["validation_pairs"], "validation-pairs")
             for track in contract.tracks

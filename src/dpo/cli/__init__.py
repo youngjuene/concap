@@ -21,7 +21,7 @@ from dpo.cli.canary import _canary_run
 from dpo.cli.candidates import _candidates_dedup, _candidates_generate
 from dpo.cli.contract import _contract_lock, _contract_validate
 from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
-from dpo.cli.report import _report_show
+from dpo.cli.report import _report_analyze, _report_show
 from dpo.cli.select import _select_run
 from dpo.cli.stage import _stage_list
 from dpo.cli.study import _study_export
@@ -180,6 +180,10 @@ def build_parser() -> argparse.ArgumentParser:
     report_show = report_actions.add_parser("show")
     report_show.add_argument("--workspace", required=True)
     report_show.set_defaults(handler=_report_show)
+    report_analyze = report_actions.add_parser("analyze")
+    report_analyze.add_argument("--workspace", required=True)
+    report_analyze.add_argument("--contract", required=True)
+    report_analyze.set_defaults(handler=_report_analyze)
 
     study = commands.add_parser("study", help="produce the held-out study split's human-study stimuli")
     study_actions = study.add_subparsers(dest="action", required=True)

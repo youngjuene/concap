@@ -59,7 +59,10 @@ uv run dpo select run --workspace artifacts/street --contract configs/study/stre
 ```
 
 `make report` prints per-variant validation accuracy, the selection ranking,
-and the lock as they publish. Training is resumable: rerunning skips finished
+and the lock as they publish; `dpo report analyze --workspace artifacts/street
+--contract configs/study/street-audio.toml` adds the inferential layer —
+clip-clustered CIs, paired tests vs SEED with BH correction, Bradley-Terry,
+and the natural-noise slices. Training is resumable: rerunning skips finished
 cells.
 
 ## 3. Export the human-study captions
