@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Caption preference collection</title>
 <style>
+  /* An instrument, not a landing page. The two caption boxes must be visually
+     identical in every property — any asymmetry is position bias in the data
+     this page exists to collect — so the design carries no accent that favours
+     a side, and the craft goes into rhythm, state, and legibility instead. */
   :root {
     --ink: #1e2430;
     --muted: #66707f;
@@ -14,6 +18,7 @@
     --accent-soft: #e8eefc;
     --ok: #1a7f4b;
     --bad: #b3372c;
+    --warn: #8a5a00;
     --page: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
@@ -26,6 +31,7 @@
       --accent-soft: #2a3450;
       --ok: #58c389;
       --bad: #e07b6f;
+      --warn: #e0b054;
       --page: #171b23;
     }
   }
@@ -48,6 +54,7 @@
   #progress-text { color: var(--muted); font-variant-numeric: tabular-nums; }
   main { max-width: 58rem; margin: 0 auto; padding: 1.25rem; }
   progress { width: 100%; height: 6px; accent-color: var(--accent); }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   #media-panel { margin: 1rem 0; text-align: center; }
   #media-panel video, #media-panel audio {
     max-width: 100%;
@@ -57,7 +64,11 @@
   #media-panel audio { background: transparent; width: 100%; }
   #media-note { color: var(--muted); font-size: 0.85rem; min-height: 1.2rem; margin: 0.25rem 0 0; }
   .question { font-weight: 600; margin: 1rem 0 0.5rem; }
+  #modality-note { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
   #captions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  /* Below this width two boxes would be too narrow to read a caption in; they
+     stack, and the slot labels carry the left/right meaning as first/second. */
+  @media (max-width: 44rem) { #captions { grid-template-columns: 1fr; } }
   .caption-box {
     font: inherit;
     color: inherit;
@@ -71,8 +82,9 @@
     overflow-wrap: anywhere;
   }
   .caption-box .slot { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 0.4rem; }
+  .caption-box .key { font-variant-numeric: tabular-nums; opacity: 0.75; }
   .caption-box.selected { border-color: var(--accent); background: var(--accent-soft); }
-  #alt-choices { display: flex; gap: 0.75rem; margin-top: 0.75rem; }
+  #alt-choices { display: flex; gap: 0.75rem; margin-top: 0.75rem; flex-wrap: wrap; }
   .alt {
     font: inherit;
     color: inherit;
@@ -86,13 +98,19 @@
   .block { margin-top: 1rem; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 10px; }
   .block[hidden] { display: none; }
   .block legend, .block .label { font-size: 0.85rem; color: var(--muted); padding: 0 0.25rem; }
+  .block.awaiting { border-color: var(--accent); }
   .scale { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.25rem; }
   .scale label, #reason-tags label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
   .scale .ends { color: var(--muted); font-size: 0.8rem; align-self: center; }
   #reason-tags { display: flex; gap: 0.5rem 1.25rem; flex-wrap: wrap; margin-top: 0.25rem; }
   fieldset { border: none; margin: 0; padding: 0; }
   #tie-subtype { font: inherit; margin-top: 0.25rem; padding: 0.3rem; }
-  .actions { margin: 1.25rem 0; display: flex; justify-content: flex-end; }
+  .actions { margin: 1.25rem 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  #keys { color: var(--muted); font-size: 0.8rem; }
+  #keys kbd {
+    font: inherit; font-size: 0.75rem; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 0.3rem; background: var(--panel);
+  }
   .primary {
     font: inherit;
     font-weight: 600;
@@ -104,6 +122,11 @@
     cursor: pointer;
   }
   .primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  #resume-banner {
+    margin: 1rem 0; padding: 0.75rem 1rem; border: 1px solid var(--warn);
+    border-radius: 10px; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+  }
+  #resume-banner p { margin: 0; flex: 1 1 18rem; }
   #save-screen input {
     font: inherit;
     color: inherit;
@@ -117,6 +140,7 @@
   #confirmation { font-weight: 600; }
   #confirmation.ok { color: var(--ok); }
   #confirmation.bad { color: var(--bad); }
+  #draft-state { color: var(--muted); font-size: 0.8rem; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -128,22 +152,28 @@
 <main>
   <progress id="progress-bar" value="0" max="1"></progress>
 
+  <section id="resume-banner" hidden>
+    <p id="resume-text"></p>
+    <button type="button" class="alt" id="resume-yes">Continue where I left off</button>
+    <button type="button" class="alt" id="resume-no">Start over</button>
+  </section>
+
   <section id="task-screen" hidden>
     <div id="media-panel"></div>
     <p id="media-note"></p>
 
-    <p class="question">Which caption better matches the clip?</p>
+    <p class="question"><span id="question-text"></span> <span id="modality-note"></span></p>
     <div id="captions">
       <button type="button" class="caption-box" id="cap-left">
-        <span class="slot">Caption A (left)</span><span id="cap-left-text"></span>
+        <span class="slot">First caption <span class="key">(←)</span></span><span id="cap-left-text"></span>
       </button>
       <button type="button" class="caption-box" id="cap-right">
-        <span class="slot">Caption B (right)</span><span id="cap-right-text"></span>
+        <span class="slot">Second caption <span class="key">(→)</span></span><span id="cap-right-text"></span>
       </button>
     </div>
     <div id="alt-choices">
-      <button type="button" class="alt" id="choice-tie">Tie</button>
-      <button type="button" class="alt" id="choice-both">Both unacceptable</button>
+      <button type="button" class="alt" id="choice-tie">Tie <span class="key">(t)</span></button>
+      <button type="button" class="alt" id="choice-both">Both unacceptable <span class="key">(u)</span></button>
     </div>
 
     <fieldset class="block" id="strength-block" hidden>
@@ -166,14 +196,22 @@
       <div id="reason-tags"></div>
     </fieldset>
 
-    <div class="actions"><button type="button" class="primary" id="next" disabled>Next</button></div>
+    <div class="actions">
+      <p id="keys">
+        <kbd>←</kbd><kbd>→</kbd> pick · <kbd>t</kbd> tie · <kbd>u</kbd> unacceptable ·
+        <kbd>1</kbd>–<kbd>5</kbd> fills the highlighted scale · <kbd>r</kbd> replay ·
+        <kbd>Enter</kbd> next
+      </p>
+      <button type="button" class="primary" id="next" disabled>Next</button>
+    </div>
+    <p id="draft-state"></p>
   </section>
 
   <section id="save-screen" hidden>
     <h2>All tasks answered</h2>
     <p>Enter your name and save your responses. The name is hashed before it enters the dataset.</p>
     <p><label>Annotator name<br><input id="annotator" autocomplete="name"></label></p>
-    <div class="actions"><button type="button" class="primary" id="save" disabled>Save responses</button></div>
+    <div class="actions"><span></span><button type="button" class="primary" id="save" disabled>Save responses</button></div>
     <p id="confirmation"></p>
   </section>
 </main>
@@ -184,10 +222,49 @@
 const el = (id) => document.getElementById(id);
 let tasks = [];
 let index = 0;
-const results = [];
+let results = [];
 let renderedAt = 0;
 let playEvents = 0;
+let sessionKey = "";
+let saved = false;
 const state = { choice: null, tieSubtype: null, strength: null, confidence: null, reasons: new Set() };
+
+// A session is ~200 judgments over ~90 minutes held in one tab. Keeping them
+// only in memory means one accidental close discards the whole sitting, so
+// every answered task is mirrored to localStorage under a key derived from the
+// task list itself — a different export cannot restore into this one.
+function draftKey(document_) {
+  const list = document_.tasks;
+  const first = list.length ? list[0].task_id : "none";
+  const last = list.length ? list[list.length - 1].task_id : "none";
+  return "dpo.collection-draft:" + list.length + ":" + first + ":" + last;
+}
+
+function saveDraft() {
+  try {
+    window.localStorage.setItem(sessionKey, JSON.stringify({ index, results }));
+    el("draft-state").textContent = "Progress saved in this browser (" + results.length + " answered).";
+  } catch (error) {
+    el("draft-state").textContent = "Could not save progress in this browser: " + error;
+  }
+}
+
+function clearDraft() {
+  try { window.localStorage.removeItem(sessionKey); } catch (error) { /* nothing to clean up */ }
+}
+
+function loadDraft() {
+  try {
+    const raw = window.localStorage.getItem(sessionKey);
+    if (!raw) { return null; }
+    const draft = JSON.parse(raw);
+    if (!Array.isArray(draft.results) || typeof draft.index !== "number") { return null; }
+    if (draft.index <= 0 || draft.index > tasks.length) { return null; }
+    return draft;
+  } catch (error) {
+    return null;
+  }
+}
 
 function buildScale(containerId, name, onPick) {
   const container = el(containerId);
@@ -242,6 +319,14 @@ function valid() {
   return state.strength === null;
 }
 
+// The scale a bare digit should fill: strength first when a side was chosen,
+// then confidence. One key stream answers the form in the order it is read.
+function pendingScale() {
+  if (decisive() && state.strength === null) { return "strength"; }
+  if (state.confidence === null) { return "confidence"; }
+  return null;
+}
+
 function refresh() {
   el("cap-left").classList.toggle("selected", state.choice === "a_better");
   el("cap-right").classList.toggle("selected", state.choice === "b_better");
@@ -249,6 +334,9 @@ function refresh() {
   el("choice-both").classList.toggle("selected", state.choice === "both_unacceptable");
   el("strength-block").hidden = !decisive();
   el("tie-block").hidden = state.choice !== "tie";
+  const pending = pendingScale();
+  el("strength-block").classList.toggle("awaiting", pending === "strength");
+  el("confidence-block").classList.toggle("awaiting", pending === "confidence");
   el("next").disabled = !valid();
 }
 
@@ -264,6 +352,20 @@ function pickChoice(choice) {
   }
   refresh();
 }
+
+function pickScaleValue(value) {
+  const pending = pendingScale();
+  if (pending === null) { return; }
+  const selector = 'input[name="' + pending + '"][value="' + value + '"]';
+  const radio = document.querySelector(selector);
+  if (radio) { radio.checked = true; radio.dispatchEvent(new Event("change")); }
+}
+
+const QUESTION = {
+  audio_only: ["Which caption better matches what you hear?", "You are hearing this clip's audio; there is no video."],
+  muted_video: ["Which caption better matches what you see?", "This clip is silent by design."],
+  unmuted_video: ["Which caption better matches this clip?", "You are seeing and hearing this clip."],
+};
 
 function buildMedia(task) {
   const panel = el("media-panel");
@@ -287,6 +389,7 @@ function buildMedia(task) {
       element.addEventListener("volumechange", () => { if (!element.muted) { element.muted = true; } });
     }
   }
+  element.id = "player";
   element.controls = true;
   element.preload = "auto";
   element.src = source;
@@ -295,6 +398,14 @@ function buildMedia(task) {
     el("media-note").textContent = "Media unavailable for this clip (" + task.clip_id + ").";
   });
   panel.appendChild(element);
+}
+
+function replayMedia() {
+  const player = el("player");
+  if (!player) { return; }
+  player.currentTime = 0;
+  const started = player.play();
+  if (started && typeof started.catch === "function") { started.catch(() => { /* user gesture required */ }); }
 }
 
 function resetState() {
@@ -314,11 +425,21 @@ function renderTask() {
   el("progress-bar").value = index;
   el("progress-bar").max = tasks.length;
   buildMedia(task);
+  const [question, note] = QUESTION[task.presentation] || QUESTION.unmuted_video;
+  el("question-text").textContent = question;
+  el("modality-note").textContent = note;
   el("cap-left-text").textContent = task.display[0].text;
   el("cap-right-text").textContent = task.display[1].text;
   resetState();
   refresh();
   renderedAt = performance.now();
+}
+
+function finish() {
+  el("task-screen").hidden = true;
+  el("save-screen").hidden = false;
+  el("progress-bar").value = tasks.length;
+  el("progress-text").textContent = tasks.length + " of " + tasks.length + " answered";
 }
 
 function nextTask() {
@@ -335,14 +456,25 @@ function nextTask() {
     replay_count: Math.max(0, playEvents - 1),
   });
   index += 1;
-  if (index < tasks.length) {
-    renderTask();
-  } else {
-    el("task-screen").hidden = true;
-    el("save-screen").hidden = false;
-    el("progress-bar").value = tasks.length;
-    el("progress-text").textContent = tasks.length + " of " + tasks.length + " answered";
-  }
+  saveDraft();
+  if (index < tasks.length) { renderTask(); } else { finish(); }
+}
+
+function onKeyDown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) { return; }
+  const tag = (event.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "select" || tag === "textarea") { return; }
+  if (el("task-screen").hidden) { return; }
+  const key = event.key;
+  if (key === "ArrowLeft") { pickChoice("a_better"); }
+  else if (key === "ArrowRight") { pickChoice("b_better"); }
+  else if (key === "t" || key === "T") { pickChoice("tie"); }
+  else if (key === "u" || key === "U") { pickChoice("both_unacceptable"); }
+  else if (key === "r" || key === "R") { replayMedia(); }
+  else if (key >= "1" && key <= "5") { pickScaleValue(Number(key)); }
+  else if (key === "Enter") { nextTask(); }
+  else { return; }
+  event.preventDefault();
 }
 
 async function saveResponses() {
@@ -364,6 +496,8 @@ async function saveResponses() {
     });
     const data = await reply.json();
     if (reply.ok) {
+      saved = true;
+      clearDraft();
       confirmation.className = "ok";
       confirmation.textContent = "Saved " + data.responses + " responses to " + data.saved;
     } else {
@@ -378,12 +512,27 @@ async function saveResponses() {
   }
 }
 
+function start(fromDraft) {
+  if (fromDraft) {
+    index = fromDraft.index;
+    results = fromDraft.results;
+  }
+  el("resume-banner").hidden = true;
+  if (index >= tasks.length) { finish(); return; }
+  el("task-screen").hidden = false;
+  el("draft-state").textContent = results.length
+    ? "Progress saved in this browser (" + results.length + " answered)."
+    : "";
+  renderTask();
+}
+
 async function boot() {
   const [meta, doc] = await Promise.all([
     fetch("/api/meta").then((reply) => reply.json()),
     fetch("/api/tasks").then((reply) => reply.json()),
   ]);
   tasks = doc.tasks;
+  sessionKey = draftKey(doc);
   buildStatic(meta);
   el("cap-left").addEventListener("click", () => pickChoice("a_better"));
   el("cap-right").addEventListener("click", () => pickChoice("b_better"));
@@ -394,8 +543,24 @@ async function boot() {
   el("annotator").addEventListener("input", () => {
     el("save").disabled = !el("annotator").value.trim() || el("confirmation").className === "ok";
   });
-  el("task-screen").hidden = false;
-  renderTask();
+  document.addEventListener("keydown", onKeyDown);
+  window.addEventListener("beforeunload", (event) => {
+    if (saved || results.length === 0) { return; }
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  const draft = loadDraft();
+  if (draft) {
+    el("resume-text").textContent =
+      "This browser holds " + draft.results.length + " answered tasks from an earlier sitting"
+      + " (you stopped at task " + (draft.index + 1) + " of " + tasks.length + ").";
+    el("resume-banner").hidden = false;
+    el("resume-yes").addEventListener("click", () => start(draft));
+    el("resume-no").addEventListener("click", () => { clearDraft(); start(null); });
+  } else {
+    start(null);
+  }
 }
 
 boot();
