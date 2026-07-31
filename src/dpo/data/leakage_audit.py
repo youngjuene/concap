@@ -38,6 +38,11 @@ class LeakageError(ValueError):
     """Raised when a leakage audit is asked to enforce and finds violations."""
 
 
+# One threshold for the gate and for any transform that pre-enforces it
+# (candidates dedup); a shared constant is what keeps them from drifting.
+CROSS_SPLIT_JACCARD = 0.8
+
+
 def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
     union = left | right
     if not union:
@@ -97,7 +102,7 @@ def audit_text_leakage(
     pool: FrozenCandidatePool,
     manifest: SplitManifest,
     *,
-    jaccard_threshold: float = 0.8,
+    jaccard_threshold: float = CROSS_SPLIT_JACCARD,
 ) -> list[str]:
     """Flag near-duplicate/paraphrase candidate text across split boundaries."""
     violations: list[str] = []
@@ -140,7 +145,7 @@ def run_leakage_audit(
     clips: Sequence[ClipInput],
     pool: FrozenCandidatePool | None = None,
     sft_rows: Sequence[SftExample] = (),
-    jaccard_threshold: float = 0.8,
+    jaccard_threshold: float = CROSS_SPLIT_JACCARD,
     enforce: bool = False,
 ) -> LeakageReport:
     violations = audit_corpus(manifest, clips)

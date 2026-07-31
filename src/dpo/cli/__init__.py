@@ -18,7 +18,7 @@ from dpo.cli._shared import DEFERRED_GATES, DOMAIN_ERRORS, Handler, _blocked
 from dpo.cli.annotation import _annotation_export_tasks, _annotation_ingest, _annotation_serve
 from dpo.cli.artifact import _artifact_gc, _artifact_rebuild_index, _artifact_trace, _artifact_verify
 from dpo.cli.canary import _canary_run
-from dpo.cli.candidates import _candidates_generate
+from dpo.cli.candidates import _candidates_dedup, _candidates_generate
 from dpo.cli.contract import _contract_lock, _contract_validate
 from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
 from dpo.cli.report import _report_show
@@ -104,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--backend-config")
     generate.add_argument("--media-dir")
     generate.set_defaults(handler=_candidates_generate)
+    dedup = candidates_actions.add_parser("dedup")
+    dedup.add_argument("--workspace", required=True)
+    dedup.add_argument("--contract", required=True)
+    dedup.add_argument("--artifact-id", action="append", required=True)
+    dedup.add_argument("--dataset-version", required=True)
+    dedup.set_defaults(handler=_candidates_dedup)
 
     annotation = commands.add_parser(
         "annotation", help="export collection tasks, serve the UI, ingest responses"

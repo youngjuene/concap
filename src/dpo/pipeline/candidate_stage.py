@@ -33,8 +33,14 @@ def publish_frozen_pool(
     shard_artifact_ids: Mapping[str, str],
     dataset_version: str,
     audit_version: str,
+    source_pool_ids: Sequence[str] = (),
+    operation: str = "candidates-freeze",
 ) -> tuple[FrozenCandidatePool, str]:
-    """Sample pairs, freeze the pool for one (track, split), and publish it."""
+    """Sample pairs, freeze the pool for one (track, split), and publish it.
+
+    ``source_pool_ids`` names pools this one was derived from (dedup), so the
+    transform is visible in lineage rather than looking like a fresh generation.
+    """
     pairs = sample_pairs(
         candidates,
         audits,
@@ -56,9 +62,10 @@ def publish_frozen_pool(
         pool.document(),
         parents=tuple(
             ParentEdge(shard_artifact_ids[clip_id], "clip-shard") for clip_id in sorted(split_clips)
-        ),
+        )
+        + tuple(ParentEdge(source_id, "dedup-source") for source_id in source_pool_ids),
         stage="candidates",
-        parameters={"operation": "candidates-freeze", "track": track, "split": split},
+        parameters={"operation": operation, "track": track, "split": split},
         row_count=len(pool.pairs),
         clips=split_clips,
         role_exposure={split},

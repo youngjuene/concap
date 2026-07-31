@@ -11,11 +11,16 @@ different contract slice.
 | artifact | id |
 | --- | --- |
 | clip registry (48 clips; train 27 / validation 7 / test 7 / study 7) | `sha256:ca6daf0e52c80d753e6f2c774bfb20355b6f610fb4f9c60ce5d4deab70c06c18` |
-| audio candidate pool, train (108 candidates / 162 pairs) | `sha256:e0d01e87e23e1899bd0216b7f3ac6d6459284b47bf7a061471b8a6d736b5fe41` |
-| audio candidate pool, validation (28 / 42) | `sha256:7c8c8e3861975f9b341fb0bd9e1e8febb210d6b09000a27d5f1873b8676ecfb1` |
+| audio candidate pool, train — deduped (104 candidates / 150 pairs) | `sha256:b0cdf7b437659a26bad749c021d2cbb0950c060f77b7d77bfac936ee1523e817` |
+| audio candidate pool, validation — deduped (24 / 30) | `sha256:12929dba2e67ceb63ab5ed93c73f3ea1b47a007f0f2c5c39fcfb15cdf310fe2f` |
 
-Sessions already exported: `data/annotation/tasks-{train,validation}.json`
-(191 and 51 tasks). `answers-*.json` holds the attention-check keys — restricted,
+Sessions already exported from the deduped pools:
+`data/annotation/tasks-{train,validation}.json` (176 and 36 tasks). The
+pre-dedup pools (`e0d01e87…`, `7c8c8e38…`) remain in the store as the new
+pools' `dedup-source` parents; do not annotate against them — the leakage
+gate refuses views derived from pools with cross-split near-duplicates, and
+`dpo candidates dedup` printed `leakage_audit_passed: true` for the pair
+listed above. `answers-*.json` holds the attention-check keys — restricted,
 never inside the served `--media-dir`.
 
 ## 1. Annotate (both authors, per split)

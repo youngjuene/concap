@@ -41,21 +41,21 @@ the honest alternative is to drop `[robustness]` from the live contract and
 stop publishing manifests no one reads; producing-and-ignoring is the worst of
 the three options.
 
-## 3. Data-level leakage gates — decision required, not just wiring
+## 3. Data-level leakage gates — RESOLVED (this entry was wrong)
 
-**What exists:** `dpo/data/leakage_audit.py` — `audit_corpus`, `audit_pool`,
-`audit_sft_rows`, `audit_text_leakage`. The canary's "leakage oracle" tests
-the *store's* protected-exposure rejection; these functions audit the *data*
-(text overlap across splits, role bleed in derived views) and are never
-called.
+The auditors were never unwired: `run_leakage_audit(enforce=True)` runs inside
+`publish_track_views` (`pipeline/view_stage.py`), so views derive was always a
+hard gate. The original entry here was a dead-symbol-sweep false positive
+(the individual auditors' only caller is same-file).
 
-**The wiring:** run them inside `views derive` before anything publishes.
-
-**The decision (authors', not an implementation detail):** these are refusal
-gates — a false positive blocks a legitimate run. Wire them as hard failures,
-as warnings recorded in the view artifacts, or not at all; pick before Phase 2
-re-runs views on real annotations, because retrofitting a gate after views are
-published means regenerating them.
+What that gate revealed when run against the live pools ahead of time: 8
+cross-split near-duplicate violations that would have refused views derive
+*after* annotation. Resolved with `dpo candidates dedup` — a code-owned
+transform sharing the audit's threshold constant — which cut both sides of
+every collision, republished both pools with `dedup-source` lineage, and
+proved in-band that the audit now passes. Within-split duplicates remain by
+design: the gate does not police them, and cutting them is not representable
+on this corpus (34 of 48 clips would fall below `per_clip_min`).
 
 ## 4. Small orphans — keep-or-delete, one decision each
 
