@@ -30,6 +30,7 @@ import torch
 from dpo.candidates.generation import resolve_media_files
 from dpo.contracts.study_contract import ContractError, StudyContract
 from dpo.core.identity import semantic_hash
+from dpo.core.safety import screen_checkpoint_directory
 from dpo.models.audio_media import build_audio_media
 from dpo.models.base import MediaBatch, ModelAdapter
 from dpo.models.gemma4.adapter import GemmaCaptionAdapter
@@ -260,6 +261,10 @@ class GemmaBackend:
         """Materialize one named LoRA on the track's base, guard, and record it."""
         from peft import get_peft_model
 
+        if attachment.directory is not None:
+            # Before the base loads and before peft touches the directory: peft
+            # would follow symlinks and import pickle-family files it finds.
+            screen_checkpoint_directory(attachment.directory)
         peft_model = self._peft.get(track)
         if peft_model is None:
             if attachment.directory is None:

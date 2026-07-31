@@ -23,7 +23,7 @@ from dpo.core.artifacts import (
     ArtifactStore,
 )
 from dpo.core.identity import repo_lock_hash
-from dpo.core.safety import DestructivePathError
+from dpo.core.safety import CheckpointSafetyError, DestructivePathError
 from dpo.data.derive_pairs import ViewError
 from dpo.data.leakage_audit import LeakageError
 from dpo.data.split import SplitError
@@ -44,6 +44,7 @@ DOMAIN_ERRORS = (
     CandidateError,
     CanaryError,
     ContractError,
+    CheckpointSafetyError,
     DestructivePathError,
     LeakageError,
     LockError,
