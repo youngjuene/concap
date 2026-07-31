@@ -1,6 +1,6 @@
 # ConCap: Comparative Preference Alignment for Audiovisual Congruence Captioning
 
-ConCap (package: `dpo`) is a pipeline with four jobs, in order:
+ConCap (package: `dpo`) is a pipeline with five jobs, in order:
 
 1. **Collect** human caption preferences through a local web UI: prepared
    video clips are shown muted (visual track) or as audio — with a per-clip
@@ -11,8 +11,10 @@ ConCap (package: `dpo`) is a pipeline with four jobs, in order:
 3. **Compare** the results: per-variant validation accuracy, winner selection,
    a locked configuration, and the inferential layer over them — all as
    content-addressed artifacts.
-4. **Export** the held-out study split's captions from the locked winner, as
-   the stimuli a downstream human study puts in front of participants.
+4. **Export** the held-out study split's captions from the locked winner, along
+   a *measured* audiovisual congruency axis — one caption per slider stop.
+5. **Run** the human study: a participant watches each clip and drags that
+   slider until the sentence fits what they hear.
 
 Every input is a typed, content-addressed artifact; one study contract owns
 every result-affecting knob; and the same commands run the synthetic canary on
@@ -58,6 +60,7 @@ data/annotation/   exported sessions; answers-*.json holds the attention-check
                    keys and must never live inside the served --media-dir
 artifacts/street/  the study's content-addressed store
 runs/checkpoints/  per-cell adapters, resumable by content hash
+data/userstudy/    human-study responses, one JSON per participant
 ```
 
 | phase | needs | run |
@@ -65,7 +68,8 @@ runs/checkpoints/  per-cell adapters, resumable by content hash
 | **1. Annotate** | two authors, 212 tasks each (~1.5 h at 25 s/task) | `make annotate SPLIT=train`, then `SPLIT=validation`, then `dpo annotation ingest` per split |
 | **2. Train and select** | one 3090 | `dpo views derive` → `dpo train run` → `dpo select run` |
 | **3. Compare** | — | `make report` and `dpo report analyze` |
-| **4. Export stimuli** | one 3090 | `dpo study export` |
+| **4. Export stimuli** | one 3090, ~12 min | `dpo study export` |
+| **5. Run the study** | participants | `dpo study serve` |
 
 ```bash
 make annotate SPLIT=train        # serve tasks-train.json on data/live/media
@@ -227,13 +231,49 @@ through its full lineage.
 uv run dpo study export --workspace "$W" --contract "$C" \
   --artifact-id "$LOCK" --artifact-id "$SELECTION_REPORT" --artifact-id "$VALIDATION_REPORT" \
   --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" \
-  --track audio --checkpoint-dir runs/checkpoints \
+  --track audio --checkpoint-dir runs/checkpoints --rungs 5 \
   --backend-config configs/gemma4/e4b-audio.toml --media-dir media/
 ```
 
 Captions the held-out **study** split with the top-ranked experiment's selected
-variant and publishes `dpo.study-export/v1` — the stimuli a downstream human
-study serves to participants. Four properties are deliberate:
+variant and publishes `dpo.study-export/v1` — the stimuli the human study
+serves. Each clip gets a *congruency ladder*: one caption per slider stop,
+ordered along a measured axis (below). Cost on one 3090, measured: about
+**100 s per clip**, so ~12 minutes for a seven-clip study split, once.
+
+### Congruency is measured, not asserted
+
+For a caption `c` on one clip:
+
+```
+congruency(c) = [ logP(c | audio, video) - logP(c | audio) ] / |c|      nats/token
+```
+
+How much does *seeing* the clip help explain this sentence? A description of
+sound alone gains nothing from the video and scores near zero; one naming the
+thing visibly making the sound scores strongly positive; one naming something
+not on screen scores **negative**, which is a principled incongruent end rather
+than a staged one. It reuses `completion_logprobs` — the same likelihood that
+scores preference pairs.
+
+Candidates are over-generated across conditionings, wordings, and temperatures;
+each is scored; and the rungs are **selected** for even spacing on that measured
+axis. Writing prompts of increasing "tie sound to sight" strength and declaring
+that ordering to be the axis is an assumption no output verifies — the model may
+answer rung three less congruently than rung two, leaving the study's
+independent variable silently unordered. Two refusals enforce it: a non-monotone
+ladder is rejected at publish, and one whose ends differ by less than
+`MIN_CONGRUENCY_SPAN` is rejected at selection, because a slider that changes
+wording without changing meaning is not a control.
+
+Building the ladder deliberately steps outside the audio track's modality
+isolation — congruency is defined against what is actually in frame, and an
+audio-only model asked to name the visible source invents one. That path runs
+through `stimulus_messages` and `generate_stimulus` / `score_stimulus`, named
+for their one purpose so the exception is visible at every call site. Nothing
+scored, trained on, or compared against preference data goes through them.
+
+Four further properties are deliberate:
 
 - It requires the **lock**, not just the selection report: configuration
   freezes before any held-out access.
@@ -252,6 +292,34 @@ The published payload is capability-exempt (`PUBLIC_DERIVED_TYPES`), so a study
 web process can read the captions without holding a study capability while the
 protected ancestry stays sealed.
 
+## 5. Run the study
+
+```bash
+uv run dpo study serve --export study-export.json \
+  --media-dir data/live/media --out data/userstudy/responses
+```
+
+A participant watches each clip with sound and drags one slider until the
+sentence beneath it best fits what they hear, then rates the match and writes
+what they heard in their own words. The slider **generates nothing at
+interaction time** — it indexes the pre-built ladder, so a drag costs a
+five-element scan (~20 ns) rather than a model call; the study document is
+fetched once at boot (~4 KB for seven clips).
+
+The control's geometry *is* the measurement: stops sit at their measured
+congruency, so the distance dragged between two captions is their distance on
+the axis, not an artefact of how many candidates happened to generate. What
+reaches the browser is narrowed to position and text — the winning arm, its
+validation accuracy, each rung's score, and the conditioning that produced it
+all stay in the artifact, because a participant who can read which stop scored
+highest has been handed the answer.
+
+This is a **separate instrument** from the annotation UI in `dpo.annotation`:
+different question, different response schema (`dpo.userstudy-responses/v1`),
+different people. Kept apart so neither study's validator can be satisfied by
+the other's data. It serves the clip *with* its soundtrack, so
+`--media-dir` needs `unmuted_video/` renders staged alongside the corpus.
+
 ## Repository structure
 
 ```text
@@ -268,6 +336,8 @@ src/dpo/
 │                  # audits, pair sampler, cross-pool dedup, freeze
 ├── annotation/    # raw_annotations, collection_tasks, webapp (FastAPI UI),
 │                  # aggregation, reliability + exclusions
+├── userstudy/     # the human study's page + app: congruency slider over a
+│                  # published study export (a separate instrument)
 ├── models/        # shared completion logprob, modality-isolated batches,
 │                  # visual_media / audio_media builders, tiny CPU backend,
 │                  # gemma4/ (adapter, backend_config, tokenization safety,
@@ -275,7 +345,8 @@ src/dpo/
 ├── objectives/    # base protocol + dpo, ipo, cdpo, rdpo, drdpo, wdpo, sft
 ├── trainers/      # one preference trainer for every preference arm,
 │                  # SFT trainer, diagnostics
-├── evaluation/    # compliance, preference accuracy, caption_generation
+├── evaluation/    # compliance, preference accuracy, caption_generation,
+│                  # congruency (the measured audiovisual axis)
 ├── analysis/      # compare (the `report analyze` layer), Bradley-Terry,
 │                  # clip-cluster bootstrap + BH correction, robustness slices
 └── pipeline/      # stage registry (artifact types + contract slices),
