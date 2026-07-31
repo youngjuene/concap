@@ -1,6 +1,6 @@
 # ConCap: Comparative Preference Alignment for Audiovisual Congruence Captioning
 
-ConCap (package: `dpo`) is a pipeline with three jobs, in order:
+ConCap (package: `dpo`) is a pipeline with four jobs, in order:
 
 1. **Collect** human caption preferences through a local web UI: prepared
    video clips are shown muted (visual track) or as audio — with a per-clip
@@ -8,8 +8,11 @@ ConCap (package: `dpo`) is a pipeline with three jobs, in order:
 2. **Train** the comparison matrix on the collected preferences: SFT plus
    seven preference objectives (DPO, IPO, cDPO, rDPO, Dr.DPO, wDPO, and
    SFT-to-DPO warm start), with in-contract hyperparameter sweeps.
-3. **Track** the results: per-variant validation accuracy, winner selection,
-   and a locked configuration, all as content-addressed artifacts.
+3. **Compare** the results: per-variant validation accuracy, winner selection,
+   a locked configuration, and the inferential layer over them — all as
+   content-addressed artifacts.
+4. **Export** the held-out study split's captions from the locked winner, as
+   the stimuli a downstream human study puts in front of participants.
 
 Every input is a typed, content-addressed artifact; one study contract owns
 every result-affecting knob; and the same commands run the synthetic canary on
@@ -42,6 +45,39 @@ uv run dpo canary run --workspace artifacts/canary --contract configs/study/cana
 uv run dpo artifact verify --workspace artifacts/canary --all
 ```
 
+## The current study, end to end
+
+The live study is `configs/study/street-audio.toml` — Gemma 4 E4B on the
+**audio caption track only** (see the contract header for why), over 48 street
+clips split train 27 / validation 7 / test 7 / study 7. Its working data:
+
+```text
+data/video/        the collected c1..c4 condition renders (read-only stimuli)
+data/live/media/   staged corpus: {clip_id}.mp4 (muted) + {clip_id}.wav per clip
+data/annotation/   exported sessions; answers-*.json holds the attention-check
+                   keys and must never live inside the served --media-dir
+artifacts/street/  the study's content-addressed store
+runs/checkpoints/  per-cell adapters, resumable by content hash
+```
+
+| phase | needs | run |
+| --- | --- | --- |
+| **1. Annotate** | two authors, ~1.7 h each | `make annotate SPLIT=train`, then `SPLIT=validation`, then `dpo annotation ingest` per split |
+| **2. Train and select** | one 3090 | `dpo views derive` → `dpo train run` → `dpo select run` |
+| **3. Compare** | — | `make report` and `dpo report analyze` |
+| **4. Export stimuli** | one 3090 | `dpo study export` |
+
+```bash
+make annotate SPLIT=train        # serve tasks-train.json on data/live/media
+make annotate SPLIT=validation   # both splits must be annotated before step 2
+make report                      # published validation/selection/lock reports
+```
+
+[`docs/study-runbook.md`](docs/study-runbook.md) carries the exact artifact ids
+and the full command sequence with real paths;
+[`docs/TODO.md`](docs/TODO.md) records what is deliberately deferred until
+after phase 2, and which of those calls are the authors' to make.
+
 ## 1. Collect preferences
 
 ```bash
@@ -69,6 +105,14 @@ uv run dpo corpus lock-splits --workspace "$W" --contract "$C" --artifact-id "$I
 uv run dpo candidates generate --workspace "$W" --contract "$C" \
   --artifact-id "$REGISTRY_ID" --track audio --split train --dataset-version study/v1
 
+# Pre-enforce the leakage gate BEFORE anyone annotates: views derive refuses a
+# candidate whose text near-duplicates one across a split boundary, and finding
+# that out afterwards wastes the annotation. This drops both sides of every
+# cross-pool collision, re-pairs, and re-freezes with dedup-source lineage.
+uv run dpo candidates dedup --workspace "$W" --contract "$C" \
+  --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" --artifact-id "$VALIDATION_POOL" \
+  --dataset-version study/v2
+
 # Annotator session: tasks with randomized display order, repeats, and
 # attention checks per the contract's [annotation] fractions.
 uv run dpo annotation export-tasks --workspace "$W" --contract "$C" \
@@ -77,7 +121,7 @@ uv run dpo annotation export-tasks --workspace "$W" --contract "$C" \
 
 uv run dpo annotation serve --tasks tasks.json --media-dir media/ --out responses/
 
-# After each annotator saves:
+# After each annotator saves (--responses repeats, once per annotator):
 uv run dpo annotation ingest --workspace "$W" --contract "$C" \
   --artifact-id "$POOL_ID" --split train --tasks tasks.json --answers answers.json \
   --responses responses/responses-alice.json --responses responses/responses-bob.json
@@ -111,7 +155,8 @@ track. Because artifact identities are stage-scoped, extending a sweep axis
 recomputes only the new cells — collected preferences are never touched.
 
 ```bash
-# Derive every training view from the frozen preferences, once per declared track.
+# Derive every training view from the frozen preferences, once per declared
+# track. Both train and validation splits must already be annotated.
 uv run dpo views derive --workspace "$W" --contract "$C" \
   --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" --artifact-id "$VALIDATION_POOL" \
   --artifact-id "$TRAIN_ANNOTATIONS" --artifact-id "$VALIDATION_ANNOTATIONS" --track audio
@@ -125,58 +170,87 @@ uv run dpo train run --workspace "$W" --contract "$C" \
 # Score every variant, pick one winner per experiment and track, lock.
 uv run dpo select run --workspace "$W" --contract "$C" \
   --artifact-id "$VIEW_IDS..." --artifact-id "$CELL_IDS..." \
-  --checkpoint-dir runs/checkpoints --backend-config ... --media-dir media/
+  --checkpoint-dir runs/checkpoints --backend-config configs/gemma4/e4b-audio.toml \
+  --media-dir media/
 ```
 
 Which backend runs is the contract's `models.seed.implementation`: the
 deterministic tiny CPU backend needs no `--backend-config`/`--media-dir` and
 runs the whole pipeline offline; the Gemma backend requires one backend TOML
-per track plus the media directory, and verifies the CUDA device, the
+per declared track plus the media directory, and verifies the CUDA device, the
 contract's `[backends]` hash pins, and full media coverage **before** touching
 the store. LoRA comes from the contract's `[training.lora]` and every attach
 is checked to keep all trainable parameters inside the language model — the
 media towers stay frozen (peft cannot wrap their `Gemma4ClippableLinear`
-modules, so this guard is load-bearing, not decorative).
+modules, so this guard is load-bearing, not decorative). A checkpoint
+directory is screened for pickle-family files and symlinks before peft is
+allowed to open it.
 
 Training is **resumable by content**: each cell writes its adapter plus a
 `cell.json` holding the semantic hash of everything it trained from, so a
 crash resumes where it stopped and a changed view or hyperparameter retrains
 exactly the cells it affects. Reference log-probabilities are precomputed and
 the reference released before the policy trains, so a second model never
-occupies device memory.
+occupies device memory. At selection, SEED and SFT are scored once per track
+and reused as both reference and policy, halving the run's forward passes.
 
 The backend TOMLs under `configs/gemma4/` carry runtime shape only (model
 pin, quantization, gradient checkpointing); the contract can pin their
 hashes via `[backends]`.
 
-## Running the current study
-
-The live study is `configs/study/street-audio.toml` (audio captions only; see
-its header for why). Its working data:
-
-```text
-data/video/        the collected c1..c4 condition renders (read-only stimuli)
-data/live/media/   staged corpus: {clip_id}.mp4 (muted) + {clip_id}.wav per clip
-data/annotation/   exported sessions; answers-*.json holds the attention-check
-                   keys and must never live inside the served --media-dir
-artifacts/street/  the study's content-addressed store
-```
-
-`docs/study-runbook.md` records the exact artifact ids and the command
-sequence from annotation through study export; `make annotate SPLIT=train`
-serves an annotator session with the right paths.
-
-## 3. Track the results
+## 3. Compare the results
 
 ```bash
-uv run dpo report show --workspace "$W"
+uv run dpo report show    --workspace "$W"                     # or: make report
+uv run dpo report analyze --workspace "$W" --contract "$C"
 ```
 
-prints every validation report (per-variant accuracy by track and
-experiment), selection report (ranking, selected variants with their
-hyperparameters), and lock manifest in the workspace. Artifacts are the
-ground truth — `dpo artifact trace` walks any result back through its full
-lineage.
+`report show` prints every validation report (per-variant accuracy by track
+and experiment), selection report (ranking, selected variants with their
+hyperparameters), and lock manifest in the workspace.
+
+`report analyze` is the inferential layer over the per-pair scores the
+validation report persists: clip-clustered bootstrap confidence intervals per
+experiment, exact paired sign tests against SEED with Benjamini-Hochberg
+correction across the preference arms, a Bradley-Terry fit over per-pair
+contests between the selected variants, and the preregistered natural-noise
+slices for the ranked winner. It re-scores nothing, so the comparison is
+reproducible from the published artifacts alone; it is read-only until the
+`dpo.analysis-report/v1` shape settles (see `docs/TODO.md`).
+
+Artifacts are the ground truth — `dpo artifact trace` walks any result back
+through its full lineage.
+
+## 4. Export the human-study stimuli
+
+```bash
+uv run dpo study export --workspace "$W" --contract "$C" \
+  --artifact-id "$LOCK" --artifact-id "$SELECTION_REPORT" --artifact-id "$VALIDATION_REPORT" \
+  --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" \
+  --track audio --checkpoint-dir runs/checkpoints \
+  --backend-config configs/gemma4/e4b-audio.toml --media-dir media/
+```
+
+Captions the held-out **study** split with the top-ranked experiment's selected
+variant and publishes `dpo.study-export/v1` — the stimuli a downstream human
+study serves to participants. Four properties are deliberate:
+
+- It requires the **lock**, not just the selection report: configuration
+  freezes before any held-out access.
+- Reading study clips takes a fenced `human-study` capability, reserved once
+  per lock (idempotent, so a crashed run retries; a new lock forces a new
+  fence, so captions from two configurations cannot be mixed). Every
+  precondition runs *before* the fence opens.
+- The protected read verifies each staged media file against the registry's
+  recorded derivative hashes, so a study cannot ship captions generated from
+  files the corpus never saw.
+- The publish **fails** if any caption byte-matches a frozen training
+  candidate — otherwise the study would measure memorization and report it as
+  caption quality.
+
+The published payload is capability-exempt (`PUBLIC_DERIVED_TYPES`), so a study
+web process can read the captions without holding a study capability while the
+protected ancestry stays sealed.
 
 ## Repository structure
 
@@ -191,7 +265,7 @@ src/dpo/
 ├── data/          # split manifest, D_sft / D_pair_strict / D_pair_all,
 │                  # noise calibration, flip manifests, weighting, leakage audit
 ├── candidates/    # candidate_records + C0 policy, generation, evidence-free
-│                  # audits, pair sampler, freeze
+│                  # audits, pair sampler, cross-pool dedup, freeze
 ├── annotation/    # raw_annotations, collection_tasks, webapp (FastAPI UI),
 │                  # aggregation, reliability + exclusions
 ├── models/        # shared completion logprob, modality-isolated batches,
@@ -202,11 +276,11 @@ src/dpo/
 ├── trainers/      # one preference trainer for every preference arm,
 │                  # SFT trainer, diagnostics
 ├── evaluation/    # compliance, preference accuracy, caption_generation
-├── analysis/      # Bradley-Terry, clip-cluster bootstrap (future
-│                  # confirmatory phase; not wired into the default pipeline)
+├── analysis/      # compare (the `report analyze` layer), Bradley-Terry,
+│                  # clip-cluster bootstrap + BH correction, robustness slices
 └── pipeline/      # stage registry (artifact types + contract slices),
                    # publishing, per-stage modules (corpus/candidate/
-                   # annotation/view/training/selection), sweep expansion,
+                   # annotation/view/training/selection/study), sweep expansion,
                    # live_runner (resumable matrix over a backend seam),
                    # offline matrix runner, lock manifest, offline canary
 ```
@@ -232,9 +306,12 @@ drift from enforcement.
   scalar maps documented in `dpo/objectives/wdpo.py` that must be
   re-verified against the pinned official code before any confirmatory run.
 - The heavier confirmatory machinery (automated evidence auditing with claim
-  ledgers, the one-shot test reservation, the blinded final human study) was
-  deliberately removed from the default path and is recoverable from git
-  history when that phase starts.
+  ledgers, the one-shot test reservation) was deliberately removed from the
+  default path and is recoverable from git history when that phase starts.
+  `dpo.study-results/v1` and `dpo.analysis-report/v1` are reserved in
+  `core/artifacts.py` for the human study's responses and its analysis; their
+  producers are built once that instrument's shape settles.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the invariants and claim
-limits.
+limits, [`docs/study-runbook.md`](docs/study-runbook.md) for the live study's
+artifact ids, and [`docs/TODO.md`](docs/TODO.md) for deferred wiring.
