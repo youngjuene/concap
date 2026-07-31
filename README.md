@@ -185,7 +185,7 @@ src/dpo/
 ├── cli/           # one module per command (`ls` here reads as the command
 │                  # list); _shared plumbing, _backend live-model resolution
 ├── core/          # content-addressed artifact store, identity, atomic IO,
-│                  # fenced access, GPU leases, text-safety screening
+│                  # fenced access, text-safety screening
 ├── contracts/     # study_contract (vocabularies, matrix, validator),
 │                  # visual_caption / audio_caption compliance screens
 ├── data/          # split manifest, D_sft / D_pair_strict / D_pair_all,
