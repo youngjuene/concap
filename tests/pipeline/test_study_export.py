@@ -15,7 +15,7 @@ from dpo.contracts.study_contract import StudyContract
 from dpo.core.artifacts import ArtifactStore
 from dpo.core.identity import repo_lock_hash
 from dpo.evaluation.caption_generation import generate_captions
-from dpo.evaluation.congruency import ClipLadder, LadderRung
+from dpo.evaluation.congruency import ClipLadder, ScoredCaption
 from dpo.models.tiny import TinyAdapter, synthetic_media
 from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
 from dpo.pipeline.publishing import ArtifactPublisher
@@ -23,10 +23,16 @@ from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM
 from dpo.pipeline.study_stage import STUDY_EXPORT_TYPE, StudyError, publish_study_export
 from tests.conftest import PreferenceWorld
 
-_RUNGS = (
-    LadderRung(0.0, "audio", "Describe what is heard."),
-    LadderRung(1.0, "audio+video", "Name the visible source of each sound."),
-)
+
+def _ladder(clip_id: str, low: str, high: str) -> ClipLadder:
+    """A two-rung ladder: audio-only at the bottom, visually bound at the top."""
+    return ClipLadder(
+        clip_id=clip_id,
+        rungs=(
+            ScoredCaption(text=low, congruency=0.0, conditioning="audio"),
+            ScoredCaption(text=high, congruency=0.6, conditioning="audio+video"),
+        ),
+    )
 
 
 def _adapter(contract: StudyContract, track: str) -> TinyAdapter:
@@ -93,8 +99,7 @@ def test_study_export_refuses_captions_that_reuse_training_candidates(
             experiment_id="DPO",
             variant_id="base",
             validation_accuracy=1.0,
-            ladders=[ClipLadder(clip_id=clip_id, captions=(memorized.text, "A fresh second rung."))],
-            rungs=_RUNGS,
+            ladders=[_ladder(clip_id, memorized.text, "A fresh second rung.")],
             training_pool=world.pool,
             lock_artifact_id=shard_ids[clip_id],
             shard_artifact_ids=shard_ids,
@@ -113,12 +118,8 @@ def test_study_export_publishes_fresh_captions(tmp_path: Path, world: Preference
         variant_id="base",
         validation_accuracy=0.75,
         ladders=[
-            ClipLadder(
-                clip_id=clip_id,
-                captions=("A wholly unseen caption for the study split.", "A visibly grounded variant."),
-            )
+            _ladder(clip_id, "A wholly unseen caption for the study split.", "A visibly grounded variant.")
         ],
-        rungs=_RUNGS,
         training_pool=world.pool,
         lock_artifact_id=shard_ids[clip_id],
         shard_artifact_ids=shard_ids,
@@ -128,18 +129,19 @@ def test_study_export_publishes_fresh_captions(tmp_path: Path, world: Preference
     assert document["training_candidate_reuse_rate"] == 0.0
     assert document["experiment_id"] == "DPO"
     assert artifact_id.startswith("sha256:")
-    # The slider reads these: one entry per rung, ascending, per clip.
-    levels = [entry["level"] for entry in document["clips"][0]["levels"]]
-    assert levels == [rung.level for rung in _RUNGS]
-    assert document["ladder_summary"]["collapsed_clips"] == []
+    # The slider reads these: stops placed by the measure, ascending, per clip.
+    levels = document["clips"][0]["levels"]
+    assert [entry["position"] for entry in levels] == [0.0, 1.0]
+    assert [entry["congruency"] for entry in levels] == [0.0, 0.6]
+    assert document["ladder_summary"]["negative_congruency_clips"] == []
 
 
 def test_study_export_requires_one_caption_per_clip(tmp_path: Path, world: PreferenceWorld) -> None:
     publisher, shard_ids = _publisher(tmp_path, world)
     clip_id = sorted(shard_ids)[0]
     duplicated = [
-        ClipLadder(clip_id=clip_id, captions=("First rung here.", "Second rung here.")),
-        ClipLadder(clip_id=clip_id, captions=("Another first rung.", "Another second rung.")),
+        _ladder(clip_id, "First rung here.", "Second rung here."),
+        _ladder(clip_id, "Another first rung.", "Another second rung."),
     ]
     with pytest.raises(StudyError, match="exactly one ladder per clip"):
         publish_study_export(
@@ -150,7 +152,33 @@ def test_study_export_requires_one_caption_per_clip(tmp_path: Path, world: Prefe
             variant_id="base",
             validation_accuracy=0.5,
             ladders=duplicated,
-            rungs=_RUNGS,
+            training_pool=world.pool,
+            lock_artifact_id=shard_ids[clip_id],
+            shard_artifact_ids=shard_ids,
+            decoding={"temperature": 0.0, "top_p": 1.0},
+        )
+
+
+def test_study_export_refuses_a_non_monotone_ladder(tmp_path: Path, world: PreferenceWorld) -> None:
+    """An unordered axis is not an independent variable."""
+    publisher, shard_ids = _publisher(tmp_path, world)
+    clip_id = sorted(shard_ids)[0]
+    backwards = ClipLadder(
+        clip_id=clip_id,
+        rungs=(
+            ScoredCaption(text="more grounded", congruency=0.9, conditioning="audio+video"),
+            ScoredCaption(text="less grounded", congruency=0.1, conditioning="audio"),
+        ),
+    )
+    with pytest.raises(StudyError, match="non-monotone"):
+        publish_study_export(
+            publisher,
+            world.contract,
+            track=world.pool.track,
+            experiment_id="DPO",
+            variant_id="base",
+            validation_accuracy=0.5,
+            ladders=[backwards],
             training_pool=world.pool,
             lock_artifact_id=shard_ids[clip_id],
             shard_artifact_ids=shard_ids,

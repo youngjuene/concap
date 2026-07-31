@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from dpo.candidates.freeze import parse_frozen_pool
 from dpo.candidates.generation import (
@@ -27,7 +28,7 @@ from dpo.core.artifacts import (
     ArtifactError,
 )
 from dpo.core.identity import sha256_file
-from dpo.evaluation.congruency import LadderRung, generate_ladders, ladder_for
+from dpo.evaluation.congruency import CandidateSpec, build_ladders, candidate_specs
 from dpo.models.gemma4.adapter import GemmaCaptionAdapter
 from dpo.models.gemma4.prompt import stimulus_messages
 from dpo.pipeline.live_runner import (
@@ -125,11 +126,10 @@ def _study_export(arguments: argparse.Namespace) -> int:
                     f"clip {clip_id!r}: media at {files[clip_id]} hashes to {actual}, which the"
                     " clip registry does not list as a derivative of this clip"
                 )
-    # One caption per (clip, rung). The bottom rung is the contract's own audio
-    # prompt on audio alone — the caption this study's trained model actually
-    # produces; every rung above it also sees the video, because congruency with
-    # the real frame is not expressible by a model that has never seen it.
-    rungs = ladder_for(contract.tracks[track].prompt)
+    # The slider's axis is measured, not assumed: over-generate candidates
+    # across conditionings and wordings, score each by how much seeing the clip
+    # helps explain it, and select the rungs from that measurement.
+    specs = candidate_specs(contract.tracks[track].prompt)
     policy = policies[key]
     if not isinstance(policy, GemmaCaptionAdapter):
         raise StudyError(
@@ -141,21 +141,31 @@ def _study_export(arguments: argparse.Namespace) -> int:
     audio_files = resolve_media_files(choice.media_dir, clip_ids, track="audio")
     video_files = resolve_media_files(choice.media_dir, clip_ids, track="visual")
 
-    def _generate(clip_id: str, rung: LadderRung) -> str:
-        messages = stimulus_messages(
-            rung.instruction,
+    def _messages(clip_id: str, instruction: str, *, with_video: bool) -> list[dict[str, Any]]:
+        return stimulus_messages(
+            instruction,
             audio_reference=str(audio_files[clip_id]),
-            video_reference=(str(video_files[clip_id]) if rung.conditioning == "audio+video" else None),
+            video_reference=str(video_files[clip_id]) if with_video else None,
         )
+
+    def _generate(clip_id: str, spec: CandidateSpec) -> str:
         return policy.generate_stimulus(
-            messages,
-            temperature=float(str(contract.validation["temperature"])),
+            _messages(clip_id, spec.instruction, with_video=spec.conditioning == "audio+video"),
+            temperature=spec.temperature,
             top_p=float(str(contract.validation["top_p"])),
             max_new_tokens=int(str(contract.validation["max_new_tokens"])),
             seed=canonical_seed,
         )
 
-    ladders = generate_ladders(clip_ids, rungs, _generate)
+    def _measure(clip_id: str, caption: str) -> float:
+        # The axis itself. Both passes use the contract's own prompt, so the
+        # only difference between them is whether the model can see the clip.
+        base = contract.tracks[track].prompt
+        seen, tokens = policy.score_stimulus(_messages(clip_id, base, with_video=True), caption)
+        heard, _ = policy.score_stimulus(_messages(clip_id, base, with_video=False), caption)
+        return (seen - heard) / max(1, tokens)
+
+    ladders = build_ladders(clip_ids, specs, rungs=int(arguments.rungs), generate=_generate, measure=_measure)
     document, artifact_id = publish_study_export(
         operation.publisher(),
         contract,
@@ -164,7 +174,6 @@ def _study_export(arguments: argparse.Namespace) -> int:
         variant_id=variant_id,
         validation_accuracy=accuracy,
         ladders=ladders,
-        rungs=rungs,
         training_pool=training_pool,
         lock_artifact_id=lock_manifest.artifact_id,
         shard_artifact_ids={clip_id: shard for clip_id, (shard, _) in shard_rows.items()},

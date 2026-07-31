@@ -251,6 +251,32 @@ class GemmaCaptionAdapter:
         prompt_length = int(encoded["input_ids"].shape[1])
         return _response_text(processor, generated[0][prompt_length:])
 
+    def score_stimulus(self, messages: list[dict[str, Any]], completion: str) -> tuple[float, int]:
+        """(summed completion log-probability, token count) under caller messages.
+
+        The scoring twin of generate_stimulus, and the measuring instrument for
+        audiovisual congruency: score one caption twice, once with the video in
+        the messages and once without, and the difference is how much seeing the
+        clip helps explain that sentence. Same completion-only masking as the
+        isolated scoring path, so the two numbers are comparable to each other
+        and to everything else the pipeline measures in log-probability.
+        """
+        model, processor = self._require_loaded()
+        prompt_length, encoding = prompt_and_full_encodings(
+            processor,
+            messages,
+            assistant_message(completion),
+            template_kwargs=template_kwargs(self.contract),
+        )
+        with self.module_mode(training=False), torch.no_grad():
+            tensors = _to_model(model, encoding)
+            logits = model(**tensors).logits
+            input_ids = tensors["input_ids"]
+            completion_mask = torch.zeros_like(input_ids)
+            completion_mask[0, prompt_length:] = 1
+            total = float(completion_logprobs(logits.float(), input_ids, completion_mask)[0])
+        return total, int(input_ids.shape[1] - prompt_length)
+
     def trainable_parameters(self) -> Iterator[torch.nn.Parameter]:
         model, _ = self._require_loaded()
         for parameter in model.parameters():

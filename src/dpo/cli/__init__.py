@@ -195,6 +195,9 @@ def build_parser() -> argparse.ArgumentParser:
     study_export.add_argument("--checkpoint-dir", required=True)
     study_export.add_argument("--backend-config", action="append")
     study_export.add_argument("--media-dir")
+    study_export.add_argument(
+        "--rungs", type=int, default=5, help="slider positions selected from the measured axis"
+    )
     study_export.set_defaults(handler=_study_export)
     study_serve = study_actions.add_parser("serve")
     study_serve.add_argument("--export", required=True, help="a published dpo.study-export/v1 document")

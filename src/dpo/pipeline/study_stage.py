@@ -31,7 +31,7 @@ from dpo.contracts.study_contract import StudyContract
 from dpo.core.artifacts import ParentEdge
 from dpo.evaluation.caption_generation import training_candidate_reuse_rate
 from dpo.evaluation.compliance import GeneratedCaption
-from dpo.evaluation.congruency import ClipLadder, LadderRung, ladder_summary
+from dpo.evaluation.congruency import ClipLadder, ladder_summary
 from dpo.pipeline.publishing import ArtifactPublisher
 
 STUDY_EXPORT_TYPE = "dpo.study-export/v1"
@@ -50,7 +50,6 @@ def publish_study_export(
     variant_id: str,
     validation_accuracy: float,
     ladders: Sequence[ClipLadder],
-    rungs: Sequence[LadderRung],
     training_pool: FrozenCandidatePool,
     lock_artifact_id: str,
     shard_artifact_ids: Mapping[str, str],
@@ -62,16 +61,23 @@ def publish_study_export(
     # Every rung is a caption a participant can be shown, so the memorization
     # gate has to see all of them, not just the bottom of each ladder.
     captions = [
-        GeneratedCaption(clip_id=ladder.clip_id, text=text) for ladder in ladders for text in ladder.captions
+        GeneratedCaption(clip_id=ladder.clip_id, text=rung.text)
+        for ladder in ladders
+        for rung in ladder.rungs
     ]
     clip_ids = [ladder.clip_id for ladder in ladders]
     if len(set(clip_ids)) != len(clip_ids):
         raise StudyError("a study export must hold exactly one ladder per clip")
-    widths = {len(ladder.captions) for ladder in ladders}
-    if widths != {len(rungs)}:
-        raise StudyError(
-            f"every ladder must carry one caption per rung ({len(rungs)}); got widths {sorted(widths)}"
-        )
+    widths = {len(ladder.rungs) for ladder in ladders}
+    if len(widths) != 1:
+        raise StudyError(f"every ladder must carry the same number of rungs; got {sorted(widths)}")
+    for ladder in ladders:
+        scores = [rung.congruency for rung in ladder.rungs]
+        if scores != sorted(scores):
+            raise StudyError(
+                f"clip {ladder.clip_id!r} has a non-monotone ladder ({scores}); the slider's"
+                " independent variable must ascend or the study measures an unordered axis"
+            )
     missing = sorted(set(clip_ids) - set(shard_artifact_ids))
     if missing:
         raise StudyError(f"caption for clip {missing[0]!r} has no registry shard to descend from")
@@ -97,9 +103,9 @@ def publish_study_export(
         "validation_accuracy": validation_accuracy,
         "decoding": dict(sorted(decoding.items())),
         "training_candidate_reuse_rate": reuse_rate,
-        "congruency_ladder": [rung.document() for rung in rungs],
-        "ladder_summary": ladder_summary(ladders, rungs),
-        "clips": [ladder.document(rungs) for ladder in sorted(ladders, key=lambda item: item.clip_id)],
+        "congruency_measure": "nats/token: logP(caption|audio,video) - logP(caption|audio)",
+        "ladder_summary": ladder_summary(ladders),
+        "clips": [ladder.document() for ladder in sorted(ladders, key=lambda item: item.clip_id)],
     }
     artifact_id = publisher.publish(
         STUDY_EXPORT_TYPE,

@@ -180,7 +180,7 @@
       <span class="heard">only what you hear</span>
       <span class="seen">tied to what you see</span>
     </div>
-    <input type="range" id="congruency" min="0" max="1" step="1" value="0"
+    <input type="range" id="congruency" min="0" max="1000" step="1" value="500"
            aria-label="How much the sentence ties the sound to what is visible">
     <div id="ticks"></div>
 
@@ -218,7 +218,6 @@
 
 const el = (id) => document.getElementById(id);
 let clips = [];
-let levels = [];
 let index = 0;
 let results = [];
 let sessionKey = "";
@@ -277,14 +276,26 @@ function buildScale(containerId, name, onPick) {
 
 function currentClip() { return clips[index]; }
 
+// Stops sit where the MEASURE put them, not at even thirds: a drag between
+// two captions covers the distance between them on the congruency axis.
+function nearestStop(share) {
+  const stops = currentClip().levels;
+  let best = 0;
+  for (let index = 1; index < stops.length; index += 1) {
+    if (Math.abs(stops[index].position - share) < Math.abs(stops[best].position - share)) {
+      best = index;
+    }
+  }
+  return best;
+}
+
 function paintCaption() {
   const clip = currentClip();
   const entry = clip.levels[state.position];
   el("caption").textContent = entry.text;
-  // The rule tints from the "heard" end to the "seen" end as the slider moves,
-  // so the axis and the readout are visibly the same dimension.
-  const share = levels.length > 1 ? state.position / (levels.length - 1) : 0;
-  el("caption").style.borderLeftColor = share < 0.5 ? "var(--heard)" : "var(--seen)";
+  // The rule tints from the "heard" end to the "seen" end, so the axis and the
+  // readout are visibly the same dimension.
+  el("caption").style.borderLeftColor = entry.position < 0.5 ? "var(--heard)" : "var(--seen)";
 }
 
 function refresh() {
@@ -300,7 +311,7 @@ function renderClip() {
   playEvents = 0;
   moves = 0;
   firstMoveAt = null;
-  state.position = Math.floor((levels.length - 1) / 2);
+  state.position = Math.floor((clip.levels.length - 1) / 2);
   state.match = null;
   state.touched = false;
 
@@ -308,9 +319,16 @@ function renderClip() {
   player.src = "/media/" + encodeURIComponent(clip.clip_id);
   el("media-note").textContent = "";
 
+  const ticks = el("ticks");
+  ticks.innerHTML = "";
+  for (let stop = 0; stop < clip.levels.length; stop += 1) {
+    const tick = document.createElement("span");
+    tick.style.marginLeft = ticks.childElementCount === 0 ? "0" : "auto";
+    ticks.appendChild(tick);
+  }
+
   const slider = el("congruency");
-  slider.max = String(levels.length - 1);
-  slider.value = String(state.position);
+  slider.value = String(Math.round(clip.levels[state.position].position * 1000));
   for (const radio of document.querySelectorAll('#match-scale input')) { radio.checked = false; }
   el("heard-text").value = "";
   paintCaption();
@@ -319,11 +337,19 @@ function renderClip() {
 }
 
 function onSlide() {
-  state.position = Number(el("congruency").value);
+  const share = Number(el("congruency").value) / 1000;
+  const stop = nearestStop(share);
+  if (stop !== state.position) { moves += 1; }
+  state.position = stop;
   if (!state.touched) { state.touched = true; firstMoveAt = performance.now(); }
-  moves += 1;
   paintCaption();
   refresh();
+}
+
+function settleSlider() {
+  // On release the handle rests exactly on the stop it selected, so the
+  // control never shows a position the caption does not correspond to.
+  el("congruency").value = String(Math.round(currentClip().levels[state.position].position * 1000));
 }
 
 function replay() {
@@ -338,7 +364,7 @@ function nextClip() {
   const clip = currentClip();
   results.push({
     clip_id: clip.clip_id,
-    congruency_level: clip.levels[state.position].level,
+    congruency_position: clip.levels[state.position].position,
     congruency_index: state.position,
     caption_shown: clip.levels[state.position].text,
     match_rating: state.match,
@@ -417,11 +443,11 @@ function begin(fromDraft) {
 async function boot() {
   const doc = await fetch("/api/study").then((reply) => reply.json());
   clips = doc.clips;
-  levels = doc.congruency_levels;
   sessionKey = draftKey(doc);
   buildScale("match-scale", "match", (value) => { state.match = value; });
 
   el("congruency").addEventListener("input", onSlide);
+  el("congruency").addEventListener("change", settleSlider);
   el("player").addEventListener("play", () => { playEvents += 1; });
   el("player").addEventListener("error", () => {
     el("media-note").textContent = "This clip could not be loaded. Please tell the researcher.";
@@ -439,11 +465,6 @@ async function boot() {
     event.preventDefault();
     event.returnValue = "";
   });
-
-  const ticks = el("ticks");
-  for (let position = 0; position < levels.length; position += 1) {
-    ticks.appendChild(document.createElement("span"));
-  }
 
   const draft = loadDraft();
   if (draft) {

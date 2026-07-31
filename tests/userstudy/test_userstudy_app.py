@@ -17,18 +17,30 @@ _EXPORT = {
     "variant_id": "base",
     "validation_accuracy": 0.83,
     "training_candidate_reuse_rate": 0.0,
-    "congruency_ladder": [
-        {"level": 0.0, "conditioning": "audio", "instruction": "heard only"},
-        {"level": 0.5, "conditioning": "audio+video", "instruction": "name the source"},
-        {"level": 1.0, "conditioning": "audio+video", "instruction": "bind sound to sight"},
-    ],
+    "congruency_measure": "nats/token: logP(caption|audio,video) - logP(caption|audio)",
     "clips": [
         {
             "clip_id": "clip-a",
+            "congruency_span": 0.62,
             "levels": [
-                {"level": 0.0, "text": "A low rumble and voices."},
-                {"level": 0.5, "text": "A tram rumbles while people talk."},
-                {"level": 1.0, "text": "The tram crossing the square rumbles as people talk beside it."},
+                {
+                    "position": 0.0,
+                    "congruency": -0.02,
+                    "conditioning": "audio",
+                    "text": "A low rumble and voices.",
+                },
+                {
+                    "position": 0.35,
+                    "congruency": 0.20,
+                    "conditioning": "audio+video",
+                    "text": "A tram rumbles while people talk.",
+                },
+                {
+                    "position": 1.0,
+                    "congruency": 0.60,
+                    "conditioning": "audio+video",
+                    "text": "The tram crossing the square rumbles as people talk beside it.",
+                },
             ],
         }
     ],
@@ -46,12 +58,21 @@ def test_participant_sees_the_ladder_and_nothing_that_unblinds_it(tmp_path: Path
     client = _client(tmp_path)
     assert client.get("/").status_code == 200
     study = client.get("/api/study").json()
-    assert study["congruency_levels"] == [0.0, 0.5, 1.0]
-    assert [entry["text"] for entry in study["clips"][0]["levels"]][0].startswith("A low rumble")
-    # Which arm produced the caption, and how well it scored, must not reach a
-    # participant — knowing it would unblind the judgment being measured.
+    levels = study["clips"][0]["levels"]
+    # Stops sit where the measure put them — 0.35, not an even third.
+    assert [entry["position"] for entry in levels] == [0.0, 0.35, 1.0]
+    assert levels[0]["text"].startswith("A low rumble")
+    # Which arm produced the caption, how well it scored, and which stop the
+    # congruency measure ranked highest must all stay out of the browser:
+    # any of them unblinds the judgment being measured.
     serialized = json.dumps(study)
-    for leaked in ("DPO", "validation_accuracy", "training_candidate_reuse_rate", "instruction"):
+    for leaked in (
+        "DPO",
+        "validation_accuracy",
+        "training_candidate_reuse_rate",
+        "congruency",
+        "conditioning",
+    ):
         assert leaked not in serialized
 
 
@@ -70,7 +91,7 @@ def test_responses_round_trip_and_reject_foreign_clips(tmp_path: Path) -> None:
         "responses": [
             {
                 "clip_id": "clip-a",
-                "congruency_level": 0.5,
+                "congruency_position": 0.35,
                 "congruency_index": 1,
                 "caption_shown": "A tram rumbles while people talk.",
                 "match_rating": 4,
@@ -85,7 +106,7 @@ def test_responses_round_trip_and_reject_foreign_clips(tmp_path: Path) -> None:
     saved = client.post("/api/responses", json=body)
     assert saved.status_code == 200 and saved.json()["responses"] == 1
     written = json.loads((tmp_path / "responses" / "responses-P01.json").read_text())
-    assert written["responses"][0]["congruency_level"] == 0.5
+    assert written["responses"][0]["congruency_position"] == 0.35
 
     stray = {**body, "responses": [{**body["responses"][0], "clip_id": "clip-elsewhere"}]}
     assert client.post("/api/responses", json=stray).status_code == 400

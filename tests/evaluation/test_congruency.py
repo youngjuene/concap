@@ -1,87 +1,105 @@
-"""The congruency ladder: what a slider position is allowed to mean."""
+"""Congruency as a measured axis: what a slider stop is allowed to mean."""
 
 from __future__ import annotations
 
 import pytest
 
 from dpo.evaluation.congruency import (
-    CONGRUENCY_LADDER,
+    MIN_CONGRUENCY_SPAN,
+    CandidateSpec,
     ClipLadder,
     CongruencyError,
-    LadderRung,
-    collapsed_clips,
-    generate_ladders,
-    ladder_for,
+    ScoredCaption,
+    build_ladders,
+    candidate_specs,
     ladder_summary,
+    select_rungs,
 )
 
 
-def test_bottom_rung_is_the_studys_own_prompt_on_audio_alone() -> None:
-    """Level 0 must be the caption the trained model actually produces."""
-    rungs = ladder_for("Describe what can clearly be heard.")
-    assert rungs[0].level == 0.0
-    assert rungs[0].conditioning == "audio"
-    assert rungs[0].instruction == "Describe what can clearly be heard."
-    # Every rung above it sees the frame — congruency with the real video is not
-    # expressible by a model that has never been shown it.
-    assert all(rung.conditioning == "audio+video" for rung in rungs[1:])
-    assert [rung.level for rung in rungs] == sorted(rung.level for rung in rungs)
+def _scored(*pairs: tuple[str, float]) -> list[ScoredCaption]:
+    return [ScoredCaption(text=text, congruency=value, conditioning="audio") for text, value in pairs]
 
 
-def test_shipped_ladder_spans_the_full_slider_range() -> None:
-    rungs = ladder_for("base")
-    assert rungs[0].level == 0.0 and rungs[-1].level == 1.0
-    assert len(rungs) == len(CONGRUENCY_LADDER)
+def test_candidate_specs_bind_the_empty_instruction_to_the_contract_prompt() -> None:
+    specs = candidate_specs("Describe what can clearly be heard.")
+    assert specs[0].instruction == "Describe what can clearly be heard."
+    assert any(spec.conditioning == "audio+video" for spec in specs)
+    # The study's own trained prompt is always in the pool, so the caption the
+    # model actually produces is always a candidate for a rung.
+    assert sum(1 for spec in specs if spec.instruction == "Describe what can clearly be heard.") >= 1
 
 
-@pytest.mark.parametrize(
-    ("rungs", "match"),
-    [
-        ((), "at least one rung"),
-        ((LadderRung(1.0, "audio", "x"), LadderRung(0.0, "audio+video", "y")), "ascending"),
-        ((LadderRung(0.0, "audio", "x"), LadderRung(0.0, "audio+video", "y")), "ascending"),
-        ((LadderRung(0.0, "audio+video", "x"),), "bottom rung must be audio-only"),
-    ],
-)
-def test_ladder_rejects_a_malformed_axis(rungs: tuple[LadderRung, ...], match: str) -> None:
-    with pytest.raises(CongruencyError, match=match):
-        ladder_for("base", rungs=rungs)
+def test_select_rungs_returns_an_ascending_evenly_spread_ladder() -> None:
+    scored = _scored(("a", 0.0), ("b", 0.05), ("c", 0.10), ("d", 0.5), ("e", 1.0))
+    chosen = select_rungs(scored, 3)
+    values = [rung.congruency for rung in chosen]
+    assert values == sorted(values)
+    assert values[0] == 0.0 and values[-1] == 1.0
+    # The middle rung is the candidate nearest the midpoint of the MEASURED
+    # range, not the middle of the candidate list.
+    assert chosen[1].congruency == 0.5
 
 
-def test_generate_ladders_walks_every_clip_and_rung() -> None:
-    rungs = ladder_for("base")
-    seen: list[tuple[str, float]] = []
+def test_select_rungs_refuses_an_axis_a_participant_could_not_feel() -> None:
+    flat = _scored(("a", 0.0), ("b", MIN_CONGRUENCY_SPAN / 4), ("c", MIN_CONGRUENCY_SPAN / 2))
+    with pytest.raises(CongruencyError, match="below"):
+        select_rungs(flat, 3)
 
-    def generate(clip_id: str, rung: LadderRung) -> str:
-        seen.append((clip_id, rung.level))
-        return f"{clip_id} at {rung.level}"
 
-    ladders = generate_ladders(["clip-a", "clip-b"], rungs, generate)
-    assert len(seen) == 2 * len(rungs)
+def test_select_rungs_needs_enough_distinct_captions() -> None:
+    with pytest.raises(CongruencyError, match="distinct captions"):
+        select_rungs(_scored(("same", 0.0), ("same", 1.0)), 3)
+    with pytest.raises(CongruencyError, match="at least two rungs"):
+        select_rungs(_scored(("a", 0.0), ("b", 1.0)), 1)
+
+
+def test_positions_place_stops_where_the_measure_put_them() -> None:
+    ladder = ClipLadder(clip_id="clip-a", rungs=tuple(_scored(("low", 0.0), ("mid", 0.8), ("high", 1.0))))
+    # 0.8 of the way up the range, not the middle: a drag between two captions
+    # covers their distance on the axis, not an artefact of the rung count.
+    assert ladder.positions() == (0.0, 0.8, 1.0)
+    assert ladder.span == pytest.approx(1.0)
+
+
+def test_build_ladders_over_generates_then_selects() -> None:
+    specs = [
+        CandidateSpec("audio", "heard only", 0.0),
+        CandidateSpec("audio+video", "name the source", 0.0),
+        CandidateSpec("audio+video", "bind sound to sight", 0.0),
+    ]
+    # A synthetic model whose captions get more visually grounded per spec, and
+    # a measure that reports exactly that.
+    scores = {"heard only": 0.0, "name the source": 0.4, "bind sound to sight": 0.9}
+    ladders = build_ladders(
+        ["clip-a", "clip-b"],
+        specs,
+        rungs=3,
+        generate=lambda clip_id, spec: spec.instruction,
+        measure=lambda clip_id, caption: scores[caption],
+    )
     assert [ladder.clip_id for ladder in ladders] == ["clip-a", "clip-b"]
-    assert all(len(ladder.captions) == len(rungs) for ladder in ladders)
+    for ladder in ladders:
+        values = [rung.congruency for rung in ladder.rungs]
+        assert values == sorted(values) == [0.0, 0.4, 0.9]
 
 
-def test_generate_ladders_rejects_an_empty_rung() -> None:
-    rungs = ladder_for("base")
-    with pytest.raises(CongruencyError, match="empty caption"):
-        generate_ladders(["clip-a"], rungs, lambda clip_id, rung: "" if rung.level > 0 else "ok")
+def test_build_ladders_rejects_a_clip_with_no_usable_candidate() -> None:
+    with pytest.raises(CongruencyError, match="no usable candidate"):
+        build_ladders(
+            ["clip-a"],
+            [CandidateSpec("audio", "x", 0.0)],
+            rungs=2,
+            generate=lambda clip_id, spec: "   ",
+            measure=lambda clip_id, caption: 0.0,
+        )
 
 
-def test_collapsed_clips_names_sliders_that_would_do_nothing() -> None:
-    """A slider whose caption never changes is a broken instrument, so it is reported."""
-    same = ClipLadder(clip_id="clip-flat", captions=("identical", "identical", "identical"))
-    varied = ClipLadder(clip_id="clip-ok", captions=("low", "middle", "high"))
-    assert collapsed_clips([same, varied]) == ["clip-flat"]
-    summary = ladder_summary([same, varied], ladder_for("base")[:3])
-    assert summary["collapsed_clips"] == ["clip-flat"]
-    assert summary["distinct_captions_per_clip"] == {"min": 1, "max": 3}
-
-
-def test_clip_ladder_document_pairs_each_caption_with_its_level() -> None:
-    rungs = ladder_for("base")[:2]
-    document = ClipLadder(clip_id="clip-a", captions=("low", "high")).document(rungs)
-    assert document == {
-        "clip_id": "clip-a",
-        "levels": [{"level": 0.0, "text": "low"}, {"level": 0.25, "text": "high"}],
-    }
+def test_summary_reports_span_and_the_incongruent_end() -> None:
+    """A negative bottom rung is the principled incongruent end, and worth naming."""
+    negative = ClipLadder(clip_id="clip-neg", rungs=tuple(_scored(("wrong", -0.3), ("right", 0.6))))
+    positive = ClipLadder(clip_id="clip-pos", rungs=tuple(_scored(("plain", 0.1), ("bound", 0.5))))
+    summary = ladder_summary([negative, positive])
+    assert summary["clips"] == 2 and summary["rungs"] == 2
+    assert summary["negative_congruency_clips"] == ["clip-neg"]
+    assert summary["congruency_span"]["max"] == pytest.approx(0.9)

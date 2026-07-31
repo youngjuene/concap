@@ -37,19 +37,22 @@ def _study_document(export: Mapping[str, Any]) -> dict[str, Any]:
     """The participant-facing subset: clips, their ladders, and the axis.
 
     The export also carries the winning experiment, its validation accuracy,
-    and the reuse rate. None of that reaches the browser — a participant who
-    can read which arm produced a caption is no longer blind to it.
+    the reuse rate, and every rung's measured congruency. None of that reaches
+    the browser — a participant who can read which arm produced a caption, or
+    which stop the measure ranked highest, is no longer blind to either.
     """
     if export.get("schema") != STUDY_EXPORT_SCHEMA:
         raise ValueError(f"study document schema must be {STUDY_EXPORT_SCHEMA!r}")
-    ladder = export["congruency_ladder"]
     return {
-        "congruency_levels": [float(rung["level"]) for rung in ladder],
         "clips": [
             {
                 "clip_id": str(clip["clip_id"]),
+                # Position and text only: the stop's place on the axis is what
+                # the control needs, and everything else about how it got there
+                # is exactly what a blind participant must not see.
                 "levels": [
-                    {"level": float(entry["level"]), "text": str(entry["text"])} for entry in clip["levels"]
+                    {"position": float(entry["position"]), "text": str(entry["text"])}
+                    for entry in clip["levels"]
                 ],
             }
             for clip in export["clips"]

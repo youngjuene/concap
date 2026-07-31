@@ -1,29 +1,39 @@
-"""The audiovisual congruency ladder: one clip, one caption per slider position.
+"""Audiovisual congruency as a measured axis, and the slider ladder built on it.
 
-A user-study participant moves a slider and the caption changes tone — from a
-description of the soundtrack that never mentions what is on screen, to one
-that names the visible object and says which sound it makes. The slider
-position is the study's independent variable, so the ladder it walks has to be
-generated deliberately rather than discovered.
+A participant drags a handle and the caption changes tone — from a description
+of the soundtrack that never mentions what is on screen, to one that names the
+visible object and says which sound it makes. The handle's position is the
+study's independent variable, so the axis it walks has to be a quantity, not an
+assumption.
 
-Two things vary together across the rungs, and both are load-bearing.
+**The measure.** For a caption ``c`` on one clip::
 
-**Conditioning.** The bottom rung is audio-only: the model cannot see the frame,
-so it cannot attribute a sound to anything visible even if asked. That rung is
-the caption the study's own trained model produces under the contract's own
-prompt — the thing the rest of the pipeline optimizes. Every rung above it adds
-the video, because congruency with *the actual frame* is not expressible by a
-model that has never seen it. Prompting an audio-only model to "name the
-visible source" would make it invent one, which is a different variable
-entirely — plausibility, not congruency.
+    congruency(c) = [ log P(c | audio, video) - log P(c | audio) ] / |c|
 
-**Instruction.** With the video available, the prompt controls how strongly the
-caption is asked to bind sound to sight.
+in nats per token: how much does *seeing* the clip help explain this sentence?
+A caption describing sound alone gains nothing from the video and scores near
+zero. One that names the thing visibly making the sound scores strongly
+positive. One that names something not on screen scores NEGATIVE — the video
+makes those words less likely — which is a principled incongruent end rather
+than a staged one.
 
-This is stimulus construction, not training or evaluation. It deliberately
-steps outside the audio track's modality isolation, and it may only be used to
-build what a participant reads — never to produce a caption that is scored,
-trained on, or compared against the preference data.
+This reuses the pipeline's own log-probability primitive, the same one that
+scores preference pairs. Nothing here re-defines what likelihood means.
+
+**Why measured rather than prompted.** Writing five instructions of increasing
+"tie sound to sight" strength and declaring that ordering to be the axis is an
+assumption no output verifies: the model may well answer rung three less
+congruently than rung two, leaving the study's independent variable silently
+unordered. So candidates are over-generated across conditionings and wordings,
+each scored, and the ladder is SELECTED from them by measured congruency — with
+non-monotone or imperceptibly narrow ladders refused rather than shipped.
+
+**Why the video is needed at all.** Congruency is defined against what is
+actually in frame, so the upper rungs must condition on the video. An
+audio-only model asked to "name the visible source" invents one, which measures
+plausibility instead. That makes ladder construction a deliberate step outside
+the audio track's modality isolation — stimulus building only, never scoring,
+training, or preference comparison.
 """
 
 from __future__ import annotations
@@ -31,144 +41,219 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-
-@dataclass(frozen=True)
-class LadderRung:
-    """One slider position: how the model is conditioned and what it is asked."""
-
-    level: float
-    conditioning: str  # "audio" | "audio+video"
-    instruction: str
-
-    def document(self) -> dict[str, object]:
-        return {
-            "level": self.level,
-            "conditioning": self.conditioning,
-            "instruction": self.instruction,
-        }
-
-
-# Code-owned, like the experiment matrix: a study may choose how many rungs to
-# use, never redefine what a rung means. The instruction at level 0.0 is
-# replaced at generation time by the contract's own audio prompt, so the bottom
-# of every ladder is the caption the trained model actually produces.
-CONGRUENCY_LADDER: tuple[LadderRung, ...] = (
-    LadderRung(
-        0.00,
+# Enough spread that the selector has a real range to choose rungs from, without
+# making generation cost balloon: every extra spec is one generation plus two
+# scoring passes per clip.
+CANDIDATE_SPECS: tuple[tuple[str, str, float], ...] = (
+    # (conditioning, instruction, temperature). The empty instruction is filled
+    # from the caption contract, so the study's own trained prompt is always a
+    # candidate and normally lands at the bottom of the axis.
+    ("audio", "", 0.0),
+    ("audio", "", 0.7),
+    (
         "audio",
-        "",  # filled from the caption contract; see ladder_for()
+        "Describe in one short English sentence only what can be heard, without"
+        " referring to anything that might be visible.",
+        0.0,
     ),
-    LadderRung(
-        0.25,
+    (
         "audio+video",
         "Describe in one short English sentence what can clearly be heard."
-        " Mention something visible only when the sound plainly comes from it;"
-        " otherwise describe the sound alone.",
+        " Mention something visible only when the sound plainly comes from it.",
+        0.0,
     ),
-    LadderRung(
-        0.50,
+    (
         "audio+video",
         "Describe in one short English sentence what can clearly be heard, naming"
         " the visible thing that makes the most prominent sound.",
+        0.0,
     ),
-    LadderRung(
-        0.75,
+    (
         "audio+video",
         "Describe in one short English sentence what can clearly be heard, tying"
         " each salient sound to the thing visible in the frame that produces it.",
+        0.0,
     ),
-    LadderRung(
-        1.00,
+    (
         "audio+video",
         "Describe in one short English sentence what is visible and what is heard"
         " as one event: name the things in the frame and say which sound each of"
         " them makes.",
+        0.0,
+    ),
+    (
+        "audio+video",
+        "Describe in one short English sentence what is visible and what is heard"
+        " as one event: name the things in the frame and say which sound each of"
+        " them makes.",
+        0.7,
     ),
 )
+
+# A ladder whose ends differ by less than this is not a slider a participant can
+# feel: dragging it would change wording without changing meaning. In nats per
+# token, on captions of roughly twenty tokens.
+MIN_CONGRUENCY_SPAN = 0.02
+
+
+@dataclass(frozen=True)
+class CandidateSpec:
+    """One over-generation setting: how to condition, what to ask, how to sample."""
+
+    conditioning: str  # "audio" | "audio+video"
+    instruction: str
+    temperature: float
+
+
+@dataclass(frozen=True)
+class ScoredCaption:
+    """One candidate caption with its measured congruency, in nats per token."""
+
+    text: str
+    congruency: float
+    conditioning: str
+
+
+@dataclass(frozen=True)
+class ClipLadder:
+    """The selected rungs for one clip, ascending in measured congruency."""
+
+    clip_id: str
+    rungs: tuple[ScoredCaption, ...]
+
+    @property
+    def span(self) -> float:
+        return self.rungs[-1].congruency - self.rungs[0].congruency if self.rungs else 0.0
+
+    def positions(self) -> tuple[float, ...]:
+        """Each rung's place on a 0..1 slider, proportional to measured congruency.
+
+        The control's geometry is the measurement: rungs that differ little sit
+        close together, so the distance a participant drags between two captions
+        is the distance between them on the axis, not an artefact of how many
+        candidates happened to be generated.
+        """
+        if not self.rungs:
+            return ()
+        low = self.rungs[0].congruency
+        span = self.span
+        if span <= 0:
+            return tuple(index / max(1, len(self.rungs) - 1) for index in range(len(self.rungs)))
+        return tuple((rung.congruency - low) / span for rung in self.rungs)
+
+    def document(self) -> dict[str, object]:
+        return {
+            "clip_id": self.clip_id,
+            "congruency_span": self.span,
+            "levels": [
+                {
+                    "position": position,
+                    "congruency": rung.congruency,
+                    "conditioning": rung.conditioning,
+                    "text": rung.text,
+                }
+                for rung, position in zip(self.rungs, self.positions(), strict=True)
+            ],
+        }
 
 
 class CongruencyError(ValueError):
     """Raised when a congruency ladder is degenerate or misconfigured."""
 
 
-def ladder_for(
-    base_prompt: str, *, rungs: Sequence[LadderRung] = CONGRUENCY_LADDER
-) -> tuple[LadderRung, ...]:
-    """The ladder with its bottom rung bound to the study's own caption prompt."""
-    if not rungs:
-        raise CongruencyError("a congruency ladder needs at least one rung")
-    levels = [rung.level for rung in rungs]
-    if levels != sorted(levels) or len(set(levels)) != len(levels):
-        raise CongruencyError("congruency levels must be unique and ascending")
-    if rungs[0].conditioning != "audio":
-        raise CongruencyError(
-            "the bottom rung must be audio-only: it is the caption the trained model produces"
-        )
+def candidate_specs(base_prompt: str) -> tuple[CandidateSpec, ...]:
+    """The over-generation grid, with empty instructions bound to the contract's."""
     return tuple(
-        LadderRung(rung.level, rung.conditioning, base_prompt if index == 0 else rung.instruction)
-        for index, rung in enumerate(rungs)
+        CandidateSpec(conditioning, instruction or base_prompt, temperature)
+        for conditioning, instruction, temperature in CANDIDATE_SPECS
     )
 
 
-@dataclass(frozen=True)
-class ClipLadder:
-    """Every rung's caption for one clip, ordered by ascending congruency."""
+def select_rungs(scored: Sequence[ScoredCaption], count: int) -> tuple[ScoredCaption, ...]:
+    """``count`` distinct captions, ascending and as evenly spread as the data allows.
 
-    clip_id: str
-    captions: tuple[str, ...]
+    Even spacing on the MEASURED axis, not on the candidate list: the goal is
+    that consecutive rungs feel equally far apart to a participant, which is a
+    property of congruency, not of generation order.
+    """
+    if count < 2:
+        raise CongruencyError("a slider needs at least two rungs")
+    unique: dict[str, ScoredCaption] = {}
+    for candidate in sorted(scored, key=lambda item: item.congruency):
+        unique.setdefault(candidate.text, candidate)
+    ordered = sorted(unique.values(), key=lambda item: item.congruency)
+    if len(ordered) < count:
+        raise CongruencyError(
+            f"only {len(ordered)} distinct captions available; need {count} rungs"
+            " — widen CANDIDATE_SPECS or lower the rung count"
+        )
+    low, high = ordered[0].congruency, ordered[-1].congruency
+    if high - low < MIN_CONGRUENCY_SPAN:
+        raise CongruencyError(
+            f"congruency span {high - low:.4f} nats/token is below {MIN_CONGRUENCY_SPAN}:"
+            " every candidate explains this clip equally well with and without the video,"
+            " so a slider over them would change wording without changing meaning"
+        )
+    chosen: list[ScoredCaption] = [ordered[0]]
+    remaining = list(ordered[1:-1])
+    for step in range(1, count - 1):
+        target = low + (high - low) * step / (count - 1)
+        if not remaining:
+            break
+        best = min(remaining, key=lambda item: abs(item.congruency - target))
+        remaining.remove(best)
+        chosen.append(best)
+    chosen.append(ordered[-1])
+    chosen.sort(key=lambda item: item.congruency)
+    if len(chosen) != count:
+        raise CongruencyError(f"selected {len(chosen)} rungs, expected {count}")
+    return tuple(chosen)
 
-    def document(self, rungs: Sequence[LadderRung]) -> dict[str, object]:
-        return {
-            "clip_id": self.clip_id,
-            "levels": [
-                {"level": rung.level, "text": text} for rung, text in zip(rungs, self.captions, strict=True)
-            ],
-        }
 
-
-def generate_ladders(
+def build_ladders(
     clip_ids: Sequence[str],
-    rungs: Sequence[LadderRung],
-    generate: Callable[[str, LadderRung], str],
+    specs: Sequence[CandidateSpec],
+    *,
+    rungs: int,
+    generate: Callable[[str, CandidateSpec], str],
+    measure: Callable[[str, str], float],
 ) -> tuple[ClipLadder, ...]:
-    """One caption per (clip, rung), via a caller-supplied generation function.
+    """Over-generate, measure congruency, and select the rungs, per clip.
 
-    ``generate`` receives the clip id and the rung so the caller owns model
-    loading, media resolution, and decoding; this module owns only what the
-    ladder means.
+    ``generate(clip_id, spec) -> caption`` and ``measure(clip_id, caption) ->
+    nats/token`` are injected so this module owns only what the axis means; the
+    caller owns model loading, media resolution, and decoding.
     """
     if not clip_ids:
         raise CongruencyError("a congruency ladder needs at least one clip")
+    if not specs:
+        raise CongruencyError("over-generation needs at least one candidate spec")
     ladders = []
     for clip_id in clip_ids:
-        captions = tuple(generate(clip_id, rung).strip() for rung in rungs)
-        if any(not text for text in captions):
-            raise CongruencyError(f"clip {clip_id!r} produced an empty caption on some rung")
-        ladders.append(ClipLadder(clip_id=clip_id, captions=captions))
+        scored: list[ScoredCaption] = []
+        for spec in specs:
+            text = generate(clip_id, spec).strip()
+            if not text:
+                continue
+            scored.append(
+                ScoredCaption(text=text, congruency=measure(clip_id, text), conditioning=spec.conditioning)
+            )
+        if not scored:
+            raise CongruencyError(f"clip {clip_id!r} produced no usable candidate captions")
+        ladders.append(ClipLadder(clip_id=clip_id, rungs=select_rungs(scored, rungs)))
     return tuple(ladders)
 
 
-def collapsed_clips(ladders: Sequence[ClipLadder]) -> list[str]:
-    """Clips whose rungs are all the same text — the slider would do nothing.
-
-    Reported rather than raised: a genuinely uniform soundtrack can legitimately
-    read the same at every congruency level, and whether that clip belongs in
-    the study is the researcher's call, not the pipeline's. But a participant
-    moving a slider that never changes the caption is a broken instrument, so
-    the count has to be visible before anyone runs the session.
-    """
-    return sorted(ladder.clip_id for ladder in ladders if len(set(ladder.captions)) == 1)
-
-
-def ladder_summary(ladders: Sequence[ClipLadder], rungs: Sequence[LadderRung]) -> dict[str, object]:
-    distinct = [len(set(ladder.captions)) for ladder in ladders]
+def ladder_summary(ladders: Sequence[ClipLadder]) -> dict[str, object]:
+    spans = [ladder.span for ladder in ladders]
     return {
         "clips": len(ladders),
-        "rungs": len(rungs),
-        "levels": [rung.level for rung in rungs],
-        "distinct_captions_per_clip": {
-            "min": min(distinct) if distinct else 0,
-            "max": max(distinct) if distinct else 0,
+        "rungs": len(ladders[0].rungs) if ladders else 0,
+        "congruency_span": {
+            "min": min(spans) if spans else 0.0,
+            "max": max(spans) if spans else 0.0,
         },
-        "collapsed_clips": collapsed_clips(ladders),
+        "negative_congruency_clips": sorted(
+            ladder.clip_id for ladder in ladders if ladder.rungs[0].congruency < 0
+        ),
     }
