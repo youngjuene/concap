@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import torch
 
-from dpo.contracts.study_contract import EXPERIMENT_IDS, TRACKS, StudyContract
+from dpo.contracts.study_contract import EXPERIMENT_IDS, StudyContract
 from dpo.core.artifacts import ParentEdge
 from dpo.data.derive_pairs import StrictPair
 from dpo.evaluation.preference_accuracy import ScoredPair, evaluate_preferences
@@ -61,65 +61,115 @@ def publish_selection(
     """Score every variant, publish validation/selection reports, and lock."""
     # Common validation scoring: every experiment variant is scored identically.
     validation_reports: dict[str, dict[str, dict[str, float]]] = {}
-    for track in TRACKS:
+    validation_scores: dict[str, dict[str, dict[str, list[dict[str, object]]]]] = {}
+    for track in contract.tracks:
         seed_adapter = seed_adapters[track]
         sft_adapter = policies[("SFT", "base", track, canonical_seed)]
+
+        def _pair_logps(adapter: ModelAdapter, scoring_track: str) -> list[tuple[float, float]]:
+            """(chosen, rejected) completion logps per validation pair, in order."""
+            rows: list[tuple[float, float]] = []
+            for validation_pair in validation_pairs[scoring_track]:
+                media = media_provider(scoring_track, [validation_pair.clip_id])
+                with torch.no_grad():
+                    chosen = float(
+                        adapter.completion_logps(
+                            media, CompletionBatch(texts=(validation_pair.chosen_text,))
+                        )[0]
+                    )
+                    rejected = float(
+                        adapter.completion_logps(
+                            media, CompletionBatch(texts=(validation_pair.rejected_text,))
+                        )[0]
+                    )
+                rows.append((chosen, rejected))
+            return rows
+
+        # SEED and SFT each play two roles: reference for the preference arms
+        # (SEED for six of them, SFT for the warm start) and policy for their
+        # own experiment. Scoring each ONCE per track and reusing the rows
+        # halves the forward passes of a selection run — every reuse is the
+        # same weights on the same pair, so the numbers are identical by
+        # construction. Scored before any trained policy is materialized, so
+        # the checkpoint residency swap happens once per trained cell.
+        seed_logps = _pair_logps(seed_adapter, track)
+        sft_logps = _pair_logps(sft_adapter, track)
         report_by_experiment: dict[str, dict[str, float]] = {}
+        scores_by_experiment: dict[str, dict[str, list[dict[str, object]]]] = {}
         for experiment_id in EXPERIMENT_IDS:
             report_by_variant: dict[str, float] = {}
+            scores_by_variant: dict[str, list[dict[str, object]]] = {}
             for variant in variants_by_experiment[experiment_id]:
-                policy_adapter = policies[(experiment_id, variant.variant_id, track, canonical_seed)]
-                reference_adapter = sft_adapter if experiment_id == "SFT_DPO" else seed_adapter
-                scored = []
-                for validation_pair in validation_pairs[track]:
-                    media = media_provider(track, [validation_pair.clip_id])
-                    chosen_batch = CompletionBatch(texts=(validation_pair.chosen_text,))
-                    rejected_batch = CompletionBatch(texts=(validation_pair.rejected_text,))
-                    with torch.no_grad():
-                        policy_chosen = float(policy_adapter.completion_logps(media, chosen_batch)[0])
-                        policy_rejected = float(policy_adapter.completion_logps(media, rejected_batch)[0])
-                        ref_chosen = float(reference_adapter.completion_logps(media, chosen_batch)[0])
-                        ref_rejected = float(reference_adapter.completion_logps(media, rejected_batch)[0])
-                    scored.append(
-                        ScoredPair(
-                            pair_id=validation_pair.pair_id,
-                            clip_id=validation_pair.clip_id,
-                            track=track,
-                            policy_chosen_logp=policy_chosen,
-                            policy_rejected_logp=policy_rejected,
-                            ref_chosen_logp=ref_chosen,
-                            ref_rejected_logp=ref_rejected,
-                            difficulty=validation_pair.difficulty,
-                            agreement=validation_pair.agreement,
-                        )
+                if experiment_id == "SEED":
+                    policy_logps = seed_logps
+                elif experiment_id == "SFT":
+                    policy_logps = sft_logps
+                else:
+                    policy_adapter = policies[(experiment_id, variant.variant_id, track, canonical_seed)]
+                    policy_logps = _pair_logps(policy_adapter, track)
+                reference_logps = sft_logps if experiment_id == "SFT_DPO" else seed_logps
+                scored = [
+                    ScoredPair(
+                        pair_id=validation_pair.pair_id,
+                        clip_id=validation_pair.clip_id,
+                        track=track,
+                        policy_chosen_logp=policy_chosen,
+                        policy_rejected_logp=policy_rejected,
+                        ref_chosen_logp=ref_chosen,
+                        ref_rejected_logp=ref_rejected,
+                        difficulty=validation_pair.difficulty,
+                        agreement=validation_pair.agreement,
                     )
+                    for validation_pair, (policy_chosen, policy_rejected), (ref_chosen, ref_rejected) in zip(
+                        validation_pairs[track], policy_logps, reference_logps, strict=True
+                    )
+                ]
                 # SEED and SFT carry no trained beta; score them at beta=1.0
                 # (accuracy is beta-invariant; beta only scales the probability fields).
                 hyper = variant.hyperparameters
                 beta = float(str(hyper["beta"])) if "beta" in hyper else 1.0
                 preference_report = evaluate_preferences(scored, beta=beta)
                 report_by_variant[variant.variant_id] = preference_report.accuracy
+                # The per-pair scores are what any inferential comparison needs
+                # (clip-clustered CIs, paired tests, Bradley-Terry); dropping
+                # them here would force the expensive scoring pass to be redone.
+                scores_by_variant[variant.variant_id] = [
+                    {
+                        "pair_id": pair.pair_id,
+                        "clip_id": pair.clip_id,
+                        "policy_chosen_logp": pair.policy_chosen_logp,
+                        "policy_rejected_logp": pair.policy_rejected_logp,
+                        "ref_chosen_logp": pair.ref_chosen_logp,
+                        "ref_rejected_logp": pair.ref_rejected_logp,
+                        "difficulty": pair.difficulty,
+                        "agreement": pair.agreement,
+                    }
+                    for pair in scored
+                ]
             report_by_experiment[experiment_id] = report_by_variant
+            scores_by_experiment[experiment_id] = scores_by_variant
         validation_reports[track] = report_by_experiment
+        validation_scores[track] = scores_by_experiment
     validation_artifact = publisher.publish(
         "dpo.validation-report/v1",
-        {"schema": "dpo.validation-report/v1", "accuracy": validation_reports},
+        {"schema": "dpo.validation-report/v1", "accuracy": validation_reports, "scores": validation_scores},
         parents=tuple(
-            ParentEdge(view_artifacts[track]["validation_pairs"], "validation-pairs") for track in TRACKS
+            ParentEdge(view_artifacts[track]["validation_pairs"], "validation-pairs")
+            for track in contract.tracks
         )
         + tuple(ParentEdge(artifact_id, "matrix-cell") for artifact_id in cell_artifacts.values()),
         stage="validate",
         parameters={"operation": "validate"},
-        clips={row.clip_id for track in TRACKS for row in validation_pairs[track]}
-        | {row.clip_id for track in TRACKS for row in strict_pairs[track]},
+        clips={row.clip_id for track in contract.tracks for row in validation_pairs[track]}
+        | {row.clip_id for track in contract.tracks for row in strict_pairs[track]},
         role_exposure={"train", "validation"},
-        selection_exposure={row.clip_id for track in TRACKS for row in validation_pairs[track]},
+        selection_exposure={row.clip_id for track in contract.tracks for row in validation_pairs[track]},
     )
     # Selection: one winning variant per experiment and track (max validation
     # accuracy, lexical variant-id tie-break), then experiments ranked by their
     # winner. Only selected variants reach the lock.
     selected_variants: dict[str, dict[str, str]] = {}
-    for track in TRACKS:
+    for track in contract.tracks:
         selected_variants[track] = {}
         for experiment_id in EXPERIMENT_IDS:
             per_variant = validation_reports[track][experiment_id]
@@ -134,7 +184,7 @@ def publish_selection(
                 experiment_id,
             ),
         )
-        for track in TRACKS
+        for track in contract.tracks
     }
     selection_artifact = publisher.publish(
         "dpo.selection-report/v1",
@@ -149,7 +199,7 @@ def publish_selection(
                     )
                     for experiment_id in EXPERIMENT_IDS
                 }
-                for track in TRACKS
+                for track in contract.tracks
             },
             "canonical_seed": canonical_seed,
             "note": selection_note,
@@ -166,7 +216,7 @@ def publish_selection(
                 track: cells[
                     (experiment_id, selected_variants[track][experiment_id], track)
                 ].checkpoint_signature
-                for track in TRACKS
+                for track in contract.tracks
             }
             for experiment_id in EXPERIMENT_IDS
         },

@@ -90,7 +90,10 @@ def precompute_reference_logps(
 ) -> dict[str, tuple[float, float]]:
     """Reference log-probabilities per pair id, computed once, without gradients."""
     table: dict[str, tuple[float, float]] = {}
-    with torch.no_grad():
+    # Eval mode, not just no_grad: the reference shares its module with the
+    # policy, so leaving it in train mode would apply LoRA dropout to the
+    # reference logps that every preference objective measures against.
+    with torch.no_grad(), reference.module_mode(training=False):
         for batch in batches:
             chosen = reference.completion_logps(batch.media, batch.chosen)
             rejected = reference.completion_logps(batch.media, batch.rejected)
@@ -133,7 +136,9 @@ class PreferenceTrainer:
 
     def _reference_pair_logps(self, batch: PreferencePairBatch) -> tuple[torch.Tensor, torch.Tensor]:
         if self.reference is not None:
-            with torch.no_grad():
+            # Same module as the policy, so the mode flips here and flips back:
+            # a reference pass must not see dropout even mid-training-step.
+            with torch.no_grad(), self.reference.module_mode(training=False):
                 chosen = self.reference.completion_logps(batch.media, batch.chosen)
                 rejected = self.reference.completion_logps(batch.media, batch.rejected)
             return chosen.detach(), rejected.detach()
@@ -147,8 +152,11 @@ class PreferenceTrainer:
         return chosen, rejected
 
     def preference_batch(self, batch: PreferencePairBatch) -> PreferenceBatch:
-        policy_chosen = self.policy.completion_logps(batch.media, batch.chosen)
-        policy_rejected = self.policy.completion_logps(batch.media, batch.rejected)
+        with self.policy.module_mode(training=True):
+            policy_chosen = self.policy.completion_logps(batch.media, batch.chosen)
+            policy_rejected = self.policy.completion_logps(batch.media, batch.rejected)
+        # Ordered after the policy pass, so the reference's eval-mode block is
+        # entered and left cleanly rather than nested inside a train-mode one.
         ref_chosen, ref_rejected = self._reference_pair_logps(batch)
         return PreferenceBatch(
             policy_chosen_logps=policy_chosen,

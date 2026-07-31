@@ -114,7 +114,7 @@ def test_train_run_refuses_a_tiny_lora_scope_before_any_workspace(tmp_path: Path
                 *("--contract", _gemma_contract_text(tmp_path, language_model_targets=False)),
                 *("--artifact-id", "sha256:" + "ab" * 32),
                 *("--checkpoint-dir", str(tmp_path / "checkpoints")),
-                *("--backend-config", "configs/gemma4/e4b.toml"),
+                *("--backend-config", "configs/gemma4/e4b-audio.toml"),
                 *("--media-dir", str(tmp_path)),
             ]
         )
@@ -136,7 +136,7 @@ def test_live_training_gates_on_cuda_without_side_effects(
             *("--contract", _gemma_contract_text(tmp_path, language_model_targets=True)),
             *("--artifact-id", "sha256:" + "ab" * 32),
             *("--checkpoint-dir", str(tmp_path / "checkpoints")),
-            *("--backend-config", "configs/gemma4/e4b.toml"),
+            *("--backend-config", "configs/gemma4/e4b-audio.toml"),
             *("--media-dir", str(tmp_path)),
         ]
     )

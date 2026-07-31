@@ -1,7 +1,16 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary live-boundary-smoke golden
+.PHONY: sync check test lint typecheck locks smoke canary live-boundary-smoke golden annotate report
+
+# Operator loop for the live study (configs/study/street-audio.toml).
+SPLIT ?= train
+annotate:
+	uv run dpo annotation serve --tasks data/annotation/tasks-$(SPLIT).json \
+	  --media-dir data/live/media --out data/annotation/responses
+
+report:
+	uv run dpo report show --workspace artifacts/street
 
 sync:
 	uv sync --dev

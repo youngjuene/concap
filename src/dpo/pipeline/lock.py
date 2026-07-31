@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from dpo.contracts.study_contract import EXPERIMENT_IDS, TRACKS, StudyContract
+from dpo.contracts.study_contract import EXPERIMENT_IDS, StudyContract
 from dpo.core.identity import semantic_hash
 
 HASH_PREFIX = "sha256:"
@@ -55,11 +55,15 @@ def create_lock_manifest(
     metric_versions: Mapping[str, str],
     selection_report_hash: str,
 ) -> LockManifest:
+    declared = set(contract.tracks)
     for experiment_id in EXPERIMENT_IDS:
         tracks = checkpoint_hashes.get(experiment_id)
-        if tracks is None or set(tracks) != set(TRACKS):
-            raise LockError(f"lock manifest requires checkpoint hashes for {experiment_id} on both tracks")
-        for track in TRACKS:
+        if tracks is None or set(tracks) != declared:
+            raise LockError(
+                f"lock manifest requires checkpoint hashes for {experiment_id} on"
+                f" every declared track {sorted(declared)}"
+            )
+        for track in sorted(declared):
             value = str(tracks[track])
             if not value.startswith(HASH_PREFIX):
                 raise LockError(f"checkpoint hash for {experiment_id}/{track} must be a sha256 hash")
@@ -76,7 +80,7 @@ def create_lock_manifest(
         "schema": "dpo.lock-manifest/v1",
         "contract_hash": contract.contract_hash,
         "checkpoint_hashes": {
-            experiment_id: {track: str(checkpoint_hashes[experiment_id][track]) for track in TRACKS}
+            experiment_id: {track: str(checkpoint_hashes[experiment_id][track]) for track in sorted(declared)}
             for experiment_id in EXPERIMENT_IDS
         },
         "processor_hash": processor_hash,

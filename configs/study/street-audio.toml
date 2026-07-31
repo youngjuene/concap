@@ -1,0 +1,252 @@
+# THE study contract: Gemma 4 E4B on the audio caption track, over the
+# street-scene corpus. Preferences are collected by the two authors on captions
+# of audio events; the trained winner then supplies the captions for a separate
+# user study, which measures their effect on participants under three soundtrack
+# conditions and is a different instrument entirely (see `dpo study export`).
+#
+# It began as the live smoke contract ("concap-street-smoke-v1") and was
+# promoted once the corpus, prompts, and backend were settled; the registry,
+# candidate pools, and annotation sessions carry stage-slice identities that a
+# study_id change does not touch, so everything generated under the smoke name
+# remains valid here. Only [tracks.audio] is declared — see the note where
+# [tracks.visual] would be.
+#
+# Media is staged from the uncaptioned source pool rather than from the c1..c4
+# condition renders: the renders that carry captions burn them into the frame,
+# and a caption-free render either has no audio (c3) or is a different clip from
+# the one c3 sampled. The condition renders remain the user study's stimuli.
+# Each staged clip still carries both a muted mp4 and a 16 kHz wav, so the same
+# corpus can serve a visual arm without re-staging if one is ever added.
+#
+# Inherited from configs/study/canary.toml except where a live run cannot use
+# canary's value. Three such places, all deliberate:
+#   - both prompts: canary's wording lets a model narrate its own presentation
+#     ("the first image shows ...", "The recording captures ..."), which a live
+#     caption must not do, and on the audio side it collapsed candidate
+#     diversity enough to fail pool construction outright;
+#   - training.lora.targets: canary names the offline tiny model's modules, and
+#     resolve_lora_targets rejects them for any Gemma run.
+# Canary keeps its values because its hash feeds the golden fixtures. Beyond
+# those, only the execution class, the seed model, and the live precision
+# differ — so the two contracts remain comparable everywhere it matters.
+
+schema_version = 1
+study_id = "concap-street-audio-v1"
+execution_class = "live"
+
+[corpus]
+group_key = "source_video_id"
+split_seed = 20260722
+adjacency_guard_ms = 2000
+
+[corpus.split_fractions]
+train = 0.55
+validation = 0.15
+test = 0.15
+study = 0.15
+
+# NO [tracks.visual]. This study collects preferences on audio captions only,
+# and the captions it judges must describe audio events — never the visual scene
+# on its own. Declaring the visual track would make scene captions generable,
+# and `dpo train run` would then require visual views that no one will annotate.
+# Leaving it undeclared makes `candidates generate --track visual` fail on this
+# contract, so the exclusion is enforced rather than remembered.
+#
+# A measured visual track does exist in git history (prompt_hash
+# sha256:9eee7b58..., video_frames = 2, and the wording that stops E4B narrating
+# "the first image shows ..."); restore that block and [backends.visual] if a
+# visual arm is ever added.
+
+[tracks.audio]
+contract_version = "audio-caption/v1"
+language = "en"
+min_words = 4
+max_words = 30
+min_clip_ms = 5000
+max_clip_ms = 15000
+# Diverges from canary.toml for the same reason as the visual prompt, and the
+# audio case is worse: canary's "perceived from the recording" made E4B open
+# every caption with "The recording captures ...", which both narrates the
+# presentation and collapses diversity — two of four generations for one clip
+# came back byte-identical and candidate_records.py rejected the pool. Naming
+# the presentation in the instruction is what puts it in the output.
+#
+# For the same reason this wording avoids "scene": it is in
+# VISUAL_CLAIM_LEXICON, so an instruction containing it steers the model
+# straight into the audit's visual-claim screen. Every word here is checked
+# against that lexicon.
+prompt = "Describe in one short English sentence the salient events, their ordering, and the overall setting that can clearly be heard. Write about what is happening, never about the recording, the audio, or the clip; express the ordering as events following one another."
+prompt_hash = "sha256:c5e37310a3c6f8c89adb8958e7932927ff421ee12f453dd32fe34f2d3dc4c3bd"
+transcribe_speech = false
+
+# One seed policy, and it names the one track this contract declares, so the
+# entry is exactly true. It used to describe the audio backend while the visual
+# track silently ran a different checkpoint, which made splitting the seed model
+# per track a prerequisite for any reportable run; consolidating on E4B and then
+# declaring one track removed that prerequisite instead of paying it.
+[models.seed]
+model_id = "google/gemma-4-E4B-it"
+revision = "a4c2d58be94dda072b918d9db64ee85c8ed34e3f"
+implementation = "dpo.models.gemma4.adapter.GemmaCaptionAdapter"
+# sha256 of "google/gemma-4-E4B-it@<revision>": reproducible, and the Hub
+# revision is the immutable identity of the weights it names.
+lock_hash = "sha256:61c8ddc3b872ee97afb43a7bd067d001da1c73bd8ac27ccfb24d3fe2cf8ad8c0"
+init_seed = 0
+
+# Provenance pin: the runtime config this track is allowed to load. One entry,
+# because one track is declared — a [backends.visual] here would be refused as
+# serving a track this contract does not declare.
+[backends.audio]
+config_hash = "sha256:ae9a3338e5419c749d684543501fff9c5b7c288e64a4655f8b22834aed3e83d1"
+
+[candidates]
+source_policy = "C0"
+per_clip = 4
+challenge_fraction_min = 0.2
+challenge_fraction_max = 0.3
+controlled_error_rate = 0.25
+max_new_tokens = 48
+generation_seed = 1
+
+[[candidates.decoding]]
+name = "greedy"
+temperature = 0.0
+top_p = 1.0
+count = 1
+
+[[candidates.decoding]]
+name = "sample"
+temperature = 0.7
+top_p = 0.9
+count = 2
+
+[[candidates.decoding]]
+name = "controlled_error"
+temperature = 0.7
+top_p = 0.9
+count = 1
+
+[pairs]
+per_clip_min = 3
+per_clip_max = 6
+seed = 7
+near_duplicate_jaccard = 0.9
+
+[annotation]
+# Two annotators (the authors), so two judgments is the ceiling, not a choice.
+# Note what this does to the view filters: agreement is modal/total, which for
+# two raters is either 0.5 or 1.0, so min_agreement = 0.6 below means UNANIMITY.
+# That is the only sensible rule for a pair of raters — there is no middle
+# value to threshold — but it makes inter-rater agreement the retention rate
+# directly, so a 70% agreement rate keeps 70% of pairs and no more.
+judgments_per_pair = 2
+repeat_fraction = 0.12
+attention_fraction = 0.05
+collection_version = "1.0"
+min_response_ms = 1500
+max_position_bias = 0.2
+min_attention_pass = 0.8
+
+[views.sft]
+min_agreement = 0.6
+min_confidence = 3.0
+
+[views.pair_strict]
+min_agreement = 0.6
+min_strength = 2.0
+
+[views.weighting]
+strategy = "inverse_pair_count"
+
+[training]
+seeds = [1, 2, 3]
+canonical_seed = 1
+# The live QLoRA backend computes in bfloat16; the canary's fp32 is a
+# fixture-only setting.
+precision = "bf16"
+max_completion_tokens = 128
+epochs = 2.0
+learning_rate = 0.005
+sft_learning_rate = 0.01
+batch_size = 4
+gradient_accumulation_steps = 1
+max_grad_norm = 1.0
+
+[training.lora]
+rank = 16
+alpha = 32
+dropout = 0.05
+# canary's ["mixer", "head"] names the offline tiny model's modules; a Gemma run
+# needs the text language model's projections, and resolve_lora_targets rejects
+# the tiny names outright. Attention plus MLP on every language-model layer, and
+# nothing outside it — the vision and audio towers must stay frozen, which
+# assert_text_only_lora_scope re-checks after every attach.
+targets = [
+  "^model\\.language_model\\.layers\\.[0-9]+\\.(self_attn\\.(q_proj|k_proj|v_proj|o_proj)|mlp\\.(gate_proj|up_proj|down_proj))$",
+]
+
+[experiments.SEED]
+objective = "none"
+
+[experiments.SEED.gate]
+max_invalid_output_rate = 0.5
+min_event_hit_rate = 0.0
+require_logprob_support = true
+
+[experiments.SFT]
+objective = "sft"
+
+[experiments.DPO]
+objective = "dpo"
+beta = 0.1
+
+[experiments.IPO]
+objective = "ipo"
+beta = 0.1
+
+[experiments.CDPO]
+objective = "cdpo"
+beta = 0.1
+epsilon = 0.1
+
+[experiments.RDPO]
+objective = "rdpo"
+beta = 0.1
+epsilon = 0.1
+epsilon_mode = "estimated"
+
+[experiments.DRDPO]
+objective = "drdpo"
+beta = 0.1
+beta_prime = 0.5
+
+[experiments.WDPO]
+objective = "wdpo"
+beta = 0.1
+flip_warmup_ratio = 0.1
+flip_budget = 0.25
+tail_quantile = 0.8
+max_tail_cap = 0.5
+cap_floor = 0.0
+enable_correction = true
+enable_winsorization = true
+paper_revision = "arxiv_2603.07211v1"
+code_commit = ""
+view = "pair_strict"
+
+[experiments.SFT_DPO]
+objective = "dpo"
+beta = 0.1
+
+[validation]
+temperature = 0.0
+top_p = 1.0
+max_new_tokens = 48
+# Read by `dpo report analyze` as the clip-clustered bootstrap resample count.
+# (Removed once as a dead knob; restored the day its consumer was wired.)
+bootstrap_samples = 200
+
+[robustness]
+flip_rates = [0.0, 0.1, 0.2, 0.3]
+flip_seed = 13
+

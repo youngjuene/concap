@@ -1,6 +1,7 @@
 """Shared train-stage implementation: run and publish every matrix cell.
 
-Every experiment variant trains on both tracks at the canonical seed through
+Every experiment variant trains on each track the contract declares, at the
+canonical seed, through
 one runner interface, and each cell is published with per-variant cache
 identity: the ``slice_override`` keys the cell on exactly what it trained
 from, so extending a sweep axis recomputes only the new cells and leaves
@@ -12,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Protocol
 
-from dpo.contracts.study_contract import EXPERIMENT_IDS, TRACKS, StudyContract
+from dpo.contracts.study_contract import EXPERIMENT_IDS, StudyContract
 from dpo.core.artifacts import ParentEdge
 from dpo.core.identity import semantic_hash
 from dpo.data.derive_pairs import StrictPair
@@ -73,7 +74,7 @@ def training_cell_contract_ids(contract: StudyContract) -> frozenset[str]:
     identities = set()
     for experiment_id in EXPERIMENT_IDS:
         for variant in expand_experiment(contract, experiment_id):
-            for track in TRACKS:
+            for track in contract.tracks:
                 resolved = resolve_experiment(
                     contract, experiment_id, track=track, seed=canonical_seed, variant=variant
                 )
@@ -107,7 +108,7 @@ def publish_training_matrix(
     cell_artifacts: dict[tuple[str, str, str], str] = {}
     for experiment_id in EXPERIMENT_IDS:
         for variant in variants_by_experiment[experiment_id]:
-            for track in TRACKS:
+            for track in contract.tracks:
                 cell = runner.run_cell(experiment_id, track=track, seed=canonical_seed, variant=variant)
                 cells[(experiment_id, variant.variant_id, track)] = cell
                 parent_edges: list[ParentEdge] = []

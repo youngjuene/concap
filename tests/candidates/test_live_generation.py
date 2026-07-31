@@ -73,7 +73,7 @@ def test_gemma_generates_real_audio_captions(tmp_path: Path) -> None:
         _gemma_contract(),
         track="audio",
         clip_ids=clip_ids,
-        backend_config_path=Path("configs/gemma4/e4b.toml"),
+        backend_config_path=Path("configs/gemma4/e4b-audio.toml"),
         media_dir=tmp_path,
     )
     per_clip = int(str(_gemma_contract().candidates["per_clip"]))
@@ -98,7 +98,7 @@ def test_gemma_completion_scoring_is_media_conditioned(tmp_path: Path) -> None:
         _write_sine(tmp_path / f"{clip_id}.wav", frequency=262.0 * (index + 1))
     files = {clip_id: tmp_path / f"{clip_id}.wav" for clip_id in clip_ids}
     adapter = GemmaCaptionAdapter(
-        config=load_config("configs/gemma4/e4b.toml"),
+        config=load_config("configs/gemma4/e4b-audio.toml"),
         contract=load_contract("configs/study/canary.toml").tracks["audio"],
         media_resolver=lambda clip_id: files[clip_id],
     )

@@ -1,0 +1,54 @@
+# Gemma 4 E4B backend for the AUDIO caption track (audio tower input). Runtime
+# and hardware concerns only — every result-affecting hyperparameter (learning
+# rates, epochs, batch geometry, LoRA topology, seeds, precision) lives in the
+# study contract, which pins this file's hash for provenance.
+# Hardware target: one RTX 3090 (24 GB), QLoRA.
+
+[model]
+model_id = "google/gemma-4-E4B-it"
+revision = "a4c2d58be94dda072b918d9db64ee85c8ed34e3f"
+media_inputs = "audio"
+
+# MEASURED, UNRESOLVED: nf4 destroys this model's audio captioning. On real
+# 10.5 s street recordings and on synthetic textures with known ground truth,
+# 4-bit E4B answers almost every clip with the same boilerplate ("a continuous,
+# loud burst of static or noise with no discernible events or setting"), and
+# describes its own input as "repeated, unintelligible characters". The cause
+# is not the staging or the tower:
+#   - the processor's input_features are well-scaled and distinct per clip
+#     (mean -1.8 vs -2.8, std ~1.0; nothing truncated or saturated),
+#   - level and duration are irrelevant (peak-normalising and trimming to 4 s
+#     change nothing), and so is the prompt (four rewordings, all degenerate),
+#   - leaving the audio tower in bf16 via llm_int8_skip_modules changes nothing,
+#     so it is the quantised LANGUAGE MODEL that cannot read the audio tokens.
+# Unquantised bf16 E4B fixes it outright at 14.8 GiB resident: white noise ->
+# "heavy rain falling", a tremolo tone -> "a bell", and an Amsterdam square ->
+# "a group of people gathered outdoors, likely at a public event, with some
+# talking and moving around".
+#
+# 12B is NOT a fallback for this track, at any precision. It is an encoder-free
+# unified model: the 305M USM conformer is discarded and raw 16 kHz audio is
+# chunked into 640-sample frames projected straight into the LM by RMSNorm ->
+# Linear, a 2.5M-parameter path against E4B's 308.8M tower. Its published audio
+# results are FLEURS ASR and CoVoST — speech only — and on non-speech street
+# audio it hallucinates speech for everything, answering two different clips
+# with one byte-identical sentence in bf16 as well as nf4. The leading RMSNorm
+# also means clip level cannot be the cause. Use E4B for audio.
+#
+# Flipping load_in_4bit to false is the only known working audio configuration.
+# It is now expressible — backend_config.py no longer requires 4-bit, and the
+# bf16 path is verified end to end (14.8 GiB, all-bfloat16 params, base frozen,
+# checkpointing armed) — but it is still not free: the 24 GB training budget was
+# measured against a 4-bit base, so the matrix must be re-measured before the
+# audio track can be trained.
+[quantization]
+# Deliberately unquantized: see the measurement above. quant_type and
+# double_quant are inert while load_in_4bit is false, and are kept only so
+# flipping it back needs no other edit.
+load_in_4bit = false
+quant_type = "nf4"
+double_quant = true
+compute_dtype = "bfloat16"
+
+[runtime]
+gradient_checkpointing = true

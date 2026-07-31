@@ -169,6 +169,34 @@ class OwnedWorkspace:
         return candidates
 
 
+def screen_checkpoint_directory(adapter_dir: str | Path) -> Path:
+    """Structural screen for a checkpoint directory about to be loaded.
+
+    The subset of ``validate_safetensors_adapter`` that needs no identity
+    manifest: no pickle-family files, no symlinks anywhere, and the safetensors
+    weights present. This is what the training backend runs before handing a
+    ``--checkpoint-dir`` adapter to peft — peft's loader would happily follow a
+    symlink or import a planted ``training_args.bin``. The full identity check
+    stays with the release workflow, which writes the manifest it verifies.
+    """
+    root = Path(adapter_dir)
+    if not root.is_dir() or root.is_symlink():
+        raise CheckpointSafetyError("adapter must be a real directory")
+    if any(path.is_symlink() for path in root.rglob("*")):
+        raise CheckpointSafetyError("adapter directory must not contain symlinks")
+    unsafe = sorted(
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in UNSAFE_CHECKPOINT_SUFFIXES
+    )
+    if unsafe:
+        raise CheckpointSafetyError(f"legacy or unsafe checkpoint file is forbidden: {unsafe[0]}")
+    weights = root / "adapter_model.safetensors"
+    if not weights.is_file() or weights.is_symlink():
+        raise CheckpointSafetyError("adapter_model.safetensors is required")
+    return root
+
+
 def validate_safetensors_adapter(
     adapter_dir: str | Path,
     expected_identity: Mapping[str, object],

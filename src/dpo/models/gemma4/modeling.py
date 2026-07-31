@@ -69,17 +69,28 @@ def _apply_text_only_template(processor: Any) -> None:
         processor.tokenizer.chat_template = stripped
 
 
-def load_quantized_base(config: BackendConfig) -> Any:
+def load_base_model(config: BackendConfig) -> Any:
+    """The pinned checkpoint, quantized to nf4 or left in bfloat16.
+
+    Unquantized is not the default but it is a supported configuration: the
+    audio track needs it, because nf4 leaves the language model unable to read
+    the audio soft tokens (measured; see configs/gemma4/e4b-audio.toml). Passing no
+    quantization_config is what makes ``dtype`` alone govern the weights.
+    """
     import torch
     from transformers import AutoModelForMultimodalLM, BitsAndBytesConfig
 
     if not torch.cuda.is_available():
-        raise ModelSetupError("4-bit Gemma 4 loading requires a CUDA GPU")
-    quantization_config = BitsAndBytesConfig(  # type: ignore[no-untyped-call]
-        load_in_4bit=config.quantization.load_in_4bit,
-        bnb_4bit_quant_type=config.quantization.quant_type,
-        bnb_4bit_use_double_quant=config.quantization.double_quant,
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        raise ModelSetupError("Gemma 4 loading requires a CUDA GPU")
+    quantization_config = (
+        BitsAndBytesConfig(  # type: ignore[no-untyped-call]
+            load_in_4bit=True,
+            bnb_4bit_quant_type=config.quantization.quant_type,
+            bnb_4bit_use_double_quant=config.quantization.double_quant,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+        if config.quantization.load_in_4bit
+        else None
     )
     model = AutoModelForMultimodalLM.from_pretrained(
         config.model.model_id,
@@ -96,15 +107,29 @@ def load_quantized_base(config: BackendConfig) -> Any:
     return model
 
 
-def prepare_quantized_model(model: Any, *, gradient_checkpointing: bool) -> Any:
-    """The one k-bit preparation: non-reentrant checkpointing, casts, grad hooks."""
-    from peft import prepare_model_for_kbit_training
+def prepare_base_model(model: Any, *, gradient_checkpointing: bool, quantized: bool) -> Any:
+    """Freeze the base and arm checkpointing, before any LoRA attach.
 
-    return prepare_model_for_kbit_training(  # type: ignore[no-untyped-call]
-        model,
-        use_gradient_checkpointing=gradient_checkpointing,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-    )
+    The 4-bit path is peft's k-bit preparation: non-reentrant checkpointing,
+    layernorm upcasts, grad hooks. The bf16 path needs the same two effects
+    without the k-bit casts, so it does them directly — freeze every base
+    parameter, then make the embedding output require grad, or checkpointing
+    has no graph to recompute through once the base is frozen.
+    """
+    if quantized:
+        from peft import prepare_model_for_kbit_training
+
+        return prepare_model_for_kbit_training(  # type: ignore[no-untyped-call]
+            model,
+            use_gradient_checkpointing=gradient_checkpointing,
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+    if gradient_checkpointing:
+        model.enable_input_require_grads()
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    return model
 
 
 def trainable_parameter_names(model: Any) -> list[str]:

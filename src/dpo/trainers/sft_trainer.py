@@ -76,7 +76,10 @@ class SftTrainer:
         self.optimizer = torch.optim.AdamW(parameters, lr=config.learning_rate)
 
     def step(self, batch: SftBatch, global_step: int) -> float:
-        logps = self.policy.completion_logps(batch.media, batch.completions)
+        # Train mode is what arms gradient checkpointing (gated per decoder layer
+        # on self.training) and what makes the contract's LoRA dropout apply.
+        with self.policy.module_mode(training=True):
+            logps = self.policy.completion_logps(batch.media, batch.completions)
         output = self.objective.loss(logps, batch.weights)
         if not bool(torch.isfinite(output.loss.detach())):
             raise TrainerError(f"non-finite SFT loss at step {global_step}")

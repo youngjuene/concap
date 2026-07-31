@@ -28,11 +28,40 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from dpo.annotation.collection_tasks import RESPONSES_SCHEMA, TASKS_SCHEMA
 from dpo.annotation.raw_annotations import AnnotationError
+from dpo.candidates.generation import AUDIO_MEDIA_SUFFIXES, VIDEO_MEDIA_SUFFIXES
 from dpo.contracts.study_contract import CHOICES, REASON_TAGS, TIE_SUBTYPES
 
 CLIP_ID_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
-AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".ogg", ".flac")
-VIDEO_SUFFIXES = (".mp4", ".webm", ".mov")
+# One suffix vocabulary for staged clip media, shared with the generation-side
+# resolver so the file the model read and the file the annotator hears can
+# never drift apart by extension.
+AUDIO_SUFFIXES = AUDIO_MEDIA_SUFFIXES
+VIDEO_SUFFIXES = VIDEO_MEDIA_SUFFIXES
+# Presentations whose media a flat directory cannot disambiguate: they are all
+# videos of the same clip differing only in soundtrack, so ``{clip_id}.mp4``
+# could serve any of them and the annotator would never know which they got.
+# These must come from a presentation-scoped subdirectory or 404.
+SCOPED_ONLY_PRESENTATIONS = ("unmuted_video", "substituted_audio_video")
+
+
+def resolve_presentation_media(media_dir: Path, clip_id: str, presentation: str) -> Path | None:
+    """The file for one clip under one presentation, or None.
+
+    ``media_dir/<presentation>/<clip_id>.<ext>`` wins. A flat
+    ``media_dir/<clip_id>.<ext>`` is accepted only for the presentations whose
+    content it cannot get wrong — a muted video and an audio-only track are
+    exactly what a track-staged corpus already holds.
+    """
+    suffixes = AUDIO_SUFFIXES if presentation == "audio_only" else VIDEO_SUFFIXES
+    bases = [media_dir / presentation]
+    if presentation not in SCOPED_ONLY_PRESENTATIONS:
+        bases.append(media_dir)
+    for base in bases:
+        for suffix in suffixes:
+            candidate = base / f"{clip_id}{suffix}"
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 def build_app(tasks_document: Mapping[str, Any], media_dir: Path, out_path: Path) -> FastAPI:
@@ -68,15 +97,17 @@ def build_app(tasks_document: Mapping[str, Any], media_dir: Path, out_path: Path
     def media(clip_id: str, presentation: str = "muted_video") -> Response:
         if not CLIP_ID_RE.fullmatch(clip_id):
             return JSONResponse({"error": f"invalid clip id {clip_id!r}"}, status_code=400)
+        resolved = resolve_presentation_media(media_dir, clip_id, presentation)
+        if resolved is not None:
+            return FileResponse(resolved)
         suffixes = AUDIO_SUFFIXES if presentation == "audio_only" else VIDEO_SUFFIXES
-        for suffix in suffixes:
-            candidate = media_dir / f"{clip_id}{suffix}"
-            if candidate.is_file():
-                return FileResponse(candidate)
+        where = f"{media_dir / presentation}"
+        if presentation not in SCOPED_ONLY_PRESENTATIONS:
+            where += f" or {media_dir}"
         return JSONResponse(
             {
                 "error": f"no media for clip {clip_id!r} with presentation {presentation!r};"
-                f" expected {clip_id}<{'|'.join(suffixes)}> under {media_dir}"
+                f" expected {clip_id}<{'|'.join(suffixes)}> under {where}"
             },
             status_code=404,
         )

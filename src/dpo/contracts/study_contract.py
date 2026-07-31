@@ -40,10 +40,18 @@ EXECUTION_CLASSES = ("synthetic_canary", "live")
 TERMINAL_STATES = ("offline", "release")
 TERMINAL_VALUES = ("pending", "blocked_pending_external_operation", "complete")
 
-# How a clip is presented to an annotator. The visual track is always the
-# muted video; the audio track is audio-only by default, with an explicit
-# per-clip opt-in to unmuted video — every judgment records which one it saw,
-# so any cross-modal contamination stays measurable.
+# How a clip is presented to a PREFERENCE annotator — someone choosing between
+# two candidate captions. Every judgment records which presentation it saw, so
+# any cross-modal contamination stays measurable.
+#
+# This vocabulary is not the downstream user study's condition set. That study
+# measures the effect of a trained model's captions on participants and is a
+# different instrument with a different response schema; a caption condition
+# there does not have to be expressible here.
+#
+# The visual track is always the muted video, and the audio track must be able
+# to hear something — a preference judgment about an audio caption made in
+# silence is unverifiable, not a condition.
 PRESENTATIONS = ("muted_video", "audio_only", "unmuted_video")
 AUDIO_PRESENTATIONS = ("audio_only", "unmuted_video")
 
@@ -540,7 +548,14 @@ def _validate_annotation(value: object) -> None:
             "min_attention_pass",
         },
     )
-    _integer(table["judgments_per_pair"], "annotation.judgments_per_pair", minimum=3)
+    # Three or more gives a majority that resolves a split; two does not, and
+    # `agreement` (modal/total) can then only be 0.5 or 1.0, so any
+    # min_agreement above 0.5 means unanimity and every disagreed pair is
+    # dropped rather than adjudicated. That is a defensible rule for two expert
+    # annotators — a pair they split on is genuinely ambiguous and would train
+    # noise — but it makes inter-rater agreement the retention rate exactly, so
+    # a contract choosing 2 is accepting a smaller, cleaner view.
+    _integer(table["judgments_per_pair"], "annotation.judgments_per_pair", minimum=2)
     _number(table["repeat_fraction"], "annotation.repeat_fraction", minimum=0.0, maximum=0.5)
     _number(table["attention_fraction"], "annotation.attention_fraction", minimum=0.0, maximum=0.5)
     _string(table["collection_version"], "annotation.collection_version")
@@ -557,11 +572,16 @@ def _validate_views(value: object) -> None:
     strict = _table(table["pair_strict"], "views.pair_strict", {"min_agreement", "min_strength"})
     _number(strict["min_agreement"], "views.pair_strict.min_agreement", minimum=0.0, maximum=1.0)
     _number(strict["min_strength"], "views.pair_strict.min_strength", minimum=1.0, maximum=5.0)
-    weighting = _table(table["weighting"], "views.weighting", {"strategy", "cap_per_clip"})
+    weighting = _table(table["weighting"], "views.weighting", {"strategy"}, {"cap_per_clip"})
     strategy = _string(weighting["strategy"], "views.weighting.strategy")
     if strategy not in {"inverse_pair_count", "cap", "none"}:
         raise ContractError("views.weighting.strategy must be inverse_pair_count, cap, or none")
-    _integer(weighting["cap_per_clip"], "views.weighting.cap_per_clip", minimum=1)
+    # Only the "cap" strategy reads cap_per_clip; requiring it under the other
+    # strategies forced every contract to carry an inert knob.
+    if strategy == "cap" and "cap_per_clip" not in weighting:
+        raise ContractError("views.weighting.strategy 'cap' requires cap_per_clip")
+    if "cap_per_clip" in weighting:
+        _integer(weighting["cap_per_clip"], "views.weighting.cap_per_clip", minimum=1)
 
 
 def _validate_training(value: object) -> None:
@@ -579,7 +599,6 @@ def _validate_training(value: object) -> None:
         {
             "seeds",
             "canonical_seed",
-            "world_size",
             "precision",
             "max_completion_tokens",
             "epochs",
@@ -590,6 +609,10 @@ def _validate_training(value: object) -> None:
             "max_grad_norm",
             "lora",
         },
+        # No stage reads training.world_size (receipts record the WORLD_SIZE
+        # env var instead) and only 1 was ever accepted; legal to state, never
+        # required.
+        {"world_size"},
     )
     seeds = _integers(table["seeds"], "training.seeds")
     if len(seeds) < 3 or len(set(seeds)) != len(seeds):
@@ -597,7 +620,7 @@ def _validate_training(value: object) -> None:
     canonical = _integer(table["canonical_seed"], "training.canonical_seed", minimum=0)
     if canonical not in seeds:
         raise ContractError("training.canonical_seed must be one of training.seeds")
-    if _integer(table["world_size"], "training.world_size", minimum=1) != 1:
+    if "world_size" in table and _integer(table["world_size"], "training.world_size", minimum=1) != 1:
         raise ContractError("training.world_size must be 1 (one process per GPU; DDP is out of scope)")
     if _string(table["precision"], "training.precision") not in {"bf16", "fp32"}:
         raise ContractError("training.precision must be bf16 or fp32")
@@ -712,12 +735,17 @@ def _validate_validation(value: object) -> None:
     table = _table(
         value,
         "validation",
-        {"temperature", "top_p", "max_new_tokens", "bootstrap_samples"},
+        {"temperature", "top_p", "max_new_tokens"},
+        # Nothing reads bootstrap_samples yet — dpo.analysis.bootstrap, its
+        # intended consumer, has no command wired to it. Accepted for forward
+        # compatibility, not required.
+        {"bootstrap_samples"},
     )
     _number(table["temperature"], "validation.temperature", minimum=0.0)
     _number(table["top_p"], "validation.top_p", exclusive_minimum=0.0, maximum=1.0)
     _integer(table["max_new_tokens"], "validation.max_new_tokens", minimum=1)
-    _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
+    if "bootstrap_samples" in table:
+        _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
 
 
 def _validate_robustness(value: object) -> None:
@@ -772,9 +800,10 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
             "experiments",
             "validation",
             "robustness",
-            "terminal_states",
         },
-        {"backends"},
+        # backends pins are only meaningful for live runs; terminal_states is
+        # display metadata no pipeline stage reads, so a contract may omit it.
+        {"backends", "terminal_states"},
     )
     if _integer(root["schema_version"], "schema_version") != 1:
         raise ContractError("schema_version must be 1")
@@ -783,8 +812,16 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
     if execution_class not in EXECUTION_CLASSES:
         raise ContractError(f"execution_class must be one of {sorted(EXECUTION_CLASSES)}")
     _validate_corpus(root["corpus"])
-    tracks_table = _table(root["tracks"], "tracks", set(TRACKS))
-    tracks = {track: _validate_track(track, tracks_table[track]) for track in TRACKS}
+    # A study may collect and train one caption track. Requiring both forced a
+    # single-track study to generate, annotate, and train a track it does not
+    # report — and for an audio-caption study that means producing captions of
+    # the visual scene, which is exactly what such a study excludes. At least
+    # one track is still mandatory: a contract with none trains nothing.
+    tracks_table = _table(root["tracks"], "tracks", set(), set(TRACKS))
+    declared = [track for track in TRACKS if track in tracks_table]
+    if not declared:
+        raise ContractError(f"tracks: declare at least one of {sorted(TRACKS)}")
+    tracks = {track: _validate_track(track, tracks_table[track]) for track in declared}
     models = _table(root["models"], "models", {"seed"})
     _model(models["seed"], "models.seed", with_init_seed=True)
     if "backends" in root:
@@ -799,7 +836,8 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
         _validate_experiment(experiment_id, experiments[experiment_id])
     _validate_validation(root["validation"])
     _validate_robustness(root["robustness"])
-    _validate_terminal_states(root["terminal_states"], execution_class)
+    if "terminal_states" in root:
+        _validate_terminal_states(root["terminal_states"], execution_class)
     return StudyContract(
         raw=raw,
         contract_hash=semantic_hash(raw),
