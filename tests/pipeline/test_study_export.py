@@ -15,13 +15,18 @@ from dpo.contracts.study_contract import StudyContract
 from dpo.core.artifacts import ArtifactStore
 from dpo.core.identity import repo_lock_hash
 from dpo.evaluation.caption_generation import generate_captions
-from dpo.evaluation.compliance import GeneratedCaption
+from dpo.evaluation.congruency import ClipLadder, LadderRung
 from dpo.models.tiny import TinyAdapter, synthetic_media
 from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
 from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM
 from dpo.pipeline.study_stage import STUDY_EXPORT_TYPE, StudyError, publish_study_export
 from tests.conftest import PreferenceWorld
+
+_RUNGS = (
+    LadderRung(0.0, "audio", "Describe what is heard."),
+    LadderRung(1.0, "audio+video", "Name the visible source of each sound."),
+)
 
 
 def _adapter(contract: StudyContract, track: str) -> TinyAdapter:
@@ -88,7 +93,8 @@ def test_study_export_refuses_captions_that_reuse_training_candidates(
             experiment_id="DPO",
             variant_id="base",
             validation_accuracy=1.0,
-            captions=[GeneratedCaption(clip_id=clip_id, text=memorized.text)],
+            ladders=[ClipLadder(clip_id=clip_id, captions=(memorized.text, "A fresh second rung."))],
+            rungs=_RUNGS,
             training_pool=world.pool,
             lock_artifact_id=shard_ids[clip_id],
             shard_artifact_ids=shard_ids,
@@ -106,7 +112,13 @@ def test_study_export_publishes_fresh_captions(tmp_path: Path, world: Preference
         experiment_id="DPO",
         variant_id="base",
         validation_accuracy=0.75,
-        captions=[GeneratedCaption(clip_id=clip_id, text="A wholly unseen caption for the study split.")],
+        ladders=[
+            ClipLadder(
+                clip_id=clip_id,
+                captions=("A wholly unseen caption for the study split.", "A visibly grounded variant."),
+            )
+        ],
+        rungs=_RUNGS,
         training_pool=world.pool,
         lock_artifact_id=shard_ids[clip_id],
         shard_artifact_ids=shard_ids,
@@ -116,16 +128,20 @@ def test_study_export_publishes_fresh_captions(tmp_path: Path, world: Preference
     assert document["training_candidate_reuse_rate"] == 0.0
     assert document["experiment_id"] == "DPO"
     assert artifact_id.startswith("sha256:")
+    # The slider reads these: one entry per rung, ascending, per clip.
+    levels = [entry["level"] for entry in document["clips"][0]["levels"]]
+    assert levels == [rung.level for rung in _RUNGS]
+    assert document["ladder_summary"]["collapsed_clips"] == []
 
 
 def test_study_export_requires_one_caption_per_clip(tmp_path: Path, world: PreferenceWorld) -> None:
     publisher, shard_ids = _publisher(tmp_path, world)
     clip_id = sorted(shard_ids)[0]
     duplicated = [
-        GeneratedCaption(clip_id=clip_id, text="First caption for this clip."),
-        GeneratedCaption(clip_id=clip_id, text="Second caption for the very same clip."),
+        ClipLadder(clip_id=clip_id, captions=("First rung here.", "Second rung here.")),
+        ClipLadder(clip_id=clip_id, captions=("Another first rung.", "Another second rung.")),
     ]
-    with pytest.raises(StudyError, match="exactly one caption per clip"):
+    with pytest.raises(StudyError, match="exactly one ladder per clip"):
         publish_study_export(
             publisher,
             world.contract,
@@ -133,7 +149,8 @@ def test_study_export_requires_one_caption_per_clip(tmp_path: Path, world: Prefe
             experiment_id="DPO",
             variant_id="base",
             validation_accuracy=0.5,
-            captions=duplicated,
+            ladders=duplicated,
+            rungs=_RUNGS,
             training_pool=world.pool,
             lock_artifact_id=shard_ids[clip_id],
             shard_artifact_ids=shard_ids,

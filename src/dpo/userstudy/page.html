@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound caption study</title>
+<style>
+  /* One instrument, one gesture. The participant's whole job is to drag a
+     handle until a sentence fits what they are hearing, so the slider gets the
+     entire visual budget and everything else — player, caption, controls —
+     stays quiet enough that the caption's own change is the loudest event on
+     the page. The caption sits directly under the slider, not beside it, so
+     the eye travels handle -> words without crossing anything else. */
+  :root {
+    --ink: #11161f;
+    --muted: #5d6673;
+    --line: #d5dae2;
+    --panel: #f5f7fa;
+    --page: #ffffff;
+    --rail: #cfd6e0;
+    --heard: #1f6f8b;      /* the sound end of the axis */
+    --seen: #b5651d;       /* the picture end of the axis */
+    --ok: #1a7f4b;
+    --bad: #b3372c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e9edf3; --muted: #97a1b0; --line: #363d4a; --panel: #1e232c;
+      --page: #141920; --rail: #3c4553; --heard: #6bb8d6; --seen: #e0a165;
+      --ok: #58c389; --bad: #e07b6f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--page);
+  }
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+  #progress-text { color: var(--muted); font-variant-numeric: tabular-nums; }
+  main { max-width: 46rem; margin: 0 auto; padding: 1.25rem; }
+  progress { width: 100%; height: 6px; accent-color: var(--heard); }
+  :focus-visible { outline: 3px solid var(--heard); outline-offset: 3px; }
+
+  #player-wrap { margin: 1rem 0; }
+  video { width: 100%; border-radius: 10px; background: #000; display: block; }
+  #media-note { color: var(--muted); font-size: 0.85rem; min-height: 1.2rem; margin: 0.25rem 0 0; }
+
+  .prompt { font-weight: 600; margin: 1.5rem 0 0.25rem; }
+  .prompt-help { color: var(--muted); font-size: 0.88rem; margin: 0 0 0.75rem; }
+
+  /* The axis: labelled by what each end MEANS, not by numbers. A participant
+     is never asked to think in levels. */
+  .axis-ends { display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.1rem; }
+  .axis-ends .heard { color: var(--heard); font-weight: 600; }
+  .axis-ends .seen { color: var(--seen); font-weight: 600; }
+  #congruency {
+    width: 100%; margin: 0; height: 2.5rem; background: transparent;
+    -webkit-appearance: none; appearance: none; cursor: grab;
+  }
+  #congruency:active { cursor: grabbing; }
+  #congruency::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(to right, var(--heard), var(--seen));
+  }
+  #congruency::-moz-range-track {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(to right, var(--heard), var(--seen));
+  }
+  #congruency::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 26px; height: 26px; margin-top: -10px; border-radius: 50%;
+    background: var(--page); border: 3px solid var(--ink);
+  }
+  #congruency::-moz-range-thumb {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--page); border: 3px solid var(--ink);
+  }
+  #ticks { display: flex; justify-content: space-between; margin-top: -0.4rem; }
+  #ticks span { width: 1px; height: 6px; background: var(--rail); }
+
+  /* The caption is the readout. It is sized like the thing being judged, and
+     it holds its height so a longer sentence at one end never shifts the
+     slider under the participant's finger mid-drag. */
+  #caption {
+    margin: 0.75rem 0 0; padding: 1.15rem 1.25rem; min-height: 6.5rem;
+    display: flex; align-items: center;
+    border: 1px solid var(--line); border-left: 4px solid var(--heard);
+    border-radius: 10px; background: var(--panel);
+    font-size: 1.15rem; line-height: 1.5;
+    transition: border-left-color 120ms linear;
+  }
+  @media (prefers-reduced-motion: reduce) { #caption { transition: none; } }
+
+  fieldset { border: none; margin: 1.25rem 0 0; padding: 0; }
+  legend { font-weight: 600; padding: 0; }
+  .help { color: var(--muted); font-size: 0.88rem; margin: 0.1rem 0 0.5rem; }
+  .scale { display: flex; gap: 0.9rem; flex-wrap: wrap; }
+  .scale label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+  .scale .ends { color: var(--muted); font-size: 0.8rem; align-self: center; }
+  textarea {
+    font: inherit; color: inherit; background: var(--panel);
+    width: 100%; min-height: 4.5rem; padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line); border-radius: 8px; resize: vertical;
+  }
+  .actions { margin: 1.5rem 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  .hint { color: var(--muted); font-size: 0.8rem; }
+  .primary {
+    font: inherit; font-weight: 600; color: #fff; background: var(--ink);
+    border: none; border-radius: 8px; padding: 0.6rem 1.6rem; cursor: pointer;
+  }
+  .primary:disabled { opacity: 0.35; cursor: not-allowed; }
+  input[type="text"] {
+    font: inherit; color: inherit; background: var(--panel);
+    padding: 0.5rem 0.75rem; border: 1px solid var(--line);
+    border-radius: 8px; width: 100%; max-width: 24rem;
+  }
+  #confirmation { font-weight: 600; }
+  #confirmation.ok { color: var(--ok); }
+  #confirmation.bad { color: var(--bad); }
+  #draft-state { color: var(--muted); font-size: 0.8rem; }
+  #resume-banner {
+    margin: 1rem 0; padding: 0.75rem 1rem; border: 1px solid var(--seen);
+    border-radius: 10px; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+  }
+  #resume-banner p { margin: 0; flex: 1 1 18rem; }
+  .alt {
+    font: inherit; color: inherit; padding: 0.5rem 1rem;
+    border: 2px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sound caption study</h1>
+  <div id="progress-text"></div>
+</header>
+<main>
+  <progress id="progress-bar" value="0" max="1"></progress>
+
+  <section id="intro">
+    <h2>What you will do</h2>
+    <p>
+      You will watch a series of short street clips with sound. Under each one is
+      a sentence describing what can be heard, and a slider that changes how much
+      that sentence ties the sound to what you can see.
+    </p>
+    <p>
+      For each clip: play it, then drag the slider until the sentence best matches
+      what you are watching and hearing. Then answer two short questions. There is
+      no right answer — we are measuring what fits, for you.
+    </p>
+    <p><label>Your participant name or code<br><input type="text" id="participant" autocomplete="off"></label></p>
+    <div class="actions"><span></span><button type="button" class="primary" id="begin" disabled>Start</button></div>
+  </section>
+
+  <section id="resume-banner" hidden>
+    <p id="resume-text"></p>
+    <button type="button" class="alt" id="resume-yes">Continue where I left off</button>
+    <button type="button" class="alt" id="resume-no">Start over</button>
+  </section>
+
+  <section id="task-screen" hidden>
+    <div id="player-wrap"><video id="player" controls playsinline preload="auto"></video></div>
+    <p id="media-note"></p>
+
+    <p class="prompt">Drag until the sentence best matches this clip.</p>
+    <p class="prompt-help">
+      The sentence changes as you drag. Move it anywhere along the line — including
+      the ends — and leave it where it fits best.
+    </p>
+
+    <div class="axis-ends">
+      <span class="heard">only what you hear</span>
+      <span class="seen">tied to what you see</span>
+    </div>
+    <input type="range" id="congruency" min="0" max="1" step="1" value="0"
+           aria-label="How much the sentence ties the sound to what is visible">
+    <div id="ticks"></div>
+
+    <p id="caption"></p>
+
+    <fieldset>
+      <legend>How well does this sentence match the clip?</legend>
+      <p class="help">At the position you left the slider.</p>
+      <div class="scale" id="match-scale"><span class="ends">not at all</span></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>What did you hear?</legend>
+      <p class="help">In your own words, before you saw any sentence — one line is plenty.</p>
+      <textarea id="heard-text" placeholder="e.g. a tram going past and people talking"></textarea>
+    </fieldset>
+
+    <div class="actions">
+      <p class="hint">Arrow keys nudge the slider · <kbd>r</kbd> replays the clip</p>
+      <button type="button" class="primary" id="next" disabled>Next clip</button>
+    </div>
+    <p id="draft-state"></p>
+  </section>
+
+  <section id="save-screen" hidden>
+    <h2>That is everything — thank you</h2>
+    <p>Save your responses to finish.</p>
+    <div class="actions"><span></span><button type="button" class="primary" id="save">Save responses</button></div>
+    <p id="confirmation"></p>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const el = (id) => document.getElementById(id);
+let clips = [];
+let levels = [];
+let index = 0;
+let results = [];
+let sessionKey = "";
+let participant = "";
+let saved = false;
+let playEvents = 0;
+let shownAt = 0;
+let firstMoveAt = null;
+let moves = 0;
+const state = { position: 0, match: null, touched: false };
+
+function draftKey(document_) {
+  const ids = document_.clips.map((clip) => clip.clip_id);
+  return "dpo.userstudy-draft:" + ids.length + ":" + (ids[0] || "none") + ":" + (ids[ids.length - 1] || "none");
+}
+function saveDraft() {
+  try {
+    window.localStorage.setItem(sessionKey, JSON.stringify({ index, results, participant }));
+    el("draft-state").textContent = "Progress saved in this browser (" + results.length + " of " + clips.length + ").";
+  } catch (error) {
+    el("draft-state").textContent = "Could not save progress in this browser: " + error;
+  }
+}
+function clearDraft() {
+  try { window.localStorage.removeItem(sessionKey); } catch (error) { /* nothing to clean up */ }
+}
+function loadDraft() {
+  try {
+    const raw = window.localStorage.getItem(sessionKey);
+    if (!raw) { return null; }
+    const draft = JSON.parse(raw);
+    if (!Array.isArray(draft.results) || typeof draft.index !== "number") { return null; }
+    if (draft.index <= 0 || draft.index > clips.length) { return null; }
+    return draft;
+  } catch (error) { return null; }
+}
+
+function buildScale(containerId, name, onPick) {
+  const container = el(containerId);
+  for (let value = 1; value <= 5; value += 1) {
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = name;
+    radio.value = String(value);
+    radio.addEventListener("change", () => { onPick(value); refresh(); });
+    label.appendChild(radio);
+    label.appendChild(document.createTextNode(String(value)));
+    container.appendChild(label);
+  }
+  const high = document.createElement("span");
+  high.className = "ends";
+  high.textContent = "completely";
+  container.appendChild(high);
+}
+
+function currentClip() { return clips[index]; }
+
+function paintCaption() {
+  const clip = currentClip();
+  const entry = clip.levels[state.position];
+  el("caption").textContent = entry.text;
+  // The rule tints from the "heard" end to the "seen" end as the slider moves,
+  // so the axis and the readout are visibly the same dimension.
+  const share = levels.length > 1 ? state.position / (levels.length - 1) : 0;
+  el("caption").style.borderLeftColor = share < 0.5 ? "var(--heard)" : "var(--seen)";
+}
+
+function refresh() {
+  el("next").disabled = !(state.touched && state.match !== null);
+}
+
+function renderClip() {
+  const clip = currentClip();
+  el("progress-text").textContent = "Clip " + (index + 1) + " of " + clips.length;
+  el("progress-bar").value = index;
+  el("progress-bar").max = clips.length;
+
+  playEvents = 0;
+  moves = 0;
+  firstMoveAt = null;
+  state.position = Math.floor((levels.length - 1) / 2);
+  state.match = null;
+  state.touched = false;
+
+  const player = el("player");
+  player.src = "/media/" + encodeURIComponent(clip.clip_id);
+  el("media-note").textContent = "";
+
+  const slider = el("congruency");
+  slider.max = String(levels.length - 1);
+  slider.value = String(state.position);
+  for (const radio of document.querySelectorAll('#match-scale input')) { radio.checked = false; }
+  el("heard-text").value = "";
+  paintCaption();
+  refresh();
+  shownAt = performance.now();
+}
+
+function onSlide() {
+  state.position = Number(el("congruency").value);
+  if (!state.touched) { state.touched = true; firstMoveAt = performance.now(); }
+  moves += 1;
+  paintCaption();
+  refresh();
+}
+
+function replay() {
+  const player = el("player");
+  player.currentTime = 0;
+  const started = player.play();
+  if (started && typeof started.catch === "function") { started.catch(() => { /* needs a gesture */ }); }
+}
+
+function nextClip() {
+  if (el("next").disabled) { return; }
+  const clip = currentClip();
+  results.push({
+    clip_id: clip.clip_id,
+    congruency_level: clip.levels[state.position].level,
+    congruency_index: state.position,
+    caption_shown: clip.levels[state.position].text,
+    match_rating: state.match,
+    heard_freetext: el("heard-text").value.trim(),
+    slider_moves: moves,
+    time_to_first_move_ms: firstMoveAt === null ? null : Math.round(firstMoveAt - shownAt),
+    response_time_ms: Math.max(0, Math.round(performance.now() - shownAt)),
+    replay_count: Math.max(0, playEvents - 1),
+  });
+  index += 1;
+  saveDraft();
+  if (index < clips.length) { renderClip(); } else { finish(); }
+}
+
+function finish() {
+  el("task-screen").hidden = true;
+  el("save-screen").hidden = false;
+  el("progress-bar").value = clips.length;
+  el("progress-text").textContent = clips.length + " of " + clips.length + " answered";
+}
+
+async function saveResponses() {
+  const confirmation = el("confirmation");
+  el("save").disabled = true;
+  confirmation.className = "";
+  confirmation.textContent = "Saving…";
+  try {
+    const reply = await fetch("/api/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schema: "dpo.userstudy-responses/v1",
+        participant: participant,
+        responses: results,
+      }),
+    });
+    const data = await reply.json();
+    if (reply.ok) {
+      saved = true;
+      clearDraft();
+      confirmation.className = "ok";
+      confirmation.textContent = "Saved " + data.responses + " responses. You can close this window.";
+    } else {
+      confirmation.className = "bad";
+      confirmation.textContent = "Save failed: " + (data.detail || data.error || reply.status);
+      el("save").disabled = false;
+    }
+  } catch (error) {
+    confirmation.className = "bad";
+    confirmation.textContent = "Save failed: " + error;
+    el("save").disabled = false;
+  }
+}
+
+function onKeyDown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) { return; }
+  const tag = (event.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") { return; }
+  if (el("task-screen").hidden) { return; }
+  if (event.key === "r" || event.key === "R") { replay(); event.preventDefault(); }
+}
+
+function begin(fromDraft) {
+  el("intro").hidden = true;
+  el("resume-banner").hidden = true;
+  if (fromDraft) {
+    index = fromDraft.index;
+    results = fromDraft.results;
+    participant = fromDraft.participant || participant;
+  }
+  if (index >= clips.length) { finish(); return; }
+  el("task-screen").hidden = false;
+  renderClip();
+}
+
+async function boot() {
+  const doc = await fetch("/api/study").then((reply) => reply.json());
+  clips = doc.clips;
+  levels = doc.congruency_levels;
+  sessionKey = draftKey(doc);
+  buildScale("match-scale", "match", (value) => { state.match = value; });
+
+  el("congruency").addEventListener("input", onSlide);
+  el("player").addEventListener("play", () => { playEvents += 1; });
+  el("player").addEventListener("error", () => {
+    el("media-note").textContent = "This clip could not be loaded. Please tell the researcher.";
+  });
+  el("next").addEventListener("click", nextClip);
+  el("save").addEventListener("click", saveResponses);
+  el("participant").addEventListener("input", () => {
+    participant = el("participant").value.trim();
+    el("begin").disabled = !participant;
+  });
+  el("begin").addEventListener("click", () => begin(null));
+  document.addEventListener("keydown", onKeyDown);
+  window.addEventListener("beforeunload", (event) => {
+    if (saved || results.length === 0) { return; }
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  const ticks = el("ticks");
+  for (let position = 0; position < levels.length; position += 1) {
+    ticks.appendChild(document.createElement("span"));
+  }
+
+  const draft = loadDraft();
+  if (draft) {
+    el("intro").hidden = true;
+    el("resume-text").textContent =
+      "This browser holds " + draft.results.length + " answered clips from an earlier sitting.";
+    el("resume-banner").hidden = false;
+    el("resume-yes").addEventListener("click", () => begin(draft));
+    el("resume-no").addEventListener("click", () => { clearDraft(); el("intro").hidden = false; el("resume-banner").hidden = true; });
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

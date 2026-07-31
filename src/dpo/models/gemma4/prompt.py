@@ -49,3 +49,22 @@ def prompt_messages(contract: CaptionContract, *, media_reference: str) -> list[
 
 def assistant_message(completion: str) -> list[dict[str, str]]:
     return [{"role": "assistant", "content": completion.strip()}]
+
+
+def stimulus_messages(
+    instruction: str, *, audio_reference: str, video_reference: str | None = None
+) -> list[dict[str, Any]]:
+    """Messages for human-study stimulus generation, optionally seeing the frame.
+
+    Deliberately NOT track-bound. A congruency ladder needs the model to see
+    what the caption should attribute a sound to, which the audio track's own
+    messages can never carry — so this is the one builder that may put video and
+    audio in the same turn, and it exists only to construct what a participant
+    reads. Nothing scored, trained on, or compared against preference data may
+    come through here; those go through prompt_messages and stay isolated.
+    """
+    parts: list[dict[str, Any]] = []
+    if video_reference is not None:
+        parts.append({"type": "video", "video": video_reference})
+    parts.append({"type": "audio", "audio": audio_reference})
+    return [{"role": "system", "content": instruction}, {"role": "user", "content": parts}]

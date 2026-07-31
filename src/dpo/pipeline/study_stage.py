@@ -31,6 +31,7 @@ from dpo.contracts.study_contract import StudyContract
 from dpo.core.artifacts import ParentEdge
 from dpo.evaluation.caption_generation import training_candidate_reuse_rate
 from dpo.evaluation.compliance import GeneratedCaption
+from dpo.evaluation.congruency import ClipLadder, LadderRung, ladder_summary
 from dpo.pipeline.publishing import ArtifactPublisher
 
 STUDY_EXPORT_TYPE = "dpo.study-export/v1"
@@ -48,18 +49,29 @@ def publish_study_export(
     experiment_id: str,
     variant_id: str,
     validation_accuracy: float,
-    captions: Sequence[GeneratedCaption],
+    ladders: Sequence[ClipLadder],
+    rungs: Sequence[LadderRung],
     training_pool: FrozenCandidatePool,
     lock_artifact_id: str,
     shard_artifact_ids: Mapping[str, str],
     decoding: Mapping[str, object],
 ) -> tuple[dict[str, object], str]:
-    """Freeze one track's study captions and publish them for the human study."""
-    if not captions:
-        raise StudyError("a study export needs at least one caption")
-    clip_ids = [caption.clip_id for caption in captions]
+    """Freeze one track's congruency ladders and publish them for the human study."""
+    if not ladders:
+        raise StudyError("a study export needs at least one clip")
+    # Every rung is a caption a participant can be shown, so the memorization
+    # gate has to see all of them, not just the bottom of each ladder.
+    captions = [
+        GeneratedCaption(clip_id=ladder.clip_id, text=text) for ladder in ladders for text in ladder.captions
+    ]
+    clip_ids = [ladder.clip_id for ladder in ladders]
     if len(set(clip_ids)) != len(clip_ids):
-        raise StudyError("a study export must hold exactly one caption per clip")
+        raise StudyError("a study export must hold exactly one ladder per clip")
+    widths = {len(ladder.captions) for ladder in ladders}
+    if widths != {len(rungs)}:
+        raise StudyError(
+            f"every ladder must carry one caption per rung ({len(rungs)}); got widths {sorted(widths)}"
+        )
     missing = sorted(set(clip_ids) - set(shard_artifact_ids))
     if missing:
         raise StudyError(f"caption for clip {missing[0]!r} has no registry shard to descend from")
@@ -85,10 +97,9 @@ def publish_study_export(
         "validation_accuracy": validation_accuracy,
         "decoding": dict(sorted(decoding.items())),
         "training_candidate_reuse_rate": reuse_rate,
-        "captions": [
-            {"clip_id": caption.clip_id, "text": caption.text}
-            for caption in sorted(captions, key=lambda item: item.clip_id)
-        ],
+        "congruency_ladder": [rung.document() for rung in rungs],
+        "ladder_summary": ladder_summary(ladders, rungs),
+        "clips": [ladder.document(rungs) for ladder in sorted(ladders, key=lambda item: item.clip_id)],
     }
     artifact_id = publisher.publish(
         STUDY_EXPORT_TYPE,
@@ -97,7 +108,7 @@ def publish_study_export(
         + tuple(ParentEdge(shard_artifact_ids[clip_id], "clip-shard") for clip_id in sorted(clip_ids)),
         stage="study-export",
         parameters={"operation": "study-export", "track": track, "experiment_id": experiment_id},
-        row_count=len(captions),
+        row_count=len(ladders),
         clips=set(clip_ids),
         role_exposure={"study"},
         attributes={"track": track, "experiment_id": experiment_id, "variant_id": variant_id},

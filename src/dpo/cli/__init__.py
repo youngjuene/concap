@@ -24,7 +24,7 @@ from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
 from dpo.cli.report import _report_analyze, _report_show
 from dpo.cli.select import _select_run
 from dpo.cli.stage import _stage_list
-from dpo.cli.study import _study_export
+from dpo.cli.study import _study_export, _study_serve
 from dpo.cli.train import _train_run
 from dpo.cli.views import _views_derive
 from dpo.contracts.study_contract import AUDIO_PRESENTATIONS
@@ -196,6 +196,13 @@ def build_parser() -> argparse.ArgumentParser:
     study_export.add_argument("--backend-config", action="append")
     study_export.add_argument("--media-dir")
     study_export.set_defaults(handler=_study_export)
+    study_serve = study_actions.add_parser("serve")
+    study_serve.add_argument("--export", required=True, help="a published dpo.study-export/v1 document")
+    study_serve.add_argument("--media-dir", required=True)
+    study_serve.add_argument("--out", required=True)
+    study_serve.add_argument("--host", default="127.0.0.1")
+    study_serve.add_argument("--port", type=int, default=8776)
+    study_serve.set_defaults(handler=_study_serve)
 
     for command_name in DEFERRED_GATES:
         blocked = commands.add_parser(command_name, help=f"live boundary: {DEFERRED_GATES[command_name]}")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from dpo.candidates.freeze import parse_frozen_pool
 from dpo.candidates.generation import (
@@ -26,7 +27,9 @@ from dpo.core.artifacts import (
     ArtifactError,
 )
 from dpo.core.identity import sha256_file
-from dpo.evaluation.caption_generation import generate_captions
+from dpo.evaluation.congruency import LadderRung, generate_ladders, ladder_for
+from dpo.models.gemma4.adapter import GemmaCaptionAdapter
+from dpo.models.gemma4.prompt import stimulus_messages
 from dpo.pipeline.live_runner import (
     load_checkpoint_policies,
 )
@@ -122,15 +125,37 @@ def _study_export(arguments: argparse.Namespace) -> int:
                     f"clip {clip_id!r}: media at {files[clip_id]} hashes to {actual}, which the"
                     " clip registry does not list as a derivative of this clip"
                 )
-    captions = generate_captions(
-        policies[key],
-        clip_ids,
-        backend.media_batch(track, clip_ids),
-        temperature=float(str(contract.validation["temperature"])),
-        top_p=float(str(contract.validation["top_p"])),
-        max_new_tokens=int(str(contract.validation["max_new_tokens"])),
-        seed=canonical_seed,
-    )
+    # One caption per (clip, rung). The bottom rung is the contract's own audio
+    # prompt on audio alone — the caption this study's trained model actually
+    # produces; every rung above it also sees the video, because congruency with
+    # the real frame is not expressible by a model that has never seen it.
+    rungs = ladder_for(contract.tracks[track].prompt)
+    policy = policies[key]
+    if not isinstance(policy, GemmaCaptionAdapter):
+        raise StudyError(
+            "congruency ladders need the Gemma backend's stimulus generation;"
+            f" this policy is {type(policy).__name__}"
+        )
+    if choice.media_dir is None:
+        raise StudyError("congruency ladders need --media-dir to resolve audio and video per clip")
+    audio_files = resolve_media_files(choice.media_dir, clip_ids, track="audio")
+    video_files = resolve_media_files(choice.media_dir, clip_ids, track="visual")
+
+    def _generate(clip_id: str, rung: LadderRung) -> str:
+        messages = stimulus_messages(
+            rung.instruction,
+            audio_reference=str(audio_files[clip_id]),
+            video_reference=(str(video_files[clip_id]) if rung.conditioning == "audio+video" else None),
+        )
+        return policy.generate_stimulus(
+            messages,
+            temperature=float(str(contract.validation["temperature"])),
+            top_p=float(str(contract.validation["top_p"])),
+            max_new_tokens=int(str(contract.validation["max_new_tokens"])),
+            seed=canonical_seed,
+        )
+
+    ladders = generate_ladders(clip_ids, rungs, _generate)
     document, artifact_id = publish_study_export(
         operation.publisher(),
         contract,
@@ -138,7 +163,8 @@ def _study_export(arguments: argparse.Namespace) -> int:
         experiment_id=experiment_id,
         variant_id=variant_id,
         validation_accuracy=accuracy,
-        captions=captions,
+        ladders=ladders,
+        rungs=rungs,
         training_pool=training_pool,
         lock_artifact_id=lock_manifest.artifact_id,
         shard_artifact_ids={clip_id: shard for clip_id, (shard, _) in shard_rows.items()},
@@ -155,8 +181,22 @@ def _study_export(arguments: argparse.Namespace) -> int:
             "variant_id": variant_id,
             "validation_accuracy": accuracy,
             "clips": len(clip_ids),
+            "ladder_summary": document["ladder_summary"],
             "training_candidate_reuse_rate": document["training_candidate_reuse_rate"],
             "lock_id": lock.lock_id,
         }
+    )
+    return 0
+
+
+def _study_serve(arguments: argparse.Namespace) -> int:
+    from dpo.userstudy.app import run_study_app
+
+    run_study_app(
+        export_path=Path(arguments.export),
+        media_dir=Path(arguments.media_dir),
+        out_path=Path(arguments.out),
+        host=arguments.host,
+        port=arguments.port,
     )
     return 0

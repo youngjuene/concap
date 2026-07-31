@@ -212,6 +212,45 @@ class GemmaCaptionAdapter:
             outputs.append(_response_text(processor, generated[0][prompt_length:]))
         return outputs
 
+    def generate_stimulus(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float,
+        top_p: float,
+        max_new_tokens: int,
+        seed: int,
+    ) -> str:
+        """Generate from caller-built messages, for human-study stimuli only.
+
+        ``generate`` is track-bound: it refuses a media batch of the wrong
+        modality, which is what keeps the caption pipeline honest. A congruency
+        ladder has to condition on video AND audio at once, so it needs a way
+        past that — and the way past is this method, named for its one purpose
+        so the exception is visible at every call site rather than hidden in a
+        flag. Eval mode, frozen decoding, and channel-aware parsing are the same
+        as the isolated path; only the messages differ.
+        """
+        model, processor = self._require_loaded()
+        torch.manual_seed(seed)
+        with self.module_mode(training=False):
+            encoded = processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+                **template_kwargs(self.contract),
+            )
+            sampling: dict[str, Any] = (
+                {"do_sample": True, "temperature": temperature, "top_p": top_p}
+                if temperature > 0
+                else {"do_sample": False}
+            )
+            generated = model.generate(**_to_model(model, encoded), **sampling, max_new_tokens=max_new_tokens)
+        prompt_length = int(encoded["input_ids"].shape[1])
+        return _response_text(processor, generated[0][prompt_length:])
+
     def trainable_parameters(self) -> Iterator[torch.nn.Parameter]:
         model, _ = self._require_loaded()
         for parameter in model.parameters():
