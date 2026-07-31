@@ -28,11 +28,15 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from dpo.annotation.collection_tasks import RESPONSES_SCHEMA, TASKS_SCHEMA
 from dpo.annotation.raw_annotations import AnnotationError
+from dpo.candidates.generation import AUDIO_MEDIA_SUFFIXES, VIDEO_MEDIA_SUFFIXES
 from dpo.contracts.study_contract import CHOICES, REASON_TAGS, TIE_SUBTYPES
 
 CLIP_ID_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
-AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".ogg", ".flac")
-VIDEO_SUFFIXES = (".mp4", ".webm", ".mov")
+# One suffix vocabulary for staged clip media, shared with the generation-side
+# resolver so the file the model read and the file the annotator hears can
+# never drift apart by extension.
+AUDIO_SUFFIXES = AUDIO_MEDIA_SUFFIXES
+VIDEO_SUFFIXES = VIDEO_MEDIA_SUFFIXES
 # Presentations whose media a flat directory cannot disambiguate: they are all
 # videos of the same clip differing only in soundtrack, so ``{clip_id}.mp4``
 # could serve any of them and the annotator would never know which they got.

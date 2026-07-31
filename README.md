@@ -149,6 +149,23 @@ The backend TOMLs under `configs/gemma4/` carry runtime shape only (model
 pin, quantization, gradient checkpointing); the contract can pin their
 hashes via `[backends]`.
 
+## Running the current study
+
+The live study is `configs/study/street-audio.toml` (audio captions only; see
+its header for why). Its working data:
+
+```text
+data/video/        the collected c1..c4 condition renders (read-only stimuli)
+data/live/media/   staged corpus: {clip_id}.mp4 (muted) + {clip_id}.wav per clip
+data/annotation/   exported sessions; answers-*.json holds the attention-check
+                   keys and must never live inside the served --media-dir
+artifacts/street/  the study's content-addressed store
+```
+
+`docs/study-runbook.md` records the exact artifact ids and the command
+sequence from annotation through study export; `make annotate SPLIT=train`
+serves an annotator session with the right paths.
+
 ## 3. Track the results
 
 ```bash
@@ -165,6 +182,8 @@ lineage.
 
 ```text
 src/dpo/
+├── cli/           # one module per command (`ls` here reads as the command
+│                  # list); _shared plumbing, _backend live-model resolution
 ├── core/          # content-addressed artifact store, identity, atomic IO,
 │                  # fenced access, GPU leases, text-safety screening
 ├── contracts/     # study_contract (vocabularies, matrix, validator),
