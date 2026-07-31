@@ -106,6 +106,13 @@ STAGES: dict[str, PipelineStage] = {
             FULL_CONTRACT,
             "Freeze configuration before any test access",
         ),
+        PipelineStage(
+            "study-export",
+            ("dpo.lock-manifest/v1",),
+            ("dpo.study-export/v1",),
+            ("validation", "tracks", "models"),
+            "Caption the held-out study split with the locked winner, for the human study",
+        ),
     )
 }
 

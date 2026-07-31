@@ -49,7 +49,7 @@ from dpo.contracts.study_contract import (
     StudyContract,
     load_contract,
 )
-from dpo.core.access import AccessDenied
+from dpo.core.access import ROLE_SCOPES, AccessCapability, AccessDenied, ProtectedAccessAuthority
 from dpo.core.artifacts import (
     GC_ROOT_TYPES,
     ArtifactError,
@@ -61,6 +61,7 @@ from dpo.core.safety import DestructivePathError
 from dpo.data.derive_pairs import ViewError
 from dpo.data.leakage_audit import LeakageError
 from dpo.data.split import ClipInput, SplitError, parse_split_manifest
+from dpo.evaluation.caption_generation import generate_captions
 from dpo.pipeline.annotation_stage import ingest_annotations
 from dpo.pipeline.canary import CanaryError, run_canary
 from dpo.pipeline.candidate_stage import publish_frozen_pool
@@ -83,6 +84,7 @@ from dpo.pipeline.stage_inputs import (
     request_parameters,
 )
 from dpo.pipeline.stages import STAGES, StageError, allowed_contract_ids, lineage_edges, stage
+from dpo.pipeline.study_stage import StudyError, publish_study_export
 from dpo.pipeline.training_stage import publish_training_matrix, training_cell_contract_ids
 from dpo.pipeline.view_stage import publish_track_views
 
@@ -101,6 +103,7 @@ DOMAIN_ERRORS = (
     LockError,
     SplitError,
     StageError,
+    StudyError,
     ViewError,
 )
 
@@ -387,10 +390,37 @@ def _find_manifest(operation: _Operation, artifact_type: str) -> ArtifactManifes
     raise ArtifactError(f"this command requires a {artifact_type!r} input artifact")
 
 
+def _registry_shard_ids(
+    store: ArtifactStore,
+    registry_manifest: ArtifactManifest,
+    keep: Callable[[Mapping[str, object]], bool],
+) -> dict[str, str]:
+    """clip_id -> shard artifact id, from verified metadata alone.
+
+    Membership metadata carries the clip id and its role, so a caller can learn
+    WHICH clips a protected role holds — and check its own preconditions —
+    without opening a payload and therefore without a capability. Reading what
+    those clips contain still requires one.
+    """
+    registry_id = registry_manifest.semantic["request"]["parameters"]["registry_id"]
+    found: dict[str, str] = {}
+    for shard_id in store.find_by_type("dpo.clip-registry-shard/v1"):
+        manifest = store.verify_metadata(shard_id)
+        entry = manifest.semantic["registry_membership"][0]
+        if entry["registry_id"] != registry_id or not keep(entry):
+            continue
+        found[str(entry["clip_id"])] = shard_id
+    return found
+
+
 def _registry_shard_rows(
     store: ArtifactStore,
     registry_manifest: ArtifactManifest,
     keep: Callable[[Mapping[str, object]], bool],
+    *,
+    capability: AccessCapability | None = None,
+    authority: ProtectedAccessAuthority | None = None,
+    semantic_hash_for_read: str | None = None,
 ) -> dict[str, tuple[str, dict[str, Any]]]:
     """clip_id -> (shard artifact id, locked registry row) for one registry.
 
@@ -398,6 +428,10 @@ def _registry_shard_rows(
     stays sealed to capability-free readers; per-clip shards carry exactly one
     role each, so only the shards ``keep`` selects (from their verified
     membership metadata) are ever opened.
+
+    Selecting a protected role additionally requires a fenced capability, which
+    the caller reserves and completes around the whole read — passing it here
+    only authorizes the shard payloads this call opens.
     """
     registry_id = registry_manifest.semantic["request"]["parameters"]["registry_id"]
     rows: dict[str, tuple[str, dict[str, Any]]] = {}
@@ -406,7 +440,14 @@ def _registry_shard_rows(
         entry = manifest.semantic["registry_membership"][0]
         if entry["registry_id"] != registry_id or not keep(entry):
             continue
-        row = json.loads(store.read_payload(shard_id))
+        row = json.loads(
+            store.read_payload(
+                shard_id,
+                capability=capability,
+                authority=authority,
+                semantic_hash=semantic_hash_for_read,
+            )
+        )
         rows[str(row["clip_id"])] = (shard_id, row)
     return rows
 
@@ -1026,6 +1067,134 @@ def _select_run(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _study_export(arguments: argparse.Namespace) -> int:
+    contract = load_contract(arguments.contract)
+    choice = _resolve_backend(contract, arguments, command="study export")
+    if choice is None:
+        return 3
+    operation = _operation(arguments, with_training_cells=True)
+    _require_types(
+        operation,
+        {
+            "dpo.lock-manifest/v1",
+            "dpo.selection-report/v1",
+            "dpo.validation-report/v1",
+            "dpo.clip-registry/v1",
+            "dpo.frozen-candidate-pool/v1",
+        },
+        minimum=5,
+    )
+    track = str(arguments.track)
+    if track not in contract.tracks:
+        raise ArtifactError(
+            f"this contract does not declare track {track!r}; it declares {sorted(contract.tracks)}"
+        )
+    lock_manifest = _find_manifest(operation, "dpo.lock-manifest/v1")
+    selection_manifest = _find_manifest(operation, "dpo.selection-report/v1")
+    validation_manifest = _find_manifest(operation, "dpo.validation-report/v1")
+    registry_manifest = _find_manifest(operation, "dpo.clip-registry/v1")
+    pool_manifest = _find_manifest(operation, "dpo.frozen-candidate-pool/v1")
+
+    lock = parse_lock_manifest(json.loads(operation.store.read_payload(lock_manifest.artifact_id)))
+    selection = json.loads(operation.store.read_payload(selection_manifest.artifact_id))
+    # Selection already ranks experiments by their winner's validation accuracy,
+    # so the overall winner is the first ranked experiment's selected variant.
+    # The accuracy itself lives in the validation report, not the selection one.
+    experiment_id = str(selection["ranking"][track][0])
+    variant_id = str(selection["selected_variants"][track][experiment_id])
+    validation = json.loads(operation.store.read_payload(validation_manifest.artifact_id))
+    accuracy = float(validation["accuracy"][track][experiment_id][variant_id])
+
+    training_pool = parse_frozen_pool(operation.store.read_payload(pool_manifest.artifact_id))
+
+    # Every precondition BEFORE the fence opens. A missing checkpoint or absent
+    # media is recoverable, but reserving first leaves an open reservation and a
+    # study.sqlite in a workspace where no study clip was ever read. Shard
+    # membership metadata names the role and clip without opening any payload.
+    shard_ids = _registry_shard_ids(
+        operation.store, registry_manifest, lambda entry: str(entry["role"]) == "study"
+    )
+    if not shard_ids:
+        raise ArtifactError("the clip registry has no study-role clips to caption")
+    clip_ids = sorted(shard_ids)
+    _require_media_coverage(choice, {track: set(clip_ids)})
+
+    backend = _build_backend(contract, choice)
+    policies, _ = load_checkpoint_policies(backend, arguments.checkpoint_dir)
+    canonical_seed = int(str(contract.training["canonical_seed"]))
+    key = (experiment_id, variant_id, track, canonical_seed)
+    if key not in policies:
+        raise ArtifactError(
+            f"checkpoint directory has no policy for the selected cell {key};"
+            " run `dpo train run` with the same --checkpoint-dir first"
+        )
+
+    # One reservation per locked configuration: reserve() is idempotent for a
+    # matching (scope, hash, roles), so a crashed run retries, while a new lock
+    # forces a new fence and captions from two configurations cannot be mixed.
+    authority = ProtectedAccessAuthority(operation.store.root / "study.sqlite")
+    capability = authority.reserve(scope=ROLE_SCOPES["study"], semantic_hash=lock.lock_id, roles={"study"})
+    shard_rows = _registry_shard_rows(
+        operation.store,
+        registry_manifest,
+        lambda entry: str(entry["role"]) == "study",
+        capability=capability,
+        authority=authority,
+        semantic_hash_for_read=lock.lock_id,
+    )
+    # The protected read earns its place rather than being ceremonial: it proves
+    # the media about to be captioned is a derivative this corpus registered, so
+    # a study cannot ship captions generated from files the registry never saw.
+    if choice.media_dir is not None:
+        files = resolve_media_files(choice.media_dir, clip_ids, track=track)
+        for clip_id in clip_ids:
+            registered = {str(value) for value in shard_rows[clip_id][1]["derivative_hashes"]}
+            actual = sha256_file(files[clip_id])
+            if actual not in registered:
+                raise StudyError(
+                    f"clip {clip_id!r}: media at {files[clip_id]} hashes to {actual}, which the"
+                    " clip registry does not list as a derivative of this clip"
+                )
+    captions = generate_captions(
+        policies[key],
+        clip_ids,
+        backend.media_batch(track, clip_ids),
+        temperature=float(str(contract.validation["temperature"])),
+        top_p=float(str(contract.validation["top_p"])),
+        max_new_tokens=int(str(contract.validation["max_new_tokens"])),
+        seed=canonical_seed,
+    )
+    document, artifact_id = publish_study_export(
+        operation.publisher(),
+        contract,
+        track=track,
+        experiment_id=experiment_id,
+        variant_id=variant_id,
+        validation_accuracy=accuracy,
+        captions=captions,
+        training_pool=training_pool,
+        lock_artifact_id=lock_manifest.artifact_id,
+        shard_artifact_ids={clip_id: shard for clip_id, (shard, _) in shard_rows.items()},
+        decoding=dict(contract.validation),
+    )
+    authority.complete(capability)
+    _emit(
+        {
+            "status": "published",
+            "operation": "study-export",
+            "artifact_id": artifact_id,
+            "track": track,
+            "experiment_id": experiment_id,
+            "variant_id": variant_id,
+            "validation_accuracy": accuracy,
+            "clips": len(clip_ids),
+            "training_candidate_reuse_rate": document["training_candidate_reuse_rate"],
+            "lock_id": lock.lock_id,
+        }
+    )
+    return 0
+
+
 def _report_show(arguments: argparse.Namespace) -> int:
     store = ArtifactStore.open(arguments.workspace)
 
@@ -1220,6 +1389,18 @@ def build_parser() -> argparse.ArgumentParser:
     report_show = report_actions.add_parser("show")
     report_show.add_argument("--workspace", required=True)
     report_show.set_defaults(handler=_report_show)
+
+    study = commands.add_parser("study", help="produce the held-out study split's human-study stimuli")
+    study_actions = study.add_subparsers(dest="action", required=True)
+    study_export = study_actions.add_parser("export")
+    study_export.add_argument("--workspace", required=True)
+    study_export.add_argument("--contract", required=True)
+    study_export.add_argument("--artifact-id", action="append", required=True)
+    study_export.add_argument("--track", required=True)
+    study_export.add_argument("--checkpoint-dir", required=True)
+    study_export.add_argument("--backend-config", action="append")
+    study_export.add_argument("--media-dir")
+    study_export.set_defaults(handler=_study_export)
 
     for command_name in DEFERRED_GATES:
         blocked = commands.add_parser(command_name, help=f"live boundary: {DEFERRED_GATES[command_name]}")
