@@ -62,7 +62,7 @@ runs/checkpoints/  per-cell adapters, resumable by content hash
 
 | phase | needs | run |
 | --- | --- | --- |
-| **1. Annotate** | two authors, ~1.7 h each | `make annotate SPLIT=train`, then `SPLIT=validation`, then `dpo annotation ingest` per split |
+| **1. Annotate** | two authors, 212 tasks each (~1.5 h at 25 s/task) | `make annotate SPLIT=train`, then `SPLIT=validation`, then `dpo annotation ingest` per split |
 | **2. Train and select** | one 3090 | `dpo views derive` → `dpo train run` → `dpo select run` |
 | **3. Compare** | — | `make report` and `dpo report analyze` |
 | **4. Export stimuli** | one 3090 | `dpo study export` |
