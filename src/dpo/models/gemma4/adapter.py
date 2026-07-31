@@ -274,7 +274,22 @@ class GemmaCaptionAdapter:
             input_ids = tensors["input_ids"]
             completion_mask = torch.zeros_like(input_ids)
             completion_mask[0, prompt_length:] = 1
-            total = float(completion_logprobs(logits.float(), input_ids, completion_mask)[0])
+            # Only positions from prompt_length-1 onward predict a supervised
+            # token, and log_softmax casts its whole input to fp32 — over a
+            # video-conditioned prompt of ~2500 soft tokens x 262k vocab that is
+            # several GiB of logits which the mask then discards. Slicing to the
+            # window first computes the same quantity from the same per-token
+            # log-probabilities; only the summation tree differs, which moves
+            # the result by ~1e-7 relative — about 5e-7 nats/token on the
+            # congruency axis, against a 0.02 threshold.
+            window = max(0, prompt_length - 1)
+            total = float(
+                completion_logprobs(
+                    logits[:, window:].float(),
+                    input_ids[:, window:],
+                    completion_mask[:, window:],
+                )[0]
+            )
         return total, int(input_ids.shape[1] - prompt_length)
 
     def trainable_parameters(self) -> Iterator[torch.nn.Parameter]:
