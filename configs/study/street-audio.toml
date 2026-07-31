@@ -1,10 +1,15 @@
-# Live smoke contract over the collected street-scene stimulus set.
+# THE study contract: Gemma 4 E4B on the audio caption track, over the
+# street-scene corpus. Preferences are collected by the two authors on captions
+# of audio events; the trained winner then supplies the captions for a separate
+# user study, which measures their effect on participants under three soundtrack
+# conditions and is a different instrument entirely (see `dpo study export`).
 #
-# Scope: Gemma 4 E4B on the AUDIO caption track only — see the note where
-# [tracks.visual] would be. Preferences are collected by the two authors on
-# captions of audio events; the trained model then supplies the captions for a
-# separate user study, which measures their effect on participants under three
-# soundtrack conditions and is a different instrument entirely.
+# It began as the live smoke contract ("concap-street-smoke-v1") and was
+# promoted once the corpus, prompts, and backend were settled; the registry,
+# candidate pools, and annotation sessions carry stage-slice identities that a
+# study_id change does not touch, so everything generated under the smoke name
+# remains valid here. Only [tracks.audio] is declared — see the note where
+# [tracks.visual] would be.
 #
 # Media is staged from the uncaptioned source pool rather than from the c1..c4
 # condition renders: the renders that carry captions burn them into the frame,
@@ -12,9 +17,6 @@
 # the one c3 sampled. The condition renders remain the user study's stimuli.
 # Each staged clip still carries both a muted mp4 and a 16 kHz wav, so the same
 # corpus can serve a visual arm without re-staging if one is ever added.
-#
-# This contract exercises C0 candidate generation on real media; it is NOT a
-# study contract and its results must not be reported.
 #
 # Inherited from configs/study/canary.toml except where a live run cannot use
 # canary's value. Three such places, all deliberate:
@@ -29,7 +31,7 @@
 # differ — so the two contracts remain comparable everywhere it matters.
 
 schema_version = 1
-study_id = "concap-street-smoke-v1"
+study_id = "concap-street-audio-v1"
 execution_class = "live"
 
 [corpus]
