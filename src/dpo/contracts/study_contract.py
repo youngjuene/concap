@@ -545,6 +545,7 @@ def _validate_annotation(value: object) -> None:
             "collection_version",
             "min_response_ms",
             "max_position_bias",
+            "position_bias_alpha",
             "min_attention_pass",
         },
     )
@@ -561,6 +562,14 @@ def _validate_annotation(value: object) -> None:
     _string(table["collection_version"], "annotation.collection_version")
     _integer(table["min_response_ms"], "annotation.min_response_ms", minimum=0)
     _number(table["max_position_bias"], "annotation.max_position_bias", minimum=0.0, maximum=1.0)
+    # An annotator is dropped for position bias only when the lean clears
+    # max_position_bias AND an exact two-sided binomial test rejects a fair coin
+    # at this level, so both knobs are load-bearing and neither may be switched
+    # off: alpha 0 would never convict, alpha 1 would convict on the effect size
+    # alone and put the arbitrary sample-size floor back.
+    alpha = _number(table["position_bias_alpha"], "annotation.position_bias_alpha", minimum=0.0, maximum=0.5)
+    if alpha <= 0.0:
+        raise ContractError("annotation.position_bias_alpha must be greater than 0")
     _number(table["min_attention_pass"], "annotation.min_attention_pass", minimum=0.0, maximum=1.0)
 
 

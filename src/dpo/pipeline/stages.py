@@ -68,7 +68,7 @@ STAGES: dict[str, PipelineStage] = {
         PipelineStage(
             "annotation",
             ("dpo.frozen-candidate-pool/v1",),
-            ("dpo.raw-annotations/v1", "dpo.reliability-report/v1"),
+            ("dpo.raw-annotations/v1", "dpo.reliability-report/v2"),
             ("annotation",),
             "Collect human preferences against the frozen pool",
         ),

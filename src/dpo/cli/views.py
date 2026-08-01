@@ -70,7 +70,7 @@ def _reliability_report_for(store: ArtifactStore, annotations_artifact_id: str) 
     """
     matches = [
         artifact_id
-        for artifact_id in store.find_by_type("dpo.reliability-report/v1")
+        for artifact_id in store.find_by_type("dpo.reliability-report/v2")
         if any(
             parent.artifact_id == annotations_artifact_id
             for parent in store.verify_metadata(artifact_id).parents

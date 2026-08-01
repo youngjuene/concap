@@ -42,6 +42,7 @@ def ingest_annotations(
         attention_expected=attention_expected,
         min_response_ms=int(str(contract.annotation["min_response_ms"])),
         max_position_bias=float(str(contract.annotation["max_position_bias"])),
+        position_bias_alpha=float(str(contract.annotation["position_bias_alpha"])),
         min_attention_pass=float(str(contract.annotation["min_attention_pass"])),
     )
     split_clips = {candidate.clip_id for candidate in pool.candidates}
@@ -59,7 +60,7 @@ def ingest_annotations(
         role_exposure={split},
     )
     reliability_artifact = publisher.publish(
-        "dpo.reliability-report/v1",
+        "dpo.reliability-report/v2",
         reliability.document(),
         parents=(ParentEdge(annotations_artifact, "raw-annotations"),),
         stage="annotation",
