@@ -207,6 +207,8 @@ beta = 0.1
 temperature = 0.0
 top_p = 1.0
 max_new_tokens = 48
+# Deliberately coarse: the canary asserts the analysis path executes, and a
+# smoke test that takes longer stops being run.
 bootstrap_samples = 200
 
 [robustness]

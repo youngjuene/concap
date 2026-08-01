@@ -247,7 +247,10 @@ top_p = 1.0
 max_new_tokens = 48
 # Read by `dpo report analyze` as the clip-clustered bootstrap resample count.
 # (Removed once as a dead knob; restored the day its consumer was wired.)
-bootstrap_samples = 200
+# At 200 the 95% endpoints are the 5th and 195th ordered replicate, so
+# Monte-Carlo noise sets the interval width rather than the data does. This
+# is a CPU pass over a few thousand floats; there is no reason to be coarse.
+bootstrap_samples = 10000
 
 [robustness]
 flip_rates = [0.0, 0.1, 0.2, 0.3]
