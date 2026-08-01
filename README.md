@@ -68,7 +68,7 @@ data/userstudy/    human-study responses, one JSON per participant
 | **1. Annotate** | two authors, 212 tasks each (~1.5 h at 25 s/task) | `make annotate SPLIT=train`, then `SPLIT=validation`, then `dpo annotation ingest` per split |
 | **2. Train and select** | one 3090 | `dpo views derive` → `dpo train run` → `dpo select run` |
 | **3. Compare** | — | `make report` and `dpo report analyze` |
-| **4. Export stimuli** | one 3090, ~12 min | `dpo study export` |
+| **4. Export stimuli** | one 3090, ~17 min | `dpo study export` |
 | **5. Run the study** | participants | `dpo study serve` |
 
 ```bash
@@ -138,7 +138,21 @@ contamination stays measurable. Choices are recorded against the displayed
 order and resolved to canonical candidates exactly once at ingest;
 reliability screening (attention checks, repeat consistency, position bias,
 response time) applies the contract's preregistered exclusion rules before
-aggregation.
+aggregation. Position bias takes two knobs, and drops an annotator only when
+both fire: the lean must exceed `max_position_bias` *and* an exact two-sided
+binomial test must reject a fair coin at `position_bias_alpha`. Either test
+alone convicts the wrong people — the effect size alone convicts eight
+decisive judgments out of eleven, which chance produces about a fifth of the
+time, and the p-value alone convicts a 0.55 lean that distorts nothing.
+
+The report also carries **Krippendorff's α** (nominal, over canonical choices).
+It is the study's only real agreement number: an aggregated pair's `agreement`
+is the modal share, so at `judgments_per_pair = 2` it can only be 0.5 or 1.0
+and credits nothing to chance — a coin scores 0.5 there. α is computed over
+primary judgments only, since attention checks have a right answer and repeats
+measure the same annotator twice, and it is read through `canonical_choice()`,
+because two annotators who both pressed the left button under opposite display
+orders endorsed opposite candidates.
 
 ## 2. Run the experiments
 
@@ -239,14 +253,18 @@ Captions the held-out **study** split with the top-ranked experiment's selected
 variant and publishes `dpo.study-export/v1` — the stimuli the human study
 serves. Each clip gets a *congruency ladder*: one caption per slider stop,
 ordered along a measured axis (below). Cost on one 3090, measured: about
-**100 s per clip**, so ~12 minutes for a seven-clip study split, once.
+**143 s per clip** — 33 s generating, 109 s scoring — so ~17 minutes for a
+seven-clip study split, once, at a 22.5 GiB peak. Scoring dominates because
+each candidate is scored twice against a full-length video (see the ablation
+below); the audio-only second pass it replaced was roughly half the price and
+measured the wrong thing.
 
 ### Congruency is measured, not asserted
 
 For a caption `c` on one clip:
 
 ```
-congruency(c) = [ logP(c | audio, video) - logP(c | audio) ] / |c|      nats/token
+congruency(c) = [ logP(c | audio, video) - logP(c | audio, gray) ] / |c|   nats/token
 ```
 
 How much does *seeing* the clip help explain this sentence? A description of
@@ -254,7 +272,19 @@ sound alone gains nothing from the video and scores near zero; one naming the
 thing visibly making the sound scores strongly positive; one naming something
 not on screen scores **negative**, which is a principled incongruent end rather
 than a staged one. It reuses `completion_logprobs` — the same likelihood that
-scores preference pairs.
+scores preference pairs. In the literature this contrast is a length-normalized
+conditional pointwise mutual information, the same quantity contrastive
+decoding methods use to *decode*; here it selects stimuli instead.
+
+`gray` is the second pass's ablation, not a deletion: a video of the clip's own
+resolution, frame rate and frame count carrying a flat mid-grey field
+(`dpo.evaluation.ablation`). Dropping the video instead would remove ~2500 soft
+tokens along with the picture, and a model's absolute log-probability moves with
+how much context precedes a completion whatever that context contains — so a
+per-clip offset of unknown size would ride on every score. Rung order and
+spacing survive such an offset because every candidate on a clip shares it; the
+claim that does not survive is the one about the axis's zero, which is exactly
+what calling a rung *incongruent* asserts.
 
 Candidates are over-generated across conditionings, wordings, and temperatures;
 each is scored; and the rungs are **selected** for even spacing on that measured
@@ -299,23 +329,32 @@ uv run dpo study serve --export study-export.json \
   --media-dir data/live/media --out data/userstudy/responses
 ```
 
-A participant watches each clip with sound and drags one slider until the
-sentence beneath it best fits what they hear, then rates the match and writes
-what they heard in their own words. The slider **generates nothing at
-interaction time** — it indexes the pre-built ladder, so a drag costs a
-five-element scan (~20 ns) rather than a model call; the study document is
-fetched once at boot (~4 KB for seven clips).
+Each clip runs in two steps. First the participant watches it with sound and
+writes what they heard, in their own words, with no sentence on screen — that
+answer is only worth collecting before a caption has told them what to have
+heard. Then the sentence and the slider appear, and they drag until it best fits
+the clip and rate the match. The slider **generates nothing at interaction
+time** — it indexes the pre-built ladder, so a drag costs a five-element scan
+(~20 ns) rather than a model call; the study document is fetched once at boot
+(~4 KB for seven clips).
 
 The control's geometry *is* the measurement: stops sit at their measured
-congruency, so the distance dragged between two captions is their distance on
-the axis, not an artefact of how many candidates happened to generate. What
-reaches the browser is narrowed to position and text — the winning arm, its
-validation accuracy, each rung's score, and the conditioning that produced it
-all stay in the artifact, because a participant who can read which stop scored
-highest has been handed the answer.
+congruency, and the tick marks are placed at those same positions rather than
+distributed evenly, so the distance dragged between two captions is their
+distance on the axis. Marks pull answers toward themselves, so a mark anywhere
+but on its own stop is worse than no mark at all. What reaches the browser is
+narrowed to position and text — the winning arm, its validation accuracy, each
+rung's score, and the conditioning that produced it all stay in the artifact,
+because a participant who can read which stop scored highest has been handed the
+answer.
+
+Clip order is drawn per participant from their own participant code, and
+recorded with each response as `presentation_index`. The export stays sorted, so
+the artifact is unchanged; the order varies where it matters and stays stable
+across a reload or a resumed draft.
 
 This is a **separate instrument** from the annotation UI in `dpo.annotation`:
-different question, different response schema (`dpo.userstudy-responses/v1`),
+different question, different response schema (`dpo.userstudy-responses/v2`),
 different people. Kept apart so neither study's validator can be satisfied by
 the other's data. It serves the clip *with* its soundtrack, so
 `--media-dir` needs `unmuted_video/` renders staged alongside the corpus.
