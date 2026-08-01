@@ -117,3 +117,52 @@ def test_responses_round_trip_and_reject_foreign_clips(tmp_path: Path) -> None:
 def test_a_foreign_export_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="schema must be"):
         build_app({"schema": "dpo.selection-report/v1"}, tmp_path, tmp_path / "out")
+
+
+def _page() -> str:
+    from importlib.resources import files
+
+    return str(files("dpo.userstudy").joinpath("page.html").read_text(encoding="utf-8"))
+
+
+class TestInstrumentInvariants:
+    """Assertions against the page source, because the defects these guard were
+    invisible to every test that only exercised the server: the slider snapped
+    to measured positions while its tick marks were spread evenly, and the
+    free-text question claimed the caption had not been seen while showing it.
+    """
+
+    def test_marks_are_placed_by_measurement_not_distributed(self) -> None:
+        page = _page()
+        ticks_rule = page.split("#ticks {", 1)[1].split("}", 1)[0]
+        # Flexbox distribution puts marks at even intervals whatever the measure
+        # said; absolute placement is the only way a mark can sit on its stop.
+        assert "position: relative" in ticks_rule
+        assert "space-between" not in ticks_rule
+        assert "margin-left" not in page.split("#ticks span {", 1)[1].split("}", 1)[0]
+        # And the placement has to read the stop's own position.
+        assert 'tick.style.left = "calc(var(--thumb) / 2 + (100% - var(--thumb)) * " + level.position' in page
+
+    def test_what_you_heard_is_asked_before_the_caption_exists(self) -> None:
+        page = _page()
+        assert page.index('id="heard-text"') < page.index('id="caption"')
+        assert page.index('id="hear-step"') < page.index('id="judge-step"')
+        # The judging half starts hidden, so the caption is genuinely not on
+        # screen while the participant describes what they heard.
+        judge = page.split('<div id="judge-step"', 1)[1].split(">", 1)[0]
+        assert "hidden" in judge
+        assert "before you saw any sentence" not in page
+
+    def test_clip_order_is_per_participant_and_recorded(self) -> None:
+        page = _page()
+        assert "clips = ordered(studyClips, seedFrom(participant));" in page
+        # An order that is not recorded cannot be modelled, which is the only
+        # reason to vary it.
+        assert "presentation_index: index," in page
+
+    def test_the_clock_starts_when_the_clip_is_watchable(self) -> None:
+        page = _page()
+        assert 'for (const event of ["loadeddata", "canplaythrough", "playing"])' in page
+        # The slider's own latency is measured from when the slider appeared,
+        # not from when the clip did.
+        assert "Math.round(firstMoveAt - judgeShownAt)" in page
