@@ -103,7 +103,9 @@ def publish_study_export(
         "validation_accuracy": validation_accuracy,
         "decoding": dict(sorted(decoding.items())),
         "training_candidate_reuse_rate": reuse_rate,
-        "congruency_measure": "nats/token: logP(caption|audio,video) - logP(caption|audio)",
+        "congruency_measure": (
+            "nats/token: logP(caption|audio,video) - logP(caption|audio,gray video of equal length)"
+        ),
         "ladder_summary": ladder_summary(ladders),
         "clips": [ladder.document() for ladder in sorted(ladders, key=lambda item: item.clip_id)],
     }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from dpo.core.artifacts import (
     ArtifactError,
 )
 from dpo.core.identity import sha256_file
+from dpo.evaluation.ablation import gray_counterparts
 from dpo.evaluation.congruency import CandidateSpec, build_ladders, candidate_specs
 from dpo.models.gemma4.adapter import GemmaCaptionAdapter
 from dpo.models.gemma4.prompt import stimulus_messages
@@ -141,31 +143,49 @@ def _study_export(arguments: argparse.Namespace) -> int:
     audio_files = resolve_media_files(choice.media_dir, clip_ids, track="audio")
     video_files = resolve_media_files(choice.media_dir, clip_ids, track="visual")
 
-    def _messages(clip_id: str, instruction: str, *, with_video: bool) -> list[dict[str, Any]]:
+    def _messages(clip_id: str, instruction: str, *, video: Path | None) -> list[dict[str, Any]]:
         return stimulus_messages(
             instruction,
             audio_reference=str(audio_files[clip_id]),
-            video_reference=str(video_files[clip_id]) if with_video else None,
+            video_reference=None if video is None else str(video),
         )
 
-    def _generate(clip_id: str, spec: CandidateSpec) -> str:
-        return policy.generate_stimulus(
-            _messages(clip_id, spec.instruction, with_video=spec.conditioning == "audio+video"),
-            temperature=spec.temperature,
-            top_p=float(str(contract.validation["top_p"])),
-            max_new_tokens=int(str(contract.validation["max_new_tokens"])),
-            seed=canonical_seed,
+    with tempfile.TemporaryDirectory(prefix="dpo-ablation-") as ablation_root:
+        # Sight removed, context kept: see dpo.evaluation.ablation for why the
+        # measure needs the difference. The twins derive from the same renders
+        # the registry just verified, and live no longer than the measurement.
+        gray_files = gray_counterparts(video_files, Path(ablation_root))
+
+        def _generate(clip_id: str, spec: CandidateSpec) -> str:
+            # Generation is the deployment condition, not a measurement, so an
+            # audio-only spec gets no video at all. Handing it a gray frame here
+            # would invite a caption about a gray frame.
+            return policy.generate_stimulus(
+                _messages(
+                    clip_id,
+                    spec.instruction,
+                    video=video_files[clip_id] if spec.conditioning == "audio+video" else None,
+                ),
+                temperature=spec.temperature,
+                top_p=float(str(contract.validation["top_p"])),
+                max_new_tokens=int(str(contract.validation["max_new_tokens"])),
+                seed=canonical_seed,
+            )
+
+        def _measure(clip_id: str, caption: str) -> float:
+            # The axis itself. Both passes use the contract's own prompt and both
+            # carry a video of the same length, so the one thing that differs
+            # between them is whether that video shows the clip.
+            base = contract.tracks[track].prompt
+            seen, tokens = policy.score_stimulus(
+                _messages(clip_id, base, video=video_files[clip_id]), caption
+            )
+            heard, _ = policy.score_stimulus(_messages(clip_id, base, video=gray_files[clip_id]), caption)
+            return (seen - heard) / max(1, tokens)
+
+        ladders = build_ladders(
+            clip_ids, specs, rungs=int(arguments.rungs), generate=_generate, measure=_measure
         )
-
-    def _measure(clip_id: str, caption: str) -> float:
-        # The axis itself. Both passes use the contract's own prompt, so the
-        # only difference between them is whether the model can see the clip.
-        base = contract.tracks[track].prompt
-        seen, tokens = policy.score_stimulus(_messages(clip_id, base, with_video=True), caption)
-        heard, _ = policy.score_stimulus(_messages(clip_id, base, with_video=False), caption)
-        return (seen - heard) / max(1, tokens)
-
-    ladders = build_ladders(clip_ids, specs, rungs=int(arguments.rungs), generate=_generate, measure=_measure)
     document, artifact_id = publish_study_export(
         operation.publisher(),
         contract,
