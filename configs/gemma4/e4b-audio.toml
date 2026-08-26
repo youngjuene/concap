@@ -3,6 +3,14 @@
 # rates, epochs, batch geometry, LoRA topology, seeds, precision) lives in the
 # study contract, which pins this file's hash for provenance.
 # Hardware target: one RTX 3090 (24 GB), QLoRA.
+#
+# WHY THIS CHECKPOINT. At our VRAM budget both Gemma 4 E4B and 12B were live
+# options — 12B fits one 24 GB card under nf4 QLoRA — so this was not a memory
+# decision. 12B was ruled out on capability: its audio encoder accepts only
+# speech-like input (published on FLEURS ASR and CoVoST, speech only), and on
+# environmental street recordings it hallucinated speech for every clip. That
+# is total failure at the sound-event captioning this track exists to do, so
+# E4B serves audio and visual alike.
 
 [model]
 model_id = "google/gemma-4-E4B-it"
@@ -26,21 +34,17 @@ media_inputs = "audio"
 # "a group of people gathered outdoors, likely at a public event, with some
 # talking and moving around".
 #
-# 12B is NOT a fallback for this track, at any precision. It is an encoder-free
-# unified model: the 305M USM conformer is discarded and raw 16 kHz audio is
-# chunked into 640-sample frames projected straight into the LM by RMSNorm ->
-# Linear, a 2.5M-parameter path against E4B's 308.8M tower. Its published audio
-# results are FLEURS ASR and CoVoST — speech only — and on non-speech street
-# audio it hallucinates speech for everything, answering two different clips
-# with one byte-identical sentence in bf16 as well as nf4. The leading RMSNorm
-# also means clip level cannot be the cause. Use E4B for audio.
-#
 # Flipping load_in_4bit to false is the only known working audio configuration.
 # It is now expressible — backend_config.py no longer requires 4-bit, and the
 # bf16 path is verified end to end (14.8 GiB, all-bfloat16 params, base frozen,
-# checkpointing armed) — but it is still not free: the 24 GB training budget was
-# measured against a 4-bit base, so the matrix must be re-measured before the
-# audio track can be trained.
+# checkpointing armed). The 24 GB training budget was re-measured against this
+# unquantized base, because the original matrix assumed a 4-bit one: on one
+# RTX 3090, at the contract's batch_size = 4, every preference arm (DPO, IPO,
+# CDPO, RDPO, DRDPO, WDPO, SFT_DPO) trains at a 20.85 GiB peak — identical
+# across arms, since they share one memory shape and differ only in the loss.
+# Peak does not grow with pool size (media batches carry clip identity only and
+# completion_logps scores row by row), so it is set by batch_size and sequence
+# length alone. Roughly 2.7 GiB of headroom: raising batch_size is not free.
 [quantization]
 # Deliberately unquantized: see the measurement above. quant_type and
 # double_quant are inert while load_in_4bit is false, and are kept only so

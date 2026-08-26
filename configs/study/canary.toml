@@ -29,24 +29,22 @@ prompt = "Describe in one short English sentence the salient objects, actions, s
 prompt_hash = "sha256:cd2512bf8730ddb61da66faf10c7ae85692dde7244a2db1ff8efb88c7d787530"
 # Frames sampled per clip: how much of a clip the model actually sees, and
 # the dominant term in the training sequence length. Measured end to end on
-# one RTX 3090 (24 GB) with Gemma 4 12B, batch 1 + accumulation:
-#   2 frames -> SFT 16.2 GB, DPO 21.4 GB, SFT_DPO 21.4 GB  (whole matrix fits)
-#   4 frames -> SFT 20.7 GB, DPO out of memory
-#   32 (the processor default) -> ~2340-token prompts, OOM even across two GPUs
+# one RTX 3090 (24 GB) with Gemma 4 E4B in bf16, at this contract's
+# batch_size = 4:
+#   2 frames -> every preference arm peaks at 18.62 GiB (whole matrix fits)
+#   4 frames -> UNMEASURED on this backend; ~5 GiB of headroom suggests it may
+#               fit, which is a reason to measure it, not to assume it
+#   32 (the processor default) -> ~2340-token prompts, out of the question
 # Raise it only with headroom to match; it is result-affecting, so changing it
 # changes the contract hash and retrains the cells that read it.
-# Every lever for affording more frames was measured and is closed:
+# Two levers for affording more frames are already closed:
 #   - gradient checkpointing is already active (49 modules); forcing it again
 #     changes nothing,
-#   - E4B is not a lighter visual backend (16.3 GB resident after k-bit prep
-#     against 12B's 9.7 GB), so it OOMs one step sooner,
 #   - frame resolution does not matter: the processor emits exactly 70 soft
 #     tokens per frame at any input size, and 70 is the floor of the allowed
 #     max_soft_tokens {70, 140, 280, 560, 1120}.
 # Visual sequence length is therefore frames x 70 + text, and the frame count
-# is the only lever. The remaining untried option is a preparation path that
-# avoids upcasting the 2 GB embedding to fp32 (which also makes activations
-# fp32); it needs care, not a patch.
+# is the only lever.
 #
 # STUDY IMPLICATION: two frames over a five-second clip is two stills. The
 # visual caption contract asks for actions and scene changes, which two stills

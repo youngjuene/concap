@@ -97,7 +97,7 @@ init_seed = 0
 # because one track is declared — a [backends.visual] here would be refused as
 # serving a track this contract does not declare.
 [backends.audio]
-config_hash = "sha256:ae9a3338e5419c749d684543501fff9c5b7c288e64a4655f8b22834aed3e83d1"
+config_hash = "sha256:0ee3c1c86817d92172d160afb021c06fd4e8475a7f192b9ef74dfbb32ca65c59"
 
 [candidates]
 source_policy = "C0"
