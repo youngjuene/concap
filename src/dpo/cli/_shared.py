@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from dpo.analysis.bradley_terry import AnalysisError
 from dpo.annotation.raw_annotations import AnnotationError
 from dpo.candidates.candidate_records import CandidateError
 from dpo.contracts.study_contract import (
@@ -39,6 +40,7 @@ Handler = Callable[[argparse.Namespace], int]
 DOMAIN_ERRORS = (
     OSError,
     AccessDenied,
+    AnalysisError,
     AnnotationError,
     ArtifactError,
     CandidateError,

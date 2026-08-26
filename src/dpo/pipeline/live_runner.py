@@ -15,8 +15,8 @@ Resumption is content-addressed, not timestamped: each cell directory holds
 the saved adapter plus a ``cell.json`` carrying the published cell document
 and the semantic hash of everything the cell trained from. A rerun recomputes
 that hash and reuses the cell only when it matches, so a crash mid-matrix
-never redoes completed cells and a changed view, hyperparameter, seed, or
-training section retrains exactly the cells it affects.
+never redoes completed cells and a changed view, hyperparameter, seed, flip
+manifest, or training section retrains exactly the cells it affects.
 
 References never occupy a second model in VRAM: reference log-probabilities
 are precomputed once per cell and the reference adapter is released before the
@@ -42,6 +42,7 @@ from dpo.contracts.study_contract import ContractError, StudyContract
 from dpo.core.identity import canonical_bytes, semantic_hash
 from dpo.data.derive_pairs import MetadataPair, StrictPair
 from dpo.data.derive_sft import SftExample
+from dpo.data.noise import FlipManifest
 from dpo.models.base import MediaBatch, ModelAdapter
 from dpo.models.tiny import TinyAdapter, encode_text, synthetic_media
 from dpo.pipeline.experiments import (
@@ -54,8 +55,8 @@ from dpo.pipeline.experiments import (
 # The one orientation of the metadata-rich view for training. Importing the
 # offline runner's implementation (rather than restating it) keeps the live and
 # offline matrices from ever disagreeing about what pair_all trains on.
-from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM, CellResult, _oriented_from_metadata
-from dpo.pipeline.stage_inputs import parse_cell_result
+from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM, CellResult, _oriented_from_metadata, training_pairs
+from dpo.pipeline.stage_inputs import MATRIX_KEY, parse_cell_result
 from dpo.trainers.callbacks import REQUIRED_PREFERENCE_KEYS, DiagnosticsLog
 from dpo.trainers.preference_trainer import (
     PreferenceTrainer,
@@ -66,7 +67,8 @@ from dpo.trainers.preference_trainer import (
 from dpo.trainers.sft_trainer import SftTrainer, build_sft_batches
 
 CELL_FILE = "cell.json"
-CELL_KEY = tuple[str, str, str, int]
+# (experiment, variant, track, seed, train-time flip rate); 0.0 is the base cell.
+CELL_KEY = tuple[str, str, str, int, float]
 
 
 @runtime_checkable
@@ -114,9 +116,20 @@ def _slug(value: str) -> str:
     return safe or "variant"
 
 
-def cell_directory(root: str | Path, *, track: str, experiment_id: str, variant_id: str, seed: int) -> Path:
-    """``<root>/<track>/<experiment>__<variant>__seed<N>`` — the one layout."""
-    return Path(root) / track / f"{experiment_id}__{_slug(variant_id)}__seed{seed}"
+def cell_directory(
+    root: str | Path,
+    *,
+    track: str,
+    experiment_id: str,
+    variant_id: str,
+    seed: int,
+    flip_rate: float = 0.0,
+) -> Path:
+    """``<root>/<track>/<experiment>__<variant>__seed<N>[__flip<rate>]`` — the one layout."""
+    name = f"{experiment_id}__{_slug(variant_id)}__seed{seed}"
+    if flip_rate > 0.0:
+        name += f"__flip{flip_rate:g}"
+    return Path(root) / track / name
 
 
 def _write_document(path: Path, document: Mapping[str, object]) -> None:
@@ -204,16 +217,16 @@ class CheckpointPolicies(Mapping[CELL_KEY, ModelAdapter]):
 
 def load_checkpoint_policies(
     backend: TrainingBackend, root: str | Path
-) -> tuple[CheckpointPolicies, dict[tuple[str, str, str], CellResult]]:
+) -> tuple[CheckpointPolicies, dict[MATRIX_KEY, CellResult]]:
     """Rebuild the lazy policy map (and the cells) from a checkpoint root."""
     policies = CheckpointPolicies(backend)
-    cells: dict[tuple[str, str, str], CellResult] = {}
+    cells: dict[MATRIX_KEY, CellResult] = {}
     for cell, directory in scan_checkpoints(root):
         policies.register(
-            (cell.experiment_id, cell.variant_id, cell.track, cell.seed),
+            (cell.experiment_id, cell.variant_id, cell.track, cell.seed, cell.flip_rate),
             PolicyLocation(track=cell.track, directory=directory, trained=cell.trained),
         )
-        cells[(cell.experiment_id, cell.variant_id, cell.track)] = cell
+        cells[(cell.experiment_id, cell.variant_id, cell.track, cell.flip_rate)] = cell
     return policies, cells
 
 
@@ -286,8 +299,9 @@ class LiveMatrixRunner:
     metadata_pairs: Mapping[str, tuple[MetadataPair, ...]]
     sft_rows: Mapping[str, tuple[SftExample, ...]]
     policies: CheckpointPolicies = field(init=False)
-    # (experiment, variant, track, seed) -> "trained" | "resumed"; the first
-    # outcome wins, so a warm-start dependency cannot double-count its cell.
+    # (experiment, variant, track, seed, flip rate) -> "trained" | "resumed";
+    # the first outcome wins, so a warm-start dependency cannot double-count
+    # its cell.
     outcomes: dict[CELL_KEY, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -303,13 +317,16 @@ class LiveMatrixRunner:
     def seed_adapters(self) -> dict[str, ModelAdapter]:
         return {track: self.backend.seed_adapter(track) for track in sorted(self.contract.tracks)}
 
-    def cell_directory(self, experiment_id: str, variant_id: str, track: str, seed: int) -> Path:
+    def cell_directory(
+        self, experiment_id: str, variant_id: str, track: str, seed: int, flip_rate: float = 0.0
+    ) -> Path:
         return cell_directory(
             self.checkpoint_dir,
             track=track,
             experiment_id=experiment_id,
             variant_id=variant_id,
             seed=seed,
+            flip_rate=flip_rate,
         )
 
     @property
@@ -320,8 +337,10 @@ class LiveMatrixRunner:
     def resumed_count(self) -> int:
         return sum(1 for outcome in self.outcomes.values() if outcome == "resumed")
 
-    def was_resumed(self, experiment_id: str, variant_id: str, track: str, seed: int) -> bool:
-        return self.outcomes.get((experiment_id, variant_id, track, seed)) == "resumed"
+    def was_resumed(
+        self, experiment_id: str, variant_id: str, track: str, seed: int, flip_rate: float = 0.0
+    ) -> bool:
+        return self.outcomes.get((experiment_id, variant_id, track, seed, flip_rate)) == "resumed"
 
     # -- shared training mechanics --------------------------------------------
 
@@ -369,7 +388,15 @@ class LiveMatrixRunner:
 
     # -- identity of a cell's training inputs ----------------------------------
 
-    def _row_fingerprint(self, resolved: ResolvedExperiment, track: str) -> dict[str, object]:
+    def _training_pairs(
+        self, resolved: ResolvedExperiment, track: str, flip: FlipManifest | None
+    ) -> list[StrictPair]:
+        view = str(resolved.training_view)
+        return training_pairs(self._pairs_for_view(view, track), view=view, flip=flip)
+
+    def _row_fingerprint(
+        self, resolved: ResolvedExperiment, track: str, flip: FlipManifest | None
+    ) -> dict[str, object]:
         rows: dict[str, object] = {}
         needs_sft = resolved.spec.objective == "sft" or resolved.spec.policy_init == "SFT"
         if needs_sft:
@@ -392,17 +419,21 @@ class LiveMatrixRunner:
                     "rejected_text": row.rejected_text,
                     "weight": row.weight,
                 }
-                for row in self._pairs_for_view(str(resolved.training_view), track)
+                for row in self._training_pairs(resolved, track, flip)
             ]
         return rows
 
-    def inputs_hash(self, resolved: ResolvedExperiment, *, track: str, seed: int) -> str:
+    def inputs_hash(
+        self, resolved: ResolvedExperiment, *, track: str, seed: int, flip: FlipManifest | None = None
+    ) -> str:
         """Everything this cell trains from, as one semantic hash.
 
         It is deliberately a superset of the published cell's cache identity
         (``training_stage.training_cell_slice``) plus the training rows: if the
         artifact identity could change while this hash did not, a rerun would
-        publish a new artifact from a stale checkpoint.
+        publish a new artifact from a stale checkpoint. The flipped rows are
+        fingerprinted as trained on, and the manifest's own identity is named
+        too, so two manifests that happen to flip the same rows still key apart.
         """
         return semantic_hash(
             {
@@ -413,10 +444,12 @@ class LiveMatrixRunner:
                 "training_view": resolved.training_view,
                 "seed": seed,
                 "track": track,
+                "flip_rate": 0.0 if flip is None else flip.flip_rate,
+                "flip_manifest": None if flip is None else flip.sha256,
                 "track_contract": dict(self.contract.raw["tracks"][track]),
                 "training": dict(self.contract.raw["training"]),
                 "models_seed": dict(self.contract.raw["models"]["seed"]),
-                "rows": self._row_fingerprint(resolved, track),
+                "rows": self._row_fingerprint(resolved, track, flip),
             }
         )
 
@@ -433,7 +466,7 @@ class LiveMatrixRunner:
         return diagnostics
 
     def _finish(self, cell: CellResult, directory: Path, inputs_hash: str, *, resumed: bool) -> CellResult:
-        key = (cell.experiment_id, cell.variant_id, cell.track, cell.seed)
+        key = (cell.experiment_id, cell.variant_id, cell.track, cell.seed, cell.flip_rate)
         # First outcome wins, so the summary answers "did THIS run have to train
         # the cell?". A warm start that trains SFT keeps it counted as trained
         # even though the matrix's own SFT cell later reuses that checkpoint;
@@ -468,10 +501,14 @@ class LiveMatrixRunner:
         track: str,
         seed: int,
         variant: ExperimentVariant | None = None,
+        flip: FlipManifest | None = None,
     ) -> CellResult:
         resolved = resolve_experiment(self.contract, experiment_id, track=track, seed=seed, variant=variant)
-        directory = self.cell_directory(experiment_id, resolved.variant_id, track, seed)
-        inputs_hash = self.inputs_hash(resolved, track=track, seed=seed)
+        if flip is not None and not resolved.is_preference:
+            raise ContractError(f"{experiment_id} trains on no pair view; a flip manifest does not apply")
+        flip_rate = 0.0 if flip is None else flip.flip_rate
+        directory = self.cell_directory(experiment_id, resolved.variant_id, track, seed, flip_rate)
+        inputs_hash = self.inputs_hash(resolved, track=track, seed=seed, flip=flip)
         cached = read_cell_checkpoint(directory, inputs_hash=inputs_hash)
         if cached is not None:
             return self._finish(cached, directory, inputs_hash, resumed=True)
@@ -482,7 +519,7 @@ class LiveMatrixRunner:
         elif resolved.spec.objective == "sft":
             cell = self._run_sft_cell(resolved, track=track, seed=seed, directory=directory)
         else:
-            cell = self._run_preference_cell(resolved, track=track, seed=seed, directory=directory)
+            cell = self._run_preference_cell(resolved, track=track, seed=seed, directory=directory, flip=flip)
         return self._finish(cell, directory, inputs_hash, resumed=False)
 
     def _run_seed_cell(self, resolved: ResolvedExperiment, *, track: str, seed: int) -> CellResult:
@@ -492,6 +529,7 @@ class LiveMatrixRunner:
             variant_id=resolved.variant_id,
             track=track,
             seed=seed,
+            flip_rate=0.0,
             trained=False,
             objective=None,
             training_view=None,
@@ -523,6 +561,7 @@ class LiveMatrixRunner:
             variant_id=resolved.variant_id,
             track=track,
             seed=seed,
+            flip_rate=0.0,
             trained=True,
             objective="sft",
             training_view="sft",
@@ -538,10 +577,16 @@ class LiveMatrixRunner:
         return cell
 
     def _run_preference_cell(
-        self, resolved: ResolvedExperiment, *, track: str, seed: int, directory: Path
+        self,
+        resolved: ResolvedExperiment,
+        *,
+        track: str,
+        seed: int,
+        directory: Path,
+        flip: FlipManifest | None,
     ) -> CellResult:
         view = str(resolved.training_view)
-        rows = self._shuffled(self._pairs_for_view(view, track), seed)
+        rows = self._shuffled(self._training_pairs(resolved, track, flip), seed)
         if not rows:
             raise ContractError(f"track {track!r} has no pairs in view {view!r}")
         self._check_completion_budget(
@@ -583,6 +628,7 @@ class LiveMatrixRunner:
             variant_id=resolved.variant_id,
             track=track,
             seed=seed,
+            flip_rate=0.0 if flip is None else flip.flip_rate,
             trained=True,
             objective=resolved.spec.objective,
             training_view=view,

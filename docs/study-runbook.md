@@ -60,21 +60,34 @@ uv run dpo views derive --workspace artifacts/street --contract configs/study/st
   --artifact-id <train-annotations> --artifact-id <validation-annotations> --track audio
 
 uv run dpo train run --workspace artifacts/street --contract configs/study/street-audio.toml \
-  --artifact-id <view-ids...> --checkpoint-dir runs/checkpoints \
+  --artifact-id <view-ids...> --artifact-id <flip-manifest-ids...> \
+  --checkpoint-dir runs/checkpoints \
   --backend-config configs/gemma4/e4b-audio.toml --media-dir data/live/media
 
 uv run dpo select run --workspace artifacts/street --contract configs/study/street-audio.toml \
   --artifact-id <view-ids...> --artifact-id <cell-ids...> \
   --checkpoint-dir runs/checkpoints --backend-config configs/gemma4/e4b-audio.toml \
   --media-dir data/live/media
+
+uv run dpo report analyze --workspace artifacts/street --contract configs/study/street-audio.toml \
+  --artifact-id <validation-report> --artifact-id <selection-report>
 ```
 
+`views derive` prints the four view ids and, under `flip_manifests`, one id
+per `[robustness].flip_rates` entry; `train run` needs all of them. The
+matrix is 9 base cells plus **21 flipped retrainings** — each of the seven
+pair_strict preference arms (DPO, IPO, CDPO, RDPO, DRDPO, WDPO, SFT_DPO) once
+per positive rate (0.1, 0.2, 0.3) on the shared manifest — so budget roughly
+3.3x the base training time. Selection scores all 30 cells but ranks and
+locks the 9 base cells only. Training is resumable: rerunning skips finished
+cells, flipped ones included.
+
 `make report` prints per-variant validation accuracy, the selection ranking,
-and the lock as they publish; `dpo report analyze --workspace artifacts/street
---contract configs/study/street-audio.toml` adds the inferential layer —
-clip-clustered CIs, paired tests vs SEED with BH correction, Bradley-Terry,
-and the natural-noise slices. Training is resumable: rerunning skips finished
-cells.
+and the lock as they publish; `report analyze` publishes
+`dpo.analysis-report/v1` — clip-clustered CIs at 10000 resamples
+(`validation.bootstrap_samples`), paired tests vs SEED with BH correction,
+Bradley-Terry, the natural-noise slices, and the flip-rate curve of every
+retrained arm. It re-scores nothing: a rerun republishes to the same id.
 
 ## 3. Export the human-study stimuli
 

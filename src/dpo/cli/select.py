@@ -6,23 +6,14 @@ import argparse
 
 from dpo.cli._backend import _build_backend, _require_media_coverage, _resolve_backend, _selection_identity
 from dpo.cli._shared import _emit, _operation, _require_types
-from dpo.contracts.study_contract import (
-    EXPERIMENT_IDS,
-    load_contract,
-)
-from dpo.core.artifacts import (
-    ArtifactError,
-)
+from dpo.contracts.study_contract import EXPERIMENT_IDS, load_contract
+from dpo.core.artifacts import ArtifactError
 from dpo.pipeline.experiments import expand_experiment
-from dpo.pipeline.live_runner import (
-    load_checkpoint_policies,
-)
+from dpo.pipeline.live_runner import load_checkpoint_policies
 from dpo.pipeline.selection_stage import publish_selection
-from dpo.pipeline.stage_inputs import (
-    collect_matrix_cells,
-    collect_view_inputs,
-)
+from dpo.pipeline.stage_inputs import collect_matrix_cells, collect_view_inputs
 from dpo.pipeline.stages import stage
+from dpo.pipeline.training_stage import matrix_cells
 
 
 def _select_run(arguments: argparse.Namespace) -> int:
@@ -52,28 +43,32 @@ def _select_run(arguments: argparse.Namespace) -> int:
     canonical_seed = int(str(contract.training["canonical_seed"]))
     backend = _build_backend(contract, choice)
     policies, _ = load_checkpoint_policies(backend, arguments.checkpoint_dir)
-    variants_by_experiment = {
-        experiment_id: expand_experiment(contract, experiment_id) for experiment_id in EXPERIMENT_IDS
-    }
-    # Selection compares the whole matrix: every variant of every experiment on
-    # every track must be both published and materializable, or the ranking
-    # would silently be over a subset.
-    for experiment_id, variants in sorted(variants_by_experiment.items()):
-        for variant in variants:
-            for track in contract.tracks:
-                key = (experiment_id, variant.variant_id, track)
-                if key not in cells:
-                    raise ArtifactError(f"no matrix-cell artifact was given for cell {key}")
-                if (*key, canonical_seed) not in policies:
-                    raise ArtifactError(
-                        f"checkpoint directory has no policy for cell {key};"
-                        " run `dpo train run` with the same --checkpoint-dir first"
-                    )
+    # Selection compares the whole matrix: every cell the contract declares —
+    # every variant of every experiment on every track, and every flipped
+    # retraining behind the robustness curve — must be both published and
+    # materializable, or the ranking or the curve would silently be over a
+    # subset.
+    for spec in matrix_cells(contract):
+        if spec.key not in cells:
+            raise ArtifactError(f"no matrix-cell artifact was given for cell {spec.key}")
+        if (
+            spec.experiment_id,
+            spec.variant.variant_id,
+            spec.track,
+            canonical_seed,
+            spec.flip_rate,
+        ) not in policies:
+            raise ArtifactError(
+                f"checkpoint directory has no policy for cell {spec.key};"
+                " run `dpo train run` with the same --checkpoint-dir first"
+            )
     identity = _selection_identity(contract, choice)
     selection = publish_selection(
         operation.publisher(),
         contract,
-        variants_by_experiment=variants_by_experiment,
+        variants_by_experiment={
+            experiment_id: expand_experiment(contract, experiment_id) for experiment_id in EXPERIMENT_IDS
+        },
         canonical_seed=canonical_seed,
         validation_pairs=views.validation_pairs,
         strict_pairs=views.strict_pairs,

@@ -169,17 +169,49 @@ def test_policies_materialize_from_the_checkpoint_directory(world: PreferenceWor
         for experiment_id in ("SEED", "SFT", "DPO")
     }
     for experiment_id, cell in cells.items():
-        adapter = live.policies[(experiment_id, cell.variant_id, "visual", 1)]
+        adapter = live.policies[(experiment_id, cell.variant_id, "visual", 1, 0.0)]
         assert adapter.state_signature() == cell.checkpoint_signature
     # A fresh process rebuilds the same map from disk alone.
     policies, recovered = load_checkpoint_policies(TinyBackend(contract=world.contract), checkpoints)
     assert len(policies) == 3
     for experiment_id, cell in cells.items():
-        assert recovered[(experiment_id, cell.variant_id, "visual")].document() == cell.document()
+        assert recovered[(experiment_id, cell.variant_id, "visual", 0.0)].document() == cell.document()
         assert (
-            policies[(experiment_id, cell.variant_id, "visual", 1)].state_signature()
+            policies[(experiment_id, cell.variant_id, "visual", 1, 0.0)].state_signature()
             == cell.checkpoint_signature
         )
+
+
+def test_a_flipped_cell_is_its_own_checkpoint_with_its_own_identity(
+    world: PreferenceWorld, tmp_path: Path
+) -> None:
+    """The same cell retrained on flipped labels keys apart from its base cell everywhere."""
+    from dpo.data.noise import make_flip_manifest
+
+    checkpoints = tmp_path / "checkpoints"
+    live = _runner(world, checkpoints)
+    manifest = make_flip_manifest(live.strict_pairs["visual"], flip_rate=0.2, seed=13)
+    base = live.run_cell("DPO", track="visual", seed=1)
+    flipped = live.run_cell("DPO", track="visual", seed=1, flip=manifest)
+    assert flipped.flip_rate == 0.2 and base.flip_rate == 0.0
+    assert flipped.checkpoint_signature != base.checkpoint_signature
+    assert flipped.reference_signature == base.reference_signature
+    assert live.cell_directory("DPO", "base", "visual", 1, 0.2).name.endswith("__flip0.2")
+    assert live.cell_directory("DPO", "base", "visual", 1, 0.2) != live.cell_directory(
+        "DPO", "base", "visual", 1
+    )
+    assert live.trained_count == 2
+    # Both resume independently, and the policy map tells them apart.
+    again = _runner(world, checkpoints)
+    again.run_cell("DPO", track="visual", seed=1, flip=manifest)
+    assert again.was_resumed("DPO", "base", "visual", 1, 0.2)
+    assert not again.was_resumed("DPO", "base", "visual", 1)
+    policies, recovered = load_checkpoint_policies(TinyBackend(contract=world.contract), checkpoints)
+    assert set(recovered) == {("DPO", "base", "visual", 0.0), ("DPO", "base", "visual", 0.2)}
+    assert policies[("DPO", "base", "visual", 1, 0.2)].state_signature() == flipped.checkpoint_signature
+    # A manifest cannot flip a cell that trains on no pair view.
+    with pytest.raises(ContractError, match="no pair view"):
+        live.run_cell("SFT", track="visual", seed=1, flip=manifest)
 
 
 def test_scan_checkpoints_reports_every_completed_cell(world: PreferenceWorld, tmp_path: Path) -> None:

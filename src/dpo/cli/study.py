@@ -95,7 +95,7 @@ def _study_export(arguments: argparse.Namespace) -> int:
     backend = _build_backend(contract, choice)
     policies, _ = load_checkpoint_policies(backend, arguments.checkpoint_dir)
     canonical_seed = int(str(contract.training["canonical_seed"]))
-    key = (experiment_id, variant_id, track, canonical_seed)
+    key = (experiment_id, variant_id, track, canonical_seed, 0.0)
     if key not in policies:
         raise ArtifactError(
             f"checkpoint directory has no policy for the selected cell {key};"

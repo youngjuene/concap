@@ -183,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_analyze = report_actions.add_parser("analyze")
     report_analyze.add_argument("--workspace", required=True)
     report_analyze.add_argument("--contract", required=True)
+    report_analyze.add_argument("--artifact-id", action="append", required=True)
     report_analyze.set_defaults(handler=_report_analyze)
 
     study = commands.add_parser("study", help="produce the held-out study split's human-study stimuli")

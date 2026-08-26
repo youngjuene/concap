@@ -252,6 +252,10 @@ max_new_tokens = 48
 # is a CPU pass over a few thousand floats; there is no reason to be coarse.
 bootstrap_samples = 10000
 
+# Each rate above 0.0 retrains every pair_strict preference cell (DPO, IPO,
+# CDPO, RDPO, DRDPO, WDPO, SFT_DPO) on the shared flip manifest at that rate:
+# three extra rates means three extra cells per arm. `flip_rates = [0.0]` is
+# the honest way to opt out; leaving rates here that no report will cite is not.
 [robustness]
 flip_rates = [0.0, 0.1, 0.2, 0.3]
 flip_seed = 13

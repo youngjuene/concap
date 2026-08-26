@@ -736,17 +736,15 @@ def _validate_validation(value: object) -> None:
     table = _table(
         value,
         "validation",
-        {"temperature", "top_p", "max_new_tokens"},
-        # Nothing reads bootstrap_samples yet — dpo.analysis.bootstrap, its
-        # intended consumer, has no command wired to it. Accepted for forward
-        # compatibility, not required.
-        {"bootstrap_samples"},
+        {"temperature", "top_p", "max_new_tokens", "bootstrap_samples"},
     )
     _number(table["temperature"], "validation.temperature", minimum=0.0)
     _number(table["top_p"], "validation.top_p", exclusive_minimum=0.0, maximum=1.0)
     _integer(table["max_new_tokens"], "validation.max_new_tokens", minimum=1)
-    if "bootstrap_samples" in table:
-        _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
+    # The clip-clustered bootstrap resample count that `dpo report analyze`
+    # reads; result-affecting (it sets every interval's Monte-Carlo width), so
+    # the contract states it.
+    _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
 
 
 def _validate_robustness(value: object) -> None:

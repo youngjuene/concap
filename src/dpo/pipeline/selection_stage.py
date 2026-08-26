@@ -5,6 +5,14 @@ through the one shared ``completion_logps`` interface; the validation report,
 the per-experiment winner selection (max validation accuracy, lexical
 variant-id tie-break), the ranking, the selection report, and the lock
 manifest all have one home. Only selected variants reach the lock.
+
+The robustness axis is scored here too. A cell retrained on flipped train
+labels is scored on the same *unflipped* validation pairs, against the same
+reference, as its base cell, and its per-pair scores are persisted beside
+them so ``dpo report analyze`` can draw the flip-rate curve without
+re-scoring anything. Selection ranks base cells only: a model trained on
+corrupted labels is a measurement of robustness, never a candidate for the
+lock.
 """
 
 from __future__ import annotations
@@ -23,6 +31,10 @@ from dpo.pipeline.experiments import ExperimentVariant
 from dpo.pipeline.lock import LockManifest, create_lock_manifest
 from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.run_matrix import CellResult
+from dpo.pipeline.stage_inputs import MATRIX_KEY
+from dpo.pipeline.training_stage import flip_rates_of
+
+ScoreRows = list[dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -38,6 +50,23 @@ class SelectionOutcome:
     lock_artifact_id: str
 
 
+def _score_rows(scored: Sequence[ScoredPair]) -> ScoreRows:
+    """The per-pair scores as persisted: what any inferential comparison needs."""
+    return [
+        {
+            "pair_id": pair.pair_id,
+            "clip_id": pair.clip_id,
+            "policy_chosen_logp": pair.policy_chosen_logp,
+            "policy_rejected_logp": pair.policy_rejected_logp,
+            "ref_chosen_logp": pair.ref_chosen_logp,
+            "ref_rejected_logp": pair.ref_rejected_logp,
+            "difficulty": pair.difficulty,
+            "agreement": pair.agreement,
+        }
+        for pair in scored
+    ]
+
+
 def publish_selection(
     publisher: ArtifactPublisher,
     contract: StudyContract,
@@ -46,12 +75,12 @@ def publish_selection(
     canonical_seed: int,
     validation_pairs: Mapping[str, tuple[StrictPair, ...]],
     strict_pairs: Mapping[str, tuple[StrictPair, ...]],
-    policies: Mapping[tuple[str, str, str, int], ModelAdapter],
+    policies: Mapping[tuple[str, str, str, int, float], ModelAdapter],
     seed_adapters: Mapping[str, ModelAdapter],
     media_provider: Callable[[str, Sequence[str]], MediaBatch],
     view_artifacts: Mapping[str, Mapping[str, str]],
-    cells: Mapping[tuple[str, str, str], CellResult],
-    cell_artifacts: Mapping[tuple[str, str, str], str],
+    cells: Mapping[MATRIX_KEY, CellResult],
+    cell_artifacts: Mapping[MATRIX_KEY, str],
     processor_hash: str,
     preprocessing_hash: str,
     evaluation_version: str,
@@ -59,12 +88,15 @@ def publish_selection(
     selection_note: str,
 ) -> SelectionOutcome:
     """Score every variant, publish validation/selection reports, and lock."""
+    flip_rates = flip_rates_of(contract)
     # Common validation scoring: every experiment variant is scored identically.
     validation_reports: dict[str, dict[str, dict[str, float]]] = {}
-    validation_scores: dict[str, dict[str, dict[str, list[dict[str, object]]]]] = {}
+    validation_scores: dict[str, dict[str, dict[str, ScoreRows]]] = {}
+    robustness_reports: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
+    robustness_scores: dict[str, dict[str, dict[str, dict[str, ScoreRows]]]] = {}
     for track in contract.tracks:
         seed_adapter = seed_adapters[track]
-        sft_adapter = policies[("SFT", "base", track, canonical_seed)]
+        sft_adapter = policies[("SFT", "base", track, canonical_seed, 0.0)]
 
         def _pair_logps(adapter: ModelAdapter, scoring_track: str) -> list[tuple[float, float]]:
             """(chosen, rejected) completion logps per validation pair, in order."""
@@ -85,6 +117,28 @@ def publish_selection(
                 rows.append((chosen, rejected))
             return rows
 
+        def _scored(
+            policy_logps: Sequence[tuple[float, float]],
+            reference_logps: Sequence[tuple[float, float]],
+            scoring_track: str,
+        ) -> list[ScoredPair]:
+            return [
+                ScoredPair(
+                    pair_id=validation_pair.pair_id,
+                    clip_id=validation_pair.clip_id,
+                    track=scoring_track,
+                    policy_chosen_logp=policy_chosen,
+                    policy_rejected_logp=policy_rejected,
+                    ref_chosen_logp=ref_chosen,
+                    ref_rejected_logp=ref_rejected,
+                    difficulty=validation_pair.difficulty,
+                    agreement=validation_pair.agreement,
+                )
+                for validation_pair, (policy_chosen, policy_rejected), (ref_chosen, ref_rejected) in zip(
+                    validation_pairs[scoring_track], policy_logps, reference_logps, strict=True
+                )
+            ]
+
         # SEED and SFT each play two roles: reference for the preference arms
         # (SEED for six of them, SFT for the warm start) and policy for their
         # own experiment. Scoring each ONCE per track and reusing the rows
@@ -95,69 +149,73 @@ def publish_selection(
         seed_logps = _pair_logps(seed_adapter, track)
         sft_logps = _pair_logps(sft_adapter, track)
         report_by_experiment: dict[str, dict[str, float]] = {}
-        scores_by_experiment: dict[str, dict[str, list[dict[str, object]]]] = {}
+        scores_by_experiment: dict[str, dict[str, ScoreRows]] = {}
+        robustness_by_experiment: dict[str, dict[str, dict[str, float]]] = {}
+        robustness_scores_by_experiment: dict[str, dict[str, dict[str, ScoreRows]]] = {}
         for experiment_id in EXPERIMENT_IDS:
             report_by_variant: dict[str, float] = {}
-            scores_by_variant: dict[str, list[dict[str, object]]] = {}
+            scores_by_variant: dict[str, ScoreRows] = {}
+            robustness_by_variant: dict[str, dict[str, float]] = {}
+            robustness_scores_by_variant: dict[str, dict[str, ScoreRows]] = {}
             for variant in variants_by_experiment[experiment_id]:
                 if experiment_id == "SEED":
                     policy_logps = seed_logps
                 elif experiment_id == "SFT":
                     policy_logps = sft_logps
                 else:
-                    policy_adapter = policies[(experiment_id, variant.variant_id, track, canonical_seed)]
+                    policy_adapter = policies[(experiment_id, variant.variant_id, track, canonical_seed, 0.0)]
                     policy_logps = _pair_logps(policy_adapter, track)
                 reference_logps = sft_logps if experiment_id == "SFT_DPO" else seed_logps
-                scored = [
-                    ScoredPair(
-                        pair_id=validation_pair.pair_id,
-                        clip_id=validation_pair.clip_id,
-                        track=track,
-                        policy_chosen_logp=policy_chosen,
-                        policy_rejected_logp=policy_rejected,
-                        ref_chosen_logp=ref_chosen,
-                        ref_rejected_logp=ref_rejected,
-                        difficulty=validation_pair.difficulty,
-                        agreement=validation_pair.agreement,
-                    )
-                    for validation_pair, (policy_chosen, policy_rejected), (ref_chosen, ref_rejected) in zip(
-                        validation_pairs[track], policy_logps, reference_logps, strict=True
-                    )
-                ]
+                scored = _scored(policy_logps, reference_logps, track)
                 # SEED and SFT carry no trained beta; score them at beta=1.0
                 # (accuracy is beta-invariant; beta only scales the probability fields).
                 hyper = variant.hyperparameters
                 beta = float(str(hyper["beta"])) if "beta" in hyper else 1.0
-                preference_report = evaluate_preferences(scored, beta=beta)
-                report_by_variant[variant.variant_id] = preference_report.accuracy
+                report_by_variant[variant.variant_id] = evaluate_preferences(scored, beta=beta).accuracy
                 # The per-pair scores are what any inferential comparison needs
                 # (clip-clustered CIs, paired tests, Bradley-Terry); dropping
                 # them here would force the expensive scoring pass to be redone.
-                scores_by_variant[variant.variant_id] = [
-                    {
-                        "pair_id": pair.pair_id,
-                        "clip_id": pair.clip_id,
-                        "policy_chosen_logp": pair.policy_chosen_logp,
-                        "policy_rejected_logp": pair.policy_rejected_logp,
-                        "ref_chosen_logp": pair.ref_chosen_logp,
-                        "ref_rejected_logp": pair.ref_rejected_logp,
-                        "difficulty": pair.difficulty,
-                        "agreement": pair.agreement,
-                    }
-                    for pair in scored
-                ]
+                scores_by_variant[variant.variant_id] = _score_rows(scored)
+                # The same variant retrained on flipped train labels, scored on
+                # the same unflipped pairs against the same reference: one point
+                # of the flip-rate curve per contract rate.
+                by_rate: dict[str, float] = {}
+                by_rate_scores: dict[str, ScoreRows] = {}
+                for rate in flip_rates:
+                    if (experiment_id, variant.variant_id, track, rate) not in cells:
+                        continue
+                    flipped_adapter = policies[
+                        (experiment_id, variant.variant_id, track, canonical_seed, rate)
+                    ]
+                    flipped = _scored(_pair_logps(flipped_adapter, track), reference_logps, track)
+                    by_rate[f"{rate:g}"] = evaluate_preferences(flipped, beta=beta).accuracy
+                    by_rate_scores[f"{rate:g}"] = _score_rows(flipped)
+                if by_rate:
+                    robustness_by_variant[variant.variant_id] = by_rate
+                    robustness_scores_by_variant[variant.variant_id] = by_rate_scores
             report_by_experiment[experiment_id] = report_by_variant
             scores_by_experiment[experiment_id] = scores_by_variant
+            if robustness_by_variant:
+                robustness_by_experiment[experiment_id] = robustness_by_variant
+                robustness_scores_by_experiment[experiment_id] = robustness_scores_by_variant
         validation_reports[track] = report_by_experiment
         validation_scores[track] = scores_by_experiment
+        robustness_reports[track] = robustness_by_experiment
+        robustness_scores[track] = robustness_scores_by_experiment
     validation_artifact = publisher.publish(
         "dpo.validation-report/v1",
-        {"schema": "dpo.validation-report/v1", "accuracy": validation_reports, "scores": validation_scores},
+        {
+            "schema": "dpo.validation-report/v1",
+            "accuracy": validation_reports,
+            "scores": validation_scores,
+            "robustness": robustness_reports,
+            "robustness_scores": robustness_scores,
+        },
         parents=tuple(
             ParentEdge(view_artifacts[track]["validation_pairs"], "validation-pairs")
             for track in contract.tracks
         )
-        + tuple(ParentEdge(artifact_id, "matrix-cell") for artifact_id in cell_artifacts.values()),
+        + tuple(ParentEdge(artifact_id, "matrix-cell") for _, artifact_id in sorted(cell_artifacts.items())),
         stage="validate",
         parameters={"operation": "validate"},
         clips={row.clip_id for track in contract.tracks for row in validation_pairs[track]}
@@ -167,7 +225,8 @@ def publish_selection(
     )
     # Selection: one winning variant per experiment and track (max validation
     # accuracy, lexical variant-id tie-break), then experiments ranked by their
-    # winner. Only selected variants reach the lock.
+    # winner. Only selected variants — base cells, never flipped retrainings —
+    # reach the lock.
     selected_variants: dict[str, dict[str, str]] = {}
     for track in contract.tracks:
         selected_variants[track] = {}
@@ -186,6 +245,10 @@ def publish_selection(
         )
         for track in contract.tracks
     }
+
+    def _selected_cell(experiment_id: str, track: str) -> CellResult:
+        return cells[(experiment_id, selected_variants[track][experiment_id], track, 0.0)]
+
     selection_artifact = publisher.publish(
         "dpo.selection-report/v1",
         {
@@ -194,9 +257,7 @@ def publish_selection(
             "selected_variants": selected_variants,
             "selected_hyperparameters": {
                 track: {
-                    experiment_id: dict(
-                        cells[(experiment_id, selected_variants[track][experiment_id], track)].hyperparameters
-                    )
+                    experiment_id: dict(_selected_cell(experiment_id, track).hyperparameters)
                     for experiment_id in EXPERIMENT_IDS
                 }
                 for track in contract.tracks
@@ -213,10 +274,7 @@ def publish_selection(
         contract,
         checkpoint_hashes={
             experiment_id: {
-                track: cells[
-                    (experiment_id, selected_variants[track][experiment_id], track)
-                ].checkpoint_signature
-                for track in contract.tracks
+                track: _selected_cell(experiment_id, track).checkpoint_signature for track in contract.tracks
             }
             for experiment_id in EXPERIMENT_IDS
         },

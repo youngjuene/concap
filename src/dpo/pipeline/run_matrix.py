@@ -6,6 +6,12 @@ preference objectives from SEED against a frozen SEED reference, SFT_DPO DPO
 from SFT against a frozen SFT reference. The runner is store-free — the CLI
 publishes each cell's result as an artifact; golden tests snapshot per-cell
 losses and signatures.
+
+A cell may also train on a shared flip manifest (``dpo.data.noise``): the same
+experiment, variant, and seed, with the strict pair view's chosen/rejected
+labels swapped for the manifest's pair ids. That is the robustness axis of the
+matrix — every method retrains against exactly the same corrupted labels, and
+validation later scores each retraining on the same *unflipped* pairs.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from dataclasses import dataclass, field
 from dpo.contracts.study_contract import ContractError, StudyContract
 from dpo.data.derive_pairs import MetadataPair, StrictPair
 from dpo.data.derive_sft import SftExample
+from dpo.data.noise import FlipManifest, apply_flips
 from dpo.models.base import MediaBatch
 from dpo.models.tiny import TinyAdapter, encode_text, synthetic_media
 from dpo.pipeline.experiments import (
@@ -43,6 +50,8 @@ class CellResult:
     variant_id: str
     track: str
     seed: int
+    # Train-time synthetic label-flip rate; 0.0 is the base matrix cell.
+    flip_rate: float
     trained: bool
     objective: str | None
     training_view: str | None
@@ -61,6 +70,7 @@ class CellResult:
             "variant_id": self.variant_id,
             "track": self.track,
             "seed": self.seed,
+            "flip_rate": self.flip_rate,
             "trained": self.trained,
             "objective": self.objective,
             "training_view": self.training_view,
@@ -100,6 +110,23 @@ def _oriented_from_metadata(rows: Sequence[MetadataPair]) -> list[StrictPair]:
     return oriented
 
 
+def training_pairs(rows: Sequence[StrictPair], *, view: str, flip: FlipManifest | None) -> list[StrictPair]:
+    """The pair rows one preference cell trains on, with the flip manifest applied.
+
+    A manifest is built over the strict pair set and applies to nothing else:
+    flipping ``pair_all`` would either silently skip pairs the manifest never
+    saw or corrupt a different pair set per method, and either breaks the
+    "same flipped ids for every method" guarantee the manifest exists for.
+    """
+    if flip is None:
+        return list(rows)
+    if view != "pair_strict":
+        raise ContractError(
+            f"flip manifests apply to cells trained on pair_strict; this cell trains on {view!r}"
+        )
+    return list(apply_flips(rows, flip))
+
+
 @dataclass
 class OfflineMatrixRunner:
     contract: StudyContract
@@ -109,9 +136,9 @@ class OfflineMatrixRunner:
     media_dim: int = DEFAULT_MEDIA_DIM
     _seed: dict[str, TinyAdapter] = field(default_factory=dict)
     _sft: dict[tuple[str, int], tuple[TinyAdapter, int]] = field(default_factory=dict)
-    # Trained policies per (experiment, variant, track, seed), retained for
-    # validation scoring, test generation, and the study export.
-    policies: dict[tuple[str, str, str, int], TinyAdapter] = field(default_factory=dict)
+    # Trained policies per (experiment, variant, track, seed, flip rate),
+    # retained for validation scoring, test generation, and the study export.
+    policies: dict[tuple[str, str, str, int, float], TinyAdapter] = field(default_factory=dict)
 
     def seed_adapter(self, track: str) -> TinyAdapter:
         adapter = self._seed.get(track)
@@ -202,18 +229,23 @@ class OfflineMatrixRunner:
         track: str,
         seed: int,
         variant: ExperimentVariant | None = None,
+        flip: FlipManifest | None = None,
     ) -> CellResult:
         resolved: ResolvedExperiment = resolve_experiment(
             self.contract, experiment_id, track=track, seed=seed, variant=variant
         )
+        flip_rate = 0.0 if flip is None else flip.flip_rate
+        if flip is not None and not resolved.is_preference:
+            raise ContractError(f"{experiment_id} trains on no pair view; a flip manifest does not apply")
         if resolved.spec.objective is None:
             adapter = self.seed_adapter(track)
-            self.policies[(experiment_id, resolved.variant_id, track, seed)] = adapter
+            self.policies[(experiment_id, resolved.variant_id, track, seed, 0.0)] = adapter
             return CellResult(
                 experiment_id=experiment_id,
                 variant_id=resolved.variant_id,
                 track=track,
                 seed=seed,
+                flip_rate=0.0,
                 trained=False,
                 objective=None,
                 training_view=None,
@@ -227,12 +259,13 @@ class OfflineMatrixRunner:
             )
         if resolved.spec.objective == "sft":
             policy, steps = self._train_sft(track, seed)
-            self.policies[(experiment_id, resolved.variant_id, track, seed)] = policy
+            self.policies[(experiment_id, resolved.variant_id, track, seed, 0.0)] = policy
             return CellResult(
                 experiment_id=experiment_id,
                 variant_id=resolved.variant_id,
                 track=track,
                 seed=seed,
+                flip_rate=0.0,
                 trained=True,
                 objective="sft",
                 training_view="sft",
@@ -252,7 +285,12 @@ class OfflineMatrixRunner:
         policy = base.clone_trainable()
         reference = base.clone_frozen()
         assert resolved.training_view is not None
-        rows = self._shuffled(self._pairs_for_view(resolved.training_view, track), seed)
+        rows = self._shuffled(
+            training_pairs(
+                self._pairs_for_view(resolved.training_view, track), view=resolved.training_view, flip=flip
+            ),
+            seed,
+        )
         if not rows:
             raise ContractError(f"track {track!r} has no pairs in view {resolved.training_view!r}")
         self._check_completion_budget([text for row in rows for text in (row.chosen_text, row.rejected_text)])
@@ -270,12 +308,13 @@ class OfflineMatrixRunner:
         summary = trainer.train(batches)
         last = summary.get("last")
         final_loss = float(str(last["loss"])) if isinstance(last, dict) else None
-        self.policies[(experiment_id, resolved.variant_id, track, seed)] = policy
+        self.policies[(experiment_id, resolved.variant_id, track, seed, flip_rate)] = policy
         return CellResult(
             experiment_id=experiment_id,
             variant_id=resolved.variant_id,
             track=track,
             seed=seed,
+            flip_rate=flip_rate,
             trained=True,
             objective=resolved.spec.objective,
             training_view=resolved.training_view,

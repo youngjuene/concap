@@ -87,10 +87,15 @@ STAGES: dict[str, PipelineStage] = {
         ),
         PipelineStage(
             "train",
-            ("dpo.sft-view/v1", "dpo.pair-strict-view/v1", "dpo.pair-all-view/v1"),
+            (
+                "dpo.sft-view/v1",
+                "dpo.pair-strict-view/v1",
+                "dpo.pair-all-view/v1",
+                "dpo.flip-manifest/v1",
+            ),
             ("dpo.matrix-cell/v1",),
-            ("training", "experiments", "models", "tracks"),
-            "Run one experiment-matrix cell",
+            ("training", "experiments", "models", "tracks", "robustness"),
+            "Run one experiment-matrix cell, base and flipped-label retrainings alike",
         ),
         PipelineStage(
             "validate",
@@ -105,6 +110,13 @@ STAGES: dict[str, PipelineStage] = {
             ("dpo.lock-manifest/v1",),
             FULL_CONTRACT,
             "Freeze configuration before any test access",
+        ),
+        PipelineStage(
+            "analyze",
+            ("dpo.validation-report/v1", "dpo.selection-report/v1"),
+            ("dpo.analysis-report/v1",),
+            ("validation",),
+            "The inferential comparison over the published validation and selection reports",
         ),
         PipelineStage(
             "study-export",

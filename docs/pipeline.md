@@ -114,6 +114,36 @@ equals its hand-computed logsumexp reference, and wDPO with both stages
 disabled equals DPO. wDPO remains experimental until the pinned revision is
 reproduced.
 
+The matrix carries a robustness axis the contract declares in
+`[robustness].flip_rates`. `views derive` publishes one shared flip manifest
+per rate — the strict-view pair ids whose chosen/rejected labels swap,
+train labels only — and the train stage retrains every preference cell that
+trains on `D_pair_strict` once per positive rate on that manifest, so every
+method meets exactly the same corrupted labels. Each retraining is a matrix
+cell of its own, keyed by its rate, with the manifest as a parent; a WDPO
+variant on the metadata view has no flip series, because the manifest is
+built over a different pair set. Validation scores every retraining on the
+same *unflipped* validation pairs against the same reference as its base
+cell, and persists those scores beside the base scores; selection ranks and
+locks base cells only. A model trained on corrupted labels is a measurement
+of robustness, never a candidate for the lock.
+
+## Analysis
+
+`dpo report analyze` takes one validation report and the selection report
+derived from it and publishes `dpo.analysis-report/v1`: clip-clustered
+bootstrap intervals per experiment at the contract's
+`validation.bootstrap_samples` resample count, exact paired sign tests
+against SEED with Benjamini-Hochberg correction, a Bradley-Terry fit over
+per-pair contests between the selected variants, the preregistered
+natural-noise slices for the ranked winner, and the flip-rate curve of every
+selected variant that was retrained on flipped labels — accuracy and log loss
+at each rate, rate 0.0 being the base cell. It re-scores nothing: every
+number derives from the per-pair scores the validation report persists, so
+the report is a pure function of its two parents and a rerun republishes to
+the same id. An inferential number therefore has an artifact identity and a
+lineage, and `dpo artifact trace` walks it back to the cells.
+
 ## Study export and the human study
 
 The human study measures a caption's placement on an audiovisual congruency
@@ -164,8 +194,17 @@ append-only record, never rewritten.
   under the unmuted-video presentation are not modality-isolated and must be
   analyzed separately from audio-only judgments.
 - Synthetic flip results are calibrated on train labels only and never mix
-  into validation labels.
-- The confirmatory apparatus (one-shot test reservation, blinded final human
-  study, Bradley-Terry analysis integration) is intentionally out of the
-  default path; confirmatory claims require restoring it from git history
-  first.
+  into validation labels: a flip-rate curve compares retrainings on corrupted
+  train labels against one fixed, clean validation set. The curve says how
+  each objective degrades under symmetric label noise at the contract's
+  rates on this dataset; it is not a statement about the natural noise rate,
+  which `dpo.noise-calibration/v1` estimates separately from annotator
+  disagreement.
+- The **one-shot test reservation** remains out of the default path: the test
+  role is sealed by construction (a capability-read role with no capability
+  scope), no command opens it, and no artifact type in the tree refers to a
+  confirmatory phase. Every number the pipeline currently reports is
+  exploratory, computed on validation. Bradley-Terry ability estimation, the
+  clip-clustered intervals, and the robustness curve are published in
+  `dpo.analysis-report/v1` with full lineage, but they remain validation
+  numbers.

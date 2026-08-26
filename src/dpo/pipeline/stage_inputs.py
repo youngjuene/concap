@@ -20,13 +20,19 @@ from dpo.contracts.study_contract import TRACKS
 from dpo.core.artifacts import ArtifactError, ArtifactManifest, ArtifactStore
 from dpo.data.derive_pairs import MetadataPair, StrictPair, ViewError
 from dpo.data.derive_sft import SftExample
+from dpo.data.noise import FlipManifest, parse_flip_manifest
 from dpo.pipeline.run_matrix import CellResult
 
 SFT_VIEW_TYPE = "dpo.sft-view/v1"
 PAIR_STRICT_VIEW_TYPE = "dpo.pair-strict-view/v1"
 PAIR_ALL_VIEW_TYPE = "dpo.pair-all-view/v1"
 VALIDATION_PAIRS_TYPE = "dpo.validation-pairs/v1"
+FLIP_MANIFEST_TYPE = "dpo.flip-manifest/v1"
 MATRIX_CELL_TYPE = "dpo.matrix-cell/v1"
+
+# (experiment, variant, track, train-time flip rate): how published cells are
+# keyed everywhere downstream of training. 0.0 is the base matrix.
+MATRIX_KEY = tuple[str, str, str, float]
 
 # Published view type -> the key the stage functions index it by.
 VIEW_KEYS: dict[str, str] = {
@@ -77,6 +83,7 @@ _CELL_FIELDS = {
     "variant_id",
     "track",
     "seed",
+    "flip_rate",
     "trained",
     "objective",
     "training_view",
@@ -216,6 +223,7 @@ def parse_cell_result(document: Mapping[str, Any]) -> CellResult:
         variant_id=str(document["variant_id"]),
         track=str(document["track"]),
         seed=int(document["seed"]),
+        flip_rate=float(document["flip_rate"]),
         trained=bool(document["trained"]),
         objective=None if objective is None else str(objective),
         training_view=None if training_view is None else str(training_view),
@@ -258,6 +266,9 @@ class TrackViewInputs:
     strict_pairs: dict[str, tuple[StrictPair, ...]] = field(default_factory=dict)
     metadata_pairs: dict[str, tuple[MetadataPair, ...]] = field(default_factory=dict)
     validation_pairs: dict[str, tuple[StrictPair, ...]] = field(default_factory=dict)
+    # track -> flip rate -> (artifact id, manifest): the shared flip manifests
+    # the robustness cells train against.
+    flip_manifests: dict[str, dict[float, tuple[str, FlipManifest]]] = field(default_factory=dict)
 
 
 def collect_view_inputs(
@@ -266,15 +277,29 @@ def collect_view_inputs(
     *,
     required: Sequence[str],
     tracks: Sequence[str],
+    flip_rates: Sequence[float] = (),
 ) -> TrackViewInputs:
     """Parse the given view artifacts, one set per track, requiring ``required``.
 
     ``tracks`` is what the contract declares, not every track that exists: a
     single-track study publishes views for one track and must not be told the
-    other is missing.
+    other is missing. ``flip_rates`` are the manifests every track must also
+    carry — the train stage names the contract's positive rates, stages that
+    never train on flipped labels name none.
     """
     inputs = TrackViewInputs()
     for manifest in manifests:
+        if manifest.artifact_type == FLIP_MANIFEST_TYPE:
+            track = artifact_track(manifest)
+            flip = parse_flip_manifest(store.read_payload(manifest.artifact_id))
+            by_rate = inputs.flip_manifests.setdefault(track, {})
+            known = by_rate.get(flip.flip_rate)
+            if known is not None and known[0] != manifest.artifact_id:
+                raise ArtifactError(
+                    f"two different flip manifests at rate {flip.flip_rate:g} were given for {track}"
+                )
+            by_rate[flip.flip_rate] = (manifest.artifact_id, flip)
+            continue
         key = VIEW_KEYS.get(manifest.artifact_type)
         if key is None:
             continue
@@ -300,7 +325,13 @@ def collect_view_inputs(
                 f"track {track!r} is missing its {missing[0]!r} view artifact;"
                 " every track this contract declares must be published before this stage"
             )
-    undeclared = sorted(set(inputs.artifact_ids) - set(tracks))
+        absent_rates = [rate for rate in flip_rates if rate not in inputs.flip_manifests.get(track, {})]
+        if absent_rates:
+            raise ArtifactError(
+                f"track {track!r} is missing its flip manifest at rate {absent_rates[0]:g};"
+                " pass every dpo.flip-manifest/v1 artifact `views derive` published for the track"
+            )
+    undeclared = sorted((set(inputs.artifact_ids) | set(inputs.flip_manifests)) - set(tracks))
     if undeclared:
         raise ArtifactError(
             f"a view artifact was given for track {undeclared[0]!r}, which this contract does not declare"
@@ -310,15 +341,15 @@ def collect_view_inputs(
 
 def collect_matrix_cells(
     store: ArtifactStore, manifests: Sequence[ArtifactManifest]
-) -> tuple[dict[tuple[str, str, str], CellResult], dict[tuple[str, str, str], str]]:
-    """Parsed matrix cells and their artifact ids, keyed (experiment, variant, track)."""
-    cells: dict[tuple[str, str, str], CellResult] = {}
-    artifacts: dict[tuple[str, str, str], str] = {}
+) -> tuple[dict[MATRIX_KEY, CellResult], dict[MATRIX_KEY, str]]:
+    """Parsed matrix cells and their artifact ids, keyed ``MATRIX_KEY``."""
+    cells: dict[MATRIX_KEY, CellResult] = {}
+    artifacts: dict[MATRIX_KEY, str] = {}
     for manifest in manifests:
         if manifest.artifact_type != MATRIX_CELL_TYPE:
             continue
         cell = parse_cell_result(json.loads(store.read_payload(manifest.artifact_id)))
-        key = (cell.experiment_id, cell.variant_id, cell.track)
+        key = (cell.experiment_id, cell.variant_id, cell.track, cell.flip_rate)
         if key in artifacts and artifacts[key] != manifest.artifact_id:
             raise ArtifactError(f"two different matrix-cell artifacts were given for {key}")
         cells[key] = cell

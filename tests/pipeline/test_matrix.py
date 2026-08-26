@@ -56,6 +56,33 @@ def test_all_preference_cells_share_the_seed_reference(runner: OfflineMatrixRunn
         assert cell.reference_signature == seed_signature, experiment_id
 
 
+def test_a_flip_manifest_retrains_the_cell_on_swapped_labels(runner: OfflineMatrixRunner) -> None:
+    from dpo.data.noise import make_flip_manifest
+
+    strict = runner.strict_pairs["visual"]
+    manifest = make_flip_manifest(strict, flip_rate=0.2, seed=13)
+    base = runner.run_cell("DPO", track="visual", seed=1)
+    flipped = runner.run_cell("DPO", track="visual", seed=1, flip=manifest)
+    assert flipped.flip_rate == 0.2
+    assert flipped.document() != base.document()
+    assert flipped.checkpoint_signature != base.checkpoint_signature
+    # Same reference, same hyperparameters, same view: only the labels moved.
+    assert flipped.reference_signature == base.reference_signature
+    assert flipped.hyperparameters == base.hyperparameters
+    assert flipped.training_view == base.training_view == "pair_strict"
+    assert (
+        runner.policies[("DPO", "base", "visual", 1, 0.2)]
+        is not runner.policies[("DPO", "base", "visual", 1, 0.0)]
+    )
+    # An empty manifest (rate 0.0) trains the base cell exactly.
+    unflipped = runner.run_cell(
+        "DPO", track="visual", seed=1, flip=make_flip_manifest(strict, flip_rate=0.0, seed=13)
+    )
+    assert unflipped.checkpoint_signature == base.checkpoint_signature
+    with pytest.raises(ContractError, match="no pair view"):
+        runner.run_cell("SEED", track="visual", seed=1, flip=manifest)
+
+
 def _sweep_contract(base_document: dict[str, object]) -> StudyContract:
     mutated = copy.deepcopy(base_document)
     experiments = mutated["experiments"]

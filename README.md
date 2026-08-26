@@ -174,20 +174,34 @@ validated identically, and selection picks one winner per experiment and
 track. Because artifact identities are stage-scoped, extending a sweep axis
 recomputes only the new cells — collected preferences are never touched.
 
+**Robustness axis**: `[robustness].flip_rates` adds one more dimension to
+the matrix. `views derive` publishes one shared flip manifest per rate — the
+exact train pair ids whose chosen/rejected labels swap — and `train run`
+retrains every preference arm that trains on `D_pair_strict` (DPO, IPO, CDPO,
+RDPO, DRDPO, WDPO, SFT_DPO) once per positive rate on that manifest, so every
+method meets exactly the same corrupted labels. Selection scores each
+retraining on the same *unflipped* validation pairs as its base cell but
+ranks base cells only; the flip-rate curve comes out of `report analyze`.
+Three positive rates cost three extra cells per arm; `flip_rates = [0.0]` is
+the honest way to opt out.
+
 ```bash
 # Derive every training view from the frozen preferences, once per declared
-# track. Both train and validation splits must already be annotated.
+# track. Both train and validation splits must already be annotated. Prints
+# the view ids and, under "flip_manifests", one id per contract rate.
 uv run dpo views derive --workspace "$W" --contract "$C" \
   --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" --artifact-id "$VALIDATION_POOL" \
   --artifact-id "$TRAIN_ANNOTATIONS" --artifact-id "$VALIDATION_ANNOTATIONS" --track audio
 
-# Train every matrix cell. Resumable: rerunning skips finished cells.
+# Train every matrix cell, flipped retrainings included. Takes the views AND
+# the flip manifests. Resumable: rerunning skips finished cells.
 uv run dpo train run --workspace "$W" --contract "$C" \
-  --artifact-id "$VIEW_IDS..." --checkpoint-dir runs/checkpoints \
+  --artifact-id "$VIEW_IDS..." --artifact-id "$FLIP_MANIFEST_IDS..." \
+  --checkpoint-dir runs/checkpoints \
   --backend-config configs/gemma4/e4b-audio.toml \
   --media-dir media/
 
-# Score every variant, pick one winner per experiment and track, lock.
+# Score every cell, pick one winner per experiment and track, lock.
 uv run dpo select run --workspace "$W" --contract "$C" \
   --artifact-id "$VIEW_IDS..." --artifact-id "$CELL_IDS..." \
   --checkpoint-dir runs/checkpoints --backend-config configs/gemma4/e4b-audio.toml \
@@ -222,21 +236,24 @@ hashes via `[backends]`.
 
 ```bash
 uv run dpo report show    --workspace "$W"                     # or: make report
-uv run dpo report analyze --workspace "$W" --contract "$C"
+uv run dpo report analyze --workspace "$W" --contract "$C" \
+  --artifact-id "$VALIDATION_REPORT" --artifact-id "$SELECTION_REPORT"
 ```
 
 `report show` prints every validation report (per-variant accuracy by track
 and experiment), selection report (ranking, selected variants with their
-hyperparameters), and lock manifest in the workspace.
+hyperparameters), lock manifest, and analysis report in the workspace.
 
-`report analyze` is the inferential layer over the per-pair scores the
-validation report persists: clip-clustered bootstrap confidence intervals per
-experiment, exact paired sign tests against SEED with Benjamini-Hochberg
-correction across the preference arms, a Bradley-Terry fit over per-pair
-contests between the selected variants, and the preregistered natural-noise
-slices for the ranked winner. It re-scores nothing, so the comparison is
-reproducible from the published artifacts alone; it is read-only until the
-`dpo.analysis-report/v1` shape settles (see `docs/TODO.md`).
+`report analyze` publishes `dpo.analysis-report/v1`, the inferential layer
+over the per-pair scores the validation report persists: clip-clustered
+bootstrap confidence intervals per experiment at the contract's
+`validation.bootstrap_samples`, exact paired sign tests against SEED with
+Benjamini-Hochberg correction across the preference arms, a Bradley-Terry fit
+over per-pair contests between the selected variants, the preregistered
+natural-noise slices for the ranked winner, and the flip-rate robustness
+curve of every arm that was retrained on flipped labels. It re-scores
+nothing, so the report is a pure function of its two parents: a rerun
+republishes to the same id, and every number in it has lineage.
 
 Artifacts are the ground truth — `dpo artifact trace` walks any result back
 through its full lineage.

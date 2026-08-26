@@ -123,9 +123,13 @@ def test_report_show_lists_the_published_reports(capsys: pytest.CaptureFixture[s
 
 
 def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    from dpo.core.artifacts import ArtifactStore
     from dpo.pipeline.canary import run_canary
 
     run_canary(tmp_path / "store", CANARY_CONTRACT)
+    store = ArtifactStore.open(tmp_path / "store")
+    (validation_id,) = store.find_by_type("dpo.validation-report/v1")
+    (selection_id,) = store.find_by_type("dpo.selection-report/v1")
     code, document = _run(
         capsys,
         "report",
@@ -134,8 +138,14 @@ def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], 
         str(tmp_path / "store"),
         "--contract",
         str(CANARY_CONTRACT),
+        "--artifact-id",
+        validation_id,
+        "--artifact-id",
+        selection_id,
     )
     assert code == 0
+    assert document["status"] == "published"
+    assert store.verify(str(document["artifact_id"])).artifact_type == "dpo.analysis-report/v1"
     tracks = document["analysis"]["tracks"]
     assert set(tracks) == {"visual", "audio"}
     for track_document in tracks.values():
@@ -148,6 +158,7 @@ def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], 
                 assert "bh_significant" in entry["vs_seed"]
         assert experiments["SFT_DPO"]["comparison_modes"] == ["pipeline", "compute_matched"]
         assert set(track_document["top_slices"]) == {"easy", "high_agreement", "low_agreement", "near_tie"}
+        assert "DPO" in track_document["flip_curves"] and "SEED" not in track_document["flip_curves"]
 
 
 def _locked_corpus(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> tuple[str, dict[str, object]]:
