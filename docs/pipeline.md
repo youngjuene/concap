@@ -159,7 +159,10 @@ no per-clip offset of unknown size rides on the difference.
 wordings and temperatures, scores each, and *selects* rungs for even spacing
 on that measured axis. Two refusals keep the slider a control rather than a
 label: a non-monotone ladder is refused at publish, and one whose ends differ
-by less than `MIN_CONGRUENCY_SPAN` is refused at selection.
+by less than `MIN_CONGRUENCY_SPAN` is refused at selection. Every ladder in an
+export carries the same number of rungs, `[study].rungs` — the slider's
+resolution is the study's independent variable, so the contract owns it and
+the export stage's identity covers it.
 
 Gates on the export path: it requires the lock, not merely the selection
 report, so configuration freezes before any held-out access; study clips are
@@ -184,11 +187,27 @@ question, different people, and a different response schema
 by the other's data. Responses are written as files under `--out`: the
 append-only record, never rewritten.
 
+`dpo study ingest` is the reader. It checks every saved response against the
+export it answers — the clip must be one the export carries, the caption must
+be the rung the response claims at the position the export gave it, the
+rating must be on the instrument's scale, one answer per clip per participant
+— and publishes two artifacts with the export as ancestor.
+`dpo.study-responses/v1` is the validated record with participants hashed;
+`dpo.study-results/v1` is a pure function of it: placement on the measured
+axis, match rating overall and per rung, the congruency–rating correlation,
+placement by presentation order, and per-clip and per-participant tables,
+every interval from the cluster bootstrap resampling clips and then
+participants. Both types are public-derived, so a reader opens them without
+a capability while the study clips' own rows stay sealed. A different
+analysis republishes the results with the same record as parent.
+
 ## Claim limits
 
 - The comparison supports claims about these nine conditions under this
-  frozen preference dataset and these caption contracts — not about
-  preference optimization in general.
+  frozen preference dataset and the caption contracts the study declares —
+  not about preference optimization in general. With one track declared,
+  modality is a constant, not a factor: no cross-modal ranking claim is
+  available without a second declared track and its own annotation round.
 - Without the evidence-audit layer, factuality claims rest on human
   preference and the compliance screens alone; audio-track judgments made
   under the unmuted-video presentation are not modality-isolated and must be
@@ -208,3 +227,13 @@ append-only record, never rewritten.
   clip-clustered intervals, and the robustness curve are published in
   `dpo.analysis-report/v1` with full lineage, but they remain validation
   numbers.
+- The human study supports claims about where participants place a caption on
+  the measured congruency axis and how well they rate its match, on the
+  reserved study split under one presentation (the clip with its own
+  soundtrack). `dpo.study-results/v1` reports that with clip- and
+  participant-clustered intervals; it fits no mixed model, and the rating is
+  collected at the chosen rung only, so the congruency–rating correlation is
+  a within-choice relation, not a manipulation check. It does not measure
+  factuality, and it does not compare presentation conditions — a study that
+  moves the sound rather than the caption is a separate instrument that does
+  not exist yet.

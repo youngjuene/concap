@@ -49,6 +49,7 @@ PUBLIC_DERIVED_TYPES = frozenset(
         "dpo.lock-manifest/v1",
         "dpo.selection-report/v1",
         "dpo.study-export/v1",
+        "dpo.study-responses/v1",
         "dpo.study-results/v1",
         "dpo.analysis-report/v1",
     }

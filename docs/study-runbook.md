@@ -101,7 +101,7 @@ uv run dpo study export --workspace artifacts/street --contract configs/study/st
 
 Captions the study split with the top-ranked experiment's selected variant and
 publishes `dpo.study-export/v1`: one *congruency ladder* per clip,
-five captions ordered along the measured axis
+`[study].rungs` (5) captions ordered along the measured axis
 `[logP(c|audio,video) - logP(c|audio,gray)] / |c|`. Budget about 143 s per
 clip on the 3090 (33 s generating, 109 s scoring, 22.5 GiB peak) — roughly 17
 minutes for the seven study clips, once.
@@ -130,7 +130,8 @@ Serves the published export at `127.0.0.1:8776`: per clip, the participant
 watches with sound and writes what they heard, then gets the sentence and the
 slider and rates the match. Responses are written as
 `responses-<participant>.json` under `--out` in schema
-`dpo.userstudy-responses/v2` — plain files, the append-only record.
+`dpo.userstudy-responses/v2` — plain files, the append-only record; step 5
+publishes them.
 
 This step needs **video with sound**, which the corpus staging does not
 produce — `--track both` mutes every `.mp4` it writes. Stage the unmuted
@@ -150,6 +151,25 @@ The app looks in `<media-dir>/unmuted_video` first and falls back to
 `<media-dir>` itself, so a missing subdirectory does not 404 — it serves the
 corpus's **muted** render and the participant is asked to match a caption
 against silence. Check one clip has sound before recruiting anyone.
+
+## 5. Ingest the responses
+
+```bash
+uv run dpo study ingest --workspace artifacts/street --contract configs/study/street-audio.toml \
+  --artifact-id <study-export> \
+  --responses data/userstudy/responses/responses-P01.json \
+  --responses data/userstudy/responses/responses-P02.json   # one per participant
+```
+
+Checks every response against the export (its clip, the caption at the rung it
+claims, the rung's position, the rating scale, one answer per clip; the same
+participant in two files is refused) and publishes `dpo.study-responses/v1`
+(the validated rows, participants hashed) and `dpo.study-results/v1` (placement
+and match rating on the measured axis with clip- and participant-clustered
+intervals at `validation.bootstrap_samples`, the congruency–rating correlation,
+order effects, per-clip and per-participant tables). Rerunning with the same
+files republishes the same ids; adding a participant publishes a new pair with
+the old export as the shared ancestor.
 
 ## Known cautions
 

@@ -34,6 +34,7 @@ from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.stages import StageError, allowed_contract_ids
 from dpo.pipeline.study_stage import StudyError
 from dpo.pipeline.training_stage import training_cell_contract_ids
+from dpo.userstudy.responses import StudyResponseError
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -53,6 +54,7 @@ DOMAIN_ERRORS = (
     SplitError,
     StageError,
     StudyError,
+    StudyResponseError,
     ViewError,
 )
 

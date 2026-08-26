@@ -14,10 +14,13 @@ from dpo.candidates.candidate_records import CollectionPolicy, GenerationConfig,
 from dpo.candidates.freeze import FrozenCandidatePool, freeze_pool
 from dpo.candidates.pair_sampler import sample_pairs
 from dpo.contracts.study_contract import StudyContract, load_contract
-from dpo.core.identity import sha256_bytes
+from dpo.core.artifacts import ArtifactStore
+from dpo.core.identity import repo_lock_hash, sha256_bytes
 from dpo.data.derive_pairs import MetadataPair, StrictPair, derive_pair_all, derive_pair_strict
 from dpo.data.derive_sft import SftExample, derive_sft
 from dpo.data.split import ClipInput, SplitManifest, assign_splits
+from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
+from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.run_matrix import OfflineMatrixRunner
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -189,6 +192,25 @@ def derive_world_views(world: PreferenceWorld, contract: StudyContract | None = 
         metadata_pairs={"visual": meta},
         sft_rows={"visual": sft_rows},
     )
+
+
+def study_publisher(tmp_path: Path, world: PreferenceWorld) -> tuple[ArtifactPublisher, dict[str, str]]:
+    """A publisher over a fresh store, plus the shard ids of the STUDY-role clips only.
+
+    The store refuses an artifact whose asserted role disagrees with its clips'
+    registry membership, and a study export asserts ``study`` — so the fixture
+    hands back exactly the clips such an export may legitimately cover. Shared
+    by the study-export tests and the study-ingest tests.
+    """
+    store = ArtifactStore.create(tmp_path / "store")
+    publisher = ArtifactPublisher(store, world.contract, repo_lock_hash())
+    ingest_id = publish_corpus_ingest(publisher, list(world.clips))
+    _, manifest, shard_ids = publish_lock_splits(
+        publisher, world.contract, list(world.clips), ingest_artifact_id=ingest_id
+    )
+    study = {clip_id: shard for clip_id, shard in shard_ids.items() if manifest.role_of(clip_id) == "study"}
+    assert study, "the fixture world must hold at least one study-role clip"
+    return publisher, study
 
 
 def build_offline_runner(

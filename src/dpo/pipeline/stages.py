@@ -122,8 +122,15 @@ STAGES: dict[str, PipelineStage] = {
             "study-export",
             ("dpo.lock-manifest/v1",),
             ("dpo.study-export/v1",),
-            ("validation", "tracks", "models"),
+            ("validation", "tracks", "models", "study"),
             "Caption the held-out study split with the locked winner, for the human study",
+        ),
+        PipelineStage(
+            "study-ingest",
+            ("dpo.study-export/v1",),
+            ("dpo.study-responses/v1", "dpo.study-results/v1"),
+            ("validation", "study"),
+            "Validate the human study's responses against their export and analyze them",
         ),
     )
 }

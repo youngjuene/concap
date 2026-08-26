@@ -1,8 +1,9 @@
 # THE study contract: Gemma 4 E4B on the audio caption track, over the
 # street-scene corpus. Preferences are collected by the two authors on captions
-# of audio events; the trained winner then supplies the captions for a separate
-# user study, which measures their effect on participants under three soundtrack
-# conditions and is a different instrument entirely (see `dpo study export`).
+# of audio events; the trained winner then supplies the stimuli for a separate
+# user study, which measures where participants place a caption on the measured
+# audiovisual congruency axis and is a different instrument entirely (see
+# `dpo study export`, and [study] below for its one contract knob).
 #
 # It began as the live smoke contract ("concap-street-smoke-v1") and was
 # promoted once the corpus, prompts, and backend were settled; the registry,
@@ -259,4 +260,11 @@ bootstrap_samples = 10000
 [robustness]
 flip_rates = [0.0, 0.1, 0.2, 0.3]
 flip_seed = 13
+
+# The human study's resolution on the measured congruency axis: how many
+# captions each clip's ladder carries, i.e. how many stops the slider has. It
+# is the study's independent-variable resolution, so it lives here rather than
+# on the `dpo study export` command line.
+[study]
+rungs = 5
 

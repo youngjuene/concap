@@ -72,6 +72,7 @@ data/userstudy/    human-study responses, one JSON per participant
 | **3. Compare** | — | `make report` and `dpo report analyze` |
 | **4. Export stimuli** | one 3090, ~17 min | `dpo study export` |
 | **5. Run the study** | participants | `dpo study serve` |
+| **6. Analyze the study** | — | `dpo study ingest` |
 
 ```bash
 make annotate SPLIT=train        # serve tasks-train.json on data/live/media
@@ -264,14 +265,16 @@ through its full lineage.
 uv run dpo study export --workspace "$W" --contract "$C" \
   --artifact-id "$LOCK" --artifact-id "$SELECTION_REPORT" --artifact-id "$VALIDATION_REPORT" \
   --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" \
-  --track audio --checkpoint-dir runs/checkpoints --rungs 5 \
+  --track audio --checkpoint-dir runs/checkpoints \
   --backend-config configs/gemma4/e4b-audio.toml --media-dir media/
 ```
 
 Captions the held-out **study** split with the top-ranked experiment's selected
 variant and publishes `dpo.study-export/v1` — the stimuli the human study
-serves. Each clip gets a *congruency ladder*: one caption per slider stop,
-ordered along a measured axis (below). Cost on one 3090, measured: about
+serves. Each clip gets a *congruency ladder*: one caption per slider stop
+(`[study].rungs` of them — the slider's resolution is the study's independent
+variable, so the contract owns it), ordered along a measured axis (below).
+Cost on one 3090, measured: about
 **143 s per clip** — 33 s generating, 109 s scoring — so ~17 minutes for a
 seven-clip study split, once, at a 22.5 GiB peak. Scoring dominates because
 each candidate is scored twice against a full-length video (see the ablation
@@ -378,6 +381,30 @@ different people. Kept apart so neither study's validator can be satisfied by
 the other's data. It serves the clip *with* its soundtrack, so
 `--media-dir` needs `unmuted_video/` renders staged alongside the corpus.
 
+## 6. Analyze the study
+
+```bash
+uv run dpo study ingest --workspace "$W" --contract "$C" --artifact-id "$STUDY_EXPORT" \
+  --responses data/userstudy/responses/responses-P01.json \
+  --responses data/userstudy/responses/responses-P02.json
+```
+
+Reads every participant's saved file, checks each response against the export
+it was collected under — the clip must be one the export carries, the caption
+must be the rung the response claims at the position the export gave it, the
+rating must be on the instrument's scale, one answer per clip — and publishes
+two artifacts. `dpo.study-responses/v1` is the record: every validated row,
+participants hashed exactly as annotators are. `dpo.study-results/v1` is a
+pure function of it: placement on the measured axis (mean chosen position and
+congruency, the rung histogram), match rating overall and per rung, the
+correlation between a chosen caption's measured congruency and its rating,
+placement by presentation order, and per-clip and per-participant tables —
+each interval from the cluster bootstrap twice over, resampling clips and
+then participants, because both are random effects of this design. A
+different analysis republishes the results with the same record as parent;
+the record is never rewritten, and the raw files stay on disk as the
+append-only source.
+
 ## Repository structure
 
 ```text
@@ -395,7 +422,8 @@ src/dpo/
 ├── annotation/    # raw_annotations, collection_tasks, webapp (FastAPI UI),
 │                  # aggregation, reliability + exclusions
 ├── userstudy/     # the human study's page + app: congruency slider over a
-│                  # published study export (a separate instrument)
+│                  # published study export (a separate instrument), and the
+│                  # validated reader of what participants saved
 ├── models/        # shared completion logprob, modality-isolated batches,
 │                  # visual_media / audio_media builders, tiny CPU backend,
 │                  # gemma4/ (adapter, backend_config, tokenization safety,
@@ -407,11 +435,13 @@ src/dpo/
 │                  # congruency (the measured audiovisual axis)
 ├── analysis/      # compare (the `report analyze` layer), Bradley-Terry,
 │                  # clip-cluster bootstrap + BH correction, robustness slices
+│                  # and flip curves, the human study's analysis
 └── pipeline/      # stage registry (artifact types + contract slices),
                    # publishing, per-stage modules (corpus/candidate/
-                   # annotation/view/training/selection/study), sweep expansion,
-                   # live_runner (resumable matrix over a backend seam),
-                   # offline matrix runner, lock manifest, offline canary
+                   # annotation/view/training/selection/study/study_results),
+                   # sweep expansion, live_runner (resumable matrix over a
+                   # backend seam), offline matrix runner, lock manifest,
+                   # offline canary
 ```
 
 File naming follows one rule: every basename is globally unique and says what
@@ -437,9 +467,10 @@ drift from enforcement.
 - The heavier confirmatory machinery (automated evidence auditing with claim
   ledgers, the one-shot test reservation) was deliberately removed from the
   default path and is recoverable from git history when that phase starts.
-  `dpo.study-results/v1` and `dpo.analysis-report/v1` are reserved in
-  `core/artifacts.py` for the human study's responses and its analysis; their
-  producers are built once that instrument's shape settles.
+  Nothing of it is stubbed in the tree: the test split stays sealed by
+  construction — it is a capability-read role with no capability scope, so
+  no reservation can open it — and every artifact type the registry names
+  has a producer.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the invariants and claim
 limits, [`docs/study-runbook.md`](docs/study-runbook.md) for the live study's

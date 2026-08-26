@@ -1,42 +1,35 @@
 # Wiring TODO — after Phase 2
 
-Deferred deliberately, not forgotten. Each subsystem below is already built and
-unit-tested but has no production caller; wiring it before `dpo select run` has
-published a validation report, a selection report, and a lock would mean
-designing against no data — which is exactly how the dead knobs this repo just
-shed came to exist. Revisit this file once Phase 2 lands (see
+Deferred deliberately, not forgotten. What is built and has no production
+caller is listed here with the reason; what was wired since is marked so the
+next session does not re-derive it. Revisit once Phase 2 lands (see
 `docs/study-runbook.md` for the sequence).
 
-## 1. `dpo report analyze` — DONE (read-only), publication deferred
+## 1. `dpo report analyze` — DONE, publishes
 
-Wired ahead of schedule: the validation report now persists the per-pair
-scores selection was already computing (`selection_stage.py`), and
-`dpo report analyze` computes clip-clustered bootstrap CIs per experiment,
-exact paired sign tests vs SEED with BH correction, a Bradley-Terry fit over
-per-pair contests between the selected variants, and the preregistered
-natural-noise slices for the ranked winner (`analysis/compare.py`).
-`validation.bootstrap_samples` is restored to the live contract as its resample
-count. Verified against the canary end to end.
+`dpo report analyze` takes the validation and selection report ids and
+publishes `dpo.analysis-report/v1` (stage `analyze`, contract slice
+`validation`): clip-clustered bootstrap CIs per experiment at
+`validation.bootstrap_samples` (10000 on `street-audio`, 200 on the canary
+because it is a speed fixture), exact paired sign tests vs SEED with BH
+correction, a Bradley-Terry fit over per-pair contests between the selected
+variants, the natural-noise slices for the ranked winner, and the flip-rate
+curves (entry 2). It re-scores nothing, so a rerun republishes to the same id.
+Verified against the canary and the CLI pipeline end to end.
 
-**Still deferred, deliberately:** publishing the result as a
-`dpo.analysis-report/v1` artifact. The command is read-only until the authors
-have seen the shape on real Phase-2 data; promotion is a stage entry plus a
-publish call once the shape settles.
+## 2. Flip-manifest consumers — DONE, closes the robustness loop
 
-## 2. Flip-manifest consumers — close the robustness loop
+`views derive` publishes `dpo.flip-manifest/v1` per `[robustness].flip_rates`
+entry; `train run` now takes those manifests and retrains every preference
+cell on `pair_strict` once per positive rate (`training_stage.matrix_cells`
+is the one enumeration of the matrix); `select run` scores each retraining on
+the unflipped validation pairs and persists the scores under
+`robustness_scores`; `report analyze` assembles `flip_curves` from them.
 
-**What exists:** `views derive` publishes `dpo.flip-manifest/v1` artifacts for
-every `[robustness].flip_rates` entry, and `dpo/data/noise.py` has
-`parse_flip_manifest` / `apply_flips` to read them back. Nothing downstream
-consumes a flip manifest today: the robustness data is produced and then
-orphaned.
-
-**The wiring:** score selected variants on flipped views (via `apply_flips`)
-and feed `analysis.robustness.flip_curve` — naturally part of, or a sibling
-to, `report analyze`. If the study ends up not reporting robustness curves,
-the honest alternative is to drop `[robustness]` from the live contract and
-stop publishing manifests no one reads; producing-and-ignoring is the worst of
-the three options.
+**What that costs on the live contract:** three positive rates × seven
+pair_strict arms = 21 extra E4B cells on top of the 9 base cells. The
+contract's own comment says how to opt out honestly (`flip_rates = [0.0]`);
+what is no longer possible is publishing manifests no report reads.
 
 ## 3. Data-level leakage gates — RESOLVED (this entry was wrong)
 
@@ -54,13 +47,27 @@ proved in-band that the audit now passes. Within-split duplicates remain by
 design: the gate does not police them, and cutting them is not representable
 on this corpus (34 of 48 clips would fall below `per_clip_min`).
 
-## 4. Small orphans — keep-or-delete, one decision each
+**Orphaned on the other track:** only the two audio pools carry a
+`dedup-source` edge. The visual pools in `artifacts/street/` (`238ad3d4…`
+train, `8e7981fa…` validation) predate the decision to declare
+`[tracks.audio]` alone, so nothing on the live contract can read, dedup, or
+export them — `candidates generate --track visual` is refused outright. One
+decision, not two: either restore `[tracks.visual]` and `[backends.visual]`
+from git history and put the visual pools through the same dedup pass before
+exporting a session, or drop them at the next `artifact gc`. Leaving them is
+the option that later reads as a second track having been collected.
 
-| symbol | intended for | note |
-| --- | --- | --- |
-| `load_config_text` (`models/gemma4/backend_config.py`) | the `evaluate` live-scoring boundary: parsing an artifact-resolved backend config without a file path | `dpo evaluate` is a pure exit-3 gate today. Wire only if external/live scoring is ever actually needed — for this study, `select run` + `study export` may make it permanently unnecessary. |
-| `compute_report_fields` (`pipeline/experiments.py`) | report enrichment | RESOLVED: folded into `report analyze` (per-experiment `comparison_modes`). |
-| `transcribe_generation` (`candidates/generation.py`) + the `transcribe_speech` track knob | speech transcription during candidate generation | dead pair: the knob is `false` in every contract and the function has no caller. Street audio is non-speech, so likely delete both — but that changes the `[tracks]` schema surface, so do it alongside the next corpus regeneration, never mid-study. |
+## 4. The one remaining dead knob — `transcribe_speech`
+
+`tracks.audio.transcribe_speech` is parsed into `CaptionContract` and read by
+nothing. (`transcribe_generation` in `candidates/generation.py` is not the
+knob's consumer and is not dead: it is the tiny backend's hex transcription of
+raw byte output, on the live offline path — an earlier version of this entry
+had that wrong.) Deleting the knob is a `[tracks]` schema change, and the
+`candidates` stage keys its artifacts on the `tracks` section: dropping the
+line from `street-audio.toml` re-keys both live audio pools and orphans the
+212 exported annotation tasks. Do it alongside the next corpus regeneration,
+never mid-study.
 
 ## Not wiring, but blocks reporting
 
@@ -72,9 +79,39 @@ on this corpus (34 of 48 clips would fall below `per_clip_min`).
 
 ## Beyond wiring (separate builds, separately planned)
 
-- Phase 4 user-study instrument (`src/dpo/userstudy/`, A′ ambience staging,
-  ratings + comprehension schema) — planned in the session plan file; A′
-  sound character still needs author sign-off.
-- `dpo.study-results/v1` / `dpo.analysis-report/v1`: reserved in
-  `core/artifacts.py` (public-derived, GC roots), producers to be built once
-  the user-study analysis shape is settled.
+- **User-study instrument — BUILT** (2026-07-31/08-01), as a congruency-ladder
+  study rather than the A/A′ presentation study that was planned here:
+  `dpo study export` measures the axis and publishes ladders
+  (`evaluation/congruency.py`, `evaluation/ablation.py`,
+  `pipeline/study_stage.py`), `dpo study serve` runs the participant-facing
+  app (`src/dpo/userstudy/`, schema `dpo.userstudy-responses/v2`). A′ staging
+  was not built and is not needed by this design; it belongs to the
+  three-condition follow-on study (`docs/proposal.md` §4.6), which stays
+  unbuilt.
+- **Responses are ingested — DONE.** `dpo study ingest` validates every
+  `responses-<participant>.json` against the export (`userstudy/responses.py`)
+  and publishes `dpo.study-responses/v1` (the record) and
+  `dpo.study-results/v1` (the analysis, `analysis/study.py`; stage
+  `study-ingest`). The analysis is descriptive with clip- and
+  participant-clustered bootstrap intervals; the mixed-effects fit the
+  proposal names is downstream work over the persisted rows, not in this
+  repository.
+- **Rung count is a contract key — DONE.** `[study].rungs` replaces the
+  `--rungs` flag; the `study-export` and `study-ingest` stages declare the
+  section, so an export made under a different rung count has a different
+  identity and `study ingest` refuses it.
+
+## Removed as dead (2026-08-25), recoverable from git history
+
+- `dpo evaluate run`, the exit-3 placeholder (`DEFERRED_GATES`), and the
+  `live-boundary-smoke` make target; the real live gates in `_resolve_backend`
+  are unchanged.
+- `load_config_text` (`models/gemma4/backend_config.py`): no caller.
+- The reserved `dpo.test-metrics/v1`, `dpo.test-reservation/v1`,
+  `dpo.test-resume/v1`, `dpo.test-finalization/v1` types, and the
+  `confirmatory-test` capability scope whose reservation table nothing
+  created. The test role stays sealed by construction: it is in
+  `CAPABILITY_READ_ROLES` with no scope in `ROLE_SCOPES`, so no capability can
+  open it until the confirmatory apparatus is restored.
+- `[terminal_states]` and `training.world_size`: optional contract keys no
+  stage read.

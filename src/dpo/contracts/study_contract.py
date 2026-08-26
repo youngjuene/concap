@@ -379,6 +379,10 @@ class StudyContract:
     def robustness(self) -> Mapping[str, Any]:
         return self.section("robustness")
 
+    @property
+    def study(self) -> Mapping[str, Any]:
+        return self.section("study")
+
 
 # ---------------------------------------------------------------------------
 # Section validators.
@@ -741,9 +745,9 @@ def _validate_validation(value: object) -> None:
     _number(table["temperature"], "validation.temperature", minimum=0.0)
     _number(table["top_p"], "validation.top_p", exclusive_minimum=0.0, maximum=1.0)
     _integer(table["max_new_tokens"], "validation.max_new_tokens", minimum=1)
-    # The clip-clustered bootstrap resample count that `dpo report analyze`
-    # reads; result-affecting (it sets every interval's Monte-Carlo width), so
-    # the contract states it.
+    # The clip-clustered bootstrap resample count that `dpo report analyze` and
+    # `dpo study ingest` read; result-affecting (it sets every interval's
+    # Monte-Carlo width), so the contract states it.
     _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
 
 
@@ -759,6 +763,14 @@ def _validate_robustness(value: object) -> None:
     if len(set(values)) != len(values) or 0.0 not in values:
         raise ContractError("robustness.flip_rates must be unique and include 0.0")
     _integer(table["flip_seed"], "robustness.flip_seed", minimum=0)
+
+
+def _validate_study(value: object) -> None:
+    """The human study's own knobs — the slider's resolution on the measured axis."""
+    table = _table(value, "study", {"rungs"})
+    # Two rungs is the narrowest slider that is still a control; the ladder
+    # selector refuses fewer, and the export refuses ladders of unequal width.
+    _integer(table["rungs"], "study.rungs", minimum=2)
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +798,7 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
             "experiments",
             "validation",
             "robustness",
+            "study",
         },
         # backends pins are only meaningful for live runs, so a contract may omit them.
         {"backends"},
@@ -821,6 +834,7 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
         _validate_experiment(experiment_id, experiments[experiment_id])
     _validate_validation(root["validation"])
     _validate_robustness(root["robustness"])
+    _validate_study(root["study"])
     return StudyContract(
         raw=raw,
         contract_hash=semantic_hash(raw),

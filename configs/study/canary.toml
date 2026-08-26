@@ -214,3 +214,7 @@ bootstrap_samples = 200
 # axis executes end to end without tripling a smoke test's matrix.
 flip_rates = [0.0, 0.2]
 flip_seed = 13
+
+[study]
+# Slider positions selected from the measured congruency axis, per clip.
+rungs = 5
