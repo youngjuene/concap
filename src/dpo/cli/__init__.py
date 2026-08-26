@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 
-from dpo.cli._shared import DEFERRED_GATES, DOMAIN_ERRORS, Handler, _blocked
+from dpo.cli._shared import DOMAIN_ERRORS, Handler
 from dpo.cli.annotation import _annotation_export_tasks, _annotation_ingest, _annotation_serve
 from dpo.cli.artifact import _artifact_gc, _artifact_rebuild_index, _artifact_trace, _artifact_verify
 from dpo.cli.canary import _canary_run
@@ -206,17 +206,6 @@ def build_parser() -> argparse.ArgumentParser:
     study_serve.add_argument("--host", default="127.0.0.1")
     study_serve.add_argument("--port", type=int, default=8776)
     study_serve.set_defaults(handler=_study_serve)
-
-    for command_name in DEFERRED_GATES:
-        blocked = commands.add_parser(command_name, help=f"live boundary: {DEFERRED_GATES[command_name]}")
-        blocked_actions = blocked.add_subparsers(dest="action", required=True)
-        run = blocked_actions.add_parser("run")
-        run.add_argument("--workspace", required=True)
-        run.add_argument("--contract", required=True)
-        run.add_argument("--artifact-id", action="append")
-        run.add_argument("--track")
-        run.add_argument("--invoke-external", action="store_true")
-        run.set_defaults(handler=_blocked(command_name))
 
     return parser
 

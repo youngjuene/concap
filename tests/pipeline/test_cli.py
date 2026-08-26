@@ -1,4 +1,4 @@
-"""CLI surface tests: JSON output, exit codes, and the exit-3 live boundary."""
+"""CLI surface tests: JSON output, exit codes, and the exit-3 live gates."""
 
 from __future__ import annotations
 
@@ -34,26 +34,6 @@ def test_stage_list_exposes_the_lineage(capsys: pytest.CaptureFixture[str]) -> N
     lineage = document["lineage"]
     assert isinstance(lineage, list)
     assert ["contract", "lock"] not in lineage  # lineage is artifact-typed, not guessed
-
-
-def test_live_boundaries_exit_3_without_side_effects(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    # Training and selection are wired; live model scoring is still a gate.
-    for command in ("evaluate",):
-        code, document = _run(
-            capsys,
-            command,
-            "run",
-            "--workspace",
-            str(tmp_path / command),
-            "--contract",
-            str(CANARY_CONTRACT),
-            "--invoke-external",
-        )
-        assert code == 3
-        assert document["status"] == "blocked_pending_external_operation"
-        assert document["side_effects"] is False
 
 
 def test_corpus_ingest_lock_splits_and_verify_roundtrip(

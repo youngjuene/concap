@@ -54,26 +54,9 @@ DOMAIN_ERRORS = (
     ViewError,
 )
 
-DEFERRED_GATES = {
-    "evaluate": "live model scoring requires a published backend authority",
-}
-
 
 def _emit(document: Mapping[str, object]) -> None:
     sys.stdout.write(json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
-
-
-def _deferred_gate(command: str, action: str) -> int:
-    _emit(
-        {
-            "status": "blocked_pending_external_operation",
-            "command": f"{command} {action}",
-            "gate": DEFERRED_GATES[command],
-            "side_effects": False,
-            "canary_command": "dpo canary run --workspace <owned> --contract configs/study/canary.toml",
-        }
-    )
-    return 3
 
 
 @dataclass(frozen=True)
@@ -183,11 +166,3 @@ def _registry_shard_rows(
         )
         rows[str(row["clip_id"])] = (shard_id, row)
     return rows
-
-
-def _blocked(command: str) -> Handler:
-    def handler(arguments: argparse.Namespace) -> int:
-        del arguments
-        return _deferred_gate(command, "run")
-
-    return handler

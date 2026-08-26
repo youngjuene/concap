@@ -110,15 +110,6 @@ def load_config(path: str | Path) -> BackendConfig:
     return _config_from_document(document, source_path)
 
 
-def load_config_text(text: str, *, source_name: str = "artifact-config.toml") -> BackendConfig:
-    """Parse an artifact-resolved config without materializing an arbitrary input path."""
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError("artifact Gemma config is invalid TOML") from exc
-    return _config_from_document(document, Path(source_name))
-
-
 def _config_from_document(document: dict[str, Any], source_path: Path) -> BackendConfig:
     return BackendConfig(
         source_path=source_path,

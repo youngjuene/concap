@@ -32,15 +32,17 @@ card per track until those bases are shared.
 ```bash
 uv sync --dev
 make check      # ruff + mypy --strict + pytest + lockfile check
-make smoke      # offline end-to-end canary + fail-closed live boundary
+make smoke      # offline end-to-end canary
 ```
 
 `make smoke` is the complete health check: a cold canary executes every
 pipeline stage on synthetic fixtures with the tiny CPU backend (all matrix
-cells train with real optimizer steps), a warm rerun must reuse the same
-report artifact with zero recomputation, and the remaining live gate
-(`evaluate`) must refuse with exit 3 and no side effects. For a persistent,
-inspectable workspace run the underlying commands yourself:
+cells train with real optimizer steps, the flipped-label retrainings
+included), and a warm rerun must reuse the same report artifact with zero
+recomputation. The live commands gate themselves: without a CUDA device or a
+wired backend, `train`, `select`, `candidates generate`, and `study export`
+refuse with exit 3 and no side effects. For a persistent, inspectable
+workspace run the underlying commands yourself:
 
 ```bash
 uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
