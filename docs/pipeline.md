@@ -26,6 +26,13 @@ media batch can never carry an audio tensor and vice versa), separate caption
 contracts, checkpoints, and reports. Chosen and rejected completions score
 against one structurally shared media input.
 
+Which tracks exist at all is a contract decision, and an undeclared track is
+refused rather than merely unused: `candidates generate --track visual` fails
+on a contract without `[tracks.visual]`, and a `[backends.*]` entry serving an
+undeclared track is refused too. The live street study declares
+`[tracks.audio]` only, so everything below describes a one-track run on
+two-track machinery.
+
 Candidates come from the frozen collection policy C0 — the contract's seed
 model under the contract's decoding mixture and generation seed — with
 deterministic compliance and cross-modal lexicon screens (the automated
@@ -33,6 +40,13 @@ claim-ledger audit was removed from the default path; human preference is
 the quality signal). After annotation begins, candidate text, ids, pair
 mappings, source checkpoints, and decoding configurations are immutable; any
 change requires a new dataset version and a new collection round.
+
+A pool carrying cross-split near-duplicates is repaired before annotation
+rather than discovered after it: `dpo candidates dedup` cuts both sides of
+every collision under the leakage audit's own threshold constant and
+republishes the pool with a `dedup-source` edge, so the gate that would have
+refused `views derive` passes in-band instead. Within-split duplicates are
+out of the gate's scope by design.
 
 ## Preference data
 
@@ -43,9 +57,18 @@ tags; choices are recorded against the displayed order and resolved to
 canonical candidate identity exactly once. Every judgment records the
 presentation it was made under (muted video; audio-only; opt-in unmuted
 video), so cross-modal contamination on the audio track stays measurable.
-Reliability screening (attention checks, repeats, position bias, response
-time) applies the preregistered exclusion rules before aggregation; excluded
-rows remain in the raw store.
+
+Reliability screening runs before aggregation and publishes a
+`dpo.reliability-report/v2` a reviewer can check: per annotator, the judgment
+and attention-check counts, attention pass rate, repeat consistency,
+left-choice rate with its exact two-sided binomial p-value, fast-response
+count, and the exclusion reasons; plus chance-corrected agreement over the
+whole round (nominal Krippendorff alpha). Three preregistered rules exclude
+an annotator — attention pass rate below `min_attention_pass`, a position
+lean that is both larger than `max_position_bias` *and* significant at
+`position_bias_alpha`, and fast responses on at least half their rows.
+Repeat consistency is reported, not enforced. Excluded rows remain in the raw
+store.
 
 Derived views are pure functions of the frozen pool plus retained
 annotations: `D_sft` (positively endorsed, deduplicated), `D_pair_strict`
@@ -90,6 +113,46 @@ expressible without code edits. Verified objective identities: cDPO(eps=0)
 equals its hand-computed logsumexp reference, and wDPO with both stages
 disabled equals DPO. wDPO remains experimental until the pinned revision is
 reproduced.
+
+## Study export and the human study
+
+The human study measures a caption's placement on an audiovisual congruency
+axis, and the axis is measured rather than asserted. For a caption `c` on one
+clip, congruency is `[logP(c | audio, video) - logP(c | audio, gray)] / |c|`
+in nats per token, computed through the same `completion_logprobs` primitive
+that scores preference pairs. `gray` is an ablation, not a deletion: a video
+of the clip's own resolution, frame rate and frame count carrying a flat
+mid-grey field, so the second pass keeps the soft-token count of the first and
+no per-clip offset of unknown size rides on the difference.
+
+`dpo study export` over-generates candidates per clip across conditionings,
+wordings and temperatures, scores each, and *selects* rungs for even spacing
+on that measured axis. Two refusals keep the slider a control rather than a
+label: a non-monotone ladder is refused at publish, and one whose ends differ
+by less than `MIN_CONGRUENCY_SPAN` is refused at selection.
+
+Gates on the export path: it requires the lock, not merely the selection
+report, so configuration freezes before any held-out access; study clips are
+read under a fenced `human-study` capability reserved once per lock
+(idempotent on retry, and a new lock forces a new fence); staged media is
+verified against the registry's derivative hashes; and the publish fails if
+any caption byte-matches a frozen training candidate, so the study cannot
+measure memorization and report it as caption quality. The published payload
+is capability-exempt, so the study web process reads captions while the
+protected ancestry stays sealed.
+
+Building a ladder deliberately steps outside the audio track's modality
+isolation — congruency is defined against what is in frame, and an audio-only
+model asked to name the visible source invents one. That exception is confined
+to `stimulus_messages` / `generate_stimulus` / `score_stimulus`, named for
+that one purpose so it is visible at every call site; nothing scored, trained
+on, or compared against preference data goes through them.
+
+`dpo study serve` is a separate instrument from the annotation UI: different
+question, different people, and a different response schema
+(`dpo.userstudy-responses/v2`), so neither study's validator can be satisfied
+by the other's data. Responses are written as files under `--out`: the
+append-only record, never rewritten.
 
 ## Claim limits
 
