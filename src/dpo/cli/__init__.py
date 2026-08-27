@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 
-from dpo.cli._shared import DEFERRED_GATES, DOMAIN_ERRORS, Handler, _blocked
+from dpo.cli._shared import DOMAIN_ERRORS, Handler
 from dpo.cli.annotation import _annotation_export_tasks, _annotation_ingest, _annotation_serve
 from dpo.cli.artifact import _artifact_gc, _artifact_rebuild_index, _artifact_trace, _artifact_verify
 from dpo.cli.canary import _canary_run
@@ -24,7 +24,7 @@ from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
 from dpo.cli.report import _report_analyze, _report_show
 from dpo.cli.select import _select_run
 from dpo.cli.stage import _stage_list
-from dpo.cli.study import _study_export, _study_serve
+from dpo.cli.study import _study_export, _study_ingest, _study_serve
 from dpo.cli.train import _train_run
 from dpo.cli.views import _views_derive
 from dpo.contracts.study_contract import AUDIO_PRESENTATIONS
@@ -183,9 +183,12 @@ def build_parser() -> argparse.ArgumentParser:
     report_analyze = report_actions.add_parser("analyze")
     report_analyze.add_argument("--workspace", required=True)
     report_analyze.add_argument("--contract", required=True)
+    report_analyze.add_argument("--artifact-id", action="append", required=True)
     report_analyze.set_defaults(handler=_report_analyze)
 
-    study = commands.add_parser("study", help="produce the held-out study split's human-study stimuli")
+    study = commands.add_parser(
+        "study", help="export the human-study stimuli, serve the study, ingest its responses"
+    )
     study_actions = study.add_subparsers(dest="action", required=True)
     study_export = study_actions.add_parser("export")
     study_export.add_argument("--workspace", required=True)
@@ -195,9 +198,6 @@ def build_parser() -> argparse.ArgumentParser:
     study_export.add_argument("--checkpoint-dir", required=True)
     study_export.add_argument("--backend-config", action="append")
     study_export.add_argument("--media-dir")
-    study_export.add_argument(
-        "--rungs", type=int, default=5, help="slider positions selected from the measured axis"
-    )
     study_export.set_defaults(handler=_study_export)
     study_serve = study_actions.add_parser("serve")
     study_serve.add_argument("--export", required=True, help="a published dpo.study-export/v1 document")
@@ -206,17 +206,14 @@ def build_parser() -> argparse.ArgumentParser:
     study_serve.add_argument("--host", default="127.0.0.1")
     study_serve.add_argument("--port", type=int, default=8776)
     study_serve.set_defaults(handler=_study_serve)
-
-    for command_name in DEFERRED_GATES:
-        blocked = commands.add_parser(command_name, help=f"live boundary: {DEFERRED_GATES[command_name]}")
-        blocked_actions = blocked.add_subparsers(dest="action", required=True)
-        run = blocked_actions.add_parser("run")
-        run.add_argument("--workspace", required=True)
-        run.add_argument("--contract", required=True)
-        run.add_argument("--artifact-id", action="append")
-        run.add_argument("--track")
-        run.add_argument("--invoke-external", action="store_true")
-        run.set_defaults(handler=_blocked(command_name))
+    study_ingest = study_actions.add_parser("ingest")
+    study_ingest.add_argument("--workspace", required=True)
+    study_ingest.add_argument("--contract", required=True)
+    study_ingest.add_argument("--artifact-id", action="append", required=True)
+    study_ingest.add_argument(
+        "--responses", action="append", required=True, help="one saved responses-<participant>.json"
+    )
+    study_ingest.set_defaults(handler=_study_ingest)
 
     return parser
 

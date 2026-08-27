@@ -12,16 +12,12 @@ from pathlib import Path
 import pytest
 
 from dpo.contracts.study_contract import StudyContract
-from dpo.core.artifacts import ArtifactStore
-from dpo.core.identity import repo_lock_hash
 from dpo.evaluation.caption_generation import generate_captions
 from dpo.evaluation.congruency import ClipLadder, ScoredCaption
 from dpo.models.tiny import TinyAdapter, synthetic_media
-from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
-from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM
 from dpo.pipeline.study_stage import STUDY_EXPORT_TYPE, StudyError, publish_study_export
-from tests.conftest import PreferenceWorld
+from tests.conftest import PreferenceWorld, study_publisher
 
 
 def _ladder(clip_id: str, low: str, high: str) -> ClipLadder:
@@ -37,24 +33,6 @@ def _ladder(clip_id: str, low: str, high: str) -> ClipLadder:
 
 def _adapter(contract: StudyContract, track: str) -> TinyAdapter:
     return TinyAdapter(track=track, prompt=contract.tracks[track].prompt, media_dim=DEFAULT_MEDIA_DIM, seed=0)
-
-
-def _publisher(tmp_path: Path, world: PreferenceWorld) -> tuple[ArtifactPublisher, dict[str, str]]:
-    """A publisher plus the shard ids of the STUDY-role clips only.
-
-    The store refuses an artifact whose asserted role disagrees with its clips'
-    registry membership, and a study export asserts ``study`` — so the fixture
-    hands back exactly the clips such an export may legitimately cover.
-    """
-    store = ArtifactStore.create(tmp_path / "store")
-    publisher = ArtifactPublisher(store, world.contract, repo_lock_hash())
-    ingest_id = publish_corpus_ingest(publisher, list(world.clips))
-    _, manifest, shard_ids = publish_lock_splits(
-        publisher, world.contract, list(world.clips), ingest_artifact_id=ingest_id
-    )
-    study = {clip_id: shard for clip_id, shard in shard_ids.items() if manifest.role_of(clip_id) == "study"}
-    assert study, "the fixture world must hold at least one study-role clip"
-    return publisher, study
 
 
 def test_generate_captions_is_deterministic_and_clip_aligned(
@@ -87,7 +65,7 @@ def test_study_export_refuses_captions_that_reuse_training_candidates(
     tmp_path: Path, world: PreferenceWorld
 ) -> None:
     """A memorized caption would make the study measure recall, not generalization."""
-    publisher, shard_ids = _publisher(tmp_path, world)
+    publisher, shard_ids = study_publisher(tmp_path, world)
     clip_id = sorted(shard_ids)[0]
     # Text lifted verbatim from the frozen training pool, on a study-role clip.
     memorized = world.pool.candidates[0]
@@ -108,7 +86,7 @@ def test_study_export_refuses_captions_that_reuse_training_candidates(
 
 
 def test_study_export_publishes_fresh_captions(tmp_path: Path, world: PreferenceWorld) -> None:
-    publisher, shard_ids = _publisher(tmp_path, world)
+    publisher, shard_ids = study_publisher(tmp_path, world)
     clip_id = sorted(shard_ids)[0]
     document, artifact_id = publish_study_export(
         publisher,
@@ -137,7 +115,7 @@ def test_study_export_publishes_fresh_captions(tmp_path: Path, world: Preference
 
 
 def test_study_export_requires_one_caption_per_clip(tmp_path: Path, world: PreferenceWorld) -> None:
-    publisher, shard_ids = _publisher(tmp_path, world)
+    publisher, shard_ids = study_publisher(tmp_path, world)
     clip_id = sorted(shard_ids)[0]
     duplicated = [
         _ladder(clip_id, "First rung here.", "Second rung here."),
@@ -161,7 +139,7 @@ def test_study_export_requires_one_caption_per_clip(tmp_path: Path, world: Prefe
 
 def test_study_export_refuses_a_non_monotone_ladder(tmp_path: Path, world: PreferenceWorld) -> None:
     """An unordered axis is not an independent variable."""
-    publisher, shard_ids = _publisher(tmp_path, world)
+    publisher, shard_ids = study_publisher(tmp_path, world)
     clip_id = sorted(shard_ids)[0]
     backwards = ClipLadder(
         clip_id=clip_id,

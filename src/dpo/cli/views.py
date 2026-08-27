@@ -166,6 +166,11 @@ def _views_derive(arguments: argparse.Namespace) -> int:
             "operation": "views-derive",
             "track": track,
             "artifacts": views.artifact_ids,
+            # `train run` takes these alongside the views: one manifest per
+            # contract rate, the positive ones retrain every pair_strict arm.
+            "flip_manifests": {
+                f"{rate:g}": artifact_id for rate, (artifact_id, _) in sorted(views.flip_manifests.items())
+            },
             "rows": {
                 "sft": len(views.sft_rows),
                 "pair_strict": len(views.strict_pairs),

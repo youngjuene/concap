@@ -27,12 +27,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from dpo.annotation.webapp import VIDEO_SUFFIXES
 from dpo.core.atomic import atomic_write_bytes
+from dpo.userstudy.responses import RESPONSES_SCHEMA, STUDY_EXPORT_SCHEMA
 
-# v2 records presentation_index, and times the first slider move from when
-# the slider appeared rather than from when the clip did. A v1 reader would
-# take the new latency for the old one and never notice.
-RESPONSES_SCHEMA = "dpo.userstudy-responses/v2"
-STUDY_EXPORT_SCHEMA = "dpo.study-export/v1"
 CLIP_ID_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 

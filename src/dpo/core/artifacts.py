@@ -46,13 +46,10 @@ CAPABILITY_READ_ROLES = frozenset({"test", "study"})
 PUBLIC_DERIVED_TYPES = frozenset(
     {
         "dpo.canary-report/v1",
-        "dpo.test-metrics/v1",
-        "dpo.test-reservation/v1",
-        "dpo.test-resume/v1",
-        "dpo.test-finalization/v1",
         "dpo.lock-manifest/v1",
         "dpo.selection-report/v1",
         "dpo.study-export/v1",
+        "dpo.study-responses/v1",
         "dpo.study-results/v1",
         "dpo.analysis-report/v1",
     }
@@ -64,12 +61,6 @@ GC_ROOT_TYPES = frozenset(
     {
         "dpo.lock-manifest/v1",
         "dpo.canary-report/v1",
-        # Active/interruptible authorities are roots, not merely descendants of
-        # a future terminal artifact.  Retaining historical completed records is
-        # conservative and prevents GC from racing a state transition.
-        "dpo.test-reservation/v1",
-        "dpo.test-resume/v1",
-        "dpo.test-finalization/v1",
         "dpo.study-export/v1",
         "dpo.study-results/v1",
         "dpo.analysis-report/v1",

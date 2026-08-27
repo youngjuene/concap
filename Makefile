@@ -1,7 +1,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary live-boundary-smoke golden annotate report
+.PHONY: sync check test lint typecheck locks smoke canary golden annotate report
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -33,7 +33,7 @@ golden:
 
 check: lint typecheck test locks
 
-smoke: canary live-boundary-smoke
+smoke: canary
 
 canary:
 	@tmp="$$(mktemp -d)"; \
@@ -43,12 +43,3 @@ canary:
 	uv run dpo canary run --workspace "$$tmp/artifacts" --contract configs/study/canary.toml > "$$warm"; \
 	uv run dpo artifact verify --workspace "$$tmp/artifacts" --all >/dev/null; \
 	uv run python -c 'import json,sys; cold=json.load(open(sys.argv[1])); warm=json.load(open(sys.argv[2])); assert cold["artifact_id"] == warm["artifact_id"], (cold["artifact_id"], warm["artifact_id"]); assert warm["cached"] is True, warm; assert warm["provider_calls"] == 0, warm; assert cold["status"] == "offline_milestone_complete", cold; print("canary ok", cold["artifact_id"])' "$$cold" "$$warm"
-
-live-boundary-smoke:
-	@tmp="$$(mktemp -d)"; out="$$tmp/live-boundary.json"; \
-	set +e; \
-	uv run dpo evaluate run --workspace "$$tmp/artifacts" --contract configs/study/canary.toml \
-	  --track visual --invoke-external > "$$out"; status="$$?"; \
-	set -e; \
-	[ "$$status" -eq 3 ]; \
-	uv run python -c 'import json,sys; doc=json.load(open(sys.argv[1])); assert doc["status"] == "blocked_pending_external_operation", doc; assert doc["side_effects"] is False, doc; print("live boundary ok", doc["command"])' "$$out"

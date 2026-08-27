@@ -29,7 +29,7 @@ from dpo.data.derive_pairs import (
 )
 from dpo.data.derive_sft import SftExample, derive_sft
 from dpo.data.leakage_audit import run_leakage_audit
-from dpo.data.noise import estimate_natural_noise, make_flip_manifest
+from dpo.data.noise import FlipManifest, estimate_natural_noise, make_flip_manifest
 from dpo.data.split import ClipInput, SplitManifest
 from dpo.data.weighting import pair_weights
 from dpo.pipeline.publishing import ArtifactPublisher
@@ -44,6 +44,9 @@ class TrackViews:
     metadata_pairs: tuple[MetadataPair, ...]
     validation_pairs: tuple[StrictPair, ...]
     artifact_ids: dict[str, str]
+    # flip rate -> (artifact id, manifest), one per contract rate; the train
+    # stage retrains every pair_strict preference cell on the positive ones.
+    flip_manifests: dict[float, tuple[str, FlipManifest]]
 
 
 def publish_track_views(
@@ -165,18 +168,22 @@ def publish_track_views(
         clips={row.clip_id for row in strict},
         role_exposure={"train"},
     )
+    flip_manifests: dict[float, tuple[str, FlipManifest]] = {}
     for rate in [float(str(rate)) for rate in contract.robustness["flip_rates"]]:
         flip_manifest = make_flip_manifest(
             strict, flip_rate=rate, seed=int(str(contract.robustness["flip_seed"]))
         )
-        publisher.publish(
-            "dpo.flip-manifest/v1",
-            flip_manifest.document(),
-            parents=(ParentEdge(artifact_ids["pair_strict"], "pair-view"),),
-            stage="views",
-            parameters={"operation": "flip-manifest", "track": track, "rate": rate},
-            clips={row.clip_id for row in strict},
-            role_exposure={"train"},
+        flip_manifests[rate] = (
+            publisher.publish(
+                "dpo.flip-manifest/v1",
+                flip_manifest.document(),
+                parents=(ParentEdge(artifact_ids["pair_strict"], "pair-view"),),
+                stage="views",
+                parameters={"operation": "flip-manifest", "track": track, "rate": rate},
+                clips={row.clip_id for row in strict},
+                role_exposure={"train"},
+            ),
+            flip_manifest,
         )
     return TrackViews(
         sft_rows=sft_rows,
@@ -184,4 +191,5 @@ def publish_track_views(
         metadata_pairs=meta,
         validation_pairs=validation_pairs,
         artifact_ids=artifact_ids,
+        flip_manifests=flip_manifests,
     )

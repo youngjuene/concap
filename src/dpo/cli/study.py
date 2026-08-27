@@ -1,4 +1,4 @@
-"""`dpo study`: caption the held-out study split for the human study."""
+"""`dpo study`: export the human study's stimuli, serve it, and ingest its responses."""
 
 from __future__ import annotations
 
@@ -37,7 +37,9 @@ from dpo.pipeline.live_runner import (
     load_checkpoint_policies,
 )
 from dpo.pipeline.lock import parse_lock_manifest
+from dpo.pipeline.study_results_stage import publish_study_results
 from dpo.pipeline.study_stage import StudyError, publish_study_export
+from dpo.userstudy.responses import load_study_responses
 
 
 def _study_export(arguments: argparse.Namespace) -> int:
@@ -95,7 +97,7 @@ def _study_export(arguments: argparse.Namespace) -> int:
     backend = _build_backend(contract, choice)
     policies, _ = load_checkpoint_policies(backend, arguments.checkpoint_dir)
     canonical_seed = int(str(contract.training["canonical_seed"]))
-    key = (experiment_id, variant_id, track, canonical_seed)
+    key = (experiment_id, variant_id, track, canonical_seed, 0.0)
     if key not in policies:
         raise ArtifactError(
             f"checkpoint directory has no policy for the selected cell {key};"
@@ -184,7 +186,11 @@ def _study_export(arguments: argparse.Namespace) -> int:
             return (seen - heard) / max(1, tokens)
 
         ladders = build_ladders(
-            clip_ids, specs, rungs=int(arguments.rungs), generate=_generate, measure=_measure
+            clip_ids,
+            specs,
+            rungs=int(str(contract.study["rungs"])),
+            generate=_generate,
+            measure=_measure,
         )
     document, artifact_id = publish_study_export(
         operation.publisher(),
@@ -227,5 +233,36 @@ def _study_serve(arguments: argparse.Namespace) -> int:
         out_path=Path(arguments.out),
         host=arguments.host,
         port=arguments.port,
+    )
+    return 0
+
+
+def _study_ingest(arguments: argparse.Namespace) -> int:
+    """Validate every participant's saved responses against the export and publish."""
+    operation = _operation(arguments)
+    _require_types(operation, {"dpo.study-export/v1"})
+    export_manifest = _find_manifest(operation, "dpo.study-export/v1")
+    export = json.loads(operation.store.read_payload(export_manifest.artifact_id))
+    responses = load_study_responses([Path(path) for path in arguments.responses], export)
+    document, artifact_ids = publish_study_results(
+        operation.publisher(),
+        operation.contract,
+        export=export,
+        export_artifact_id=export_manifest.artifact_id,
+        responses=responses,
+    )
+    _emit(
+        {
+            "status": "published",
+            "operation": "study-ingest",
+            "track": document["track"],
+            "participants": document["participants"],
+            "responses": document["responses"],
+            "clips": document["clips"],
+            "placement": document["placement"],
+            "match_rating": document["match_rating"],
+            "congruency_rating_correlation": document["congruency_rating_correlation"],
+            "artifacts": artifact_ids,
+        }
     )
     return 0

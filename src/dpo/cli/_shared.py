@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from dpo.analysis.bradley_terry import AnalysisError
 from dpo.annotation.raw_annotations import AnnotationError
 from dpo.candidates.candidate_records import CandidateError
 from dpo.contracts.study_contract import (
@@ -33,12 +34,14 @@ from dpo.pipeline.publishing import ArtifactPublisher
 from dpo.pipeline.stages import StageError, allowed_contract_ids
 from dpo.pipeline.study_stage import StudyError
 from dpo.pipeline.training_stage import training_cell_contract_ids
+from dpo.userstudy.responses import StudyResponseError
 
 Handler = Callable[[argparse.Namespace], int]
 
 DOMAIN_ERRORS = (
     OSError,
     AccessDenied,
+    AnalysisError,
     AnnotationError,
     ArtifactError,
     CandidateError,
@@ -51,29 +54,13 @@ DOMAIN_ERRORS = (
     SplitError,
     StageError,
     StudyError,
+    StudyResponseError,
     ViewError,
 )
-
-DEFERRED_GATES = {
-    "evaluate": "live model scoring requires a published backend authority",
-}
 
 
 def _emit(document: Mapping[str, object]) -> None:
     sys.stdout.write(json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
-
-
-def _deferred_gate(command: str, action: str) -> int:
-    _emit(
-        {
-            "status": "blocked_pending_external_operation",
-            "command": f"{command} {action}",
-            "gate": DEFERRED_GATES[command],
-            "side_effects": False,
-            "canary_command": "dpo canary run --workspace <owned> --contract configs/study/canary.toml",
-        }
-    )
-    return 3
 
 
 @dataclass(frozen=True)
@@ -183,11 +170,3 @@ def _registry_shard_rows(
         )
         rows[str(row["clip_id"])] = (shard_id, row)
     return rows
-
-
-def _blocked(command: str) -> Handler:
-    def handler(arguments: argparse.Namespace) -> int:
-        del arguments
-        return _deferred_gate(command, "run")
-
-    return handler

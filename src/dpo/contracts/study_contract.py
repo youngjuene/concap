@@ -37,8 +37,6 @@ REVISION_RE = re.compile(r"(?:[0-9a-f]{40}|sha256:[0-9a-f]{64})\Z")
 TRACKS = ("visual", "audio")
 SPLITS = ("train", "validation", "test", "study")
 EXECUTION_CLASSES = ("synthetic_canary", "live")
-TERMINAL_STATES = ("offline", "release")
-TERMINAL_VALUES = ("pending", "blocked_pending_external_operation", "complete")
 
 # How a clip is presented to a PREFERENCE annotator — someone choosing between
 # two candidate captions. Every judgment records which presentation it saw, so
@@ -381,6 +379,10 @@ class StudyContract:
     def robustness(self) -> Mapping[str, Any]:
         return self.section("robustness")
 
+    @property
+    def study(self) -> Mapping[str, Any]:
+        return self.section("study")
+
 
 # ---------------------------------------------------------------------------
 # Section validators.
@@ -618,10 +620,6 @@ def _validate_training(value: object) -> None:
             "max_grad_norm",
             "lora",
         },
-        # No stage reads training.world_size (receipts record the WORLD_SIZE
-        # env var instead) and only 1 was ever accepted; legal to state, never
-        # required.
-        {"world_size"},
     )
     seeds = _integers(table["seeds"], "training.seeds")
     if len(seeds) < 3 or len(set(seeds)) != len(seeds):
@@ -629,8 +627,6 @@ def _validate_training(value: object) -> None:
     canonical = _integer(table["canonical_seed"], "training.canonical_seed", minimum=0)
     if canonical not in seeds:
         raise ContractError("training.canonical_seed must be one of training.seeds")
-    if "world_size" in table and _integer(table["world_size"], "training.world_size", minimum=1) != 1:
-        raise ContractError("training.world_size must be 1 (one process per GPU; DDP is out of scope)")
     if _string(table["precision"], "training.precision") not in {"bf16", "fp32"}:
         raise ContractError("training.precision must be bf16 or fp32")
     _integer(table["max_completion_tokens"], "training.max_completion_tokens", minimum=1)
@@ -744,17 +740,15 @@ def _validate_validation(value: object) -> None:
     table = _table(
         value,
         "validation",
-        {"temperature", "top_p", "max_new_tokens"},
-        # Nothing reads bootstrap_samples yet — dpo.analysis.bootstrap, its
-        # intended consumer, has no command wired to it. Accepted for forward
-        # compatibility, not required.
-        {"bootstrap_samples"},
+        {"temperature", "top_p", "max_new_tokens", "bootstrap_samples"},
     )
     _number(table["temperature"], "validation.temperature", minimum=0.0)
     _number(table["top_p"], "validation.top_p", exclusive_minimum=0.0, maximum=1.0)
     _integer(table["max_new_tokens"], "validation.max_new_tokens", minimum=1)
-    if "bootstrap_samples" in table:
-        _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
+    # The clip-clustered bootstrap resample count that `dpo report analyze` and
+    # `dpo study ingest` read; result-affecting (it sets every interval's
+    # Monte-Carlo width), so the contract states it.
+    _integer(table["bootstrap_samples"], "validation.bootstrap_samples", minimum=1)
 
 
 def _validate_robustness(value: object) -> None:
@@ -771,17 +765,12 @@ def _validate_robustness(value: object) -> None:
     _integer(table["flip_seed"], "robustness.flip_seed", minimum=0)
 
 
-def _validate_terminal_states(value: object, execution_class: str) -> None:
-    table = _table(value, "terminal_states", set(TERMINAL_STATES))
-    for key in TERMINAL_STATES:
-        state = _string(table[key], f"terminal_states.{key}")
-        if state not in TERMINAL_VALUES:
-            raise ContractError(f"terminal_states.{key} must be one of {sorted(TERMINAL_VALUES)}")
-    if execution_class == "synthetic_canary" and table["release"] != "blocked_pending_external_operation":
-        raise ContractError(
-            "terminal_states.release must stay blocked_pending_external_operation"
-            " in a synthetic_canary contract"
-        )
+def _validate_study(value: object) -> None:
+    """The human study's own knobs — the slider's resolution on the measured axis."""
+    table = _table(value, "study", {"rungs"})
+    # Two rungs is the narrowest slider that is still a control; the ladder
+    # selector refuses fewer, and the export refuses ladders of unequal width.
+    _integer(table["rungs"], "study.rungs", minimum=2)
 
 
 # ---------------------------------------------------------------------------
@@ -809,10 +798,10 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
             "experiments",
             "validation",
             "robustness",
+            "study",
         },
-        # backends pins are only meaningful for live runs; terminal_states is
-        # display metadata no pipeline stage reads, so a contract may omit it.
-        {"backends", "terminal_states"},
+        # backends pins are only meaningful for live runs, so a contract may omit them.
+        {"backends"},
     )
     if _integer(root["schema_version"], "schema_version") != 1:
         raise ContractError("schema_version must be 1")
@@ -845,8 +834,7 @@ def validate_contract(document: Mapping[str, Any]) -> StudyContract:
         _validate_experiment(experiment_id, experiments[experiment_id])
     _validate_validation(root["validation"])
     _validate_robustness(root["robustness"])
-    if "terminal_states" in root:
-        _validate_terminal_states(root["terminal_states"], execution_class)
+    _validate_study(root["study"])
     return StudyContract(
         raw=raw,
         contract_hash=semantic_hash(raw),

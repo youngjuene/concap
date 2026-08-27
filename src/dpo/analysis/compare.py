@@ -8,7 +8,9 @@ preregistered natural-noise slices for the ranked winner.
 
 Everything is computed from the per-pair scores the validation report persists;
 nothing here re-scores a model, so the analysis is exactly reproducible from
-the published artifacts alone.
+the published artifacts alone. That includes the robustness axis: the report
+also persists the scores of every selected variant's retraining on flipped
+train labels, and the flip-rate curve is assembled from those.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Any
 
 from dpo.analysis.bootstrap import benjamini_hochberg, clip_cluster_bootstrap
 from dpo.analysis.bradley_terry import AnalysisError, PairwiseOutcome, fit_bradley_terry
-from dpo.analysis.robustness import sliced_preference_reports
+from dpo.analysis.robustness import flip_curve, sliced_preference_reports
 from dpo.evaluation.preference_accuracy import ScoredPair
 from dpo.pipeline.experiments import compute_report_fields
 
@@ -41,6 +43,12 @@ def _scored(track: str, rows: Sequence[Mapping[str, Any]]) -> list[ScoredPair]:
         )
         for row in rows
     ]
+
+
+def _beta_of(hyperparameters: Mapping[str, Any], experiment_id: str) -> float:
+    """The selected variant's beta; SEED and SFT carry none and score at 1.0."""
+    table = hyperparameters.get(experiment_id)
+    return float(table.get("beta", 1.0)) if isinstance(table, Mapping) else 1.0
 
 
 def _exact_binomial_two_sided(successes: int, trials: int) -> float:
@@ -135,13 +143,34 @@ def compare_experiments(
                     )
         bradley_terry = fit_bradley_terry(outcomes)
 
+        # The robustness axis: each selected variant retrained on train labels
+        # flipped at the contract's rates, scored on the same unflipped
+        # validation pairs as its base cell. Validation labels are never
+        # flipped, so every point of a curve is directly comparable to its
+        # rate-0.0 origin. RDPO's epsilon mode names its curve series; the
+        # other arms carry no epsilon and report "none".
+        robustness_scores = validation.get("robustness_scores", {}).get(track, {})
+        flip_curves: dict[str, list[dict[str, object]]] = {}
+        for experiment_id in ranking:
+            flipped = robustness_scores.get(experiment_id, {}).get(selected[experiment_id])
+            if not isinstance(flipped, Mapping) or not flipped:
+                continue
+            table = hyper.get(experiment_id)
+            mode = str(table.get("epsilon_mode", "none")) if isinstance(table, Mapping) else "none"
+            points = [(0.0, mode, rows_of[experiment_id])] + [
+                (float(rate), mode, _scored(track, rows)) for rate, rows in sorted(flipped.items())
+            ]
+            flip_curves[experiment_id] = [
+                point.document() for point in flip_curve(points, beta=_beta_of(hyper, experiment_id))
+            ]
+
         top = ranking[0]
-        top_beta = float(hyper[top].get("beta", 1.0)) if isinstance(hyper.get(top), Mapping) else 1.0
         document["tracks"][track] = {  # type: ignore[index]
             "experiments": experiments,
             "bradley_terry": bradley_terry.document(),
             "top_experiment": top,
-            "top_slices": sliced_preference_reports(rows_of[top], beta=top_beta),
+            "top_slices": sliced_preference_reports(rows_of[top], beta=_beta_of(hyper, top)),
+            "flip_curves": flip_curves,
             "bootstrap_samples": bootstrap_samples,
             "alpha": alpha,
         }

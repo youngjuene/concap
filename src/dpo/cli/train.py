@@ -7,19 +7,11 @@ from pathlib import Path
 
 from dpo.cli._backend import _build_backend, _require_media_coverage, _resolve_backend
 from dpo.cli._shared import _emit, _operation, _require_types
-from dpo.contracts.study_contract import (
-    EXPERIMENT_IDS,
-    load_contract,
-)
-from dpo.pipeline.experiments import expand_experiment
-from dpo.pipeline.live_runner import (
-    LiveMatrixRunner,
-)
-from dpo.pipeline.stage_inputs import (
-    collect_view_inputs,
-)
+from dpo.contracts.study_contract import load_contract
+from dpo.pipeline.live_runner import LiveMatrixRunner
+from dpo.pipeline.stage_inputs import collect_view_inputs
 from dpo.pipeline.stages import stage
-from dpo.pipeline.training_stage import publish_training_matrix
+from dpo.pipeline.training_stage import flip_rates_of, publish_training_matrix
 
 
 def _train_run(arguments: argparse.Namespace) -> int:
@@ -34,6 +26,9 @@ def _train_run(arguments: argparse.Namespace) -> int:
         operation.manifests,
         required=("sft", "pair_strict", "pair_all"),
         tracks=sorted(contract.tracks),
+        # The robustness cells train on the shared manifests, so every positive
+        # contract rate must be given here, per track, before any cell runs.
+        flip_rates=flip_rates_of(contract),
     )
     _require_media_coverage(
         choice,
@@ -53,17 +48,14 @@ def _train_run(arguments: argparse.Namespace) -> int:
         metadata_pairs=views.metadata_pairs,
         sft_rows=views.sft_rows,
     )
-    variants_by_experiment = {
-        experiment_id: expand_experiment(contract, experiment_id) for experiment_id in EXPERIMENT_IDS
-    }
     cells, cell_artifacts = publish_training_matrix(
         operation.publisher(),
         contract,
         runner=runner,
-        variants_by_experiment=variants_by_experiment,
         canonical_seed=canonical_seed,
         view_artifacts=views.artifact_ids,
         strict_pairs=views.strict_pairs,
+        flip_manifests=views.flip_manifests,
     )
     _emit(
         {
@@ -79,11 +71,15 @@ def _train_run(arguments: argparse.Namespace) -> int:
                     "experiment_id": experiment_id,
                     "variant_id": variant_id,
                     "track": track,
-                    "artifact_id": cell_artifacts[(experiment_id, variant_id, track)],
-                    "steps": cells[(experiment_id, variant_id, track)].steps,
-                    "resumed": runner.was_resumed(experiment_id, variant_id, track, canonical_seed),
+                    "flip_rate": flip_rate,
+                    "artifact_id": cell_artifacts[key],
+                    "steps": cells[key].steps,
+                    "resumed": runner.was_resumed(
+                        experiment_id, variant_id, track, canonical_seed, flip_rate
+                    ),
                 }
-                for (experiment_id, variant_id, track) in sorted(cells)
+                for key in sorted(cells)
+                for (experiment_id, variant_id, track, flip_rate) in (key,)
             ],
         }
     )

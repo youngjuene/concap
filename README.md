@@ -32,15 +32,17 @@ card per track until those bases are shared.
 ```bash
 uv sync --dev
 make check      # ruff + mypy --strict + pytest + lockfile check
-make smoke      # offline end-to-end canary + fail-closed live boundary
+make smoke      # offline end-to-end canary
 ```
 
 `make smoke` is the complete health check: a cold canary executes every
 pipeline stage on synthetic fixtures with the tiny CPU backend (all matrix
-cells train with real optimizer steps), a warm rerun must reuse the same
-report artifact with zero recomputation, and the remaining live gate
-(`evaluate`) must refuse with exit 3 and no side effects. For a persistent,
-inspectable workspace run the underlying commands yourself:
+cells train with real optimizer steps, the flipped-label retrainings
+included), and a warm rerun must reuse the same report artifact with zero
+recomputation. The live commands gate themselves: without a CUDA device or a
+wired backend, `train`, `select`, `candidates generate`, and `study export`
+refuse with exit 3 and no side effects. For a persistent, inspectable
+workspace run the underlying commands yourself:
 
 ```bash
 uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
@@ -70,6 +72,7 @@ data/userstudy/    human-study responses, one JSON per participant
 | **3. Compare** | — | `make report` and `dpo report analyze` |
 | **4. Export stimuli** | one 3090, ~17 min | `dpo study export` |
 | **5. Run the study** | participants | `dpo study serve` |
+| **6. Analyze the study** | — | `dpo study ingest` |
 
 ```bash
 make annotate SPLIT=train        # serve tasks-train.json on data/live/media
@@ -172,20 +175,34 @@ validated identically, and selection picks one winner per experiment and
 track. Because artifact identities are stage-scoped, extending a sweep axis
 recomputes only the new cells — collected preferences are never touched.
 
+**Robustness axis**: `[robustness].flip_rates` adds one more dimension to
+the matrix. `views derive` publishes one shared flip manifest per rate — the
+exact train pair ids whose chosen/rejected labels swap — and `train run`
+retrains every preference arm that trains on `D_pair_strict` (DPO, IPO, CDPO,
+RDPO, DRDPO, WDPO, SFT_DPO) once per positive rate on that manifest, so every
+method meets exactly the same corrupted labels. Selection scores each
+retraining on the same *unflipped* validation pairs as its base cell but
+ranks base cells only; the flip-rate curve comes out of `report analyze`.
+Three positive rates cost three extra cells per arm; `flip_rates = [0.0]` is
+the honest way to opt out.
+
 ```bash
 # Derive every training view from the frozen preferences, once per declared
-# track. Both train and validation splits must already be annotated.
+# track. Both train and validation splits must already be annotated. Prints
+# the view ids and, under "flip_manifests", one id per contract rate.
 uv run dpo views derive --workspace "$W" --contract "$C" \
   --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" --artifact-id "$VALIDATION_POOL" \
   --artifact-id "$TRAIN_ANNOTATIONS" --artifact-id "$VALIDATION_ANNOTATIONS" --track audio
 
-# Train every matrix cell. Resumable: rerunning skips finished cells.
+# Train every matrix cell, flipped retrainings included. Takes the views AND
+# the flip manifests. Resumable: rerunning skips finished cells.
 uv run dpo train run --workspace "$W" --contract "$C" \
-  --artifact-id "$VIEW_IDS..." --checkpoint-dir runs/checkpoints \
+  --artifact-id "$VIEW_IDS..." --artifact-id "$FLIP_MANIFEST_IDS..." \
+  --checkpoint-dir runs/checkpoints \
   --backend-config configs/gemma4/e4b-audio.toml \
   --media-dir media/
 
-# Score every variant, pick one winner per experiment and track, lock.
+# Score every cell, pick one winner per experiment and track, lock.
 uv run dpo select run --workspace "$W" --contract "$C" \
   --artifact-id "$VIEW_IDS..." --artifact-id "$CELL_IDS..." \
   --checkpoint-dir runs/checkpoints --backend-config configs/gemma4/e4b-audio.toml \
@@ -220,21 +237,24 @@ hashes via `[backends]`.
 
 ```bash
 uv run dpo report show    --workspace "$W"                     # or: make report
-uv run dpo report analyze --workspace "$W" --contract "$C"
+uv run dpo report analyze --workspace "$W" --contract "$C" \
+  --artifact-id "$VALIDATION_REPORT" --artifact-id "$SELECTION_REPORT"
 ```
 
 `report show` prints every validation report (per-variant accuracy by track
 and experiment), selection report (ranking, selected variants with their
-hyperparameters), and lock manifest in the workspace.
+hyperparameters), lock manifest, and analysis report in the workspace.
 
-`report analyze` is the inferential layer over the per-pair scores the
-validation report persists: clip-clustered bootstrap confidence intervals per
-experiment, exact paired sign tests against SEED with Benjamini-Hochberg
-correction across the preference arms, a Bradley-Terry fit over per-pair
-contests between the selected variants, and the preregistered natural-noise
-slices for the ranked winner. It re-scores nothing, so the comparison is
-reproducible from the published artifacts alone; it is read-only until the
-`dpo.analysis-report/v1` shape settles (see `docs/TODO.md`).
+`report analyze` publishes `dpo.analysis-report/v1`, the inferential layer
+over the per-pair scores the validation report persists: clip-clustered
+bootstrap confidence intervals per experiment at the contract's
+`validation.bootstrap_samples`, exact paired sign tests against SEED with
+Benjamini-Hochberg correction across the preference arms, a Bradley-Terry fit
+over per-pair contests between the selected variants, the preregistered
+natural-noise slices for the ranked winner, and the flip-rate robustness
+curve of every arm that was retrained on flipped labels. It re-scores
+nothing, so the report is a pure function of its two parents: a rerun
+republishes to the same id, and every number in it has lineage.
 
 Artifacts are the ground truth — `dpo artifact trace` walks any result back
 through its full lineage.
@@ -245,14 +265,16 @@ through its full lineage.
 uv run dpo study export --workspace "$W" --contract "$C" \
   --artifact-id "$LOCK" --artifact-id "$SELECTION_REPORT" --artifact-id "$VALIDATION_REPORT" \
   --artifact-id "$REGISTRY_ID" --artifact-id "$TRAIN_POOL" \
-  --track audio --checkpoint-dir runs/checkpoints --rungs 5 \
+  --track audio --checkpoint-dir runs/checkpoints \
   --backend-config configs/gemma4/e4b-audio.toml --media-dir media/
 ```
 
 Captions the held-out **study** split with the top-ranked experiment's selected
 variant and publishes `dpo.study-export/v1` — the stimuli the human study
-serves. Each clip gets a *congruency ladder*: one caption per slider stop,
-ordered along a measured axis (below). Cost on one 3090, measured: about
+serves. Each clip gets a *congruency ladder*: one caption per slider stop
+(`[study].rungs` of them — the slider's resolution is the study's independent
+variable, so the contract owns it), ordered along a measured axis (below).
+Cost on one 3090, measured: about
 **143 s per clip** — 33 s generating, 109 s scoring — so ~17 minutes for a
 seven-clip study split, once, at a 22.5 GiB peak. Scoring dominates because
 each candidate is scored twice against a full-length video (see the ablation
@@ -359,6 +381,30 @@ different people. Kept apart so neither study's validator can be satisfied by
 the other's data. It serves the clip *with* its soundtrack, so
 `--media-dir` needs `unmuted_video/` renders staged alongside the corpus.
 
+## 6. Analyze the study
+
+```bash
+uv run dpo study ingest --workspace "$W" --contract "$C" --artifact-id "$STUDY_EXPORT" \
+  --responses data/userstudy/responses/responses-P01.json \
+  --responses data/userstudy/responses/responses-P02.json
+```
+
+Reads every participant's saved file, checks each response against the export
+it was collected under — the clip must be one the export carries, the caption
+must be the rung the response claims at the position the export gave it, the
+rating must be on the instrument's scale, one answer per clip — and publishes
+two artifacts. `dpo.study-responses/v1` is the record: every validated row,
+participants hashed exactly as annotators are. `dpo.study-results/v1` is a
+pure function of it: placement on the measured axis (mean chosen position and
+congruency, the rung histogram), match rating overall and per rung, the
+correlation between a chosen caption's measured congruency and its rating,
+placement by presentation order, and per-clip and per-participant tables —
+each interval from the cluster bootstrap twice over, resampling clips and
+then participants, because both are random effects of this design. A
+different analysis republishes the results with the same record as parent;
+the record is never rewritten, and the raw files stay on disk as the
+append-only source.
+
 ## Repository structure
 
 ```text
@@ -376,7 +422,8 @@ src/dpo/
 ├── annotation/    # raw_annotations, collection_tasks, webapp (FastAPI UI),
 │                  # aggregation, reliability + exclusions
 ├── userstudy/     # the human study's page + app: congruency slider over a
-│                  # published study export (a separate instrument)
+│                  # published study export (a separate instrument), and the
+│                  # validated reader of what participants saved
 ├── models/        # shared completion logprob, modality-isolated batches,
 │                  # visual_media / audio_media builders, tiny CPU backend,
 │                  # gemma4/ (adapter, backend_config, tokenization safety,
@@ -388,11 +435,13 @@ src/dpo/
 │                  # congruency (the measured audiovisual axis)
 ├── analysis/      # compare (the `report analyze` layer), Bradley-Terry,
 │                  # clip-cluster bootstrap + BH correction, robustness slices
+│                  # and flip curves, the human study's analysis
 └── pipeline/      # stage registry (artifact types + contract slices),
                    # publishing, per-stage modules (corpus/candidate/
-                   # annotation/view/training/selection/study), sweep expansion,
-                   # live_runner (resumable matrix over a backend seam),
-                   # offline matrix runner, lock manifest, offline canary
+                   # annotation/view/training/selection/study/study_results),
+                   # sweep expansion, live_runner (resumable matrix over a
+                   # backend seam), offline matrix runner, lock manifest,
+                   # offline canary
 ```
 
 File naming follows one rule: every basename is globally unique and says what
@@ -418,9 +467,10 @@ drift from enforcement.
 - The heavier confirmatory machinery (automated evidence auditing with claim
   ledgers, the one-shot test reservation) was deliberately removed from the
   default path and is recoverable from git history when that phase starts.
-  `dpo.study-results/v1` and `dpo.analysis-report/v1` are reserved in
-  `core/artifacts.py` for the human study's responses and its analysis; their
-  producers are built once that instrument's shape settles.
+  Nothing of it is stubbed in the tree: the test split stays sealed by
+  construction — it is a capability-read role with no capability scope, so
+  no reservation can open it — and every artifact type the registry names
+  has a producer.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the invariants and claim
 limits, [`docs/study-runbook.md`](docs/study-runbook.md) for the live study's

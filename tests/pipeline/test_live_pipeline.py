@@ -39,6 +39,12 @@ from tests.conftest import CANARY_CONTRACT
 TRACKS = ("visual", "audio")
 SPLITS = ("train", "validation")
 ANNOTATORS = ("Annotator One", "Annotator Two", "Annotator Three")
+# Nine experiments per track, plus one flipped retraining (the fixture
+# contract's single positive flip rate) for each of the seven preference arms
+# that train on pair_strict.
+BASE_CELLS = 9 * len(TRACKS)
+FLIP_CELLS = 7 * len(TRACKS)
+ALL_CELLS = BASE_CELLS + FLIP_CELLS
 
 _SAMPLING_ONLY_CANDIDATES = """[candidates]
 source_policy = "C0"
@@ -189,12 +195,17 @@ def pipeline(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         artifacts = derived["artifacts"]
         assert isinstance(artifacts, dict)
         views_by_track[track] = {key: str(value) for key, value in artifacts.items()}
+        flip_manifests = derived["flip_manifests"]
+        assert isinstance(flip_manifests, dict)
+        views_by_track[track].update({f"flip:{rate}": str(value) for rate, value in flip_manifests.items()})
         assert int(str(derived["rows"]["sft"])) > 0
         assert int(str(derived["rows"]["pair_strict"])) > 0
         assert int(str(derived["rows"]["validation_pairs"])) > 0
     checkpoints = tmp_path / "checkpoints"
     training_inputs = [
-        views_by_track[track][key] for track in TRACKS for key in ("sft", "pair_strict", "pair_all")
+        views_by_track[track][key]
+        for track in TRACKS
+        for key in ("sft", "pair_strict", "pair_all", "flip:0.2")
     ]
     trained = _train(workspace, contract, training_inputs, checkpoints)
     cell_ids = [str(row["artifact_id"]) for row in trained["matrix"]]
@@ -210,6 +221,11 @@ def pipeline(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         ],
         *("--checkpoint-dir", str(checkpoints)),
     )
+    analysis_inputs = [str(selected["artifacts"][key]) for key in ("validation_report", "selection_report")]
+    analyzed = invoke(
+        *("report", "analyze", "--workspace", workspace, "--contract", contract),
+        *[argument for artifact_id in analysis_inputs for argument in ("--artifact-id", artifact_id)],
+    )
     return {
         "tmp_path": tmp_path,
         "workspace": workspace,
@@ -218,6 +234,7 @@ def pipeline(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         "training_inputs": training_inputs,
         "trained": trained,
         "selected": selected,
+        "analyzed": analyzed,
         "cell_ids": cell_ids,
         "checkpoints": checkpoints,
     }
@@ -226,7 +243,14 @@ def pipeline(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 def test_views_derive_publishes_every_view_of_both_tracks(pipeline: dict[str, Any]) -> None:
     views = pipeline["views"]
     for track in TRACKS:
-        assert set(views[track]) == {"sft", "pair_strict", "pair_all", "validation_pairs"}
+        assert set(views[track]) == {
+            "sft",
+            "pair_strict",
+            "pair_all",
+            "validation_pairs",
+            "flip:0",
+            "flip:0.2",
+        }
     # The two tracks never share a view: same clips, separate everything else.
     everything = [artifact_id for track in TRACKS for artifact_id in views[track].values()]
     assert len(set(everything)) == len(everything)
@@ -236,10 +260,21 @@ def test_train_run_publishes_the_whole_matrix(pipeline: dict[str, Any]) -> None:
     trained = pipeline["trained"]
     assert trained["status"] == "published"
     assert trained["backend"] == "tiny"
-    assert int(str(trained["cells"])) == 18  # nine experiments, two tracks
-    assert int(str(trained["cells_trained"])) == 18
+    assert int(str(trained["cells"])) == ALL_CELLS
+    assert int(str(trained["cells_trained"])) == ALL_CELLS
     assert int(str(trained["cells_resumed"])) == 0
     matrix = trained["matrix"]
+    flipped = [row for row in matrix if float(str(row["flip_rate"])) > 0.0]
+    assert len(flipped) == FLIP_CELLS
+    assert {str(row["experiment_id"]) for row in flipped} == {
+        "DPO",
+        "IPO",
+        "CDPO",
+        "RDPO",
+        "DRDPO",
+        "WDPO",
+        "SFT_DPO",
+    }
     assert {str(row["experiment_id"]) for row in matrix} == {
         "SEED",
         "SFT",
@@ -260,7 +295,7 @@ def test_checkpoints_carry_every_trained_policy(pipeline: dict[str, Any]) -> Non
     from dpo.pipeline.live_runner import scan_checkpoints
 
     cells = scan_checkpoints(pipeline["checkpoints"])
-    assert len(cells) == 18
+    assert len(cells) == ALL_CELLS
     for cell, directory in cells:
         assert (directory / "cell.json").is_file()
         assert (directory / "adapter_model.safetensors").is_file() == cell.trained
@@ -288,7 +323,7 @@ def test_a_second_train_run_resumes_every_cell(pipeline: dict[str, Any]) -> None
         pipeline["training_inputs"],
         pipeline["checkpoints"],
     )
-    assert int(str(again["cells_resumed"])) == 18
+    assert int(str(again["cells_resumed"])) == ALL_CELLS
     assert int(str(again["cells_trained"])) == 0
     assert all(bool(row["resumed"]) for row in again["matrix"])
     # Resumption is not a new result: the published cells are the same artifacts.
@@ -303,4 +338,27 @@ def test_published_reports_verify_in_the_store(pipeline: dict[str, Any]) -> None
     assert isinstance(reports, dict)
     assert len(reports["selection"]) == 1
     assert len(reports["locks"]) == 1
+    assert len(reports["analyses"]) == 1
     assert reports["selection"][0]["ranking"] == pipeline["selected"]["ranking"]
+
+
+def test_report_analyze_publishes_the_flip_curves(pipeline: dict[str, Any]) -> None:
+    analyzed = pipeline["analyzed"]
+    assert analyzed["status"] == "published"
+    assert str(analyzed["artifact_id"]).startswith("sha256:")
+    for track in TRACKS:
+        curves = analyzed["analysis"]["tracks"][track]["flip_curves"]
+        # Every pair_strict preference arm has a two-point curve; SEED and SFT none.
+        assert set(curves) == {"DPO", "IPO", "CDPO", "RDPO", "DRDPO", "WDPO", "SFT_DPO"}
+        for points in curves.values():
+            assert [point["flip_rate"] for point in points] == [0.0, 0.2]
+    # A rerun is not a new result: the analysis republishes to the same id.
+    again = invoke(
+        *("report", "analyze", "--workspace", pipeline["workspace"], "--contract", pipeline["contract"]),
+        *[
+            argument
+            for key in ("validation_report", "selection_report")
+            for argument in ("--artifact-id", str(pipeline["selected"]["artifacts"][key]))
+        ],
+    )
+    assert again["artifact_id"] == analyzed["artifact_id"]

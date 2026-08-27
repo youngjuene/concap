@@ -73,6 +73,32 @@ def test_compare_is_deterministic() -> None:
     assert first == second
 
 
+def test_compare_draws_the_flip_curve_from_persisted_robustness_scores() -> None:
+    validation, selection = _payloads([1.0] * 6, [-1.0] * 6)
+    clips = [f"clip-{index % 3}" for index in range(6)]
+    # DPO retrained at two flip rates: the first still right everywhere, the
+    # second wrong on half the pairs — the curve must say so, in rate order.
+    validation["robustness_scores"] = {
+        "audio": {
+            "DPO": {
+                "base": {
+                    "0.3": [_row(i, clips[i], 1.0 if i % 2 else -1.0) for i in range(6)],
+                    "0.1": [_row(i, clips[i], 1.0) for i in range(6)],
+                }
+            }
+        }
+    }
+    document = compare_experiments(validation, selection, bootstrap_samples=16, seed=1)
+    curves = document["tracks"]["audio"]["flip_curves"]
+    assert set(curves) == {"DPO"}, "SEED was never retrained on flipped labels"
+    assert [(point["flip_rate"], point["accuracy"]) for point in curves["DPO"]] == [
+        (0.0, 1.0),
+        (0.1, 1.0),
+        (0.3, 0.5),
+    ]
+    assert {point["epsilon_mode"] for point in curves["DPO"]} == {"none"}
+
+
 def test_compare_refuses_a_scoreless_report() -> None:
     with pytest.raises(AnalysisError, match="no per-pair scores"):
         compare_experiments({"accuracy": {}}, {"ranking": {}}, bootstrap_samples=10)

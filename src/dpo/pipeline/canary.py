@@ -450,9 +450,10 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
     view_artifacts = {track: track_data[track].view_artifacts for track in TRACKS}
     # fmt: off
     cells, cell_artifacts = publish_training_matrix(
-        publisher, contract, runner=runner, variants_by_experiment=variants_by_experiment,
+        publisher, contract, runner=runner,
         canonical_seed=canonical_seed, view_artifacts=view_artifacts,
         strict_pairs={track: views_by_track[track].strict_pairs for track in TRACKS},
+        flip_manifests={track: views_by_track[track].flip_manifests for track in TRACKS},
     )
 
     # Common validation scoring, selection, and the configuration lock.

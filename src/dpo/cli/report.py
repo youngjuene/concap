@@ -1,4 +1,4 @@
-"""`dpo report`: show published validation/selection/lock reports."""
+"""`dpo report`: show published reports, and publish the inferential comparison."""
 
 from __future__ import annotations
 
@@ -6,14 +6,12 @@ import argparse
 import json
 from typing import Any
 
-from dpo.analysis.compare import DEFAULT_BOOTSTRAP_SAMPLES, compare_experiments
-from dpo.cli._shared import _emit
-from dpo.contracts.study_contract import load_contract
-from dpo.core.artifacts import (
-    ArtifactError,
-    ArtifactStore,
-)
+from dpo.analysis.compare import compare_experiments
+from dpo.cli._shared import _emit, _find_manifest, _operation, _require_types
+from dpo.core.artifacts import ArtifactError, ArtifactStore, ParentEdge
 from dpo.pipeline.lock import parse_lock_manifest
+
+ANALYSIS_REPORT_TYPE = "dpo.analysis-report/v1"
 
 
 def _report_show(arguments: argparse.Namespace) -> int:
@@ -47,6 +45,15 @@ def _report_show(arguments: argparse.Namespace) -> int:
                     {"artifact_id": artifact_id, "lock_id": parse_lock_manifest(payload).lock_id}
                     for artifact_id, payload in _payloads("dpo.lock-manifest/v1")
                 ],
+                "analyses": [
+                    {
+                        "artifact_id": artifact_id,
+                        "top_experiment": {
+                            track: entry["top_experiment"] for track, entry in payload["tracks"].items()
+                        },
+                    }
+                    for artifact_id, payload in _payloads(ANALYSIS_REPORT_TYPE)
+                ],
             },
         }
     )
@@ -54,29 +61,48 @@ def _report_show(arguments: argparse.Namespace) -> int:
 
 
 def _report_analyze(arguments: argparse.Namespace) -> int:
-    """Inferential comparison over the published validation + selection reports.
+    """Publish the inferential comparison over one validation + selection report pair.
 
-    Read-only: consumes payloads, publishes nothing. Promotion to a published
-    dpo.analysis-report/v1 artifact is deliberate follow-up work once the
-    authors have seen the shape on real data (docs/TODO.md).
+    Re-scores nothing: every number derives from the per-pair scores the
+    validation report persists, so the published ``dpo.analysis-report/v1`` is
+    a pure function of its two parents and the contract's resample count, and
+    a rerun republishes to the same id.
     """
-    store = ArtifactStore.open(arguments.workspace)
-    contract = load_contract(arguments.contract)
-
-    def _single(artifact_type: str) -> dict[str, Any]:
-        ids = store.find_by_type(artifact_type)
-        if len(ids) != 1:
-            raise ArtifactError(
-                f"expected exactly one {artifact_type} in the workspace, found {len(ids)};"
-                " pass a workspace holding one select run"
-            )
-        return dict(json.loads(store.read_payload(ids[0])))
-
-    samples = int(str(contract.validation.get("bootstrap_samples", DEFAULT_BOOTSTRAP_SAMPLES)))
+    operation = _operation(arguments)
+    _require_types(operation, {"dpo.validation-report/v1", "dpo.selection-report/v1"}, minimum=2)
+    validation_manifest = _find_manifest(operation, "dpo.validation-report/v1")
+    selection_manifest = _find_manifest(operation, "dpo.selection-report/v1")
+    # The selection report ranks exactly one validation report; an analysis
+    # over any other pairing would compare a ranking against scores it never
+    # saw.
+    if all(parent.artifact_id != validation_manifest.artifact_id for parent in selection_manifest.parents):
+        raise ArtifactError(
+            f"selection report {selection_manifest.artifact_id} was not derived from validation"
+            f" report {validation_manifest.artifact_id}"
+        )
+    validation = json.loads(operation.store.read_payload(validation_manifest.artifact_id))
+    selection = json.loads(operation.store.read_payload(selection_manifest.artifact_id))
     document = compare_experiments(
-        _single("dpo.validation-report/v1"),
-        _single("dpo.selection-report/v1"),
-        bootstrap_samples=samples,
+        validation,
+        selection,
+        bootstrap_samples=int(str(operation.contract.validation["bootstrap_samples"])),
     )
-    _emit({"status": "ok", "analysis": document})
+    artifact_id = operation.publisher().publish(
+        ANALYSIS_REPORT_TYPE,
+        document,
+        parents=(
+            ParentEdge(validation_manifest.artifact_id, "validation-report"),
+            ParentEdge(selection_manifest.artifact_id, "selection-report"),
+        ),
+        stage="analyze",
+        parameters={"operation": "analyze"},
+    )
+    _emit(
+        {
+            "status": "published",
+            "operation": "report-analyze",
+            "artifact_id": artifact_id,
+            "analysis": document,
+        }
+    )
     return 0
