@@ -1,0 +1,1183 @@
+{
+  "schema": "dpo.caption-session/v1",
+  "session_id": "demo-session",
+  "poles": {
+    "audio": [
+      "Eye",
+      "Ear"
+    ],
+    "visual": [
+      "Near",
+      "Far"
+    ]
+  },
+  "role_heads": {
+    "audio": {
+      "underneath": "Underneath",
+      "stands_out": "Stands out",
+      "only_here": "Only here"
+    }
+  },
+  "measures": {
+    "items": [
+      {
+        "id": "match",
+        "text": "The caption matched what I heard.",
+        "boxes": 5,
+        "poles": [
+          "Not at all",
+          "Completely"
+        ]
+      },
+      {
+        "id": "mattered",
+        "text": "The caption named the sounds that mattered here.",
+        "boxes": 5,
+        "poles": [
+          "Not at all",
+          "Completely"
+        ]
+      },
+      {
+        "id": "place",
+        "text": "The caption fits this place in particular.",
+        "boxes": 5,
+        "poles": [
+          "Not at all",
+          "Completely"
+        ]
+      },
+      {
+        "id": "effort",
+        "text": "Shaping the caption felt like describing the place.",
+        "boxes": 5,
+        "poles": [
+          "Not at all",
+          "Completely"
+        ]
+      },
+      {
+        "id": "attention",
+        "text": "Where was your attention?",
+        "boxes": 7,
+        "poles": [
+          "Mostly the image",
+          "Mostly the sound"
+        ]
+      },
+      {
+        "id": "criterion",
+        "text": "Is this the caption you'd want for this moment?",
+        "boxes": 2,
+        "poles": [
+          "No",
+          "Yes"
+        ]
+      }
+    ],
+    "open_item": "What makes this place sound like itself?"
+  },
+  "clips": [
+    {
+      "clip_id": "demo_tram_stop",
+      "task": "shaped",
+      "first_viewing_captions": true,
+      "balance_control": "orderings",
+      "opening": {
+        "level": "itemized",
+        "balance": 0.5
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 4200,
+          "automatic_caption": "A tram brakes at the stop while a siren passes somewhere behind.",
+          "scene": {
+            "token": "TRAM STOP ON A WIDE STREET",
+            "prose": "A tram stop on a wide street."
+          },
+          "atmosphere": {
+            "phrase": "steady, with one rise",
+            "prose": "Steady, with one rise."
+          },
+          "sources": [
+            {
+              "id": "tram",
+              "token": "TRAM BRAKING",
+              "prose": "a tram braking",
+              "phrases": [
+                "in frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.9,
+                0.7
+              ],
+              "role": "stands_out"
+            },
+            {
+              "id": "siren",
+              "token": "DISTANT SIREN",
+              "prose": "a distant siren",
+              "phrases": [
+                "out of frame",
+                "rises and fades"
+              ],
+              "weights": [
+                0.15,
+                0.95
+              ],
+              "role": "stands_out"
+            },
+            {
+              "id": "footsteps",
+              "token": "FOOTSTEPS",
+              "prose": "footsteps",
+              "phrases": [
+                "at the edge of the frame",
+                "comes and goes"
+              ],
+              "weights": [
+                0.6,
+                0.35
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "chatter",
+              "token": "CHATTER",
+              "prose": "chatter",
+              "phrases": [
+                "half in frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.4,
+                0.5
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "pigeons",
+              "token": "PIGEONS",
+              "prose": "pigeons",
+              "phrases": [
+                "fills the frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.8,
+                0.15
+              ],
+              "role": "only_here"
+            }
+          ]
+        },
+        {
+          "shot_id": "s2",
+          "start_ms": 4200,
+          "end_ms": 10000,
+          "automatic_caption": "Doors chime and people step down as traffic hums behind.",
+          "scene": {
+            "token": "TRAM DOORS OPENING",
+            "prose": "Tram doors opening onto the street."
+          },
+          "atmosphere": {
+            "phrase": "a burst, then settling",
+            "prose": "A burst, then settling."
+          },
+          "sources": [
+            {
+              "id": "doors",
+              "token": "DOOR CHIME",
+              "prose": "a door chime",
+              "phrases": [
+                "in frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.85,
+                0.8
+              ],
+              "role": "stands_out"
+            },
+            {
+              "id": "traffic",
+              "token": "TRAFFIC HUM",
+              "prose": "a traffic hum",
+              "phrases": [
+                "out of frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.2,
+                0.6
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "steps",
+              "token": "PEOPLE STEPPING DOWN",
+              "prose": "people stepping down",
+              "phrases": [
+                "in frame",
+                "builds toward the end"
+              ],
+              "weights": [
+                0.7,
+                0.4
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "bell",
+              "token": "BICYCLE BELL",
+              "prose": "a bicycle bell",
+              "phrases": [
+                "at the edge of the frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.3,
+                0.7
+              ],
+              "role": "only_here"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clip_id": "demo_market",
+      "task": "control",
+      "first_viewing_captions": false,
+      "balance_control": "orderings",
+      "opening": {
+        "level": "itemized",
+        "balance": 0.5
+      },
+      "visual_roles": {
+        "backdrop": "Backdrop",
+        "passing": "Passing through",
+        "fixed": "Fixed here"
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 5000,
+          "automatic_caption": "A parked van fills the left of the frame as a cyclist crosses.",
+          "scene": {
+            "token": "MARKET STREET AT MIDDAY",
+            "prose": "A market street at midday."
+          },
+          "atmosphere": {
+            "phrase": "still, then one crossing",
+            "prose": "Still, then one crossing."
+          },
+          "sources": [
+            {
+              "id": "van",
+              "token": "PARKED VAN",
+              "prose": "a parked van",
+              "phrases": [
+                "a third of the frame",
+                "still"
+              ],
+              "weights": [
+                0.9,
+                0.2
+              ],
+              "role": "backdrop"
+            },
+            {
+              "id": "cyclist",
+              "token": "CYCLIST",
+              "prose": "a cyclist",
+              "phrases": [
+                "small",
+                "crosses left to right"
+              ],
+              "weights": [
+                0.4,
+                0.8
+              ],
+              "role": "passing"
+            },
+            {
+              "id": "awning",
+              "token": "STRIPED AWNING",
+              "prose": "a striped awning",
+              "phrases": [
+                "wide",
+                "still"
+              ],
+              "weights": [
+                0.7,
+                0.5
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "crates",
+              "token": "STACKED CRATES",
+              "prose": "stacked crates",
+              "phrases": [
+                "small",
+                "still"
+              ],
+              "weights": [
+                0.5,
+                0.3
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "dog",
+              "token": "DOG ON A LEAD",
+              "prose": "a dog on a lead",
+              "phrases": [
+                "small",
+                "walks out of frame"
+              ],
+              "weights": [
+                0.3,
+                0.9
+              ],
+              "role": "passing"
+            }
+          ]
+        },
+        {
+          "shot_id": "s2",
+          "start_ms": 5000,
+          "end_ms": 10000,
+          "automatic_caption": "Shoppers pass a fruit stall under the awning.",
+          "scene": {
+            "token": "FRUIT STALL UNDER AN AWNING",
+            "prose": "A fruit stall under an awning."
+          },
+          "atmosphere": {
+            "phrase": "slow drift",
+            "prose": "A slow drift."
+          },
+          "sources": [
+            {
+              "id": "stall",
+              "token": "FRUIT STALL",
+              "prose": "a fruit stall",
+              "phrases": [
+                "half the frame",
+                "still"
+              ],
+              "weights": [
+                0.95,
+                0.4
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "shoppers",
+              "token": "SHOPPERS",
+              "prose": "shoppers",
+              "phrases": [
+                "medium",
+                "drift past"
+              ],
+              "weights": [
+                0.6,
+                0.7
+              ],
+              "role": "passing"
+            },
+            {
+              "id": "lamp",
+              "token": "STREET LAMP",
+              "prose": "a street lamp",
+              "phrases": [
+                "tall and thin",
+                "still"
+              ],
+              "weights": [
+                0.3,
+                0.6
+              ],
+              "role": "backdrop"
+            },
+            {
+              "id": "bus",
+              "token": "BUS",
+              "prose": "a bus",
+              "phrases": [
+                "large",
+                "pulls away"
+              ],
+              "weights": [
+                0.5,
+                0.9
+              ],
+              "role": "passing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clip_id": "demo_canal",
+      "task": "shaped",
+      "first_viewing_captions": true,
+      "balance_control": "crossfader",
+      "opening": {
+        "level": "grouped",
+        "balance": 0.3
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 3300,
+          "automatic_caption": "Water laps against the quay while a boat engine idles.",
+          "scene": {
+            "token": "CANAL QUAY",
+            "prose": "A canal quay."
+          },
+          "atmosphere": {
+            "phrase": "even, low",
+            "prose": "Even and low."
+          },
+          "sources": [
+            {
+              "id": "water",
+              "token": "WATER LAPPING",
+              "prose": "water lapping",
+              "phrases": [
+                "in frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.8,
+                0.5
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "engine",
+              "token": "BOAT ENGINE",
+              "prose": "a boat engine",
+              "phrases": [
+                "half in frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.5,
+                0.75
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "gulls",
+              "token": "GULLS",
+              "prose": "gulls",
+              "phrases": [
+                "out of frame",
+                "comes and goes"
+              ],
+              "weights": [
+                0.1,
+                0.6
+              ],
+              "role": "only_here"
+            },
+            {
+              "id": "rope",
+              "token": "ROPE CREAK",
+              "prose": "a rope creaking",
+              "phrases": [
+                "in frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.7,
+                0.3
+              ],
+              "role": "stands_out"
+            }
+          ]
+        },
+        {
+          "shot_id": "s2",
+          "start_ms": 3300,
+          "end_ms": 6600,
+          "automatic_caption": "A bell rings from a bridge as cyclists pass over it.",
+          "scene": {
+            "token": "BRIDGE OVER THE CANAL",
+            "prose": "A bridge over the canal."
+          },
+          "atmosphere": {
+            "phrase": "one clear event",
+            "prose": "One clear event."
+          },
+          "sources": [
+            {
+              "id": "bell",
+              "token": "BRIDGE BELL",
+              "prose": "a bridge bell",
+              "phrases": [
+                "in frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.85,
+                0.9
+              ],
+              "role": "stands_out"
+            },
+            {
+              "id": "cyclists",
+              "token": "CYCLISTS PASSING",
+              "prose": "cyclists passing",
+              "phrases": [
+                "in frame",
+                "comes and goes"
+              ],
+              "weights": [
+                0.75,
+                0.45
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "wind",
+              "token": "WIND",
+              "prose": "wind",
+              "phrases": [
+                "out of frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.05,
+                0.4
+              ],
+              "role": "underneath"
+            }
+          ]
+        },
+        {
+          "shot_id": "s3",
+          "start_ms": 6600,
+          "end_ms": 10000,
+          "automatic_caption": "Voices carry from a café terrace across the water.",
+          "scene": {
+            "token": "CAFE TERRACE BY THE WATER",
+            "prose": "A café terrace by the water."
+          },
+          "atmosphere": {
+            "phrase": "loose and continuous",
+            "prose": "Loose and continuous."
+          },
+          "sources": [
+            {
+              "id": "voices",
+              "token": "TERRACE VOICES",
+              "prose": "terrace voices",
+              "phrases": [
+                "at the edge of the frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.45,
+                0.8
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "cups",
+              "token": "CUPS AND SAUCERS",
+              "prose": "cups and saucers",
+              "phrases": [
+                "out of frame",
+                "comes and goes"
+              ],
+              "weights": [
+                0.1,
+                0.5
+              ],
+              "role": "only_here"
+            },
+            {
+              "id": "water2",
+              "token": "WATER LAPPING",
+              "prose": "water lapping",
+              "phrases": [
+                "in frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.85,
+                0.35
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "moped",
+              "token": "MOPED",
+              "prose": "a moped",
+              "phrases": [
+                "out of frame",
+                "rises and fades"
+              ],
+              "weights": [
+                0.2,
+                0.9
+              ],
+              "role": "stands_out"
+            },
+            {
+              "id": "music",
+              "token": "ACCORDION",
+              "prose": "an accordion",
+              "phrases": [
+                "half in frame",
+                "builds toward the end"
+              ],
+              "weights": [
+                0.55,
+                0.65
+              ],
+              "role": "only_here"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clip_id": "demo_crossing",
+      "task": "shaped",
+      "first_viewing_captions": false,
+      "balance_control": "orderings",
+      "opening": {
+        "level": "atmospheric",
+        "balance": 0.5
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 6000,
+          "automatic_caption": "A pedestrian signal ticks while buses pull through the crossing.",
+          "scene": {
+            "token": "BUSY CROSSING",
+            "prose": "A busy crossing."
+          },
+          "atmosphere": {
+            "phrase": "ticking under a surge",
+            "prose": "Ticking under a surge."
+          },
+          "sources": [
+            {
+              "id": "signal",
+              "token": "SIGNAL TICKING",
+              "prose": "a signal ticking",
+              "phrases": [
+                "in frame",
+                "steady throughout"
+              ],
+              "weights": [
+                0.75,
+                0.55
+              ],
+              "role": "only_here"
+            },
+            {
+              "id": "buses",
+              "token": "BUSES",
+              "prose": "buses",
+              "phrases": [
+                "in frame",
+                "rises and fades"
+              ],
+              "weights": [
+                0.9,
+                0.85
+              ],
+              "role": "stands_out"
+            },
+            {
+              "id": "crowd",
+              "token": "CROWD",
+              "prose": "a crowd",
+              "phrases": [
+                "fills the frame",
+                "builds toward the end"
+              ],
+              "weights": [
+                0.95,
+                0.4
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "horn",
+              "token": "CAR HORN",
+              "prose": "a car horn",
+              "phrases": [
+                "out of frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.1,
+                0.8
+              ],
+              "role": "stands_out"
+            }
+          ]
+        },
+        {
+          "shot_id": "s2",
+          "start_ms": 6000,
+          "end_ms": 10000,
+          "automatic_caption": "The crowd crosses as the signal changes.",
+          "scene": {
+            "token": "CROSSING ON THE GREEN",
+            "prose": "Crossing on the green."
+          },
+          "atmosphere": {
+            "phrase": "a release",
+            "prose": "A release."
+          },
+          "sources": [
+            {
+              "id": "steps",
+              "token": "MANY FOOTSTEPS",
+              "prose": "many footsteps",
+              "phrases": [
+                "fills the frame",
+                "builds toward the end"
+              ],
+              "weights": [
+                0.9,
+                0.6
+              ],
+              "role": "underneath"
+            },
+            {
+              "id": "signal2",
+              "token": "SIGNAL CHANGING",
+              "prose": "the signal changing",
+              "phrases": [
+                "at the edge of the frame",
+                "once, briefly"
+              ],
+              "weights": [
+                0.4,
+                0.7
+              ],
+              "role": "only_here"
+            },
+            {
+              "id": "bags",
+              "token": "SHOPPING BAGS",
+              "prose": "shopping bags",
+              "phrases": [
+                "in frame",
+                "comes and goes"
+              ],
+              "weights": [
+                0.6,
+                0.2
+              ],
+              "role": "underneath"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clip_id": "demo_arcade",
+      "task": "control",
+      "first_viewing_captions": true,
+      "balance_control": "orderings",
+      "opening": {
+        "level": "grouped",
+        "balance": 0.7
+      },
+      "visual_roles": {
+        "backdrop": "Backdrop",
+        "passing": "Passing through",
+        "fixed": "Fixed here"
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 4500,
+          "automatic_caption": "A covered arcade with shopfronts on both sides and a couple walking through.",
+          "scene": {
+            "token": "COVERED ARCADE",
+            "prose": "A covered arcade."
+          },
+          "atmosphere": {
+            "phrase": "one slow pass",
+            "prose": "One slow pass."
+          },
+          "sources": [
+            {
+              "id": "arches",
+              "token": "ARCHES",
+              "prose": "arches",
+              "phrases": [
+                "the whole frame",
+                "still"
+              ],
+              "weights": [
+                0.95,
+                0.1
+              ],
+              "role": "backdrop"
+            },
+            {
+              "id": "couple",
+              "token": "COUPLE WALKING",
+              "prose": "a couple walking",
+              "phrases": [
+                "medium",
+                "walk toward the camera"
+              ],
+              "weights": [
+                0.5,
+                0.9
+              ],
+              "role": "passing"
+            },
+            {
+              "id": "window",
+              "token": "SHOP WINDOW",
+              "prose": "a shop window",
+              "phrases": [
+                "large",
+                "still"
+              ],
+              "weights": [
+                0.8,
+                0.3
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "clock",
+              "token": "HANGING CLOCK",
+              "prose": "a hanging clock",
+              "phrases": [
+                "small",
+                "still"
+              ],
+              "weights": [
+                0.2,
+                0.5
+              ],
+              "role": "fixed"
+            }
+          ]
+        },
+        {
+          "shot_id": "s2",
+          "start_ms": 4500,
+          "end_ms": 10000,
+          "automatic_caption": "A shopkeeper pulls a shutter down at the far end.",
+          "scene": {
+            "token": "SHUTTER AT THE FAR END",
+            "prose": "A shutter at the far end."
+          },
+          "atmosphere": {
+            "phrase": "one sharp motion",
+            "prose": "One sharp motion."
+          },
+          "sources": [
+            {
+              "id": "shutter",
+              "token": "SHUTTER",
+              "prose": "a shutter",
+              "phrases": [
+                "medium",
+                "comes down"
+              ],
+              "weights": [
+                0.35,
+                0.95
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "keeper",
+              "token": "SHOPKEEPER",
+              "prose": "a shopkeeper",
+              "phrases": [
+                "small",
+                "reaches up"
+              ],
+              "weights": [
+                0.3,
+                0.8
+              ],
+              "role": "passing"
+            },
+            {
+              "id": "floor",
+              "token": "TILED FLOOR",
+              "prose": "a tiled floor",
+              "phrases": [
+                "the lower half",
+                "still"
+              ],
+              "weights": [
+                0.9,
+                0.2
+              ],
+              "role": "backdrop"
+            },
+            {
+              "id": "sign",
+              "token": "NEON SIGN",
+              "prose": "a neon sign",
+              "phrases": [
+                "small",
+                "flickers"
+              ],
+              "weights": [
+                0.4,
+                0.6
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "bike",
+              "token": "LEANING BICYCLE",
+              "prose": "a leaning bicycle",
+              "phrases": [
+                "small",
+                "still"
+              ],
+              "weights": [
+                0.55,
+                0.25
+              ],
+              "role": "fixed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clip_id": "demo_park",
+      "task": "control",
+      "first_viewing_captions": false,
+      "balance_control": "crossfader",
+      "opening": {
+        "level": "itemized",
+        "balance": 0.5
+      },
+      "visual_roles": {
+        "backdrop": "Backdrop",
+        "passing": "Passing through",
+        "fixed": "Fixed here"
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 10000,
+          "automatic_caption": "A fountain in a park square with children running past it.",
+          "scene": {
+            "token": "PARK SQUARE WITH A FOUNTAIN",
+            "prose": "A park square with a fountain."
+          },
+          "atmosphere": {
+            "phrase": "steady with darting motion",
+            "prose": "Steady with darting motion."
+          },
+          "sources": [
+            {
+              "id": "fountain",
+              "token": "FOUNTAIN",
+              "prose": "a fountain",
+              "phrases": [
+                "the centre of the frame",
+                "still"
+              ],
+              "weights": [
+                0.9,
+                0.5
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "children",
+              "token": "CHILDREN RUNNING",
+              "prose": "children running",
+              "phrases": [
+                "small",
+                "dart across"
+              ],
+              "weights": [
+                0.4,
+                0.95
+              ],
+              "role": "passing"
+            },
+            {
+              "id": "trees",
+              "token": "PLANE TREES",
+              "prose": "plane trees",
+              "phrases": [
+                "the upper half",
+                "sway"
+              ],
+              "weights": [
+                0.85,
+                0.2
+              ],
+              "role": "backdrop"
+            },
+            {
+              "id": "bench",
+              "token": "BENCH",
+              "prose": "a bench",
+              "phrases": [
+                "small",
+                "still"
+              ],
+              "weights": [
+                0.5,
+                0.3
+              ],
+              "role": "fixed"
+            },
+            {
+              "id": "pram",
+              "token": "PRAM",
+              "prose": "a pram",
+              "phrases": [
+                "small",
+                "rolls out of frame"
+              ],
+              "weights": [
+                0.3,
+                0.7
+              ],
+              "role": "passing"
+            },
+            {
+              "id": "kiosk",
+              "token": "NEWS KIOSK",
+              "prose": "a news kiosk",
+              "phrases": [
+                "medium",
+                "still"
+              ],
+              "weights": [
+                0.6,
+                0.4
+              ],
+              "role": "fixed"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "followup": {
+    "recognition": [
+      {
+        "clip_id": "demo_tram_stop",
+        "sounds": [
+          "TRAM BRAKING",
+          "DISTANT SIREN",
+          "CHURCH BELL",
+          "PIGEONS",
+          "DRILLING"
+        ]
+      },
+      {
+        "clip_id": "demo_market",
+        "sounds": [
+          "MARKET CALLS",
+          "BUS BRAKES",
+          "SEAGULLS",
+          "CRATES DRAGGED"
+        ]
+      },
+      {
+        "clip_id": "demo_canal",
+        "sounds": [
+          "WATER LAPPING",
+          "BOAT ENGINE",
+          "BRIDGE BELL",
+          "TRAIN HORN",
+          "ACCORDION"
+        ]
+      },
+      {
+        "clip_id": "demo_crossing",
+        "sounds": [
+          "SIGNAL TICKING",
+          "CAR HORN",
+          "RAIN",
+          "MANY FOOTSTEPS"
+        ]
+      },
+      {
+        "clip_id": "demo_arcade",
+        "sounds": [
+          "ECHOING STEPS",
+          "SHUTTER",
+          "STREET MUSIC",
+          "FOUNTAIN"
+        ]
+      },
+      {
+        "clip_id": "demo_park",
+        "sounds": [
+          "FOUNTAIN",
+          "CHILDREN",
+          "LAWNMOWER",
+          "DOG BARKING"
+        ]
+      }
+    ],
+    "sound_only": [
+      {
+        "excerpt_id": "x1",
+        "clip_id": "demo_canal",
+        "start_ms": 3300,
+        "end_ms": 6600
+      },
+      {
+        "excerpt_id": "x2",
+        "clip_id": "demo_crossing",
+        "start_ms": 0,
+        "end_ms": 3000
+      },
+      {
+        "excerpt_id": "x3",
+        "clip_id": "demo_tram_stop",
+        "start_ms": 4200,
+        "end_ms": 7200
+      }
+    ],
+    "check": [
+      {
+        "clip_id": "demo_tram_stop",
+        "a": "own"
+      },
+      {
+        "clip_id": "demo_canal",
+        "a": "automatic"
+      },
+      {
+        "clip_id": "demo_crossing",
+        "a": "own"
+      }
+    ]
+  }
+}

@@ -1,0 +1,277 @@
+/* The caption session's design system — docs/v1-session/spec-identity.md as CSS.
+
+   One typeface, two registers, two materials. The structure the participant
+   works (tokens, role heads, listed sounds) is set in the SDH caption register:
+   bracketed and uppercase. The sentence the model writes is sentence prose. The
+   clip and its caption are one dark object; everything else sits on the light
+   bench. Seven palette tokens and no others; flat surfaces; zero radius; no
+   shadows, gradients, or icons. Page stylesheets (kiosk.css, followup.css) add
+   layout on top of this file and redefine nothing in it. */
+
+:root {
+  /* spec-identity.md Table 2 — the seven tokens. */
+  --screen: #111311;
+  --caption: #F2F2EC;
+  --bench: #E9EAE4;
+  --ink: #1A1C1B;
+  --dim: #6F726E;
+  --rule: #C3C6C0;
+  --mark: #EAC93C;
+
+  /* One face, chosen for caption legibility at small sizes: a true regular
+     weight, unambiguous uppercase (I/l/1 distinct), and a Korean fallback in
+     the same family so the strings that replace these placeholders keep the
+     identity. */
+  --face: "Noto Sans", "Noto Sans CJK KR", "Apple SD Gothic Neo", "Malgun Gothic",
+          "Helvetica Neue", Arial, sans-serif;
+
+  /* Short linear motion (spec-identity.md Motion). */
+  --motion: 160ms;
+  --linear: linear;
+
+  /* The caption object's two reserved lines: 22 on a 30 line, plus 8 above
+     and below. Both positions read this one value, so they cannot drift. */
+  --caption-box: 76px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bench);
+  color: var(--ink);
+  font-family: var(--face);
+  font-size: 14px;
+  line-height: 1.7;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+button { cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: default; }
+
+/* Focus is visible on every interactive element (spec-identity.md Accessibility).
+   Ink on the bench, caption on the dark object. */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.dark :focus-visible, .dark:focus-visible { outline-color: var(--caption); }
+
+/* ---- Register (spec-identity.md Table 1 and Table 5) ---------------------------- */
+
+/* token: 13, bracketed, uppercase, lightly tracked. The brackets are literal
+   characters in the text, so what is read aloud is what is drawn. */
+.token {
+  font-size: 13px;
+  line-height: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+/* eyebrow: 10, uppercase, letterspaced, dim. */
+.eyebrow {
+  font-size: 10px;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+
+/* card and measure headings 20, body 14 on a 1.7 line. */
+.heading {
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--ink);
+}
+.body { font-size: 14px; line-height: 1.7; color: var(--ink); }
+.dim { color: var(--dim); }
+
+/* ---- Actions (spec-identity.md Actions) ----------------------------------------- */
+
+/* button: 12, uppercase by treatment, sentence case in source. Secondary is
+   outlined 1px; the one primary per screen is filled in mark. A disabled
+   action keeps its size and its name, loses its fill, and reads in dim behind
+   a rule outline, so the state is carried by the outline and the text weight
+   and not by the yellow alone. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 20px;
+  border: 1px solid var(--ink);
+  background: var(--bench);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-decoration: none;
+}
+.button.primary {
+  background: var(--mark);
+  border-color: var(--mark);
+}
+.button:disabled,
+.button[aria-disabled="true"] {
+  background: var(--bench);
+  border-color: var(--rule);
+  color: var(--dim);
+}
+
+/* ---- The caption object (spec-identity.md Table 4, spec 4.4) -------------------- */
+
+/* One object in two positions. Face, size, two-line box, and ground are set
+   here once; .parked and .placed differ only in where the box sits. */
+.caption-object {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--caption-box);
+  padding: 8px 24px;
+  background: var(--screen);
+  color: var(--caption);
+  font-size: 22px;
+  line-height: 30px;
+  text-align: center;
+  overflow: hidden;
+}
+.caption-object .prose {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: 60px;
+}
+.caption-object.parked { position: relative; }
+.caption-object.placed {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  /* The placed box at 80 percent of screen (spec-identity.md Table 2). */
+  background: rgba(17, 19, 17, 0.8);
+}
+/* Parked states beyond fresh (spec 4.4). Empty carries an eyebrow; stale keeps
+   the caption but dims it under its eyebrow; auditioning ghosts the sentence. */
+.caption-object .eyebrow { color: var(--dim); }
+.caption-object.stale .prose { color: var(--dim); }
+.caption-object.auditioning .prose { opacity: 0.45; }
+.caption-object.empty .prose { display: none; }
+
+/* ---- Bench components ---------------------------------------------------- */
+
+.hairline { border-top: 1px solid var(--rule); }
+
+.card {
+  background: var(--bench);
+  padding: 24px 0;
+  max-width: 640px;
+}
+.card .heading { margin-bottom: 16px; }
+.card .body + .body { margin-top: 12px; }
+.card .button { margin-top: 24px; }
+
+/* Text entry: 14 on the bench behind a rule hairline; at least 44 tall so the
+   listing field and the free-text items share one touch target. */
+.field {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  background: var(--bench);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+}
+.field::placeholder { color: var(--dim); opacity: 1; }
+.field:focus-visible { outline-offset: 0; border-color: var(--ink); }
+
+/* Discrete scales: equal boxes at least 44 square, empty in rule, answered
+   filled in ink (spec-identity.md Table 3). Pole labels are eyebrows beneath the
+   end boxes. */
+.scale { display: flex; gap: 8px; align-items: flex-start; }
+.scale .box {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--rule);
+  background: var(--bench);
+  flex: 0 0 44px;
+}
+.scale .box[aria-checked="true"] { background: var(--ink); border-color: var(--ink); }
+.scale .pole { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.scale .pole .eyebrow { text-align: center; white-space: normal; max-width: 96px; }
+
+/* Check boxes in the follow-up's recognition list share the scale box. */
+.check { display: flex; align-items: center; gap: 16px; min-height: 44px; }
+.check .box {
+  width: 44px; height: 44px; flex: 0 0 44px;
+  border: 1px solid var(--rule); background: var(--bench);
+}
+.check .box[aria-checked="true"] { background: var(--ink); border-color: var(--ink); }
+
+/* ---- Skeleton rows (spec 4.1, spec-identity.md Table 3) ------------------------- */
+
+/* A row is the touch target: at least 44 tall, token left, its two measured
+   phrases as an eyebrow on the right. The left border is the marking channel:
+   bench (invisible) at rest, ink when the row moved since the caption was
+   written or, under reduced motion, since the last change. A held row is
+   outlined alone. A struck row is struck through and dim and stays legible. */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 8px 8px 10px;
+  border-left: 2px solid var(--bench);
+  background: var(--bench);
+  text-align: left;
+}
+.row .token { flex: 1 1 auto; }
+.row .phrases { flex: 0 1 auto; text-align: right; }
+.row.member { padding-left: 34px; }
+.row.member .token, .row.member .phrases { color: var(--dim); }
+.row.struck .token { text-decoration: line-through; color: var(--dim); }
+.row.struck .phrases { color: var(--dim); }
+.row.moved { border-left-color: var(--ink); }
+.row.held { outline: 1px solid var(--ink); outline-offset: -1px; }
+
+/* ---- Timeline lanes (spec 3.1) ------------------------------------------- */
+
+/* Shots as segments. Empty in rule, filled in ink, and the lower-lane segment
+   being shaped or revised in mark — the only place besides the primary action
+   that mark may appear. */
+.lane { display: flex; gap: 2px; width: 100%; height: 8px; }
+.lane .segment { height: 8px; background: var(--rule); flex-grow: 1; }
+.lane .segment.filled { background: var(--ink); }
+.lane .segment.current { background: var(--mark); }
+
+/* ---- Materials ----------------------------------------------------------- */
+
+.dark { background: var(--screen); color: var(--caption); }
+
+/* ---- Motion -------------------------------------------------------------- */
+
+.moving { transition: transform var(--motion) var(--linear); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

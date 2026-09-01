@@ -40,3 +40,17 @@ def atomic_write_bytes(path: str | Path, payload: bytes) -> bool:
     finally:
         with suppress(FileNotFoundError):
             temporary.unlink()
+
+
+def replace_atomically(path: str | Path, payload: bytes) -> None:
+    """Write ``payload`` over ``path`` so a reader never sees a partial file.
+
+    ``atomic_write_bytes`` publishes immutable destinations; this is its
+    mutable counterpart for the files a running instrument rewrites — the
+    resumable snapshot, the caption cache — reusing the same fsynced temporary
+    and finishing with ``os.replace`` instead of ``os.link``.
+    """
+    destination = Path(path)
+    temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.tmp"
+    atomic_write_bytes(temporary, payload)
+    os.replace(temporary, destination)

@@ -23,6 +23,10 @@ from dpo.cli.contract import _contract_lock, _contract_validate
 from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
 from dpo.cli.report import _report_analyze, _report_show
 from dpo.cli.select import _select_run
+from dpo.cli.session import (
+    DEFAULT_CONTRACT as SESSION_DEFAULT_CONTRACT,
+)
+from dpo.cli.session import _session_scaffold, _session_serve, _session_validate
 from dpo.cli.stage import _stage_list
 from dpo.cli.study import _study_export, _study_ingest, _study_serve
 from dpo.cli.train import _train_run
@@ -214,6 +218,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--responses", action="append", required=True, help="one saved responses-<participant>.json"
     )
     study_ingest.set_defaults(handler=_study_ingest)
+
+    session = commands.add_parser("session", help="validate, scaffold, and serve a caption session")
+    session_actions = session.add_subparsers(dest="action", required=True)
+    session_validate = session_actions.add_parser("validate")
+    session_validate.add_argument("--session", required=True)
+    session_validate.set_defaults(handler=_session_validate)
+    session_scaffold = session_actions.add_parser("scaffold")
+    session_scaffold.add_argument("--media-dir", required=True)
+    session_scaffold.add_argument("--out", required=True)
+    session_scaffold.add_argument("--clips", nargs="*", help="clip ids; default: every mp4 under --media-dir")
+    session_scaffold.set_defaults(handler=_session_scaffold)
+    session_serve = session_actions.add_parser("serve")
+    session_serve.add_argument("--session", required=True)
+    session_serve.add_argument("--media-dir", required=True)
+    session_serve.add_argument("--out", required=True)
+    session_serve.add_argument("--writer", choices=["template", "gemma"], default="template")
+    session_serve.add_argument("--backend-config", help="gemma: the audio backend config")
+    session_serve.add_argument(
+        "--checkpoint", help="gemma: a LoRA checkpoint directory; default: the base model"
+    )
+    session_serve.add_argument(
+        "--contract", default=SESSION_DEFAULT_CONTRACT, help="gemma: the study contract for [tracks.audio]"
+    )
+    session_serve.add_argument("--host", default="127.0.0.1")
+    session_serve.add_argument("--port", type=int, default=8777)
+    session_serve.set_defaults(handler=_session_serve)
 
     return parser
 

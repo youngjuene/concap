@@ -1,0 +1,224 @@
+"""`dpo session`: validate, scaffold, and serve a caption session document.
+
+The document is authored by hand (docs/v1-session/runbook.md), so ``validate``
+exists as its own command and ``scaffold`` writes a starting point that
+``validate`` refuses until the sources are filled in — a scaffold that passed
+would let an unauthored session be served to a participant.
+
+``serve`` picks the writer. The template writer needs nothing and is the
+default; the Gemma writer is constructed the way ``dpo study export`` builds
+its adapter (a backend config, the study contract's audio track, an optional
+checkpoint), behind a lazy import so choosing the template never imports torch.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from dpo.caption.media import clip_duration_ms, find_clip_video
+from dpo.cli._shared import _emit
+from dpo.session.document import (
+    ATTENTION_POLES,
+    ATTENTION_TEXT,
+    AUDIO_ROLE_HEADS,
+    CRITERION_TEXT,
+    OPEN_ITEM_TEXT,
+    POLES,
+    SESSION_SCHEMA,
+    SessionDocumentError,
+    load_session_document,
+)
+from dpo.session.writer import CaptionWriter, ShotMedia, TemplateWriter
+
+DEFAULT_CONTRACT = "configs/study/street-audio.toml"
+FALLBACK_CLIP_MS = 10000
+# Placeholder visual roles for a scaffolded control clip (spec 4.6: "three role
+# heads supplied with the visual inventory"); the researcher renames them.
+SCAFFOLD_VISUAL_ROLES = {"backdrop": "Backdrop", "passing": "Passing through", "fixed": "Fixed here"}
+
+
+class SessionUsageError(ValueError):
+    """The command line, not the session document, is what is wrong.
+
+    Kept apart from ``SessionDocumentError`` so ``serve`` never blames the
+    document (``{"status": "invalid", "session": ...}``) for a missing flag.
+    """
+
+
+def _session_validate(arguments: argparse.Namespace) -> int:
+    try:
+        document = load_session_document(arguments.session)
+    except SessionDocumentError as exc:
+        _emit({"status": "invalid", "session": str(arguments.session), "error": str(exc)})
+        return 2
+    _emit(
+        {
+            "status": "valid",
+            "session": str(arguments.session),
+            "session_id": document["session_id"],
+            "clips": len(document["clips"]),
+            "shots": sum(len(clip["shots"]) for clip in document["clips"]),
+        }
+    )
+    return 0
+
+
+def _discover_clips(media_dir: Path) -> list[str]:
+    found: dict[str, None] = {}
+    for base in (media_dir / "unmuted_video", media_dir):
+        if base.is_dir():
+            for path in sorted(base.glob("*.mp4")):
+                found.setdefault(path.stem, None)
+    return list(found)
+
+
+def _scaffold_clip(media_dir: Path, clip_id: str, index: int) -> dict[str, Any]:
+    video = find_clip_video(media_dir, clip_id)
+    end_ms = (clip_duration_ms(video) if video is not None else None) or FALLBACK_CLIP_MS
+    task = "shaped" if index % 2 == 0 else "control"
+    clip: dict[str, Any] = {
+        "clip_id": clip_id,
+        "task": task,
+        "first_viewing_captions": index % 4 < 2,
+        "balance_control": "orderings",
+        "opening": {"level": "itemized", "balance": 0.5},
+    }
+    if task == "control":
+        clip["visual_roles"] = dict(SCAFFOLD_VISUAL_ROLES)
+    clip["shots"] = [
+        {
+            "shot_id": "s1",
+            "start_ms": 0,
+            "end_ms": end_ms,
+            "automatic_caption": "",
+            "scene": {"token": "", "prose": ""},
+            "atmosphere": {"phrase": "", "prose": ""},
+            "sources": [],
+        }
+    ]
+    return clip
+
+
+def _session_scaffold(arguments: argparse.Namespace) -> int:
+    media_dir = Path(arguments.media_dir)
+    clip_ids = list(arguments.clips or []) or _discover_clips(media_dir)
+    if not clip_ids:
+        _emit({"status": "error", "error": f"no clips named and none found under {media_dir}"})
+        return 2
+    clips = [_scaffold_clip(media_dir, clip_id, index) for index, clip_id in enumerate(clip_ids)]
+    shaped = [clip["clip_id"] for clip in clips if clip["task"] == "shaped"]
+    document = {
+        "schema": SESSION_SCHEMA,
+        "session_id": Path(arguments.out).stem,
+        "poles": POLES,
+        "role_heads": {"audio": AUDIO_ROLE_HEADS},
+        "measures": {
+            "items": [
+                {"id": "attention", "text": ATTENTION_TEXT, "boxes": 7, "poles": ATTENTION_POLES},
+                {"id": "criterion", "text": CRITERION_TEXT, "boxes": 2, "poles": ["No", "Yes"]},
+            ],
+            "open_item": OPEN_ITEM_TEXT,
+        },
+        "clips": clips,
+        "followup": {
+            "recognition": [{"clip_id": clip_id, "sounds": []} for clip_id in clip_ids],
+            "sound_only": [],
+            "check": [
+                {"clip_id": clip_id, "a": "own" if i % 2 == 0 else "automatic"}
+                for i, clip_id in enumerate(shaped)
+            ],
+        },
+    }
+    out = Path(arguments.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _emit({"status": "scaffolded", "clips": len(clips), "out": str(out)})
+    return 0
+
+
+def _gemma_writer(arguments: argparse.Namespace) -> tuple[CaptionWriter, ShotMedia] | None:
+    """The Gemma writer and its shot-media resolver, or None when blocked (exit 3).
+
+    Mirrors ``dpo.cli._backend``: gate on CUDA before loading anything, then
+    build the adapter from the backend config and the contract's audio track.
+    """
+    if not arguments.backend_config:
+        raise SessionUsageError("--writer gemma requires --backend-config")
+    import torch
+
+    if not torch.cuda.is_available():
+        _emit(
+            {
+                "status": "blocked_pending_external_operation",
+                "command": "session serve",
+                "gate": "the Gemma writer requires a CUDA device; use --writer template without one",
+                "side_effects": False,
+            }
+        )
+        return None
+    from dpo.caption.media import shot_audio, shot_still
+    from dpo.contracts.study_contract import load_contract
+    from dpo.models.gemma4.adapter import GemmaCaptionAdapter
+    from dpo.models.gemma4.backend_config import load_config
+    from dpo.session.writer import GemmaWriter
+
+    config = load_config(arguments.backend_config)
+    contract = load_contract(arguments.contract)
+    if config.model.media_inputs != "audio" or "audio" not in contract.tracks:
+        raise SessionUsageError(
+            "--writer gemma needs an audio backend config and a contract with [tracks.audio]"
+        )
+    adapter = GemmaCaptionAdapter(
+        config=config,
+        contract=contract.tracks["audio"],
+        media_resolver=lambda reference: reference,
+        adapter_dir=None if arguments.checkpoint is None else str(arguments.checkpoint),
+    )
+    media_dir = Path(arguments.media_dir)
+    cache_dir = Path(arguments.out) / "media-cache"
+
+    # A control clip's writer looks at the shot rather than listening to it
+    # (spec 4.6): the resolver picks by the clip's task in the document.
+    tasks = {
+        str(clip["clip_id"]): str(clip["task"])
+        for clip in load_session_document(Path(arguments.session))["clips"]
+    }
+
+    def resolve(clip_id: str, shot: Mapping[str, Any]) -> Path:
+        cut = shot_still if tasks.get(clip_id) == "control" else shot_audio
+        return cut(media_dir, cache_dir, clip_id, int(shot["start_ms"]), int(shot["end_ms"]))
+
+    return GemmaWriter(adapter), resolve
+
+
+def _session_serve(arguments: argparse.Namespace) -> int:
+    from dpo.session.app import run_session_app
+
+    try:
+        if arguments.writer == "gemma":
+            built = _gemma_writer(arguments)
+            if built is None:
+                return 3
+            writer, shot_media = built
+        else:
+            writer, shot_media = TemplateWriter(), None
+        run_session_app(
+            session_path=Path(arguments.session),
+            media_dir=Path(arguments.media_dir),
+            out_dir=Path(arguments.out),
+            writer=writer,
+            shot_media=shot_media,
+            host=arguments.host,
+            port=arguments.port,
+        )
+    except SessionUsageError as exc:
+        _emit({"status": "error", "command": "session serve", "error": str(exc)})
+        return 2
+    except SessionDocumentError as exc:
+        _emit({"status": "invalid", "session": str(arguments.session), "error": str(exc)})
+        return 2
+    return 0

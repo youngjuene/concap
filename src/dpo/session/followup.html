@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!-- The follow-up page shell (spec 8, Table 9). Every visible string is set
+     from STRINGS in followup.js, so this file carries structure only: one
+     column, one section per screen, hidden until its step. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caption session</title>
+  <link rel="stylesheet" href="/static/identity.css">
+  <link rel="stylesheet" href="/static/followup.css">
+</head>
+<body>
+  <main class="followup">
+    <header class="masthead">
+      <p class="eyebrow" id="masthead"></p>
+    </header>
+
+    <p class="notice body" id="notice" hidden></p>
+
+    <!-- intro: instruction card, participant identifier field, Begin -->
+    <section class="screen card" id="intro" hidden>
+      <h1 class="heading" id="intro-heading"></h1>
+      <p class="body" id="intro-body"></p>
+      <div>
+        <label class="eyebrow" id="participant-label" for="participant"></label>
+        <input class="field" id="participant" type="text" autocomplete="off" autocapitalize="off"
+               autocorrect="off" spellcheck="false" maxlength="64">
+      </div>
+      <button class="button primary" id="begin" type="button" disabled></button>
+    </section>
+
+    <!-- recognition: still frame of the clip, list of sound names with boxes, Next -->
+    <section class="screen" id="recognition" hidden data-state="untouched">
+      <img class="still" id="recognition-still" alt="">
+      <h1 class="heading" id="recognition-heading"></h1>
+      <div class="recognition-list" id="recognition-list" role="group"></div>
+      <button class="button primary" id="recognition-next" type="button"></button>
+    </section>
+
+    <!-- sound only: Play, the excerpt (no image, no controls), the row of clip stills, Next -->
+    <section class="screen" id="sound-only" hidden data-state="unplayed">
+      <h1 class="heading" id="sound-heading"></h1>
+      <audio id="excerpt" preload="auto"></audio>
+      <button class="button" id="play" type="button"></button>
+      <div class="choices" id="sound-choices" role="radiogroup"></div>
+      <button class="button primary" id="sound-next" type="button" disabled></button>
+    </section>
+
+    <!-- check: the looping clip with the placed caption, the toggle, the choice -->
+    <section class="screen" id="check" hidden data-state="preparing" data-choice="disabled">
+      <h1 class="heading" id="check-heading"></h1>
+      <p class="eyebrow" id="check-eyebrow"></p>
+      <!-- The frame is laid out at the kiosk's stage width and scaled as one
+           picture to the column (followup.css .stage), so the placed caption
+           is the kiosk's, not a reflow of it. -->
+      <div class="stage" id="stage">
+        <div class="frame dark">
+          <video id="clip" playsinline loop preload="auto"></video>
+          <div class="caption-object placed" id="placed" hidden>
+            <span class="prose" id="placed-prose"></span>
+          </div>
+        </div>
+      </div>
+      <button class="button" id="toggle" type="button" disabled></button>
+      <button class="button primary" id="choose" type="button" disabled></button>
+    </section>
+
+    <!-- done: summary -->
+    <section class="screen card" id="done" hidden>
+      <h1 class="heading" id="done-heading"></h1>
+      <ul class="summary" id="done-summary"></ul>
+    </section>
+  </main>
+  <script src="/static/followup.js"></script>
+</body>
+</html>

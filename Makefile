@@ -1,7 +1,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary golden annotate report
+.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -11,6 +11,14 @@ annotate:
 
 report:
 	uv run dpo report show --workspace artifacts/street
+
+# The caption session over synthetic clips (docs/v1-session/runbook.md): stage
+# demo media for the fixture document, then serve it with the template writer.
+session-demo:
+	uv run python scripts/stage_session_demo.py \
+	  --session tests/session/fixtures/session.json --out data/session-demo/media
+	uv run dpo session serve --session tests/session/fixtures/session.json \
+	  --media-dir data/session-demo/media --out data/session-demo/responses --writer template
 
 sync:
 	uv sync --dev

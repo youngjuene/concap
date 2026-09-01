@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Kiosk: the tablet is the instrument, so the page is not pinch-zoomable —
+     the pinch on the skeleton is the fold gesture (spec 4.3, build contract 9). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Caption session</title>
+<link rel="stylesheet" href="/static/identity.css">
+<link rel="stylesheet" href="/static/kiosk.css">
+</head>
+<body>
+<!-- The shell holds only the regions whose position never changes (spec 3.1):
+     the timeline above, the stage beside the working column, the actions
+     beneath. Every screen renders into these regions; nothing is added here
+     that the spec does not list. -->
+<div class="app" id="app">
+  <header class="timeline" id="timeline" hidden>
+    <span class="eyebrow clip-count" id="clip-count"></span>
+    <div class="lanes">
+      <div class="lane-row">
+        <span class="eyebrow lane-label" id="lane-upper-label"></span>
+        <div class="lane" id="lane-upper"></div>
+      </div>
+      <div class="lane-row">
+        <span class="eyebrow lane-label" id="lane-lower-label"></span>
+        <div class="lane" id="lane-lower"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage-layout" id="main">
+    <!-- The stage column: a 16:9 frame with the footage and a small shot
+         label, and the parked strip flush beneath at frame width. The strip's
+         space is reserved in every step so the only thing that ever moves is
+         the caption (spec 3.1, 4.4). -->
+    <section class="stage-column" id="stage-column" hidden>
+      <!-- The frame is a target during the viewings (a tap toggles playback,
+           spec Table 4 playing/paused), so it can take focus and show it
+           (spec 7); kiosk.js drops the tabindex while a shot is being shaped. -->
+      <div class="frame dark" id="frame" tabindex="0">
+        <video id="video" playsinline preload="auto"></video>
+        <span class="eyebrow shot-label" id="shot-label"></span>
+      </div>
+      <div class="strip dark" id="strip">
+        <div class="caption-object parked empty" id="caption">
+          <span class="eyebrow" id="caption-eyebrow"></span>
+          <span class="prose" id="caption-prose"></span>
+        </div>
+      </div>
+    </section>
+    <section class="working" id="working"></section>
+  </main>
+
+  <footer class="actions" id="actions" hidden></footer>
+</div>
+<script src="/static/kiosk.js"></script>
+</body>
+</html>

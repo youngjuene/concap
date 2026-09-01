@@ -1,0 +1,168 @@
+/* Kiosk layout — spec 3.1 and spec-identity.md "Surfaces and spacing".
+
+   identity.css owns every token, register, and component surface. This file
+   only places them: a 1180-wide frame, the timeline above, a ~720 stage beside
+   a working column behind a 24 gutter, the actions beneath. Single-column
+   screens hide the stage and let the working column span. The stage never
+   moves between stage screens, so the only thing that ever moves is the
+   caption. Nothing here names a color outside the seven tokens, and mark is
+   never referenced: identity.css already gives it to the primary action and
+   the current lower-lane segment, the only two places it may appear. */
+
+.app {
+  max-width: 1180px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ---- Timeline (spec 3.1): clip count eyebrow, two lanes ------------------ */
+
+.timeline { display: flex; align-items: flex-start; gap: 24px; }
+.timeline[hidden] { display: none; }
+.clip-count { flex: 0 0 auto; min-width: 88px; }
+.lanes { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; }
+.lane-row { display: flex; align-items: center; gap: 16px; }
+.lane-label { flex: 0 0 88px; }
+
+/* ---- Stage beside the working column (spec 3.1) -------------------------- */
+
+/* The stage width. spec-identity.md says around 720; at 1180 that leaves a 404
+   working column, and a shot with eight orderings needs 8 x 40 for its
+   columns (spec 7) beside a legible row, which does not fit. 640 leaves 484:
+   eight columns at 42 beside rows of at least 148. One value, so every stage
+   screen holds the same frame (spec 3.1). */
+.stage-layout { --stage-w: 640px; display: flex; align-items: flex-start; gap: 24px; flex: 1 1 auto; }
+.stage-column { flex: 0 0 var(--stage-w); width: var(--stage-w); max-width: 100%; }
+.stage-column[hidden] { display: none; }
+.working { flex: 1 1 0; min-width: 0; }
+/* Listing, cards, measures, probe: no live frame to keep beside them, so the
+   working column widens across the layout (spec 3.1). */
+.stage-layout.single .working { flex-basis: 100%; }
+
+/* The 16:9 frame: footage, a small shot label, the placed caption, and
+   nothing else (spec 3.1 "Keep the stage neutral otherwise"). */
+.frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+.frame video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.frame .shot-label { position: absolute; top: 8px; left: 12px; color: var(--caption); }
+
+/* The parked strip: flush beneath the frame, frame width, always reserved,
+   empty while the caption is placed (spec 3.1, 4.4). */
+.strip { position: relative; width: 100%; height: var(--caption-box); }
+
+/* Parked states that carry an eyebrow over the prose (stale, auditioning, a
+   failed request): the eyebrow takes the box's top line and the two prose
+   lines sit beneath it, so neither is clipped. The box itself keeps its size.
+   Empty carries only the eyebrow, centered (spec 4.4). */
+.caption-object .eyebrow { display: none; }
+.caption-object.empty .eyebrow,
+.caption-object.noted .eyebrow { display: block; }
+.caption-object.noted { padding-top: 16px; padding-bottom: 0; }
+.caption-object.noted .eyebrow { position: absolute; top: 0; left: 24px; right: 24px; text-align: center; }
+.caption-object[hidden] { display: none; }
+
+/* ---- Working column contents --------------------------------------------- */
+
+.instruction { display: block; margin-bottom: 16px; }
+.stack > * + * { margin-top: 16px; }
+.item .text { margin-bottom: 8px; }
+.working .button { margin-right: 16px; }
+
+/* Listing (spec 4.5): heading, field, listed tokens in the caption register. */
+.listed { display: flex; flex-wrap: wrap; gap: 8px 16px; min-height: 18px; }
+
+/* Measures (spec 4.7): text left, discrete scale right, one row per item. */
+.measure {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 16px 0;
+  border-top: 1px solid var(--rule);
+}
+.measure .text { flex: 1 1 auto; }
+.measure .scale { flex: 0 0 auto; }
+/* The attention item alone beside the stage (spec 4.7): the working column
+   is too narrow for text beside seven boxes, so the scale sits beneath. */
+.measure.stacked { flex-direction: column; align-items: flex-start; border-top: 0; padding: 0; }
+
+/* Summary on the probe and done screens: label eyebrows over counts. */
+.summary { display: flex; gap: 32px; }
+.summary .count { display: block; font-size: 20px; line-height: 1.4; }
+
+/* ---- Skeleton (spec 4.1–4.3) --------------------------------------------- */
+
+/* The pinch on the skeleton is the fold gesture, so the browser gets none of
+   the touch here (build contract 9). */
+.skeleton { touch-action: none; user-select: none; -webkit-user-select: none; }
+.skeleton-body { display: flex; align-items: stretch; gap: 8px; }
+.rows { flex: 1 1 0; min-width: 148px; position: relative; }
+/* The two measured phrases sit to the right of the token (spec 4.1) while
+   the row has room for both; beside many ordering columns a row is narrow,
+   and then the phrases wrap onto their own line beneath the token, still
+   right-aligned (the auto margin keeps them at the row's right on either
+   line). The row stays at least 44 tall. Role heads are set as tokens
+   (spec-identity.md Table 1), so nothing here retracks them. */
+.row { flex-wrap: wrap; row-gap: 0; }
+.row .phrases { margin-left: auto; color: var(--dim); }
+/* The atmospheric row carries only the phrase, so it reads from the right. */
+.row.atmospheric { justify-content: flex-end; }
+
+/* Orderings (spec 4.2): labels at the ends over the columns, an SVG drawing
+   beside the rows, and a button per column overlaying it as the hit area. */
+.orderings-labels { display: flex; justify-content: space-between; margin-left: auto; padding-bottom: 8px; }
+.orderings { position: relative; flex: 0 0 auto; max-width: 100%; overflow-x: auto; }
+.orderings svg { display: block; }
+.orderings .column {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-height: 44px;
+  background: none;
+  border: 0;
+}
+/* The drawing scrolls inside its own box, which also clips anything drawn
+   outside a column's edges, so the focus ring is drawn inside the column
+   instead: it lies in the 4px gutter around the drawn rect (kiosk.js
+   COLUMN_INSET) and stays visible on every edge (spec 7: focus visible on
+   every interactive element). */
+.orderings .column:focus-visible { outline-offset: -2px; }
+
+/* Fold (spec 4.3): a handle at the foot of the admitted rows, the level named
+   in the eyebrow beside it. The handle is a 2px ink bar in a 44-tall button. */
+.fold { display: flex; align-items: center; gap: 16px; min-height: 44px; }
+.fold-handle {
+  width: 88px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+.fold-handle .bar { display: block; width: 48px; border-top: 2px solid var(--ink); }
+
+/* Struck rows fall beneath the handle under a hairline (spec 4.1). */
+.struck-rows { margin-top: 8px; padding-top: 8px; }
+.struck-rows:empty { display: none; }
+
+/* ---- Actions beneath the stage (spec 3.1, 4.8) --------------------------- */
+
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.actions[hidden] { display: none; }
+.actions .spacer { flex: 1 1 auto; }
+.actions .criterion { flex-basis: 100%; }
+
+/* ---- Below 1180 the stage shrinks with the viewport ---------------------- */
+
+@media (max-width: 1100px) {
+  .stage-layout { --stage-w: 56%; }
+}

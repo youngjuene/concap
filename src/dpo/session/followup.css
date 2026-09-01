@@ -1,0 +1,153 @@
+/* Layout of the follow-up page (spec 8, Table 9; contract §11).
+
+   identity.css carries the identity — tokens, register, the caption object,
+   the check row, the buttons — and this file only places things. It redefines
+   nothing from identity.css and names no color outside its tokens. Phone
+   first: one column, centered, tolerant of desktop widths (spec-identity.md Surfaces
+   and spacing). The column is capped at the kiosk's stage width plus its own
+   padding (640 + 2 x 16), so on a desktop the check frame is the kiosk's
+   picture unscaled and the placed caption is the identity's 22 on 30 (spec
+   Table 7, spec 8). Spacing on the 4 and 8 scale. */
+
+.followup {
+  width: 100%;
+  max-width: 672px;
+  margin: 0 auto;
+  padding: 16px 16px 48px;
+}
+
+.masthead {
+  padding: 8px 0 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 16px;
+}
+
+/* The one-line message in the interface's voice (spec 5 Errors). */
+.notice {
+  margin-bottom: 16px;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.screen[hidden] {
+  display: none;
+}
+
+/* Every text container holds the longer Korean copy (spec-identity.md Copy). */
+.screen .heading,
+.screen .body {
+  overflow-wrap: anywhere;
+}
+
+/* Phone first: actions span the column so the thumb finds them. */
+.screen .button {
+  width: 100%;
+}
+
+/* The intro is identity's card with its 24 rhythm; the field sits under its
+   eyebrow label at 4. */
+.screen.card .field {
+  margin-top: 4px;
+}
+
+/* A still frame of the clip (Table 9 recognition): the frame ratio on the
+   dark ground, so the still reads as the clip and not as a picture. */
+.still {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--screen);
+}
+
+/* Recognition rows: identity's .check per sound, one under another behind
+   hairlines; the whole row is the button. */
+.recognition-list {
+  display: flex;
+  flex-direction: column;
+}
+.recognition-list .check {
+  width: 100%;
+  padding: 4px 0;
+  text-align: left;
+}
+.recognition-list .check + .check {
+  border-top: 1px solid var(--rule);
+}
+
+/* Sound only: the row of the six clip stills as choices. Unselected sits
+   behind a 1px rule; selected behind a 2px ink border (contract §11), with
+   the padding taking up the difference so nothing shifts. The row wraps to
+   three per line on narrow phones so each still keeps a 44 target. */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 479px) {
+  .choices {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.choice {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 1px;
+  border: 1px solid var(--rule);
+  background: var(--bench);
+}
+.choice[aria-checked="true"] {
+  padding: 0;
+  border: 2px solid var(--ink);
+}
+.choice img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--screen);
+}
+
+/* The check: the kiosk's frame — 16:9 on the dark ground with the placed
+   caption object in its lower third (identity .caption-object.placed). The
+   caption box is the only thing on the frame (spec 3.1). The caption must
+   look exactly as it did in the kiosk (spec 8), and identity's 22px two-line
+   box holds about 96 characters only at the kiosk's stage width: so the frame
+   is laid out at that width (kiosk.css --stage-w; followup.js
+   KIOSK_STAGE_WIDTH), unscaled when the column holds it, and scaled down as
+   one picture when it does not. A phone shows the same picture smaller (the
+   caption at about 12px on a 390 screen), never a caption cut short; the
+   choice is recorded in docs/v1-session/runbook.md §4. */
+.stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+.frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 640px;
+  height: 360px;
+  transform-origin: 0 0;
+  transform: scale(var(--frame-scale, 1));
+}
+.frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.frame .caption-object[hidden] {
+  display: none;
+}
+
+/* Done: the summary as plain lines. */
+.summary {
+  list-style: none;
+}

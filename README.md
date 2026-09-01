@@ -381,6 +381,17 @@ different people. Kept apart so neither study's validator can be satisfied by
 the other's data. It serves the clip *with* its soundtrack, so
 `--media-dir` needs `unmuted_video/` renders staged alongside the corpus.
 
+### The caption session
+
+A second participant instrument, `dpo session serve`, lets a participant shape
+each shot's caption on a skeleton of the sounds it could mention and watch the
+clip again with their captions placed; a follow-up on a later day checks
+recognition and preference. It is authored as a session document, serves the
+same `unmuted_video/` media, and writes an event log per participant. Operator
+steps, the writer choice, and where the files land are in
+[`docs/v1-session/runbook.md`](docs/v1-session/runbook.md); `make session-demo`
+serves the fixture over synthetic clips.
+
 ## 6. Analyze the study
 
 ```bash
