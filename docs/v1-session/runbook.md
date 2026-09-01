@@ -157,7 +157,7 @@ to `<media-dir>/<clip_id>.mp4`. It must be video WITH sound: the participant
 lists and shapes what they hear.
 
 Real footage: stage the unmuted renders into `data/live/media/unmuted_video`
-exactly as [`docs/study-runbook.md` §4](study-runbook.md#4-run-the-study)
+exactly as [`docs/shared/study-runbook.md` §4](../shared/study-runbook.md#4-run-the-study)
 describes for the slider study:
 
 ```bash

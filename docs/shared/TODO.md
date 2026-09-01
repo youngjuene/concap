@@ -3,7 +3,7 @@
 Deferred deliberately, not forgotten. What is built and has no production
 caller is listed here with the reason; what was wired since is marked so the
 next session does not re-derive it. Revisit once Phase 2 lands (see
-`docs/study-runbook.md` for the sequence).
+`docs/shared/study-runbook.md` for the sequence).
 
 ## 1. `dpo report analyze` — DONE, publishes
 
@@ -86,7 +86,7 @@ never mid-study.
   `pipeline/study_stage.py`), `dpo study serve` runs the participant-facing
   app (`src/dpo/userstudy/`, schema `dpo.userstudy-responses/v2`). A′ staging
   was not built and is not needed by this design; it belongs to the
-  three-condition follow-on study (`docs/proposal.md` §4.6), which stays
+  three-condition follow-on study (`docs/shared/proposal.md` §4.6), which stays
   unbuilt.
 - **Responses are ingested — DONE.** `dpo study ingest` validates every
   `responses-<participant>.json` against the export (`userstudy/responses.py`)

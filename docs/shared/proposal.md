@@ -751,7 +751,7 @@ media.
 
 ## 9. Scope and claim limits
 
-Stated up front, and enforced in `docs/pipeline.md`:
+Stated up front, and enforced in `docs/shared/pipeline.md`:
 
 - The comparison supports claims about **these nine conditions, under this
   frozen preference dataset, under this one audio caption contract** — not

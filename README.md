@@ -80,9 +80,9 @@ make annotate SPLIT=validation   # both splits must be annotated before step 2
 make report                      # published validation/selection/lock reports
 ```
 
-[`docs/study-runbook.md`](docs/study-runbook.md) carries the exact artifact ids
+[`docs/shared/study-runbook.md`](docs/shared/study-runbook.md) carries the exact artifact ids
 and the full command sequence with real paths;
-[`docs/TODO.md`](docs/TODO.md) records what is deliberately deferred until
+[`docs/shared/TODO.md`](docs/shared/TODO.md) records what is deliberately deferred until
 after phase 2, and which of those calls are the authors' to make.
 
 ## 1. Collect preferences
@@ -387,7 +387,10 @@ Two further participant instruments elicit caption preferences, built to two
 specifications that disagree about the surface. Both serve the same
 `unmuted_video/` media, write an event log per participant, and share
 `dpo.caption` — the writers, the cache, and the caption budget — so whichever
-is not adopted can be deleted whole.
+is not adopted can be deleted whole
+([`docs/shared/caption-stack.md`](docs/shared/caption-stack.md) says how). The
+documentation is split the same way the code is:
+[`docs/README.md`](docs/README.md) is the map.
 
 `dpo session serve` builds [`docs/v1-session/`](docs/v1-session/): the skeleton of the sounds a
 caption could mention is the only control surface, a participant shapes each
@@ -498,6 +501,6 @@ drift from enforcement.
   no reservation can open it — and every artifact type the registry names
   has a producer.
 
-See [`docs/pipeline.md`](docs/pipeline.md) for the invariants and claim
-limits, [`docs/study-runbook.md`](docs/study-runbook.md) for the live study's
-artifact ids, and [`docs/TODO.md`](docs/TODO.md) for deferred wiring.
+See [`docs/shared/pipeline.md`](docs/shared/pipeline.md) for the invariants and claim
+limits, [`docs/shared/study-runbook.md`](docs/shared/study-runbook.md) for the live study's
+artifact ids, and [`docs/shared/TODO.md`](docs/shared/TODO.md) for deferred wiring.
