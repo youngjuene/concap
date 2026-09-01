@@ -21,6 +21,10 @@ The grouped level (spec 4.3) ranks the role heads instead: a head's weights are
 the element-wise maximum over its admitted members, so a group leans where its
 strongest member leans, and the same sweep applies.
 
+Not every crossing earns a column. Weights derived from masks cross each other
+at arbitrarily close λ, leaving regimes too narrow to aim at and too many to
+draw; ``MIN_SPAN`` and ``MAX_ORDERINGS`` below say which survive and why.
+
 ``all_orderings`` precomputes the table for every non-empty subset of a shot's
 sources; that table, and never the weights, is what the inventory route sends.
 Everything here is pure and stays free of the document module so it can be
@@ -37,6 +41,35 @@ from typing import Any, TypedDict
 from dpo.session.document import LEVELS
 
 _EPSILON = 1e-9
+
+# The narrowest λ interval that still counts as an ordering the participant
+# could have chosen.
+#
+# Crossings are computed from weights carried to six decimals, so a pair of
+# nearly-parallel lines can cross a hair away from another pair and leave a
+# regime 0.0001 wide between them. Real Sa2VA-derived weights do this freely:
+# the eight fixed visual categories of one clip produced seventeen orderings,
+# six of them narrower than a thousandth, several of zero width.
+#
+# Two reasons such a regime must not become a column. It is a spurious
+# precision claim — the settings a participant commits are recorded as the
+# interval of λ the ordering holds over (an interval-censored α), and an
+# interval that narrow reports a certainty the weights do not carry. And the
+# component draws every ordering as a column of equal width at 40px minimum
+# (spec 4.2, spec 7), so a regime holding a thousandth of the axis is offered
+# to the hand as the exact equal of one holding half of it. Collapsing the
+# unchoosable ones is what makes equal-width columns an honest drawing.
+MIN_SPAN = 0.02
+
+# The most orderings one shot may offer. The kiosk's stage was sized to this
+# number and says so (kiosk.css: 640 leaves a 484 working column, "eight
+# columns at 42 beside rows of at least 148"). Eight sources can cross into
+# twenty-nine raw regimes, which no column of that width can draw, so the
+# drawing would scroll and the orderings past the eighth would be reachable
+# only by a gesture nothing on the screen advertises. The cap collapses the
+# narrowest regimes until the shot fits the surface it is drawn on, which
+# keeps the widest — the ones a participant can actually aim at.
+MAX_ORDERINGS = 8
 
 
 class Ordering(TypedDict):
@@ -82,11 +115,60 @@ def _crossings(items: Sequence[Weighted]) -> list[float]:
     return sorted(points)
 
 
-def orderings(sources: Sequence[Mapping[str, Any]] | Sequence[Weighted]) -> list[Ordering]:
+def _merge_adjacent(result: list[Ordering]) -> None:
+    """Fuse neighbours that name the same ordering, in place."""
+    index = 0
+    while index + 1 < len(result):
+        if result[index]["order"] == result[index + 1]["order"]:
+            result[index]["span"][1] = result[index + 1]["span"][1]
+            del result[index + 1]
+        else:
+            index += 1
+
+
+def _collapse(result: list[Ordering], min_span: float, max_count: int) -> list[Ordering]:
+    """Drop regimes too narrow, or too many, keeping the spans a partition.
+
+    The narrowest goes first, and its span goes to its neighbours — split at
+    the midpoint between two, or wholly to the one neighbour at either end —
+    so collapsing never opens a gap and never piles the whole axis onto one
+    survivor. Removing a regime can leave two neighbours naming the same
+    ordering, which then fuse. The endpoints are never lost: the eye-first and
+    ear-first orderings hold at λ=0 and λ=1 whatever is collapsed between them.
+    """
+    while len(result) > 1:
+        widths = [ordering["span"][1] - ordering["span"][0] for ordering in result]
+        narrowest = min(range(len(result)), key=widths.__getitem__)
+        if widths[narrowest] >= min_span and len(result) <= max_count:
+            break
+        lo, hi = result[narrowest]["span"]
+        del result[narrowest]
+        if narrowest == 0:
+            result[0]["span"][0] = lo
+        elif narrowest == len(result):
+            result[-1]["span"][1] = hi
+        else:
+            middle = (lo + hi) / 2.0
+            result[narrowest - 1]["span"][1] = middle
+            result[narrowest]["span"][0] = middle
+        _merge_adjacent(result)
+    return result
+
+
+def orderings(
+    sources: Sequence[Mapping[str, Any]] | Sequence[Weighted],
+    *,
+    min_span: float = MIN_SPAN,
+    max_count: int = MAX_ORDERINGS,
+) -> list[Ordering]:
     """The distinct rankings from λ=0 to λ=1, each with the span it holds over.
 
     Spans partition [0, 1]. One item, or items whose lines never cross in
-    (0, 1), give exactly one ordering with span [0, 1].
+    (0, 1), give exactly one ordering with span [0, 1]. Rankings holding less
+    than ``min_span`` of the axis, and the narrowest beyond ``max_count`` of
+    them, are collapsed into their neighbours for the reasons given at
+    :data:`MIN_SPAN` and :data:`MAX_ORDERINGS`; pass ``min_span=0.0`` with
+    ``max_count`` large for the raw partition.
     """
     items = [
         s if isinstance(s, Weighted) else Weighted(str(s["id"]), *map(float, s["weights"])) for s in sources
@@ -101,7 +183,7 @@ def orderings(sources: Sequence[Mapping[str, Any]] | Sequence[Weighted]) -> list
             result[-1]["span"][1] = hi
         else:
             result.append({"order": order, "span": [lo, hi]})
-    return result
+    return _collapse(result, min_span, max_count)
 
 
 def resolve(candidates: Sequence[Ordering], balance: float) -> int:

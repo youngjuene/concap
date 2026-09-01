@@ -205,3 +205,46 @@ def test_link_masks_cli_writes_a_manifest(tmp_path: Path, capsys: pytest.Capture
     assert json.loads(out.read_text(encoding="utf-8"))["schema"] == MASK_LINK_SCHEMA
     emitted = json.loads(capsys.readouterr().out)
     assert emitted["status"] == "linked"
+
+
+# ---- the role a mask cannot measure ----------------------------------------
+
+
+def test_audio_role_is_unset_with_its_evidence_reported(tmp_path: Path) -> None:
+    root = tmp_path / "masks"
+    # A siren grounded in every frame: the case that used to come back
+    # "underneath" because something siren-shaped was visible throughout.
+    _mask(root / "audio" / "clip_001" / "Siren" / "00000.png", {(2, 2), (3, 2)})
+    _mask(root / "audio" / "clip_001" / "Siren" / "00001.png", {(2, 2), (3, 3)})
+    _mask(root / "audio" / "clip_001" / "Speech" / "00000.png", {(0, 0)})
+    _mask(root / "audio" / "clip_001" / "Speech" / "00001.png", set())
+    tidy, ontology = tmp_path / "tidy.csv", tmp_path / "ontology.json"
+    _tidy(tidy)
+    _ontology(ontology)
+
+    linked = derive_mask_links(root, tidy, ontology, fps=1.0, clips=["clip_001"])
+
+    audio = {entry["label"]: entry for entry in linked["clips"]["clip_001"]["audio"]}
+    for entry in audio.values():
+        assert entry["session_source"]["role"] is None
+        assert "role" in entry["session_source"]["review_required"]
+        detail = entry["parameters"]["detail"]
+        assert detail["role"] is None
+        # The evidence a researcher annotates from is still on the entry.
+        assert detail["grounding_presence"] == entry["mask"]["presence_ratio"]
+        assert detail["tag_count"] == entry["tag_count"]
+    assert audio["Siren"]["parameters"]["detail"]["grounding_presence"] == 1.0
+
+
+def test_visual_role_stays_set_because_the_category_names_it(tmp_path: Path) -> None:
+    root = tmp_path / "masks"
+    _mask(root / "visual" / "clip_001" / "Road" / "00000.png", {(1, 3)})
+    tidy, ontology = tmp_path / "tidy.csv", tmp_path / "ontology.json"
+    _tidy(tidy)
+    _ontology(ontology)
+
+    linked = derive_mask_links(root, tidy, ontology, fps=1.0, clips=["clip_001"])
+
+    visual = {entry["label"]: entry for entry in linked["clips"]["clip_001"]["visual"]}
+    assert visual["Road"]["session_source"]["role"] == "fixed"
+    assert "role" not in visual["Road"]["session_source"]["review_required"]

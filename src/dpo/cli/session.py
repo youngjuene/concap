@@ -26,13 +26,14 @@ from dpo.session.document import (
     ATTENTION_TEXT,
     AUDIO_ROLE_HEADS,
     CRITERION_TEXT,
+    MAX_SOURCES,
     OPEN_ITEM_TEXT,
     POLES,
     SESSION_SCHEMA,
     SessionDocumentError,
     load_session_document,
 )
-from dpo.session.mask_parameters import MaskParameterError, derive_mask_links
+from dpo.session.mask_parameters import MASK_LINK_SCHEMA, MaskParameterError, derive_mask_links
 from dpo.session.writer import CaptionWriter, ShotMedia, TemplateWriter
 
 DEFAULT_CONTRACT = "configs/study/street-audio.toml"
@@ -77,7 +78,65 @@ def _discover_clips(media_dir: Path) -> list[str]:
     return list(found)
 
 
-def _scaffold_clip(media_dir: Path, clip_id: str, index: int) -> dict[str, Any]:
+def _load_mask_links(path: Path) -> Mapping[str, Any]:
+    """The ``dpo.caption-mask-link/v1`` manifest ``link-masks`` wrote."""
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SessionUsageError(f"cannot read mask links {path}: {exc}") from exc
+    if not isinstance(document, dict) or document.get("schema") != MASK_LINK_SCHEMA:
+        raise SessionUsageError(f"{path}: not a {MASK_LINK_SCHEMA} manifest")
+    clips = document.get("clips")
+    if not isinstance(clips, dict):
+        raise SessionUsageError(f"{path}: manifest has no clips object")
+    return clips
+
+
+def _linked_sources(links: Mapping[str, Any], clip_id: str, task: str, path: Path) -> list[dict[str, Any]]:
+    """The manifest's ``session_source`` rows for one clip, as the document wants them.
+
+    A shaped clip takes the audio branch, a control clip the visual one. Only
+    admission candidates cross over: on the visual branch a category whose mask
+    is empty everywhere is not a thing in the shot, while on the audio branch
+    every tag stays a candidate because an off-screen sound is still a sound
+    (mask_parameters, ``_audio_entries``).
+
+    Everything the manifest marks ``review_required`` comes across as it was
+    derived. That is deliberate — the operator reviews it in the document,
+    where the validator can refuse what is still unset — and it is why an
+    audio source arrives with a null role and a scaffold does not validate.
+    """
+    clip = links.get(clip_id)
+    if clip is None:
+        raise SessionUsageError(f"{path}: no linked masks for clip {clip_id!r}")
+    branch = "audio" if task == "shaped" else "visual"
+    entries = clip.get(branch)
+    if not isinstance(entries, list):
+        raise SessionUsageError(f"{path}: clip {clip_id!r} has no {branch} branch")
+    sources = [
+        dict(entry["session_source"])
+        for entry in entries
+        if entry.get("parameters", {}).get("admission", {}).get("candidate")
+    ]
+    if not sources:
+        raise SessionUsageError(
+            f"{path}: clip {clip_id!r} has no admitted {branch} source; the skeleton needs at least one row"
+        )
+    if len(sources) > MAX_SOURCES:
+        raise SessionUsageError(
+            f"{path}: clip {clip_id!r} links {len(sources)} {branch} sources, "
+            f"more than the {MAX_SOURCES} a shot may carry; re-run link-masks over fewer labels"
+        )
+    return sources
+
+
+def _scaffold_clip(
+    media_dir: Path,
+    clip_id: str,
+    index: int,
+    links: Mapping[str, Any] | None = None,
+    links_path: Path | None = None,
+) -> dict[str, Any]:
     video = find_clip_video(media_dir, clip_id)
     end_ms = (clip_duration_ms(video) if video is not None else None) or FALLBACK_CLIP_MS
     task = "shaped" if index % 2 == 0 else "control"
@@ -90,6 +149,9 @@ def _scaffold_clip(media_dir: Path, clip_id: str, index: int) -> dict[str, Any]:
     }
     if task == "control":
         clip["visual_roles"] = dict(SCAFFOLD_VISUAL_ROLES)
+    sources: list[dict[str, Any]] = []
+    if links is not None and links_path is not None:
+        sources = _linked_sources(links, clip_id, task, links_path)
     clip["shots"] = [
         {
             "shot_id": "s1",
@@ -98,7 +160,7 @@ def _scaffold_clip(media_dir: Path, clip_id: str, index: int) -> dict[str, Any]:
             "automatic_caption": "",
             "scene": {"token": "", "prose": ""},
             "atmosphere": {"phrase": "", "prose": ""},
-            "sources": [],
+            "sources": sources,
         }
     ]
     return clip
@@ -110,7 +172,16 @@ def _session_scaffold(arguments: argparse.Namespace) -> int:
     if not clip_ids:
         _emit({"status": "error", "error": f"no clips named and none found under {media_dir}"})
         return 2
-    clips = [_scaffold_clip(media_dir, clip_id, index) for index, clip_id in enumerate(clip_ids)]
+    links_path = Path(arguments.mask_links) if arguments.mask_links else None
+    try:
+        links = _load_mask_links(links_path) if links_path is not None else None
+        clips = [
+            _scaffold_clip(media_dir, clip_id, index, links, links_path)
+            for index, clip_id in enumerate(clip_ids)
+        ]
+    except SessionUsageError as exc:
+        _emit({"status": "error", "command": "session scaffold", "error": str(exc)})
+        return 2
     shaped = [clip["clip_id"] for clip in clips if clip["task"] == "shaped"]
     document = {
         "schema": SESSION_SCHEMA,
@@ -137,7 +208,20 @@ def _session_scaffold(arguments: argparse.Namespace) -> int:
     out = Path(arguments.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    _emit({"status": "scaffolded", "clips": len(clips), "out": str(out)})
+    linked = sum(len(clip["shots"][0]["sources"]) for clip in clips)
+    _emit(
+        {
+            "status": "scaffolded",
+            "clips": len(clips),
+            "sources": linked,
+            "mask_links": str(links_path) if links_path is not None else None,
+            "out": str(out),
+            # A scaffold never validates: the automatic caption, the scene and
+            # atmosphere rows, the follow-up lists, and — on a shaped clip —
+            # every source's role are the researcher's to author.
+            "next": f"author the empty fields, then: dpo session validate --session {out}",
+        }
+    )
     return 0
 
 

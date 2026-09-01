@@ -215,6 +215,15 @@ def _validate_source(raw: object, path: str, roles: Mapping[str, str]) -> str:
         raise _fail(f"{path}.weights", "must be [left, right]")
     for side, weight in enumerate(weights):
         _unit(weight, f"{path}.weights[{side}]")
+    if source.get("role") is None:
+        # ``session link-masks`` writes null here on an audio source and says
+        # so in ``review_required``: a mask locates where a tagged sound could
+        # be seen, which is not evidence for how that sound sits in the
+        # soundscape. The role is the researcher's to annotate.
+        raise _fail(
+            f"{path}.role",
+            f"must be one of {list(roles)}; it is unset because no mask measures it",
+        )
     _choice(source.get("role"), f"{path}.role", list(roles))
     return source_id
 

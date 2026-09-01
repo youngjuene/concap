@@ -377,13 +377,30 @@ def _temporal_phrase(mask: Mapping[str, Any]) -> str:
     return "stays in view"
 
 
-def _audio_role(parent: str, tag_count: int, mask: Mapping[str, Any]) -> str:
-    presence = float(mask["presence_ratio"])
-    if parent in BACKGROUND_FAMILIES or presence >= 0.75:
-        return "underneath"
-    if tag_count > 1 or presence <= 0.4:
-        return "stands_out"
-    return "only_here"
+def _audio_role_evidence(parent: str, tag_count: int, mask: Mapping[str, Any]) -> dict[str, Any]:
+    """What is known about an audio source's soundscape role, and nothing more.
+
+    The role heads — Underneath, Stands out, Only here — describe how a sound
+    sits in the soundscape. No mask measures that. An earlier version of this
+    module guessed one from the top-level family, the tag multiplicity, and
+    the mask's presence ratio; on real footage it called a siren "underneath"
+    because the segmenter found something siren-shaped in most frames, which
+    inverts the one thing about a siren a caption must get right.
+
+    So the evidence is reported and the verdict is withheld: ``role`` is null
+    in the session source, ``review_required`` names it, and the document
+    validator refuses a session until a researcher has annotated it.
+    """
+    return {
+        "role": None,
+        "background_family": parent in BACKGROUND_FAMILIES,
+        "tag_count": tag_count,
+        "grounding_presence": mask["presence_ratio"],
+        "basis": (
+            "top-level family and tag multiplicity, reported as evidence only: "
+            "visual grounding does not measure how a sound sits in the soundscape"
+        ),
+    }
 
 
 def _audio_entries(clip_dir: Path, tags: _TagRecord | None, fps: float) -> list[dict[str, Any]]:
@@ -400,7 +417,7 @@ def _audio_entries(clip_dir: Path, tags: _TagRecord | None, fps: float) -> list[
         count = tags["counts"][label]
         visibility = _visibility_phrase(mask)
         temporal = _temporal_phrase(mask)
-        role = _audio_role(parent, count, mask)
+        detail = _audio_role_evidence(parent, count, mask)
         weights = [eye, ear]
         entries.append(
             {
@@ -426,10 +443,7 @@ def _audio_entries(clip_dir: Path, tags: _TagRecord | None, fps: float) -> list[
                             "ear": "final_labels multiplicity, normalized per clip",
                         },
                     },
-                    "detail": {
-                        "role": role,
-                        "basis": "top-level family, tag multiplicity, and visual-grounding persistence",
-                    },
+                    "detail": detail,
                     "phrases": {
                         "visibility": visibility,
                         "mask_temporal": temporal,
@@ -442,7 +456,9 @@ def _audio_entries(clip_dir: Path, tags: _TagRecord | None, fps: float) -> list[
                     "prose": label.lower(),
                     "phrases": [visibility, temporal],
                     "weights": weights,
-                    "role": role,
+                    # Null, not a guess: see ``_audio_role_evidence``. The
+                    # document validator refuses the session until it is set.
+                    "role": None,
                     "review_required": ["prose", "phrases[1]", "role", "weights[1]"],
                 },
             }

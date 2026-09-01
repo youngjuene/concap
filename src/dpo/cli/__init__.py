@@ -228,6 +228,11 @@ def build_parser() -> argparse.ArgumentParser:
     session_scaffold.add_argument("--media-dir", required=True)
     session_scaffold.add_argument("--out", required=True)
     session_scaffold.add_argument("--clips", nargs="*", help="clip ids; default: every mp4 under --media-dir")
+    session_scaffold.add_argument(
+        "--mask-links",
+        help="a dpo.caption-mask-link/v1 manifest from `session link-masks`; "
+        "fills each shot's sources from it (audio on a shaped clip, visual on a control clip)",
+    )
     session_scaffold.set_defaults(handler=_session_scaffold)
     session_link_masks = session_actions.add_parser(
         "link-masks", help="derive caption-parameter evidence from Sa2VA masks and audio tags"

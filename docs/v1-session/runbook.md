@@ -68,8 +68,35 @@ uv run dpo session link-masks \
 Add `--clips amsterdam_006 singapore_303` for a bounded calibration pass. The
 manifest gives every source a `session_source` object with the same `id`,
 `token`, `prose`, `phrases`, `weights`, and `role` fields the session document
-expects. Copy those only after reviewing the fields named in
-`review_required`.
+expects, beside the raw evidence each was derived from.
+
+Hand the manifest to `scaffold` and the sources arrive in the document already
+filled — the audio branch on a shaped clip, the visual branch on a control
+clip, and a visual category whose mask is empty in every frame left out:
+
+```bash
+uv run dpo session scaffold --media-dir data/live/media \
+  --out data/session/session.json \
+  --mask-links data/session/sa2va-mask-links.json
+# {"status": "scaffolded", "clips": 6, "sources": 34, ...}
+```
+
+That scaffold still does not validate, and that is the point. Review every
+field the manifest names in `review_required`, and expect the validator to
+stop on the role first:
+
+```bash
+uv run dpo session validate --session data/session/session.json
+# {"status": "invalid", "error": "clips[0].shots[0].sources[0].role: must be one of
+#  ['underneath', 'stands_out', 'only_here']; it is unset because no mask measures it", ...}
+```
+
+An audio source arrives with `role: null` deliberately. The role heads say how
+a sound sits in the soundscape, and a grounding mask does not measure that: an
+earlier version guessed one from mask presence and called a siren *underneath*
+because something siren-shaped stayed in frame. Visual roles do come through
+set, because there the role is a property of the fixed category, not of the
+mask. The `parameters.detail` block carries the evidence to annotate from.
 
 The mapping is intentionally explicit:
 
@@ -90,9 +117,38 @@ The mapping is intentionally explicit:
 
 Sa2VA audio masks ground a *possible visible source* of a tagged sound; they
 do not measure loudness or acoustic onset. Consequently the suggested audio
-temporal phrase, role, and Ear weight remain researcher-calibration fields.
-Mask coordinates are preprocessing evidence and never become participant
-stage overlays.
+temporal phrase and Ear weight remain researcher-calibration fields, and the
+role is not suggested at all. Mask coordinates are preprocessing evidence and
+never become participant stage overlays.
+
+### What the derived weights do to the balance control
+
+Read the orderings a shot offers before recruiting on it. Balance is a choice
+among the distinct rankings the admitted sources take between the two poles,
+so the *number* of those rankings is the resolution of the control, and mask
+weights set it. On the two clips measured on 2026-09-01:
+
+| Clip | Branch | Sources | Orderings |
+|---|---|---|---|
+| `amsterdam_006` | audio | 4 | 2 |
+| `singapore_303` | audio | 2 | 2 |
+| `amsterdam_006` | visual | 8 | 8 (16 before collapsing) |
+| `singapore_303` | visual | 8 | 8 (17 before collapsing) |
+
+Two things to know about that table. The audio side is coarse because the Ear
+weight is `final_labels` multiplicity, which is usually 1 and quantizes to
+`{0.5, 1.0}`, so most pairs never cross and the crossfader is close to a
+two-position switch. That is honest about what the data supports, and it is
+the ceiling until a salience measure with more resolution than a tag count
+exists.
+
+The visual side is the opposite problem. Eight sources cross into as many as
+twenty-nine rankings, several separated by less than a thousandth of the axis.
+`skeleton.MIN_SPAN` and `skeleton.MAX_ORDERINGS` collapse the ones a
+participant could not aim at into their neighbours, keeping the widest and
+always keeping the two endpoints, so the columns the kiosk draws at equal
+width are all rankings that hold a real interval. The raw partition is still
+available (`orderings(..., min_span=0.0)`) if you want to see what was merged.
 
 ## 2. Stage the media
 

@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 
 from dpo.session.skeleton import (
+    MAX_ORDERINGS,
+    MIN_SPAN,
     Settings,
     SettingsError,
     all_orderings,
@@ -177,3 +179,72 @@ def test_members_sit_under_their_head_in_the_heads_itemized_order() -> None:
     ear_end = members_in_order(admitted, "underneath", 1.0)
     assert [m["id"] for m in eye_end] == ["footsteps", "chatter"]
     assert [m["id"] for m in ear_end] == ["chatter", "footsteps"]
+
+
+# ---- collapsing regimes nobody could choose (MIN_SPAN, MAX_ORDERINGS) --------
+
+
+def _near_parallel(count: int) -> list[dict[str, Any]]:
+    """Sources whose lines cross at many nearly-coincident points in (0, 1)."""
+    return [_source(f"s{i}", 0.5 + i * 1e-4, 0.5 - i * 1e-4 + i * i * 1e-5) for i in range(count)]
+
+
+def test_raw_partition_is_available_and_covers_the_axis() -> None:
+    raw = orderings(_near_parallel(6), min_span=0.0, max_count=99)
+    assert len(raw) > 1
+    assert raw[0]["span"][0] == 0.0
+    assert raw[-1]["span"][1] == 1.0
+    assert min(o["span"][1] - o["span"][0] for o in raw) < MIN_SPAN
+
+
+def test_collapsing_leaves_no_regime_narrower_than_min_span() -> None:
+    kept = orderings(_near_parallel(6))
+    assert all(o["span"][1] - o["span"][0] >= MIN_SPAN - 1e-12 for o in kept)
+
+
+def test_collapsing_keeps_the_spans_a_partition_of_the_axis() -> None:
+    kept = orderings(_near_parallel(6))
+    assert kept[0]["span"][0] == 0.0
+    assert kept[-1]["span"][1] == 1.0
+    for earlier, later in zip(kept, kept[1:], strict=False):
+        assert earlier["span"][1] == pytest.approx(later["span"][0])
+
+
+def test_collapsing_keeps_the_eye_first_and_ear_first_orderings() -> None:
+    sources = _near_parallel(6)
+    raw = orderings(sources, min_span=0.0, max_count=99)
+    kept = orderings(sources)
+    assert kept[0]["order"] == raw[0]["order"]
+    assert kept[-1]["order"] == raw[-1]["order"]
+
+
+def test_no_shot_offers_more_columns_than_the_stage_was_sized_for() -> None:
+    assert len(orderings(_near_parallel(8))) <= MAX_ORDERINGS
+
+
+def test_a_kept_ordering_is_one_the_raw_partition_also_names() -> None:
+    sources = _near_parallel(6)
+    raw = [tuple(o["order"]) for o in orderings(sources, min_span=0.0, max_count=99)]
+    for ordering in orderings(sources):
+        assert tuple(ordering["order"]) in raw
+
+
+def test_resolve_still_answers_for_every_balance_after_collapsing() -> None:
+    kept = orderings(_near_parallel(6))
+    for step in range(101):
+        index = resolve(kept, step / 100.0)
+        lo, hi = kept[index]["span"]
+        assert lo - 1e-9 <= step / 100.0 <= hi + 1e-9
+
+
+def test_wide_regimes_are_left_alone() -> None:
+    # Two sources crossing once at the middle: one crossing, two wide regimes.
+    sources = [_source("eye", 1.0, 0.0), _source("ear", 0.0, 1.0)]
+    assert orderings(sources) == orderings(sources, min_span=0.0, max_count=99)
+
+
+def test_collapsing_a_regime_never_moves_a_source_that_never_crosses() -> None:
+    # A source that leads on both axes leads in every ordering, collapsed or not.
+    sources = [_source("loud", 1.0, 1.0), *_near_parallel(5)]
+    for ordering in orderings(sources):
+        assert ordering["order"][0] == "loud"
