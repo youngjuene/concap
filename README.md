@@ -82,8 +82,9 @@ make report                      # published validation/selection/lock reports
 
 [`docs/shared/study-runbook.md`](docs/shared/study-runbook.md) carries the exact artifact ids
 and the full command sequence with real paths;
-[`docs/shared/TODO.md`](docs/shared/TODO.md) records what is deliberately deferred until
-after phase 2, and which of those calls are the authors' to make.
+[`docs/shared/TODO.md`](docs/shared/TODO.md) records what is still open and
+which of those calls are the authors' to make — including the one thing to do
+before anyone annotates.
 
 ## 1. Collect preferences
 
