@@ -50,6 +50,50 @@ shaped clip and from the clip's own three `visual_roles` on a control clip;
 shaped clip; the copy fields (`poles`, `role_heads`, the attention and
 criterion items, `open_item`) must match spec Table 6 verbatim.
 
+### Derive parameter evidence from Sa2VA masks
+
+`session link-masks` turns the Sa2VA mask tree into a reviewable
+`dpo.caption-mask-link/v1` manifest. It supports both propagated masks at
+`{branch}/{clip}/{label}/{frame}.png` and the one-frame-per-second release
+layout at `{branch}/{clip}/{label}_{second}.png`:
+
+```bash
+uv run dpo session link-masks \
+  --mask-root /mnt/hdd/research/2026/Sa2VA/avmask/runs/60fps-windowed/masks \
+  --tidy-data /mnt/hdd/research/2026/Sa2VA/avmask/data/tidy_data.csv \
+  --ontology /mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json \
+  --out data/session/sa2va-mask-links.json
+```
+
+Add `--clips amsterdam_006 singapore_303` for a bounded calibration pass. The
+manifest gives every source a `session_source` object with the same `id`,
+`token`, `prose`, `phrases`, `weights`, and `role` fields the session document
+expects. Copy those only after reviewing the fields named in
+`review_required`.
+
+The mapping is intentionally explicit:
+
+- `final_labels` names the audio mask prompts and admission candidates.
+  Repeated labels provide a normalized Ear-side prior.
+- `top_level_parent_name` is an aggregate family/count constraint, not a
+  label-by-label mapping. The AudioSet ontology resolves each fine label, and
+  the CSV counts resolve DAG ambiguities such as Bell belonging to either
+  Music or Sounds of things.
+- Audio-mask presence, foreground area, and normalized bounding-box
+  coordinates provide the Eye-side visibility evidence. An empty mask does
+  not remove an audio admission candidate because off-screen sounds remain
+  valid.
+- The eight fixed visual categories provide control-task candidates. Mask
+  bottom coordinate, area, and persistence produce Near/Far weights.
+- Union bounding boxes, mean box centers, frame extents, timestamps, and the
+  raw evidence behind every score remain in the manifest for audit.
+
+Sa2VA audio masks ground a *possible visible source* of a tagged sound; they
+do not measure loudness or acoustic onset. Consequently the suggested audio
+temporal phrase, role, and Ear weight remain researcher-calibration fields.
+Mask coordinates are preprocessing evidence and never become participant
+stage overlays.
+
 ## 2. Stage the media
 
 The app serves `<media-dir>/unmuted_video/<clip_id>.mp4` first and falls back

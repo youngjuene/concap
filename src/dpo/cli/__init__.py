@@ -26,7 +26,7 @@ from dpo.cli.select import _select_run
 from dpo.cli.session import (
     DEFAULT_CONTRACT as SESSION_DEFAULT_CONTRACT,
 )
-from dpo.cli.session import _session_scaffold, _session_serve, _session_validate
+from dpo.cli.session import _session_link_masks, _session_scaffold, _session_serve, _session_validate
 from dpo.cli.stage import _stage_list
 from dpo.cli.study import _study_export, _study_ingest, _study_serve
 from dpo.cli.train import _train_run
@@ -229,6 +229,24 @@ def build_parser() -> argparse.ArgumentParser:
     session_scaffold.add_argument("--out", required=True)
     session_scaffold.add_argument("--clips", nargs="*", help="clip ids; default: every mp4 under --media-dir")
     session_scaffold.set_defaults(handler=_session_scaffold)
+    session_link_masks = session_actions.add_parser(
+        "link-masks", help="derive caption-parameter evidence from Sa2VA masks and audio tags"
+    )
+    session_link_masks.add_argument(
+        "--mask-root", required=True, help="directory containing audio/ and visual/"
+    )
+    session_link_masks.add_argument(
+        "--tidy-data", required=True, help="CSV with final_labels and top_level_parent_name"
+    )
+    session_link_masks.add_argument(
+        "--ontology", help="AudioSet ontology JSON; default: ontology.json beside --tidy-data"
+    )
+    session_link_masks.add_argument("--out", required=True, help="output dpo.caption-mask-link/v1 JSON")
+    session_link_masks.add_argument("--fps", type=float, default=60.0, help="source video frame rate")
+    session_link_masks.add_argument(
+        "--clips", nargs="*", help="optional clip ids; default: all discovered clips"
+    )
+    session_link_masks.set_defaults(handler=_session_link_masks)
     session_serve = session_actions.add_parser("serve")
     session_serve.add_argument("--session", required=True)
     session_serve.add_argument("--media-dir", required=True)

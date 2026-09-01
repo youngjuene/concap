@@ -32,6 +32,7 @@ from dpo.session.document import (
     SessionDocumentError,
     load_session_document,
 )
+from dpo.session.mask_parameters import MaskParameterError, derive_mask_links
 from dpo.session.writer import CaptionWriter, ShotMedia, TemplateWriter
 
 DEFAULT_CONTRACT = "configs/study/street-audio.toml"
@@ -137,6 +138,36 @@ def _session_scaffold(arguments: argparse.Namespace) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _emit({"status": "scaffolded", "clips": len(clips), "out": str(out)})
+    return 0
+
+
+def _session_link_masks(arguments: argparse.Namespace) -> int:
+    """Summarize Sa2VA masks as auditable admission/balance/detail evidence."""
+    tidy_data = Path(arguments.tidy_data)
+    ontology = Path(arguments.ontology) if arguments.ontology else tidy_data.with_name("ontology.json")
+    try:
+        document = derive_mask_links(
+            mask_root=Path(arguments.mask_root),
+            tidy_data=tidy_data,
+            ontology=ontology,
+            fps=float(arguments.fps),
+            clips=arguments.clips,
+        )
+    except MaskParameterError as exc:
+        _emit({"status": "invalid", "command": "session link-masks", "error": str(exc)})
+        return 2
+    out = Path(arguments.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _emit(
+        {
+            "status": "linked",
+            "out": str(out),
+            "clips": len(document["clips"]),
+            "audio_sources": sum(len(clip["audio"]) for clip in document["clips"].values()),
+            "visual_sources": sum(len(clip["visual"]) for clip in document["clips"].values()),
+        }
+    )
     return 0
 
 
