@@ -51,8 +51,6 @@ prompt_hash = "sha256:cd2512bf8730ddb61da66faf10c7ae85692dde7244a2db1ff8efb88c7d
 # barely evidence. If motion matters, the lever is SHORTER CLIPS (min_clip_ms /
 # max_clip_ms below) so the same two frames cover less time — or more VRAM.
 video_frames = 2
-include_ocr = false
-include_camera_motion = false
 
 [tracks.audio]
 contract_version = "audio-caption/v1"
@@ -63,7 +61,6 @@ min_clip_ms = 5000
 max_clip_ms = 15000
 prompt = "Describe in one short English sentence the salient events, their ordering, and the overall setting that can be perceived from the recording."
 prompt_hash = "sha256:f3bde1f2848477a43378d6eb84cdd07be61a319eb701f501962dbfd7c75f61d2"
-transcribe_speech = false
 
 [models.seed]
 model_id = "fixture/tiny-caption-model"

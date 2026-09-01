@@ -78,7 +78,6 @@ max_clip_ms = 15000
 # against that lexicon.
 prompt = "Describe in one short English sentence the salient events, their ordering, and the overall setting that can clearly be heard. Write about what is happening, never about the recording, the audio, or the clip; express the ordering as events following one another."
 prompt_hash = "sha256:c5e37310a3c6f8c89adb8958e7932927ff421ee12f453dd32fe34f2d3dc4c3bd"
-transcribe_speech = false
 
 # One seed policy, and it names the one track this contract declares, so the
 # entry is exactly true. It used to describe the audio backend while the visual

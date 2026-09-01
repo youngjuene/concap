@@ -291,9 +291,6 @@ class CaptionContract:
     # any other result-affecting knob — and it dominates the training
     # sequence length, so it is also what makes a visual cell fit or not.
     video_frames: int
-    include_ocr: bool
-    include_camera_motion: bool
-    transcribe_speech: bool
 
 
 @dataclass(frozen=True)
@@ -422,10 +419,10 @@ def _validate_track(track: str, value: object) -> CaptionContract:
     }
     if track == "visual":
         keys.add("video_frames")
-        optional = {"include_ocr", "include_camera_motion"}
-    else:
-        optional = {"transcribe_speech"}
-    table = _table(value, f"tracks.{track}", keys, optional)
+    # No optional keys. A track knob that nothing reads is a claim the contract
+    # cannot keep, and `_table` refuses what is not listed here, so an old
+    # config naming one fails loudly instead of carrying a dead promise.
+    table = _table(value, f"tracks.{track}", keys)
     language = _string(table["language"], f"tracks.{track}.language")
     if language != "en":
         raise ContractError(f"tracks.{track}.language must be 'en' (multilingual output is out of scope)")
@@ -464,9 +461,6 @@ def _validate_track(track: str, value: object) -> CaptionContract:
         prompt=prompt,
         prompt_hash=prompt_hash,
         video_frames=video_frames,
-        include_ocr=bool(table.get("include_ocr", False)),
-        include_camera_motion=bool(table.get("include_camera_motion", False)),
-        transcribe_speech=bool(table.get("transcribe_speech", False)),
     )
 
 
