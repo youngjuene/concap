@@ -1,0 +1,160 @@
+{
+  "schema": "dpo.caption-console/v1",
+  "session_id": "console-demo",
+  "config": {
+    "schema": "dpo.caption-console-config/v1",
+    "study_id": "street2026",
+    "corpus_id": "demo",
+    "method_constants": {
+      "ordering_saturates": true,
+      "salience": "w_g = c_g * e_g",
+      "visibility": "v_g = r_g / (r_g + r0)",
+      "normalization": "sum over the full source set, applied before filtering",
+      "score": "score_g = alpha * w_hat_g + (1 - alpha) * v_hat_g",
+      "register_from": "p_g",
+      "grouping": "labels merged above the IoU threshold; area once per group, energy summed"
+    },
+    "calibration": {
+      "half_saturation": 0.02,
+      "iou_threshold": 0.5,
+      "min_regime": 0.02,
+      "cut_threshold": 0.25,
+      "minimum_shot_ms": 2000,
+      "stride_ms": 250,
+      "visibility_bands": [
+        {
+          "at_least": 0.66,
+          "phrase": "fills much of the frame"
+        },
+        {
+          "at_least": 0.33,
+          "phrase": "in frame"
+        },
+        {
+          "at_least": 0.05,
+          "phrase": "small in the frame"
+        },
+        {
+          "at_least": 0.0,
+          "phrase": "out of frame"
+        }
+      ],
+      "registers": [
+        {
+          "at_least": 0.85,
+          "phrase": "throughout"
+        },
+        {
+          "at_least": 0.5,
+          "phrase": "for much of the moment"
+        },
+        {
+          "at_least": 0.15,
+          "phrase": "in passing"
+        },
+        {
+          "at_least": 0.0,
+          "phrase": "once, briefly"
+        }
+      ]
+    }
+  },
+  "clips": [
+    {
+      "clip_id": "demo_tram_stop",
+      "opening": {
+        "grain": "itemized",
+        "alpha": 0.5,
+        "admitted": null
+      },
+      "shots": [
+        {
+          "shot_id": "s1",
+          "start_ms": 0,
+          "end_ms": 4200,
+          "raw_caption": "A tram brakes at the stop while a siren passes behind.",
+          "default_caption": "A tram braking, with a siren somewhere behind it.",
+          "sources": [
+            {
+              "id": "tram",
+              "labels": [
+                "Rail transport",
+                "Brakes"
+              ],
+              "prose": "a tram braking",
+              "share": 0.18,
+              "presence": 0.9,
+              "confidence": 0.92,
+              "energy": 0.55
+            },
+            {
+              "id": "siren",
+              "labels": [
+                "Siren"
+              ],
+              "prose": "a distant siren",
+              "share": 0.002,
+              "presence": 0.35,
+              "confidence": 0.88,
+              "energy": 0.8
+            },
+            {
+              "id": "footsteps",
+              "labels": [
+                "Footsteps",
+                "Speech"
+              ],
+              "prose": "footsteps and voices",
+              "share": 0.06,
+              "presence": 0.75,
+              "confidence": 0.7,
+              "energy": 0.3
+            },
+            {
+              "id": "pigeons",
+              "labels": [
+                "Bird"
+              ],
+              "prose": "pigeons",
+              "share": 0.11,
+              "presence": 0.45,
+              "confidence": 0.6,
+              "energy": 0.1
+            }
+          ]
+        },
+        {
+          "shot_id": "s2",
+          "start_ms": 4200,
+          "end_ms": 10000,
+          "raw_caption": "Traffic passes steadily as the tram pulls away.",
+          "default_caption": "Traffic passing, with the tram pulling away.",
+          "sources": [
+            {
+              "id": "traffic",
+              "labels": [
+                "Traffic noise, roadway noise"
+              ],
+              "prose": "passing traffic",
+              "share": 0.22,
+              "presence": 0.95,
+              "confidence": 0.9,
+              "energy": 0.7
+            },
+            {
+              "id": "tram",
+              "labels": [
+                "Rail transport"
+              ],
+              "prose": "the tram pulling away",
+              "share": 0.09,
+              "presence": 0.4,
+              "confidence": 0.85,
+              "energy": 0.45
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

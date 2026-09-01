@@ -1,0 +1,153 @@
+/* The console's identity — docs/v2-console/spec-uiux.md §6 as CSS.
+
+   An instrument for street-level material. Concrete ground, paper panels, one
+   streetlight amber for the primary action. Three faces with one job each:
+   Archivo carries display and the caption band, IBM Plex Mono carries every
+   label, token and eyebrow, IBM Plex Sans carries body text.
+
+   Seven palette tokens and no others. Surfaces are flat: zero border radius,
+   1px hairlines in rule, no shadows, no gradients, no icons, and nothing
+   meaningful carried by colour alone. Spacing works on a 4 and 8 scale.
+
+   The faces are named with full fallback stacks and no @import. The session
+   runs as an offline kiosk (§7), so a stylesheet that waited on fonts.google
+   would render the instrument in a fallback face at the moment it matters and
+   in the intended one during rehearsal. Install the families locally to get
+   them; the stacks below hold the metrics either way, and every Korean string
+   that replaces the English placeholders falls through to a Korean face in the
+   same position. */
+
+:root {
+  /* §6 Table 4 — the seven tokens. */
+  --ground: #DFE2DE;   /* app background, concrete */
+  --panel: #F1F2EF;    /* surfaces, cards */
+  --ink: #191D1C;      /* text, active states */
+  --dim: #6E7674;      /* secondary text */
+  --rule: #BFC5C0;     /* hairlines, borders */
+  --sodium: #B96F14;   /* primary action, streetlight amber */
+  --teal: #1F6663;     /* audio accent, bench only — never on a session screen */
+
+  --display: Archivo, "Archivo Expanded", "Helvetica Neue", Arial, "Noto Sans KR", sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, "Noto Sans Mono CJK KR", monospace;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, "Noto Sans KR", sans-serif;
+
+  --motion: 140ms;
+  /* The caption band reserves its height so the layout never jumps between
+     generations (§3.1). Two lines of 22 on 30, plus 12 above and below. */
+  --caption-band: 84px;
+  --gap: 8px;
+  --column: 760px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.7;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+button { cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: default; }
+
+/* Focus is visible on every interactive element (§7). */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ---- Type (§6) ------------------------------------------------------------ */
+
+/* The caption band is the hero: the object of preference is prose, so prose
+   gets the display treatment. Archivo 600 at 22 on 30. */
+.caption-prose {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 30px;
+  color: var(--ink);
+  text-align: center;
+}
+
+.heading {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.body { font-family: var(--body); font-size: 14px; line-height: 1.7; }
+
+/* Tokens and buttons: mono at 11 to 12, tracked uppercase. */
+.token {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Eyebrows: mono 10, letter-spaced, uppercase, dim. */
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ---- Actions (§4.5) ------------------------------------------------------- */
+
+/* Sodium appears only on the primary action and the momentary solo state (§6).
+   Nothing else on a session screen may take it. */
+.button {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 12px 20px;
+  min-height: 44px;
+  border: 1px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+}
+.button.primary {
+  background: var(--sodium);
+  border-color: var(--sodium);
+  color: var(--panel);
+}
+.button:disabled {
+  border-color: var(--rule);
+  color: var(--dim);
+  background: var(--panel);
+}
+/* A disabled primary keeps its shape and loses its fill, so "not yet" reads as
+   a state of the same button rather than as a different one. */
+.button.primary:disabled { background: var(--panel); }
+
+/* ---- Surfaces ------------------------------------------------------------- */
+
+.panel { background: var(--panel); border: 1px solid var(--rule); }
+.hairline { border-top: 1px solid var(--rule); }
+
+/* ---- Motion (§7) ---------------------------------------------------------- */
+
+.moves { transition: transform var(--motion) linear, opacity var(--motion) linear; }
+
+@media (prefers-reduced-motion: reduce) {
+  .moves { transition: none; }
+}

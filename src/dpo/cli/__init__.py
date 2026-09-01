@@ -19,6 +19,7 @@ from dpo.cli.annotation import _annotation_export_tasks, _annotation_ingest, _an
 from dpo.cli.artifact import _artifact_gc, _artifact_rebuild_index, _artifact_trace, _artifact_verify
 from dpo.cli.canary import _canary_run
 from dpo.cli.candidates import _candidates_dedup, _candidates_generate
+from dpo.cli.console import register as register_console
 from dpo.cli.contract import _contract_lock, _contract_validate
 from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
 from dpo.cli.report import _report_analyze, _report_show
@@ -267,6 +268,10 @@ def build_parser() -> argparse.ArgumentParser:
     session_serve.add_argument("--host", default="127.0.0.1")
     session_serve.add_argument("--port", type=int, default=8777)
     session_serve.set_defaults(handler=_session_serve)
+
+    # The console instrument (docs/v2-console) is a separate command over a separate
+    # package, so whichever of the two is not adopted can be removed whole.
+    register_console(commands)
 
     return parser
 

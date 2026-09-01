@@ -1,17 +1,22 @@
-"""Caption machinery, kept apart from the instrument that drives it.
+"""Caption machinery shared by both participant instruments.
 
-What a caption request *is*, how prose is written from one, that identical
-settings return the identical caption, and how a shot's media is cut: none of
-that depends on the surface a participant touched to reach the settings. So it
-lives here rather than inside ``dpo.session``, which owns the surface — the
-skeleton, its orderings, its copy — and builds a ``CaptionRequest`` from it.
+Two instruments are built against two specifications:
 
-``CaptionRequest`` is the seam. Upstream of it is one instrument's idea of what
-a control is; downstream is the model, the budget, and the cache, and nothing
-downstream needs to know which gesture produced the settings.
+* ``dpo.session`` — the skeleton-only instrument of ``docs/v1-session/``, where the
+  ordered list of what a caption will mention is the sole control surface;
+* ``dpo.console`` — the console instrument of ``docs/v2-console/``, where a token
+  strip, a segmented crossfader and four detents drive a read-only skeleton.
 
-Nothing in this package may import from ``dpo.session``. The dependency runs
-one way.
+They disagree about surfaces, identity, copy, screens, and how a source's
+weights are computed. They agree about everything downstream of the settings:
+what a caption request *is*, how prose is written from one, that identical
+settings return the identical caption, and how a shot's media is cut. That
+agreement lives here so the two never drift apart on the expensive, model-
+shaped half, and so archiving either instrument means deleting its own
+package and nothing else.
+
+Nothing in this package may import from ``dpo.session`` or ``dpo.console``.
+The dependency runs one way.
 """
 
 from dpo.caption.writer import (

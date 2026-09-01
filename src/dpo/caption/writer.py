@@ -1,16 +1,18 @@
-"""Prose from settings: the one slow thing in the interface, and its cache.
+"""Prose from settings: the one slow thing in either instrument, and its cache.
 
-The skeleton is deterministic and instant; the sentence is "requested
-explicitly and is the only slow thing in the interface" (spec 2), always behind
-Show caption. A writer turns a ``CaptionRequest`` — the admitted sources in the
-order the skeleton shows them, or the heads with their members, or the scene or
-atmosphere row — into one or two sentences of sentence prose.
+The deterministic layer is instant; the sentence is "requested explicitly and
+is the only slow thing in the interface", always behind Show caption. A writer
+turns a ``CaptionRequest`` — the admitted sources in the order the instrument
+shows them, or the heads with their members, or the scene or atmosphere row —
+into one or two sentences of sentence prose.
 
-``CaptionRequest`` is the seam between the instrument and this module:
-``dpo.session.writer`` builds one from a skeleton ordering, and from the
-request onward nothing here knows what a skeleton is.
+``CaptionRequest`` is the seam between the two instruments and this module.
+Each builds a request its own way (``dpo.session.writer`` from a skeleton
+ordering, ``dpo.console.requests`` from a regime and a grain); from the request
+onward the machinery is identical, so a caption written for one instrument is
+written by exactly the code that writes for the other.
 
-Two writers. ``TemplateWriter`` is deterministic string assembly, so the
+Two writers. ``TemplateWriter`` is deterministic string assembly, so an
 instrument can be built, tested, and demonstrated without a GPU and so every
 behavioral test has a caption it can predict. ``GemmaWriter`` conditions the
 study's own model on the shot's audio with an instruction that names exactly
@@ -312,14 +314,19 @@ class GemmaWriter:
         *,
         max_new_tokens: int = GEMMA_MAX_NEW_TOKENS,
         fallback: CaptionWriter | None = None,
+        instruction: Callable[[CaptionRequest], str] | None = None,
     ) -> None:
         self.adapter = adapter
         self.max_new_tokens = max_new_tokens
         # What a caption becomes when the model will not fit the box in two
         # tries: the template's sentence for the same list, which keeps every
         # entry in order and drops notes to fit. A caption that silently lost
-        # an admitted source would misreport the skeleton it was written for.
+        # an admitted source would misreport the settings it was written for.
         self.fallback: CaptionWriter = TemplateWriter() if fallback is None else fallback
+        # The two instruments name their levels differently and mean different
+        # things by the last two, so each supplies its own system text while
+        # sharing the generation, the retry, and the budget enforcement below.
+        self.instruction = gemma_instruction if instruction is None else instruction
 
     def messages(self, request: CaptionRequest) -> list[dict[str, Any]]:
         from dpo.models.gemma4.prompt import stimulus_messages
@@ -327,8 +334,8 @@ class GemmaWriter:
         if request.media_path is None:
             raise WriterError("the Gemma writer needs the shot's media; no media_path on the request")
         if request.task == "control":
-            return visual_messages(gemma_instruction(request), str(request.media_path))
-        return stimulus_messages(gemma_instruction(request), audio_reference=str(request.media_path))
+            return visual_messages(self.instruction(request), str(request.media_path))
+        return stimulus_messages(self.instruction(request), audio_reference=str(request.media_path))
 
     def _generate(self, messages: list[dict[str, Any]]) -> str:
         try:

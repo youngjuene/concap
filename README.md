@@ -381,16 +381,31 @@ different people. Kept apart so neither study's validator can be satisfied by
 the other's data. It serves the clip *with* its soundtrack, so
 `--media-dir` needs `unmuted_video/` renders staged alongside the corpus.
 
-### The caption session
+### The caption instruments
 
-A second participant instrument, `dpo session serve`, lets a participant shape
-each shot's caption on a skeleton of the sounds it could mention and watch the
-clip again with their captions placed; a follow-up on a later day checks
-recognition and preference. It is authored as a session document, serves the
-same `unmuted_video/` media, and writes an event log per participant. Operator
-steps, the writer choice, and where the files land are in
-[`docs/v1-session/runbook.md`](docs/v1-session/runbook.md); `make session-demo`
-serves the fixture over synthetic clips.
+Two further participant instruments elicit caption preferences, built to two
+specifications that disagree about the surface. Both serve the same
+`unmuted_video/` media, write an event log per participant, and share
+`dpo.caption` — the writers, the cache, and the caption budget — so whichever
+is not adopted can be deleted whole.
+
+`dpo session serve` builds [`docs/v1-session/`](docs/v1-session/): the skeleton of the sounds a
+caption could mention is the only control surface, a participant shapes each
+shot on it and watches the clip again with their captions placed, and a
+follow-up on a later day checks recognition and preference. Sources can be
+filled from Sa2VA masks (`session link-masks`, then `scaffold --mask-links`).
+Operator steps are in [`docs/v1-session/runbook.md`](docs/v1-session/runbook.md);
+`make session-demo` serves the fixture over synthetic clips.
+
+`dpo console serve` builds [`docs/v2-console/`](docs/v2-console/): a console of three
+controls drives a read-only skeleton, and the caption preference is checked in
+session against the default policy rather than on a later day. Its quantities
+are computed rather than authored — shots cut on visual composition, audio
+labels grouped by mask agreement, saturating visibility against a calibrated
+`r0` — and frozen into a hashed configuration artifact that stamps every
+caption and log line. Operator steps are in
+[`docs/v2-console/runbook.md`](docs/v2-console/runbook.md); `make console-demo`
+serves its fixture on port 8778, so both instruments can run side by side.
 
 ## 6. Analyze the study
 

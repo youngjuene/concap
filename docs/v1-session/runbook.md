@@ -315,3 +315,9 @@ The download on the kiosk's final screen (`/api/log?participant=P01`) is the
 events and the snapshot in one JSON document (`dpo.caption-session-log/v1`);
 the files above are the authoritative copy.
 
+## 6. The other instrument
+
+`dpo console` builds the later specification in `docs/v2-console/`, which contradicts
+this one on the control surface, the identity, the screens, and the copy. See
+[`docs/v2-console/runbook.md`](../v2-console/runbook.md) for the comparison and its
+operator steps. The two share `dpo.caption` and nothing else.

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Caption session</title>
+    <link rel="stylesheet" href="/identity.css" />
+    <link rel="stylesheet" href="/console.css" />
+  </head>
+  <body>
+    <!-- The session runs as a kiosk at 1180 by 820 landscape (spec-uiux.md §1).
+         One shell holds every screen; screens swap inside it so the stage never
+         moves. Section numbers below cite spec-uiux.md. -->
+    <main class="shell" id="shell">
+      <!-- The phase rail is numbered because the trial genuinely is a
+           sequence, and the numbers tell the participant where they are (§3.1). -->
+      <nav class="rail" id="rail" aria-label="Session phases"></nav>
+
+      <section class="stage-block" id="stage-block" hidden>
+        <div class="stage" id="stage">
+          <video id="video" playsinline preload="auto"></video>
+          <div class="shot-label eyebrow" id="shot-label"></div>
+          <div class="placed" id="placed" hidden><p class="caption-prose" id="placed-text"></p></div>
+        </div>
+        <div class="progress" id="progress" role="presentation"><div class="played" id="played"></div></div>
+      </section>
+
+      <!-- The caption band is the hero, with reserved height so the layout
+           never jumps between generations (§3.1). -->
+      <section class="band" id="band" hidden>
+        <p class="caption-prose" id="band-text"></p>
+        <p class="eyebrow band-note" id="band-note"></p>
+      </section>
+
+      <section class="console" id="console" hidden>
+        <div class="control sources" id="sources-control">
+          <p class="eyebrow">Sources</p>
+          <div class="strip" id="strip"></div>
+        </div>
+        <div class="control balance" id="balance-control">
+          <p class="eyebrow">Balance</p>
+          <div class="crossfader" id="crossfader">
+            <span class="eyebrow pole" id="pole-eye"></span>
+            <div class="segments" id="segments"></div>
+            <span class="eyebrow pole" id="pole-ear"></span>
+          </div>
+        </div>
+        <div class="control detail" id="detail-control">
+          <p class="eyebrow">Detail</p>
+          <div class="detents" id="detents"></div>
+        </div>
+      </section>
+
+      <section class="skeleton" id="skeleton" hidden>
+        <ol class="rows" id="rows"></ol>
+      </section>
+
+      <section class="actions" id="actions" hidden>
+        <div class="buttons" id="buttons"></div>
+        <p class="criterion body" id="criterion"></p>
+      </section>
+
+      <!-- Single-column screens: cards, the check, the probe, and the line a
+           page with no participant identifier shows instead of anything else. -->
+      <section class="column" id="column" hidden></section>
+    </main>
+    <script src="/console.js"></script>
+  </body>
+</html>

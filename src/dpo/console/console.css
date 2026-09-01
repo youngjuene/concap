@@ -1,0 +1,236 @@
+/* Layout for the console session. identity.css owns colour, type and surface;
+   this file only places things, and redefines nothing in it.
+
+   The vertical order is §3.1's, top to bottom: phase rail, stage, progress bar,
+   caption band, console, skeleton, actions. Every screen uses the same shell,
+   so the stage stays in one place through the whole trial and only its
+   contents change.
+
+   Section numbers cite spec-uiux.md. */
+
+.shell {
+  max-width: 1180px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 16px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- Phase rail (§3.1) ---------------------------------------------------- */
+
+.rail {
+  display: flex;
+  gap: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.rail .phase { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--dim); }
+/* The phase reached is inked; the ones before it keep a rule beneath, so
+   position is legible without colour. */
+.rail .phase.current { color: var(--ink); border-bottom: 2px solid var(--ink); padding-bottom: 4px; }
+.rail .phase.done { color: var(--ink); }
+
+/* ---- Stage (§3.1) --------------------------------------------------------- */
+
+/* The stage stays neutral: footage, a small shot label, and the progress bar.
+   No overlays, mask colours or scene annotations, since scene structure must
+   not cue responses. */
+.stage-block { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: var(--column);
+  aspect-ratio: 16 / 9;
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+.stage video { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--ink); }
+.stage .shot-label { position: absolute; top: 8px; left: 8px; color: var(--panel); opacity: 0.7; }
+
+/* The placed caption during a viewing: lower third of the frame. */
+.stage .placed {
+  position: absolute;
+  left: 0; right: 0; bottom: 8%;
+  padding: 8px 24px;
+}
+.stage .placed .caption-prose { color: var(--panel); }
+
+.progress { width: 100%; max-width: var(--column); height: 4px; background: var(--rule); }
+.progress .played { height: 100%; width: 0; background: var(--ink); }
+
+/* ---- Caption band (§3.1, the hero) ---------------------------------------- */
+
+.band {
+  width: 100%;
+  max-width: var(--column);
+  margin: 0 auto;
+  min-height: var(--caption-band);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+}
+/* Stale is dimmed as well as labelled, so the state reads without colour. */
+.band.stale .caption-prose { color: var(--dim); }
+.band.auditioning .caption-prose { color: var(--dim); font-style: italic; }
+.band .band-note { text-align: center; }
+.band.empty .caption-prose { display: none; }
+
+/* ---- Console (§4.1–4.3) --------------------------------------------------- */
+
+.console {
+  width: 100%;
+  max-width: var(--column);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  align-items: start;
+}
+.console .detail { grid-column: 1 / -1; }
+.console .control { display: flex; flex-direction: column; gap: 8px; }
+
+/* At the atmospheric detent nothing is named, so the admitted set and the
+   balance have no surface to act on and the interface visibly disables them
+   (§4.3). Grayed and inert, never merely styled: pointer-events go too, so a
+   control that looks dead is dead. */
+.console .control.inert { opacity: 0.4; pointer-events: none; }
+.console .control.inert .token { color: var(--dim); }
+
+/* Sources: a token strip. Mute is latching and shown as a strike-through, so
+   an excluded source stays legible rather than vanishing (§4.1). */
+.strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.strip .source {
+  min-height: 44px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.strip .source.muted { text-decoration: line-through; color: var(--dim); border-style: dashed; }
+/* Solo is momentary. While held the token takes the sodium accent and the
+   other skeleton rows dim (§4.1). */
+.strip .source.solo { background: var(--sodium); border-color: var(--sodium); color: var(--panel); }
+
+/* Balance: a segmented crossfader with poles as small mono text and no
+   numerals anywhere (§4.2). Segment widths vary per shot because the regimes
+   they stand for do; each keeps a touch minimum. */
+.crossfader { display: flex; align-items: center; gap: 12px; }
+.crossfader .pole { flex: 0 0 auto; }
+.segments { display: flex; flex: 1 1 auto; height: 44px; border: 1px solid var(--rule); }
+.segments .segment {
+  flex-grow: 1;
+  flex-basis: 0;
+  min-width: 24px;
+  height: 100%;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  background: var(--panel);
+}
+.segments .segment:last-child { border-right: 0; }
+/* The selected segment fills with ink. Selection is also announced through
+   aria-pressed, so it does not rest on fill alone. */
+.segments .segment[aria-pressed="true"] { background: var(--ink); }
+
+/* Detail: four equal detents (§4.3). */
+.detents { display: flex; border: 1px solid var(--rule); }
+.detents .detent {
+  flex: 1 1 0;
+  min-height: 44px;
+  padding: 12px 8px;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.detents .detent:last-child { border-right: 0; }
+.detents .detent[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+
+/* ---- Skeleton (§4.4) ------------------------------------------------------ */
+
+/* The zero-latency feedback surface: every gesture reorders, re-bands or
+   re-admits it instantly, while prose waits for an explicit request. It is a
+   numbered list and it is not a control. */
+.skeleton { width: 100%; max-width: var(--column); margin: 0 auto; }
+.rows { list-style: none; counter-reset: row; }
+.rows .row {
+  counter-increment: row;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+}
+.rows .row::before {
+  content: counter(row);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  flex: 0 0 20px;
+}
+.rows .row .name { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
+  text-transform: uppercase; flex: 1 1 auto; }
+.rows .row .phrases { margin-left: auto; text-align: right; }
+/* While a token is soloed, the rows that are not it dim (§4.1). */
+.rows.soloing .row:not(.solo) { opacity: 0.35; }
+.rows .row.empty { color: var(--dim); border-top: 1px solid var(--rule); }
+
+/* ---- Actions (§4.5) ------------------------------------------------------- */
+
+.actions { width: 100%; max-width: var(--column); margin: 0 auto; display: flex;
+  flex-direction: column; gap: 8px; }
+.actions .buttons { display: flex; gap: 16px; align-items: center; }
+.actions .criterion { color: var(--dim); }
+
+/* ---- Single-column screens ------------------------------------------------ */
+
+.column { width: 100%; max-width: var(--column); margin: 0 auto; display: flex;
+  flex-direction: column; gap: 16px; }
+.card { padding: 24px; background: var(--panel); border: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 12px; }
+.card .body + .body { margin-top: 4px; }
+
+/* The check: two equal cards, side assignment randomized per shot (§3.2). */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pair .choice {
+  display: flex; flex-direction: column; gap: 12px; justify-content: space-between;
+  padding: 20px; background: var(--panel); border: 1px solid var(--rule); text-align: left;
+  min-height: 160px;
+}
+.pair .choice .caption-prose { text-align: left; }
+.pair .choice[aria-pressed="true"] { border-color: var(--ink); border-width: 2px; padding: 19px; }
+
+.probe-field, .column textarea {
+  width: 100%; min-height: 120px; padding: 12px;
+  background: var(--panel); border: 1px solid var(--rule);
+  font-family: var(--body); font-size: 14px; line-height: 1.7;
+}
+
+.summary { display: flex; gap: 32px; }
+.summary .cell { display: flex; flex-direction: column; gap: 4px; }
+.summary .count { font-family: var(--display); font-weight: 600; font-size: 24px; }
+
+.notice { padding: 24px; font-family: var(--body); }
+
+/* ---- Below the kiosk width ------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .console { grid-template-columns: 1fr; }
+  .pair { grid-template-columns: 1fr; }
+}
