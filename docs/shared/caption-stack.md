@@ -59,14 +59,14 @@ Delete the package, its tests, and its documentation directory:
 ```bash
 # if v2 is not adopted
 rm -rf src/dpo/console tests/console docs/v2-console src/dpo/cli/console.py
-# then drop the `register_console(commands)` line from src/dpo/cli/__init__.py
+# then drop the `register_console` line and its import from src/dpo/cli/__init__.py
 ```
 
 ```bash
 # if v1 is not adopted
 rm -rf src/dpo/session tests/session docs/v1-session src/dpo/cli/session.py
-# then drop the `session` block and its imports from src/dpo/cli/__init__.py,
-# and the session-demo target from the Makefile
+# then drop the `register_session` line and its import from
+# src/dpo/cli/__init__.py, and the session-demo target from the Makefile
 ```
 
 `tests/caption/` stays in both directions: it holds the tests of the shared

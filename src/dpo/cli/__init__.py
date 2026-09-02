@@ -24,10 +24,7 @@ from dpo.cli.contract import _contract_lock, _contract_validate
 from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
 from dpo.cli.report import _report_analyze, _report_show
 from dpo.cli.select import _select_run
-from dpo.cli.session import (
-    DEFAULT_CONTRACT as SESSION_DEFAULT_CONTRACT,
-)
-from dpo.cli.session import _session_link_masks, _session_scaffold, _session_serve, _session_validate
+from dpo.cli.session import register as register_session
 from dpo.cli.stage import _stage_list
 from dpo.cli.study import _study_export, _study_ingest, _study_serve
 from dpo.cli.train import _train_run
@@ -220,57 +217,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     study_ingest.set_defaults(handler=_study_ingest)
 
-    session = commands.add_parser("session", help="validate, scaffold, and serve a caption session")
-    session_actions = session.add_subparsers(dest="action", required=True)
-    session_validate = session_actions.add_parser("validate")
-    session_validate.add_argument("--session", required=True)
-    session_validate.set_defaults(handler=_session_validate)
-    session_scaffold = session_actions.add_parser("scaffold")
-    session_scaffold.add_argument("--media-dir", required=True)
-    session_scaffold.add_argument("--out", required=True)
-    session_scaffold.add_argument("--clips", nargs="*", help="clip ids; default: every mp4 under --media-dir")
-    session_scaffold.add_argument(
-        "--mask-links",
-        help="a dpo.caption-mask-link/v1 manifest from `session link-masks`; "
-        "fills each shot's sources from it (audio on a shaped clip, visual on a control clip)",
-    )
-    session_scaffold.set_defaults(handler=_session_scaffold)
-    session_link_masks = session_actions.add_parser(
-        "link-masks", help="derive caption-parameter evidence from Sa2VA masks and audio tags"
-    )
-    session_link_masks.add_argument(
-        "--mask-root", required=True, help="directory containing audio/ and visual/"
-    )
-    session_link_masks.add_argument(
-        "--tidy-data", required=True, help="CSV with final_labels and top_level_parent_name"
-    )
-    session_link_masks.add_argument(
-        "--ontology", help="AudioSet ontology JSON; default: ontology.json beside --tidy-data"
-    )
-    session_link_masks.add_argument("--out", required=True, help="output dpo.caption-mask-link/v1 JSON")
-    session_link_masks.add_argument("--fps", type=float, default=60.0, help="source video frame rate")
-    session_link_masks.add_argument(
-        "--clips", nargs="*", help="optional clip ids; default: all discovered clips"
-    )
-    session_link_masks.set_defaults(handler=_session_link_masks)
-    session_serve = session_actions.add_parser("serve")
-    session_serve.add_argument("--session", required=True)
-    session_serve.add_argument("--media-dir", required=True)
-    session_serve.add_argument("--out", required=True)
-    session_serve.add_argument("--writer", choices=["template", "gemma"], default="template")
-    session_serve.add_argument("--backend-config", help="gemma: the audio backend config")
-    session_serve.add_argument(
-        "--checkpoint", help="gemma: a LoRA checkpoint directory; default: the base model"
-    )
-    session_serve.add_argument(
-        "--contract", default=SESSION_DEFAULT_CONTRACT, help="gemma: the study contract for [tracks.audio]"
-    )
-    session_serve.add_argument("--host", default="127.0.0.1")
-    session_serve.add_argument("--port", type=int, default=8777)
-    session_serve.set_defaults(handler=_session_serve)
-
-    # The console instrument (docs/v2-console) is a separate command over a separate
-    # package, so whichever of the two is not adopted can be removed whole.
+    # Each instrument attaches its own command group from its own module, so
+    # whichever of the two is not adopted is removed by deleting that module
+    # and one line here (docs/shared/caption-stack.md).
+    register_session(commands)
     register_console(commands)
 
     return parser
