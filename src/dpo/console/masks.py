@@ -266,8 +266,20 @@ def _identifier(members: Sequence[str]) -> str:
     return "_".join(part for part in slug.split("_") if part)[:64] or "source"
 
 
+def _primary(label: str) -> str:
+    """The AudioSet display name's first clause: "Vehicle horn, car horn, honking" -> "vehicle horn".
+
+    AudioSet writes a label as its canonical name followed by synonyms. The
+    synonyms are for a reader of the ontology, not for a caption: a source
+    named by its whole display name ran to sixty-four characters on a real
+    clip even after the grouping was fixed, and no sentence naming it fit the
+    budget. The first clause is the name.
+    """
+    return label.split(",", 1)[0].strip().lower()
+
+
 def _prose(members: Sequence[str]) -> str:
-    return " and ".join(member.lower() for member in members)
+    return " and ".join(_primary(member) for member in members)
 
 
 def derive_clip(

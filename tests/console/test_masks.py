@@ -315,3 +315,22 @@ class TestScaffoldedDocument:
 
         with pytest.raises(ConsoleDocumentError):
             load_console_document(out)
+
+
+class TestSourceNaming:
+    """A source is named by its label's canonical clause, not the synonym list."""
+
+    def test_the_first_clause_names_the_source(self, masks: Path) -> None:
+        _visual(masks, "clip_001", 2)
+        _mask(masks / "audio" / "clip_001" / "Vehicle horn, car horn, honking" / "00000.png", (0, 0, 4, 4))
+        clip = derive_clip(masks, "clip_001", fps=1.0, downsample=1)
+        assert clip["shots"][0]["sources"][0]["prose"] == "vehicle horn"
+        # The label itself is kept whole for the audit trail.
+        assert clip["shots"][0]["sources"][0]["labels"] == ["Vehicle horn, car horn, honking"]
+
+    def test_a_merged_source_joins_canonical_names(self, masks: Path) -> None:
+        _visual(masks, "clip_001", 2)
+        for label in ("Traffic noise, roadway noise", "Vehicle horn, car horn, honking"):
+            _mask(masks / "audio" / "clip_001" / label / "00000.png", (0, 0, 4, 4))
+        clip = derive_clip(masks, "clip_001", fps=1.0, downsample=1)
+        assert clip["shots"][0]["sources"][0]["prose"] == "traffic noise and vehicle horn"
