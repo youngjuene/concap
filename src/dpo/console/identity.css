@@ -41,6 +41,11 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Every screen section below sets its own display (flex, grid), which would
+   outrank the attribute's user-agent rule; hidden must still mean hidden, or
+   the intro card sits under an empty stage and console. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   background: var(--ground);
