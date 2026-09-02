@@ -92,6 +92,12 @@ def build_request(
             for role in settings.order
         )
         sources = tuple(member for head in heads for member in head.members)
+    elif settings.level == "scene":
+        # The scene row hides the sources from the participant, not from the
+        # writer: the instruction is anchored on what the shot actually has,
+        # in document order, so the sentence it names the scene with is true
+        # of those sounds and adds none.
+        sources = tuple(_source_spec(source) for source in shot["sources"])
     else:
         sources = ()
     # What admission left out, where admission has a surface. At scene and

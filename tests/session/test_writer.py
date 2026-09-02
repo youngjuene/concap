@@ -527,3 +527,19 @@ class TestExcludedInRequests:
         for level in ("scene", "atmospheric"):
             request = build_request(document, clip, shot, Settings(level, (), ()), None)
             assert request.excluded == ()
+
+
+class TestSceneAnchoring:
+    def test_the_scene_request_carries_the_shots_sources(self) -> None:
+        document = _document()
+        clip, shot = document["clips"][0], document["clips"][0]["shots"][0]
+        request = build_request(document, clip, shot, Settings("scene", (), ()), None)
+        assert [s.id for s in request.sources] == [s["id"] for s in shot["sources"]]
+
+    def test_the_scene_instruction_lists_the_sounds_and_forbids_adding_one(self) -> None:
+        request = _request("scene", (TRAM, SIREN))
+        text = gemma_instruction(request)
+        assert "The scene: A tram stop on a wide street. The sounds in it:" in text
+        assert "a tram braking, a distant siren" in text
+        assert "add no sound that is not listed" in text
+        assert "do not enumerate" in text

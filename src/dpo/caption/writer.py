@@ -271,8 +271,9 @@ GEMMA_LEVEL_RULES = {
         " and no other source: {groups}."
     ),
     "scene": (
-        "Write one sentence that names the scene as a whole, and nothing else — no individual sound"
-        " source, nothing added. The scene: {scene}"
+        "Write one sentence that names the scene as a whole and is true of the sounds in it —"
+        " do not enumerate them, and add no sound that is not listed."
+        " The scene: {scene}. The sounds in it: {sources}."
     ),
     "atmospheric": (
         "Describe only the temporal character of the moment as a whole, with no nouns naming any"
@@ -300,8 +301,9 @@ GEMMA_VISUAL_LEVEL_RULES = {
         " and nothing else: {groups}."
     ),
     "scene": (
-        "Write one sentence that names the scene as a whole, and nothing else — no individual"
-        " thing, nothing added. The scene: {scene}"
+        "Write one sentence that names the scene as a whole and is true of the things in it —"
+        " do not enumerate them, and add nothing that is not listed."
+        " The scene: {scene}. The things in it: {sources}."
     ),
     "atmospheric": (
         "Describe only the character of the motion in the moment as a whole, with no nouns naming"
@@ -375,7 +377,14 @@ def gemma_instruction(request: CaptionRequest) -> str:
         )
         return preamble + rule.format(groups=groups)
     if request.level == "scene":
-        return preamble + rule.format(scene=request.scene_prose)
+        # Anchored on the shot's sources, which the request carries at this
+        # level for exactly this purpose: without them the model has only a
+        # noun and a prohibition, and fills the gap with sounds of its own.
+        listed = ", ".join(s.prose for s in request.sources) or "none listed"
+        # The authored scene prose is a sentence with its own full stop; the
+        # rule supplies the punctuation around it.
+        scene = request.scene_prose.strip().rstrip(".")
+        return preamble + rule.format(scene=scene, sources=listed)
     return preamble + rule.format(atmosphere=request.atmosphere_prose)
 
 
