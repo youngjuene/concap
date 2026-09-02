@@ -83,6 +83,8 @@ html {
    position is legible without colour. */
 .rail .phase.current { color: var(--ink); border-bottom: 2px solid var(--ink); padding-bottom: 4px; }
 .rail .phase.done { color: var(--ink); }
+/* Which clip, at the far end, only when the document has more than one. */
+.rail .rail-clip { margin-left: auto; align-self: center; }
 
 /* ---- Stage (§3.1) --------------------------------------------------------- */
 

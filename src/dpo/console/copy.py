@@ -38,6 +38,10 @@ STRINGS: dict[str, Any] = {
         "replay": "Replay shot",
         "pause": "Pause loop",
         "adjust": "Adjust, then show the caption",
+        # Not in Table 3: Table 2 names a "caption stale" state, and a band
+        # that only dims cannot say that its prose predates the last change.
+        # The other instrument's words for the same state.
+        "stale": "Written before your last change",
     },
     "busy": {"writing": "Writing…", "preparing": "Preparing comparison…"},
     "check_heading": "Which caption would you rather have?",

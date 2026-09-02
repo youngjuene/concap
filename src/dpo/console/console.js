@@ -295,14 +295,24 @@ function renderRail(screen) {
     const marks = index === current ? "phase current" : index < current ? "phase done" : "phase";
     rail.appendChild(el("span", { class: marks, text: label }));
   });
+  // The four phases run once per clip. With more than one clip the rail also
+  // says which, or the return to "1 watch" after a check reads as a repeat.
+  const total = state.session.clips.length;
+  if (total > 1 && current >= 0) {
+    rail.appendChild(
+      el("span", { class: "eyebrow rail-clip", text: "Clip " + (state.snapshot.clip_index + 1) + " of " + total }),
+    );
+  }
+}
+
+// A card's body, one paragraph per line; the heading is the screen's.
+function cardBody(key) {
+  return state.cards[key].body.map((line) => el("p", { class: "body", text: line }));
 }
 
 function card(key, action) {
   const copy = state.cards[key];
-  const node = el("div", { class: "card" }, [
-    el("h1", { class: "heading", text: copy.heading }),
-    ...copy.body.map((line) => el("p", { class: "body", text: line })),
-  ]);
+  const node = el("div", { class: "card" }, [el("h1", { class: "heading", text: copy.heading }), ...cardBody(key)]);
   node.appendChild(el("div", { class: "buttons" }, [action]));
   return node;
 }
@@ -557,8 +567,10 @@ function renderBand() {
   const fresh = isFresh(a);
   band.className = fresh ? "band" : "band stale";
   text.textContent = a.band.caption;
-  // Stale is dimmed as well as labelled, so it reads without colour.
-  note.textContent = fresh ? "" : state.strings.helpers.adjust;
+  // Stale is dimmed as well as labelled, so it reads without colour, and the
+  // label says what it is: prose from before the last change, not the
+  // empty band's invitation.
+  note.textContent = fresh ? "" : state.strings.helpers.stale;
 }
 
 function renderConsole() {
@@ -619,7 +631,17 @@ function renderConsole() {
   });
 }
 
-function renderRows() {
+// Where each skeleton row is, keyed by source: taken before a change is
+// rendered, so the rows that change place can slide from where they were.
+function rowPositions() {
+  const before = new Map();
+  $("rows")
+    .querySelectorAll(".row[data-id]")
+    .forEach((row) => before.set(row.getAttribute("data-id"), row.getBoundingClientRect().top));
+  return before;
+}
+
+function renderRows(before) {
   const a = state.authoring;
   const rows = clear($("rows"));
   rows.className = a.solo ? "rows soloing" : "rows";
@@ -635,12 +657,32 @@ function renderRows() {
   order.forEach((id) => {
     const source = sourceById(a, id);
     rows.appendChild(
-      el("li", { class: "row" + (a.solo && a.solo.id === id ? " solo" : "") }, [
+      el("li", { class: "row" + (a.solo && a.solo.id === id ? " solo" : ""), "data-id": id }, [
         el("span", { class: "name", text: source.prose }),
         el("span", { class: "phrases eyebrow", text: source.band + " · " + source.register }),
       ]),
     );
   });
+  if (!before) return;
+  // The skeleton answers instantly (§4.4); the slide is what says which rows
+  // the change moved. Rects are in zoomed units under the root zoom, the
+  // transform is not. Reduced motion turns the transition off (identity.css).
+  const moved = [];
+  rows.querySelectorAll(".row[data-id]").forEach((row) => {
+    const was = before.get(row.getAttribute("data-id"));
+    if (was === undefined) return;
+    const delta = (was - row.getBoundingClientRect().top) / pageZoom;
+    if (Math.abs(delta) >= 1) moved.push([row, delta]);
+  });
+  moved.forEach(([row, delta]) => (row.style.transform = "translateY(" + delta + "px)"));
+  if (moved.length) {
+    requestAnimationFrame(() => {
+      moved.forEach(([row]) => {
+        row.classList.add("moves");
+        row.style.transform = "";
+      });
+    });
+  }
 }
 
 function renderAuthoringActions() {
@@ -690,9 +732,10 @@ function renderAuthoringActions() {
 }
 
 function afterChange() {
+  const before = rowPositions(); // read the old layout before any write
   renderBand();
   renderConsole();
-  renderRows();
+  renderRows(before);
   renderAuthoringActions();
   api.save();
 }
@@ -867,6 +910,8 @@ function renderCheck() {
     .then((answer) => {
       clear(column);
       column.appendChild(el("h1", { class: "heading", text: state.strings.check_heading }));
+      // §3.2's card for the check: what the two cards are, said once.
+      cardBody("check").forEach((line) => column.appendChild(line));
       answer.shots.forEach((pair, index) => {
         const chosen = (state.snapshot.choices[clip.clip_id] || {})[pair.shot_id];
         const choice = (side) =>
