@@ -6,14 +6,19 @@ on the expensive, model-shaped half of the problem, and so that archiving
 either one is a directory deletion rather than an untangling.
 
 ```text
-src/dpo/caption/     writer.py, media.py     ← shared
+src/dpo/caption/     writer.py, media.py, background.py, ontology.py   ← shared
+tests/caption/       its tests, and the seam test                      ← survives either archival
 src/dpo/session/     v1, docs/v1-session/    ← imports dpo.caption
 src/dpo/console/     v2, docs/v2-console/    ← imports dpo.caption
 ```
 
 The dependency runs one way and a test asserts it
-(`tests/console/test_detachment.py`): nothing in `dpo.caption` may import
-either instrument, and neither instrument may import the other.
+(`tests/caption/test_detachment.py`): nothing in `dpo.caption` may import
+either instrument, and neither instrument may import the other. The same test
+watches the test tree, because the seam leaked there first: an instrument's
+tests may not import the other's package, and every module of the shared
+package has a test file under `tests/caption`, so no archival can take the
+last tests of code that survives it.
 
 ## The seam is `CaptionRequest`
 
@@ -57,7 +62,23 @@ rm -rf src/dpo/console tests/console docs/v2-console src/dpo/cli/console.py
 # then drop the `register_console(commands)` line from src/dpo/cli/__init__.py
 ```
 
+```bash
+# if v1 is not adopted
+rm -rf src/dpo/session tests/session docs/v1-session src/dpo/cli/session.py
+# then drop the `session` block and its imports from src/dpo/cli/__init__.py,
+# and the session-demo target from the Makefile
+```
+
+`tests/caption/` stays in both directions: it holds the tests of the shared
+package and the seam test itself, so `make check` is green after either
+deletion without recovering a test from history. Ruff and mypy fail closed on
+anything the edit to `src/dpo/cli/__init__.py` misses.
+
 Nothing in `dpo.caption` refers to either instrument except in prose, so the
-shared stack needs no edit. The one thing to check afterwards is
-`GemmaWriter`'s `instruction=` parameter: with a single caller it can collapse
-back into a module constant, but it costs nothing to leave.
+shared stack needs no edit to keep working. Two things are worth doing
+afterwards. `GemmaWriter`'s `instruction=` parameter can collapse back into a
+module constant with a single caller, though it costs nothing to leave. And if
+v1 is the one archived, the shared writer is left holding v1's own text — the
+level rules, the template's rendering of heads and scene rows, the
+control-clip instruction — which is then dead code inside the surviving
+package and should be deleted with it.

@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 import json
-import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from dpo.caption.writer import CacheMismatch, Written, names_excluded
 from dpo.session.document import clip_by_id
 from dpo.session.skeleton import Settings, orderings
 from dpo.session.writer import (
     CAPTION_MAX_CHARS,
     GEMMA_INSTRUCTION,
     GEMMA_VISUAL_INSTRUCTION,
-    CachedWriter,
     CaptionRequest,
     GemmaWriter,
     HeadSpec,
@@ -25,13 +22,11 @@ from dpo.session.writer import (
     WriterError,
     audition_requests,
     build_request,
-    cut_at_sentence,
     gemma_instruction,
     warm_auditions,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "session.json"
-
 TRAM = SourceSpec("tram", "TRAM BRAKING", "a tram braking", ("in frame", "once, briefly"))
 SIREN = SourceSpec("siren", "DISTANT SIREN", "a distant siren", ("out of frame", "rises and fades"))
 STEPS = SourceSpec("footsteps", "FOOTSTEPS", "footsteps", ("at the edge of the frame", "comes and goes"))
@@ -127,81 +122,6 @@ class TestTemplateWriter:
         writer = TemplateWriter()
         assert writer.write(_request("scene")) == "A tram stop on a wide street."
         assert writer.write(_request("atmospheric")) == "Steady, with one rise."
-
-
-class CountingWriter:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def write(self, request: CaptionRequest) -> str:
-        self.calls += 1
-        return f"caption {self.calls} for {request.settings_key}"
-
-
-def test_the_cache_returns_the_same_string_without_calling_the_inner_writer(tmp_path: Path) -> None:
-    inner = CountingWriter()
-    cache_path = tmp_path / "captions.json"
-    cached = CachedWriter(inner, cache_path)
-    request = _request("itemized", (TRAM, SIREN))
-    first, hit = cached.write_cached(request)
-    assert hit is False and inner.calls == 1
-    second, hit = cached.write_cached(request)
-    assert hit is True and second == first and inner.calls == 1
-    other, _ = cached.write_cached(_request("itemized", (SIREN, TRAM)))
-    assert other != first and inner.calls == 2
-    # A rerun over the same file costs nothing: the cache is loaded at start.
-    fresh_inner = CountingWriter()
-    reloaded = CachedWriter(fresh_inner, cache_path)
-    assert reloaded.write(request) == first
-    assert fresh_inner.calls == 0
-    assert not list(tmp_path.glob(".*.tmp"))
-
-
-class SlowCountingWriter(CountingWriter):
-    """Holds every call open until released, so concurrent misses overlap."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.release = threading.Event()
-        self.entered = threading.Event()
-
-    def write(self, request: CaptionRequest) -> str:
-        self.entered.set()
-        self.release.wait(5)
-        return super().write(request)
-
-
-def test_concurrent_misses_on_one_key_call_the_inner_writer_once(tmp_path: Path) -> None:
-    # FastAPI runs the sync caption route in a threadpool: two Show caption
-    # presses for one settings key must not become two generations (spec 7:
-    # identical settings return the identical cached caption).
-    inner = SlowCountingWriter()
-    cached = CachedWriter(inner, tmp_path / "captions.json")
-    request = _request("itemized", (TRAM, SIREN))
-    results: list[tuple[str, bool]] = []
-    workers = [
-        threading.Thread(target=lambda: results.append(cached.write_cached(request))) for _ in range(4)
-    ]
-    for worker in workers:
-        worker.start()
-    assert inner.entered.wait(5)
-    inner.release.set()
-    for worker in workers:
-        worker.join(5)
-    assert inner.calls == 1
-    assert {caption for caption, _ in results} == {"caption 1 for itemized|tram,siren"}
-    assert sorted(hit for _, hit in results) == [False, True, True, True]
-    # The file carries the provenance beside the caption; a writer that does
-    # not report one is recorded as such rather than guessed at.
-    assert json.loads((tmp_path / "captions.json").read_text(encoding="utf-8"))["captions"] == {
-        "demo_tram_stop/s1/itemized|tram,siren": {
-            "caption": "caption 1 for itemized|tram,siren",
-            "writer": "unknown",
-            "names_excluded": [],
-            # A writer with no instruction gives the model no text to go stale.
-            "prompt": "",
-        }
-    }
 
 
 class FakeAdapter:
@@ -323,96 +243,6 @@ def test_auditions_cover_every_source_and_every_present_head() -> None:
     assert "role:backdrop" in control and control["van"] == "A parked van still."
 
 
-class TestGemmaBudget:
-    """The model was measured overrunning the two-line budget it is asked for."""
-
-    class Drafts(FakeAdapter):
-        def __init__(self, *drafts: str) -> None:
-            super().__init__()
-            self.drafts = list(drafts)
-            self.calls: list[str] = []
-
-        def generate_stimulus(self, messages: list[dict[str, Any]], **kwargs: Any) -> str:
-            self.calls.append(str(messages[0]["content"]))
-            return self.drafts.pop(0)
-
-    LONG = (
-        "Distant siren rises and fades. Tram brakes once. Chatter is steady. Footsteps come and go."
-        " Pigeons are steady."
-    )
-    SHORT = "Siren rises and fades. Tram brakes once. Chatter, footsteps, and pigeons steady."
-
-    def test_a_caption_within_budget_costs_one_call(self, tmp_path: Path) -> None:
-        adapter = self.Drafts(self.SHORT)
-        assert GemmaWriter(adapter).write(_request("scene", media_path=tmp_path)) == self.SHORT
-        assert len(adapter.calls) == 1
-
-    def test_an_overrun_is_retried_once_naming_the_overrun(self, tmp_path: Path) -> None:
-        assert len(self.LONG) > CAPTION_MAX_CHARS >= len(self.SHORT)
-        adapter = self.Drafts(self.LONG, self.SHORT)
-        assert GemmaWriter(adapter).write(_request("scene", media_path=tmp_path)) == self.SHORT
-        assert len(adapter.calls) == 2
-        assert f"Too long: {len(self.LONG)} characters" in adapter.calls[1] or (
-            f"ran to {len(self.LONG)} characters" in adapter.calls[1]
-        )
-        assert adapter.calls[1].startswith(adapter.calls[0])
-        # A scene request has no entries to name, so the retry only asks for less.
-        assert "separated by commas" not in adapter.calls[1]
-
-    def test_the_retry_names_every_entry_in_order(self, tmp_path: Path) -> None:
-        adapter = self.Drafts(self.LONG, self.SHORT)
-        request = _request("itemized", (TRAM, SIREN, STEPS), media_path=tmp_path)
-        assert GemmaWriter(adapter).write(request) == self.SHORT
-        assert (
-            "lists a tram braking, a distant siren, footsteps, in that order, separated by commas"
-            in adapter.calls[1]
-        )
-
-    def test_four_or_more_entries_carry_the_budget_hint_in_the_first_draft(self, tmp_path: Path) -> None:
-        few = FakeAdapter()
-        GemmaWriter(few).write(_request("itemized", (TRAM, SIREN, STEPS), media_path=tmp_path))
-        assert "four or more entries" not in few.messages[0]["content"]
-        many = FakeAdapter()
-        GemmaWriter(many).write(_request("itemized", (TRAM, SIREN, STEPS, VAN), media_path=tmp_path))
-        assert f"stay under {CAPTION_MAX_CHARS} characters" in many.messages[0]["content"]
-
-    def test_a_second_overrun_falls_back_to_the_template_for_the_same_list(self, tmp_path: Path) -> None:
-        # The template keeps every entry in order; a sentence cut would not.
-        adapter = self.Drafts(self.LONG, self.LONG)
-        request = _request("itemized", (TRAM, SIREN, STEPS), media_path=tmp_path)
-        caption = GemmaWriter(adapter).write(request)
-        assert caption == TemplateWriter().write(request)
-        assert len(caption) <= CAPTION_MAX_CHARS
-        for source in (TRAM, SIREN, STEPS):
-            assert source.prose in caption.lower()
-        # A longer retry never replaces the draft it was meant to shorten.
-        adapter = self.Drafts(self.LONG, self.LONG + " And more.")
-        assert GemmaWriter(adapter).write(request) == caption
-
-    def test_when_even_the_template_overruns_the_caption_ends_at_a_whole_sentence(
-        self, tmp_path: Path
-    ) -> None:
-        class Overrunning:
-            def write(self, request: CaptionRequest) -> str:
-                return "x" * (CAPTION_MAX_CHARS + 1)
-
-        adapter = self.Drafts(self.LONG, self.LONG)
-        caption = GemmaWriter(adapter, fallback=Overrunning()).write(_request("scene", media_path=tmp_path))
-        assert (
-            caption
-            == "Distant siren rises and fades. Tram brakes once. Chatter is steady. Footsteps come and go."
-        )
-        assert len(caption) <= CAPTION_MAX_CHARS and caption.endswith(".")
-
-    def test_the_cut_ends_a_run_on_at_a_word_inside_the_budget(self) -> None:
-        # No sentence end inside the budget: the caption still has to fit the
-        # box, so it ends at its last whole word, and says so.
-        run_on = " ".join(["word"] * 40)
-        cut = cut_at_sentence(run_on, CAPTION_MAX_CHARS)
-        assert len(cut) <= CAPTION_MAX_CHARS and cut.endswith("word…")
-        assert cut_at_sentence("One. Two.", 6) == "One."
-
-
 class TestGemmaControl:
     """Spec 4.6: the control caption is a plain visual description, so the writer looks, not listens."""
 
@@ -438,199 +268,6 @@ class TestGemmaControl:
             adapter = FakeAdapter("A shopping street with a tram crossing.")
             GemmaWriter(adapter).write(_request(level, task="control", media_path=tmp_path / "s.jpg"))
             assert "sound" not in adapter.messages[0]["content"]
-
-
-# ---- provenance: which path wrote a caption, and whether it named a muted source
-
-
-class TestProvenance:
-    def test_the_template_reports_itself(self) -> None:
-        written = TemplateWriter().write_attributed(_request("itemized", (TRAM, SIREN)))
-        assert written.writer == "template"
-        assert written.caption == TemplateWriter().write(_request("itemized", (TRAM, SIREN)))
-
-    def test_a_first_try_within_budget_is_the_models(self, tmp_path: Path) -> None:
-        written = GemmaWriter(FakeAdapter()).write_attributed(_request("scene", media_path=tmp_path))
-        assert written.writer == "gemma"
-
-    def test_a_second_try_that_fits_is_marked_as_tightened(self, tmp_path: Path) -> None:
-        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.LONG, TestGemmaBudget.SHORT)
-        written = GemmaWriter(adapter).write_attributed(_request("scene", media_path=tmp_path))
-        assert written.writer == "gemma-tightened"
-        assert written.caption == TestGemmaBudget.SHORT
-
-    def test_two_overruns_are_marked_as_the_fallback(self, tmp_path: Path) -> None:
-        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.LONG, TestGemmaBudget.LONG)
-        written = GemmaWriter(adapter).write_attributed(
-            _request("itemized", (TRAM, SIREN), media_path=tmp_path)
-        )
-        assert written.writer == "template-fallback"
-        assert written.caption == TemplateWriter().write(_request("itemized", (TRAM, SIREN)))
-
-    def test_a_cut_with_no_sentence_end_inside_the_budget_still_fits(self, tmp_path: Path) -> None:
-        run_on = "the tram brakes while the siren rises and the crowd talks over the pigeons " * 3
-        assert "." not in run_on and len(run_on) > CAPTION_MAX_CHARS
-        cut = cut_at_sentence(run_on.strip(), CAPTION_MAX_CHARS)
-        assert len(cut) <= CAPTION_MAX_CHARS and cut.endswith("…")
-        assert cut[:-1].strip() == cut[:-1]  # ends on a whole word
-        assert cut_at_sentence("Short.", CAPTION_MAX_CHARS) == "Short."
-
-    def test_a_writer_that_does_not_report_is_recorded_as_unknown(self, tmp_path: Path) -> None:
-        cached = CachedWriter(CountingWriter(), tmp_path / "captions.json")
-        written, hit = cached.write_attributed_cached(_request("itemized", (TRAM,)))
-        assert written.writer == "unknown" and hit is False
-
-    def test_the_cache_keeps_the_provenance_across_a_restart(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        CachedWriter(TemplateWriter(), path).write_attributed_cached(_request("itemized", (TRAM,)))
-        written, hit = CachedWriter(TemplateWriter(), path).write_attributed_cached(
-            _request("itemized", (TRAM,))
-        )
-        assert hit is True and written.writer == "template"
-
-    def test_a_cache_written_before_provenance_still_loads(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        path.write_text(json.dumps({"demo_tram_stop/s1/itemized|tram": "An old caption."}), encoding="utf-8")
-        written, hit = CachedWriter(CountingWriter(), path).write_attributed_cached(
-            _request("itemized", (TRAM,))
-        )
-        assert hit is True
-        assert written == Written("An old caption.", "unknown")
-
-
-class TestCacheIdentity:
-    """The file says who wrote it; another writer's captions are not this writer's."""
-
-    @staticmethod
-    def _gemma(tmp_path: Path, checkpoint: str | None = None) -> GemmaWriter:
-        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.SHORT)
-        adapter.adapter_dir = checkpoint  # type: ignore[attr-defined]
-        return GemmaWriter(adapter)
-
-    def test_a_template_rehearsal_is_refused_by_a_gemma_run_over_the_same_out(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        CachedWriter(TemplateWriter(), path).write(_request("itemized", (TRAM,)))
-        with pytest.raises(CacheMismatch, match="written by template"):
-            CachedWriter(self._gemma(tmp_path), path)
-
-    def test_another_checkpoint_is_another_writer(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        CachedWriter(self._gemma(tmp_path, "runs/base"), path).write(
-            _request("itemized", (TRAM,), media_path=tmp_path)
-        )
-        with pytest.raises(CacheMismatch, match="runs/base"):
-            CachedWriter(self._gemma(tmp_path, "runs/dpo-v3"), path)
-        # The same checkpoint is the same writer.
-        assert CachedWriter(self._gemma(tmp_path, "runs/base"), path).entries
-
-    def test_the_identity_names_the_instruction_so_an_edit_is_a_new_writer(self, tmp_path: Path) -> None:
-        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.SHORT)
-        plain = GemmaWriter(adapter).identity
-        other = GemmaWriter(adapter, instruction=lambda request: "say nothing").identity
-        assert plain.startswith("gemma:") and plain != other
-
-    def test_a_writer_that_does_not_say_who_it_is_cannot_take_a_named_cache(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        CachedWriter(TemplateWriter(), path).write(_request("itemized", (TRAM,)))
-        with pytest.raises(CacheMismatch):
-            CachedWriter(CountingWriter(), path)
-
-    def test_an_old_file_loads_when_its_captions_could_be_this_writers(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        old = {"demo_tram_stop/s1/itemized|tram": {"caption": "A tram.", "writer": "gemma-tightened"}}
-        path.write_text(json.dumps(old), encoding="utf-8")
-        assert CachedWriter(self._gemma(tmp_path), path).lookup(_request("itemized", (TRAM,))) == "A tram."
-        with pytest.raises(CacheMismatch, match="gemma writer"):
-            CachedWriter(TemplateWriter(), path)
-
-
-class TestPromptStaleness:
-    """The identity cannot see an edited rule; the per-caption digest can."""
-
-    class Rule:
-        """A writer whose instruction is assembled from a constant it can edit."""
-
-        def __init__(self) -> None:
-            self.rule = "name every source"
-            self.calls = 0
-
-        def instruction(self, request: CaptionRequest) -> str:
-            return f"{self.rule}: {request.settings_key}"
-
-        def write(self, request: CaptionRequest) -> str:
-            self.calls += 1
-            return f"caption {self.calls}"
-
-    def test_a_caption_records_the_text_the_model_was_given(self, tmp_path: Path) -> None:
-        writer = self.Rule()
-        cached = CachedWriter(writer, tmp_path / "captions.json")
-        written, _ = cached.write_attributed_cached(_request("itemized", (TRAM,)))
-        assert written.prompt and len(written.prompt) == 12
-
-    def test_an_edited_rule_is_missed_rather_than_served(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        writer = self.Rule()
-        request = _request("itemized", (TRAM,))
-        first, hit = CachedWriter(writer, path).write_cached(request)
-        assert hit is False and first == "caption 1"
-        # Untouched, the cache still answers: the digest matches.
-        again, hit = CachedWriter(writer, path).write_cached(request)
-        assert hit is True and again == first and writer.calls == 1
-        # The identity is unchanged by this, which is exactly the hole.
-        writer.rule = "name only what is admitted"
-        rewritten, hit = CachedWriter(writer, path).write_cached(request)
-        assert hit is False and rewritten == "caption 2"
-
-    def test_a_file_written_before_the_digest_is_missed_once(self, tmp_path: Path) -> None:
-        path = tmp_path / "captions.json"
-        writer = self.Rule()
-        entry = {"caption": "A tram.", "writer": "gemma"}
-        path.write_text(
-            json.dumps({"writer": "unknown", "captions": {"demo_tram_stop/s1/itemized|tram": entry}}),
-            encoding="utf-8",
-        )
-        cached = CachedWriter(writer, path)
-        first, hit = cached.write_cached(_request("itemized", (TRAM,)))
-        assert hit is False and first == "caption 1"
-        second, hit = cached.write_cached(_request("itemized", (TRAM,)))
-        assert hit is True and second == first
-
-    def test_a_writer_with_no_instruction_reads_every_entry(self, tmp_path: Path) -> None:
-        """The template is a function of the request, so nothing about it can go stale."""
-        path = tmp_path / "captions.json"
-        request = _request("itemized", (TRAM, SIREN))
-        inner = CountingWriter()
-        first = CachedWriter(inner, path).write(request)
-        assert CachedWriter(CountingWriter(), path).write(request) == first
-
-
-class TestNamesExcluded:
-    def test_a_muted_source_the_caption_still_names_is_reported(self) -> None:
-        assert names_excluded("A tram brakes as a siren fades.", [SIREN]) == ("siren",)
-
-    def test_a_caption_that_leaves_the_muted_source_out_reports_nothing(self) -> None:
-        assert names_excluded("A tram brakes at the stop.", [SIREN, STEPS]) == ()
-
-    def test_generic_words_do_not_count_as_naming(self) -> None:
-        noise = SourceSpec("traffic", "TRAFFIC NOISE", "traffic noise", ("in frame", "steady"))
-        # "noise" alone is not the source; "traffic" is.
-        assert names_excluded("The noise of the street carries.", [noise]) == ()
-        assert names_excluded("Traffic passes steadily.", [noise]) == ("traffic",)
-
-    def test_matching_is_by_whole_word(self) -> None:
-        bird = SourceSpec("bird", "BIRD", "a bird", ("small", "comes and goes"))
-        assert names_excluded("A third tram passes.", [bird]) == ()
-        assert names_excluded("Birds call overhead.", [bird]) == ("bird",)
-
-    def test_it_is_measured_not_enforced(self, tmp_path: Path) -> None:
-        """The caption is returned as the model wrote it; the log learns, the participant does not."""
-        adapter = FakeAdapter("A tram brakes as a siren fades.")
-        written = GemmaWriter(adapter).write_attributed(
-            _request("itemized", (TRAM,), media_path=tmp_path, excluded=(SIREN,))
-        )
-        assert written.caption == "A tram brakes as a siren fades."
-        assert written.names_excluded == ("siren",)
-        assert written.writer == "gemma"
 
 
 class TestExcludedInRequests:
