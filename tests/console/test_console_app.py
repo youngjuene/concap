@@ -323,6 +323,18 @@ class TestLog:
         assert set(answer) >= {"events", "snapshot", "config_hash", "session_id", "participant"}
 
 
+class TestDownload:
+    def test_the_log_is_served_as_an_attachment_so_the_done_screen_stays(
+        self, client: TestClient, shot_ids: Any
+    ) -> None:
+        _sources(client, *shot_ids)
+        response = client.get(f"/api/log?participant={PARTICIPANT}")
+        assert response.status_code == 200
+        assert response.headers["content-disposition"].startswith("attachment;")
+        assert PARTICIPANT in response.headers["content-disposition"]
+        assert response.json()["events"]
+
+
 class TestSession:
     def test_the_page_gets_its_copy_from_the_one_place_it_lives(self, client: TestClient) -> None:
         answer = client.get(f"/api/session?participant={PARTICIPANT}").json()

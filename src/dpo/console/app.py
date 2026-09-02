@@ -365,7 +365,13 @@ def build_app(
         checked = _participant(participant)
         if isinstance(checked, JSONResponse):
             return checked
-        return log.export(checked, str(document["session_id"]))
+        # The done screen navigates here; as an attachment the browser saves
+        # the file and stays on the screen, where a bare JSON body would
+        # replace the kiosk with the log's text.
+        return JSONResponse(
+            log.export(checked, str(document["session_id"])),
+            headers={"Content-Disposition": f'attachment; filename="console-log-{checked}.json"'},
+        )
 
     # ---- media -------------------------------------------------------------
 
