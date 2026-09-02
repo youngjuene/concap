@@ -39,9 +39,19 @@ and `p_g` per shot per group.
 ```bash
 uv run dpo console preprocess \
   --mask-root /mnt/hdd/research/2026/Sa2VA/avmask/runs/60fps-windowed/masks \
+  --tidy-data /mnt/hdd/research/2026/Sa2VA/avmask/data/tidy_data.csv \
+  --ontology /mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json \
+  --cache-dir data/console/mask-cache \
   --out data/console/masks.json --fps 60 \
   --clips amsterdam_006 singapore_303
 ```
+
+`--tidy-data` with `--ontology` resolves every audio label to its AudioSet
+family, and labels from different families are never merged however their
+masks overlap; without them the grouping is by mask agreement alone, and the
+manifest's `grouping_constraint` says which you got. `--cache-dir` keeps the
+decoded masks between runs, one compressed file per clip, so re-running the
+calibration sweep reads no PNG twice and produces an identical manifest.
 
 Both release layouts are read (`{branch}/{clip}/{label}/{frame}.png` and
 `{branch}/{clip}/{label}_{second}.png`). Masks are read at 1/4 resolution by
@@ -75,15 +85,23 @@ clear the floor stays whole.
 | Idling ↔ Traffic noise | 0.062 |
 | Idling ↔ Vehicle horn | 0.003 |
 
-At the default 0.5 those first two pairs merge, and transitivity carries the
-third in with them: *Bird*, *Traffic noise* and *Vehicle horn* become one
-source, leaving *Idling* alone. Read that as evidence about the grounding
-rather than about the street. Sa2VA returned nearly the same region for three
-different audio prompts on this clip, which is exactly the double-counting §4
-exists to prevent — and also a sign that those prompts did not ground
-separately. On `singapore_303`, where they did, *Siren* ↔ *Vehicle* scored
-0.001 and nothing merged. Look at the `grouping` field of every clip before you
-accept a manifest.
+At the default 0.5 the first two pairs clear the threshold, and by mask
+agreement alone transitivity would carry the third in with them: *Bird*,
+*Traffic noise* and *Vehicle horn* as one source. That is evidence about the
+grounding rather than about the street — Sa2VA returned nearly the same region
+for three different audio prompts — and it had a cost past the grouping: the
+fused source's prose ran to seventy-one characters, no sentence naming it fit
+the caption budget, and every caption that mentioned it fell to the template
+fallback.
+
+Two things now stop that. Labels merge only within one AudioSet family, which
+§4's own justification — labels that share a *physical source* — requires and
+which an animal and a vehicle do not satisfy; on this clip that yields *Bird*
+alone, *Traffic noise* with *Vehicle horn*, and *Idling* alone. And a source is
+named by each label's canonical clause rather than its whole display name, so
+the merged pair reads *traffic noise and vehicle horn*, thirty characters. On
+`singapore_303` *Siren* ↔ *Vehicle* scored 0.001 and nothing merged. Look at
+the `grouping` field of every clip before you accept a manifest all the same.
 
 **`r0`, the half-saturation constant.** The default 0.02 says a source
 occupying two per cent of the frame is half visible. Grounded audio masks on
