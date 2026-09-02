@@ -115,6 +115,70 @@ class TestYielding:
             background.close()
 
 
+class Flaky:
+    """A writer whose first request fails outside the writer's own error type."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def write(self, request: CaptionRequest) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            raise OSError("no space left on device")
+        return "caption for " + request.settings_key
+
+
+class TestResilience:
+    def test_the_worker_survives_an_error_that_is_not_the_writers_own(self, tmp_path: Path) -> None:
+        cached = CachedWriter(Flaky(), tmp_path / "captions.json")
+        background = BackgroundWriter(cached)
+        try:
+            background.warm([_request(TRAM), _request(SIREN)], key="s1")
+            # The key still comes ready, the failure is on record, and the
+            # thread that would otherwise have died wrote the next caption.
+            assert background.wait_for("s1", timeout=5)
+            assert background.failures and background.failures[0][1].startswith("OSError")
+            assert cached.lookup(_request(SIREN)) is not None
+            assert background._thread.is_alive()
+        finally:
+            background.close()
+
+    def test_urgent_moves_queued_warm_work_ahead_instead_of_queuing_it_twice(self, tmp_path: Path) -> None:
+        inner = Slow(delay=0.05)
+        cached = CachedWriter(inner, tmp_path / "captions.json")
+        background = BackgroundWriter(cached)
+        try:
+            with background.foreground():  # hold the worker while the queues fill
+                for shot in ("s1", "s2", "s3"):
+                    background.warm([_request(TRAM, shot=shot), _request(SIREN, shot=shot)], key=shot)
+                background.urgent([_request(TRAM, shot="s3"), _request(SIREN, shot="s3")], key="s3")
+                assert background._pending["s3"] == 2
+            # s3 is written first, and its key is ready as soon as its own two
+            # are — before the sweep has reached the last shot it was queued
+            # behind, which is two captions further on.
+            assert background.wait_for("s3", timeout=0.4)
+            assert cached.lookup(_request(TRAM, shot="s3")) is not None
+            assert cached.lookup(_request(SIREN, shot="s3")) is not None
+            assert cached.lookup(_request(SIREN, shot="s2")) is None
+            assert len(inner.order) <= 3
+            assert background.wait_for("s2", timeout=5)
+        finally:
+            background.close()
+
+    def test_a_finished_key_takes_new_work_with_a_fresh_event(self, tmp_path: Path) -> None:
+        cached = CachedWriter(Slow(delay=0.05), tmp_path / "captions.json")
+        background = BackgroundWriter(cached)
+        try:
+            background.warm([_request(TRAM)], key="s1")
+            assert background.wait_for("s1", timeout=5)
+            background.warm([_request(SIREN)], key="s1")
+            assert background.wait_for("s1", timeout=0.001) is False
+            assert background.wait_for("s1", timeout=5)
+            assert cached.lookup(_request(SIREN)) is not None
+        finally:
+            background.close()
+
+
 class TestProvenance:
     def test_wrote_tells_a_prefetched_hit_from_a_revisit(self, tmp_path: Path) -> None:
         cached = CachedWriter(TemplateWriter(), tmp_path / "captions.json")

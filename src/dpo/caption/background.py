@@ -100,18 +100,35 @@ class BackgroundWriter:
         requests: Iterable[CaptionRequest],
         key: Hashable | None,
     ) -> None:
-        items = [(key, request) for request in requests if self.cached.lookup(request) is None]
+        wanted = [request for request in requests if self.cached.lookup(request) is None]
         if not self.enabled:
             # Synchronous: the template writer is instant, and a test wants an
             # answer it can assert on rather than a thread it must join.
-            for _, request in items:
+            for request in wanted:
                 self._write(request)
             return
         with self._lock:
+            queued = {self.cached.key_for(request) for _, request in self._urgent}
+            queued.update(self.cached.key_for(request) for _, request in self._warm)
+            asked = {self.cached.key_for(request) for request in wanted}
+            if queue is self._urgent:
+                # What the warm-up already holds moves ahead rather than being
+                # queued twice: it is still counted under the key it came with,
+                # and a second copy would have kept that key's event unset until
+                # the sweep reached the first.
+                promoted = [item for item in self._warm if self.cached.key_for(item[1]) in asked]
+                for item in promoted:
+                    self._warm.remove(item)
+                self._urgent.extend(promoted)
+            items = [(key, request) for request in wanted if self.cached.key_for(request) not in queued]
             if key is not None:
                 if items:
                     self._pending[key] = self._pending.get(key, 0) + len(items)
-                    self._ready.setdefault(key, threading.Event())
+                    # A key that finished earlier gets a fresh event for its new
+                    # work; the old one is already set and would answer at once.
+                    event = self._ready.get(key)
+                    if event is None or event.is_set():
+                        self._ready[key] = threading.Event()
                 elif key not in self._ready:
                     done = threading.Event()
                     done.set()
@@ -133,12 +150,16 @@ class BackgroundWriter:
             if item is None:
                 return
             key, request = item
-            self._write(request)
-            if key is not None:
-                with self._lock:
-                    self._pending[key] -= 1
-                    if self._pending[key] <= 0:
-                        self._ready[key].set()
+            try:
+                self._write(request)
+            finally:
+                # Whatever happened to the caption, the key's count moves on:
+                # a waiter blocked on it forever would pin a request thread.
+                if key is not None:
+                    with self._lock:
+                        self._pending[key] -= 1
+                        if self._pending[key] <= 0:
+                            self._ready[key].set()
 
     def _write(self, request: CaptionRequest) -> None:
         try:
@@ -150,6 +171,10 @@ class BackgroundWriter:
             # A background failure must not take the server down; the route
             # will hit the same failure on its own request and report it.
             self.failures.append((request, str(exc)))
+        except Exception as exc:  # noqa: BLE001 — the worker is the one thread; it must not die
+            # Not the writer's own refusal: a full disk under the cache file, a
+            # malformed row. Recorded the same way, and the worker goes on.
+            self.failures.append((request, f"{type(exc).__name__}: {exc}"))
 
 
 __all__ = ["BackgroundWriter"]
