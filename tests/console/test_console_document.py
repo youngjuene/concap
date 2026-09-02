@@ -114,6 +114,14 @@ class TestParticipantDocument:
         shot = participant_document(document)["clips"][0]["shots"][0]
         assert "default_caption" not in shot
 
+    def test_the_opening_travels_because_the_page_starts_the_console_on_it(
+        self, document: dict[str, Any]
+    ) -> None:
+        # Without it the page fell back to its own default opening and the
+        # documented start-state covariate was never what the document said.
+        clip = participant_document(document)["clips"][0]
+        assert clip["opening"] == document["clips"][0]["opening"]
+
     def test_the_stamp_travels_so_a_stale_tab_can_be_told_apart(self, document: dict[str, Any]) -> None:
         assert len(participant_document(document)["config_hash"]) == 12
 

@@ -273,6 +273,9 @@ def participant_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "clips": [
             {
                 "clip_id": clip["clip_id"],
+                # The start state the trial opens on (§11): a grain, an α and
+                # an admitted set — participant variables, not measurements.
+                "opening": dict(clip["opening"]),
                 "shots": [
                     {
                         "shot_id": shot["shot_id"],
