@@ -105,6 +105,26 @@ def test_participant_ids_are_refused_before_any_file_is_named(tmp_path: Path, ba
     assert not [path for path in tmp_path.iterdir() if path.name.startswith(("events-", "snapshot-"))]
 
 
+def test_a_torn_last_line_does_not_take_the_log_down(tmp_path: Path) -> None:
+    log = EventLog(tmp_path)
+    log.append("P01", [{"type": "session.begin"}, {"type": "listing.submit", "clip_id": "c1"}], None)
+    with log.events_path("P01").open("a", encoding="utf-8") as handle:
+        handle.write('{"type": "screen.enter", "scr')  # the process died mid-write
+    # The whole lines still read, the gate still answers, and the next append
+    # starts on its own line.
+    assert [event["type"] for event in log.events("P01")] == ["session.begin", "listing.submit"]
+    assert log.listing_submitted("P01", "c1")
+
+
+def test_a_torn_line_that_is_not_the_last_is_corruption(tmp_path: Path) -> None:
+    log = EventLog(tmp_path)
+    log.append("P01", [{"type": "session.begin"}], None)
+    path = log.events_path("P01")
+    path.write_text('{"type": "session.begin"\n' + path.read_text(encoding="utf-8"), encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        log.events("P01")
+
+
 def test_a_malformed_event_is_refused_and_nothing_is_written(tmp_path: Path) -> None:
     log = EventLog(tmp_path)
     with pytest.raises(SessionLogError, match=r"events\[1\]"):

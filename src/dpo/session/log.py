@@ -141,10 +141,20 @@ class EventLog:
             return []
         rows: list[dict[str, Any]] = []
         with path.open(encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    rows.append(json.loads(line))
+            lines = [line.strip() for line in handle]
+        for index, stripped in enumerate(lines):
+            if not stripped:
+                continue
+            try:
+                rows.append(json.loads(stripped))
+            except json.JSONDecodeError:
+                # A torn last line is a write that did not finish — a crash, a
+                # full disk — and the events before it are whole; reading them
+                # keeps the gate and the log answering. A torn line anywhere
+                # else is corruption, and stays an error.
+                if index == len(lines) - 1:
+                    break
+                raise
         return rows
 
     def snapshot(self, participant: str) -> dict[str, Any] | None:

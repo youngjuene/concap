@@ -310,6 +310,20 @@ class TestLog:
         events = client.get(f"/api/log?participant={PARTICIPANT}").json()["events"]
         assert events[0]["config_hash"] != "forged"
 
+    def test_a_torn_last_line_in_the_events_file_does_not_become_a_permanent_500(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        client.post(
+            "/api/events",
+            json={"participant": PARTICIPANT, "events": [{"type": "session.begin"}], "snapshot": None},
+        )
+        events_file = next((tmp_path / "out").glob(f"events-{PARTICIPANT}.jsonl"))
+        with events_file.open("a", encoding="utf-8") as handle:
+            handle.write('{"type": "screen.enter", "scr')
+        answer = client.get(f"/api/log?participant={PARTICIPANT}")
+        assert answer.status_code == 200
+        assert [event["type"] for event in answer.json()["events"]] == ["session.begin"]
+
     def test_an_event_without_a_type_is_refused(self, client: TestClient) -> None:
         answer = client.post(
             "/api/events", json={"participant": PARTICIPANT, "events": [{"screen": "author"}]}
