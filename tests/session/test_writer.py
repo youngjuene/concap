@@ -402,9 +402,12 @@ class TestGemmaBudget:
         )
         assert len(caption) <= CAPTION_MAX_CHARS and caption.endswith(".")
 
-    def test_the_cut_leaves_a_caption_with_no_sentence_end_alone(self) -> None:
-        run_on = "x" * (CAPTION_MAX_CHARS + 10)
-        assert cut_at_sentence(run_on, CAPTION_MAX_CHARS) == run_on
+    def test_the_cut_ends_a_run_on_at_a_word_inside_the_budget(self) -> None:
+        # No sentence end inside the budget: the caption still has to fit the
+        # box, so it ends at its last whole word, and says so.
+        run_on = " ".join(["word"] * 40)
+        cut = cut_at_sentence(run_on, CAPTION_MAX_CHARS)
+        assert len(cut) <= CAPTION_MAX_CHARS and cut.endswith("word…")
         assert cut_at_sentence("One. Two.", 6) == "One."
 
 
@@ -461,6 +464,14 @@ class TestProvenance:
         )
         assert written.writer == "template-fallback"
         assert written.caption == TemplateWriter().write(_request("itemized", (TRAM, SIREN)))
+
+    def test_a_cut_with_no_sentence_end_inside_the_budget_still_fits(self, tmp_path: Path) -> None:
+        run_on = "the tram brakes while the siren rises and the crowd talks over the pigeons " * 3
+        assert "." not in run_on and len(run_on) > CAPTION_MAX_CHARS
+        cut = cut_at_sentence(run_on.strip(), CAPTION_MAX_CHARS)
+        assert len(cut) <= CAPTION_MAX_CHARS and cut.endswith("…")
+        assert cut[:-1].strip() == cut[:-1]  # ends on a whole word
+        assert cut_at_sentence("Short.", CAPTION_MAX_CHARS) == "Short."
 
     def test_a_writer_that_does_not_report_is_recorded_as_unknown(self, tmp_path: Path) -> None:
         cached = CachedWriter(CountingWriter(), tmp_path / "captions.json")

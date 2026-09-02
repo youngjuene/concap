@@ -372,10 +372,21 @@ def tighten(messages: list[dict[str, Any]], length: int, names: Sequence[str]) -
 
 
 def cut_at_sentence(caption: str, budget: int) -> str:
-    """The caption up to its last sentence end inside the budget, or unchanged if none fits."""
+    """The caption up to its last sentence end inside the budget.
+
+    A caption with no sentence end inside the budget — one long sentence —
+    ends at its last word boundary inside it, with an ellipsis that says so.
+    Returning it whole would publish a caption the box clips mid-word as if
+    it had been cut, which is what this function exists to prevent.
+    """
+    if len(caption) <= budget:
+        return caption
     head = caption[:budget]
     end = max(head.rfind("."), head.rfind("!"), head.rfind("?"))
-    return caption[: end + 1] if end > 0 else caption
+    if end > 0:
+        return caption[: end + 1]
+    words = head[: budget - 1].rsplit(" ", 1)[0].rstrip(",;:—- ")
+    return words + "…"
 
 
 def _entry(source: SourceSpec) -> str:
