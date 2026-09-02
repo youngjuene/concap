@@ -243,6 +243,15 @@ def build_app(
         if isinstance(clip, JSONResponse):
             return clip
         roles = roles_for(document, clip)
+        # An audition that could not be written is the writer failing, and the
+        # participant is told so (contract §7), not handed a shot whose held
+        # tokens ghost an empty line.
+        auditions = {
+            str(shot["shot_id"]): _auditions((str(clip["clip_id"]), str(shot["shot_id"])))
+            for shot in clip["shots"]
+        }
+        if any(found is None for found in auditions.values()):
+            return _error(502, CAPTION_FAILED)
         return {
             "clip_id": clip["clip_id"],
             "task": clip["task"],
@@ -268,7 +277,7 @@ def build_app(
                     "atmosphere": {"phrase": shot["atmosphere"]["phrase"]},
                     "orderings": all_orderings(shot, roles),
                     "opening": dict(clip["opening"]),
-                    "auditions": _auditions((str(clip["clip_id"]), str(shot["shot_id"]))) or {},
+                    "auditions": auditions[str(shot["shot_id"])],
                 }
                 for shot in clip["shots"]
             ],

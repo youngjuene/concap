@@ -273,6 +273,28 @@ def test_a_writer_failure_is_the_table_6_error(tmp_path: Path, package_files: No
     assert CAPTION_FAILED == "Caption request failed. Check the connection and try again."
 
 
+class SirenAuditionFailsWriter(TemplateWriter):
+    """Every caption but the siren's own audition succeeds, so the app builds."""
+
+    def write(self, request: CaptionRequest) -> str:
+        if request.level == "itemized" and [source.id for source in request.sources] == ["siren"]:
+            raise WriterError("backend down")
+        return super().write(request)
+
+
+def test_one_failed_audition_is_the_same_502_not_an_empty_audition_table(
+    tmp_path: Path, package_files: None
+) -> None:
+    document = _document()
+    client = TestClient(
+        build_app(document, _fake_media(tmp_path, document), tmp_path / "out", SirenAuditionFailsWriter())
+    )
+    _submit_listing(client, "demo_tram_stop")
+    inventory = client.get("/api/inventory/demo_tram_stop?participant=P01")
+    # Before, the shot arrived with `auditions: {}` and a held siren ghosted nothing.
+    assert inventory.status_code == 502 and inventory.json() == {"error": CAPTION_FAILED}
+
+
 def test_a_failed_shot_audio_cut_is_the_same_502(tmp_path: Path, package_files: None) -> None:
     # In Gemma mode the shot's audio is cut before the writer runs; ffmpeg
     # failing there is a writer failure to the participant (contract §7), not
