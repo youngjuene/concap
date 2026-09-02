@@ -101,11 +101,10 @@ def test_corpus_ingest_lock_splits_and_verify_roundtrip(
     assert again["artifact_id"] == registry["artifact_id"]
 
 
-def test_report_show_lists_the_published_reports(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    from dpo.pipeline.canary import run_canary
-
-    run_canary(tmp_path / "store", CANARY_CONTRACT)
-    code, document = _run(capsys, "report", "show", "--workspace", str(tmp_path / "store"))
+def test_report_show_lists_the_published_reports(
+    capsys: pytest.CaptureFixture[str], canary_store: tuple[Path, object]
+) -> None:
+    code, document = _run(capsys, "report", "show", "--workspace", str(canary_store[0]))
     assert code == 0
     assert document["status"] == "ok"
     reports = document["reports"]
@@ -122,12 +121,11 @@ def test_report_show_lists_the_published_reports(capsys: pytest.CaptureFixture[s
     assert str(reports["locks"][0]["lock_id"]).startswith("sha256:")
 
 
-def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], canary_copy: Path) -> None:
+    # `report analyze` publishes into the workspace, so it takes a copy.
     from dpo.core.artifacts import ArtifactStore
-    from dpo.pipeline.canary import run_canary
 
-    run_canary(tmp_path / "store", CANARY_CONTRACT)
-    store = ArtifactStore.open(tmp_path / "store")
+    store = ArtifactStore.open(canary_copy)
     (validation_id,) = store.find_by_type("dpo.validation-report/v1")
     (selection_id,) = store.find_by_type("dpo.selection-report/v1")
     code, document = _run(
@@ -135,7 +133,7 @@ def test_report_analyze_compares_the_matrix(capsys: pytest.CaptureFixture[str], 
         "report",
         "analyze",
         "--workspace",
-        str(tmp_path / "store"),
+        str(canary_copy),
         "--contract",
         str(CANARY_CONTRACT),
         "--artifact-id",

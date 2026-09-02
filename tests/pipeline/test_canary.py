@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dpo.pipeline.canary import run_canary
+from dpo.pipeline.canary import CanaryResult, run_canary
 from tests.conftest import CANARY_CONTRACT
 
 
-def test_canary_cold_then_warm_is_cached_with_zero_provider_calls(tmp_path: Path) -> None:
-    cold = run_canary(tmp_path / "store", CANARY_CONTRACT)
+def test_canary_cold_then_warm_is_cached_with_zero_provider_calls(
+    canary_store: tuple[Path, CanaryResult],
+) -> None:
+    store, cold = canary_store
     assert cold.report["status"] == "offline_milestone_complete"
     assert not cold.cached
     # The trimmed default pipeline is provider-free even on a cold run; the
@@ -20,7 +22,7 @@ def test_canary_cold_then_warm_is_cached_with_zero_provider_calls(tmp_path: Path
         "tamper": "payload_corruption_detected",
     }
     assert cold.report["release"] == "blocked_pending_external_operation"
-    warm = run_canary(tmp_path / "store", CANARY_CONTRACT)
+    warm = run_canary(store, CANARY_CONTRACT)
     assert warm.cached
     assert warm.provider_calls == 0
     assert warm.artifact_id == cold.artifact_id
