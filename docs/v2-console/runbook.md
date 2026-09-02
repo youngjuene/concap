@@ -66,13 +66,15 @@ re-measure on yours.
 
 **`θ`, the composition shift that cuts a shot.** The maximum shift observed
 over a 250 ms stride was **0.112** on `amsterdam_006` and **0.068** on
-`singapore_303`; the medians were 0.014 and 0.018. At the default `θ = 0.25`
-nothing is cut and each ten-second clip is one shot — which is the right answer
-for this corpus, because these clips genuinely are continuous takes. Lower `θ`
-before you have measured audio reliability and you will shorten every analysis
-window for no visual reason (§5.2). The floor on shot length binds on the last
-shot as well as the first, so a clip that cannot be split into shots that all
-clear the floor stays whole.
+`singapore_303`; the medians were 0.014 and 0.018, and at the default
+`θ = 0.25` neither clip is cut. Over the whole corpus (48 clips, 2026-09-02)
+the default cuts **14 clips** — 8 into two shots and 6 into three, the
+shortest 2.0 s — so a ten-second clip is one shot for 34 of them, not all.
+Look at `frames` per shot before recruiting on a cut clip: a 2.5 s shot is a
+2.5 s audio window. Lower `θ` before you have measured audio reliability and
+you will shorten every analysis window for no visual reason (§5.2). The floor
+on shot length binds on the last shot as well as the first, so a clip that
+cannot be split into shots that all clear the floor stays whole.
 
 **The IoU threshold.** On `amsterdam_006` the pairwise agreements were:
 
@@ -102,6 +104,15 @@ named by each label's canonical clause rather than its whole display name, so
 the merged pair reads *traffic noise and vehicle horn*, thirty characters. On
 `singapore_303` *Siren* ↔ *Vehicle* scored 0.001 and nothing merged. Look at
 the `grouping` field of every clip before you accept a manifest all the same.
+
+**The corpus, preprocessed whole.** With `--tidy-data`, `--ontology` and
+`--provisional-salience`, all 48 clips (16 per city) scaffold into one document
+that validates: 68 shots, 120 sources (two to four per shot, one shot with one),
+109 labels standing alone and 11 merges of two to four labels, the longest
+source name 42 characters. Served on the base E4B every audition and one
+caption per shot came from the model — 390 captions, 13 of them tightened,
+none from the template — so the budget holds across the corpus, not only on
+the two clips above.
 
 **`r0`, the half-saturation constant.** The default 0.02 says a source
 occupying two per cent of the frame is half visible. Grounded audio masks on
