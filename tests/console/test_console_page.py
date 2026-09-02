@@ -238,6 +238,13 @@ class TestCopy:
         assert STRINGS["error"] == "Caption request failed. Check the connection and try again."
         assert "sorry" not in STRINGS["error"].lower()
 
+    def test_the_one_string_the_page_must_hold_is_the_table_string(self) -> None:
+        # /api/session is gated on the participant, so the line for a missing
+        # one is the one string the script carries; it must be copy.py's.
+        match = re.search(r'const PARTICIPANT_MISSING = "([^"]+)";', SCRIPT)
+        assert match and match.group(1) == STRINGS["participant_missing"]
+        assert SCRIPT.count(STRINGS["participant_missing"]) == 1
+
     def test_every_instruction_card_the_screens_need_exists(self) -> None:
         assert set(CARDS) == {"intro", "author", "check"}
         for card in CARDS.values():

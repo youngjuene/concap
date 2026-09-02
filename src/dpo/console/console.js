@@ -204,7 +204,10 @@ function newAuthoring(clip, shot, opening, committed) {
     grain,
     alpha,
     solo: null,
-    band: null,   // {caption, key} — the prose currently read
+    // {caption, key} — the prose currently read. A shot reopened for revision
+    // opens on the caption it committed, so the participant reads what they
+    // are revising instead of an empty band.
+    band: committed ? { caption: committed.caption, key: committed.key } : null,
     writing: false,
     error: null,
     revising: false,
@@ -333,7 +336,7 @@ function stopLoop() {
   if (loopHandle) cancelAnimationFrame(loopHandle);
   loopHandle = null;
   const video = $("video");
-  if (video) video.onended = null;
+  if (video) video.onended = video.onplay = video.onpause = null;
 }
 
 function loadMedia(clip) {
@@ -376,6 +379,11 @@ function renderViewing(which) {
     api.emit("viewing.ended", { clip_id: clip.clip_id, which });
     renderViewingActions(which);
   };
+  // The helper reads "Pause loop" while the clip plays and "Replay shot" while
+  // it is paused. play() resolves after this render, so the label follows the
+  // element's own events rather than its state at render time.
+  video.onplay = () => renderViewingActions(which);
+  video.onpause = () => renderViewingActions(which);
   video.play().catch(() => undefined);
   api.emit("viewing.play", { clip_id: clip.clip_id, which });
 
@@ -397,23 +405,27 @@ function renderViewing(which) {
   loopHandle = requestAnimationFrame(tick);
 }
 
+// Play or pause the stage's video, logging which under the given event names.
+function togglePlayback(video, events, payload) {
+  if (video.paused) {
+    video.play().catch(() => undefined);
+    api.emit(events.play, payload);
+  } else {
+    video.pause();
+    api.emit(events.pause, payload);
+  }
+}
+
 function renderViewingActions(which) {
   const clip = currentClip();
   const video = $("video");
   const buttons = clear($("buttons"));
+  const helpers = clear($("stage-actions"));
   const pause = button(video.paused ? state.strings.helpers.replay : state.strings.helpers.pause, {
-    onclick: () => {
-      if (video.paused) {
-        video.play().catch(() => undefined);
-        api.emit("viewing.play", { clip_id: clip.clip_id, which });
-      } else {
-        video.pause();
-        api.emit("viewing.pause", { clip_id: clip.clip_id, which });
-      }
-      renderViewingActions(which);
-    },
+    onclick: () =>
+      togglePlayback(video, { play: "viewing.play", pause: "viewing.pause" }, { clip_id: clip.clip_id, which }),
   });
-  buttons.appendChild(pause);
+  helpers.appendChild(pause);
 
   if (which === "second") {
     // Revise pauses playback and opens the console for the current shot (§3.2).
@@ -502,6 +514,9 @@ function startShotLoop() {
   const start = a.shot.start_ms / 1000;
   const end = a.shot.end_ms / 1000;
   if (video.currentTime < start || video.currentTime > end) video.currentTime = start;
+  // The helpers read the element's state, so their labels follow its events.
+  video.onplay = renderAuthoringActions;
+  video.onpause = renderAuthoringActions;
   video.play().catch(() => undefined);
   const tick = () => {
     if (video.currentTime >= end) video.currentTime = start;
@@ -630,7 +645,32 @@ function renderRows() {
 
 function renderAuthoringActions() {
   const a = state.authoring;
+  const video = $("video");
   const buttons = clear($("buttons"));
+  const helpers = clear($("stage-actions"));
+  // Table 3's author helpers: the shot loops while its caption is shaped, and
+  // these hold or restart it. Pause keeps its name and carries its state in
+  // aria-pressed; Replay returns to the shot's first frame and plays.
+  helpers.appendChild(
+    button(state.strings.helpers.replay, {
+      onclick: () => {
+        video.currentTime = a.shot.start_ms / 1000;
+        video.play().catch(() => undefined);
+        api.emit("loop.replay", { clip_id: a.clip.clip_id, shot_id: a.shot.shot_id });
+      },
+    }),
+  );
+  helpers.appendChild(
+    button(state.strings.helpers.pause, {
+      "aria-pressed": video.paused ? "true" : "false",
+      onclick: () =>
+        togglePlayback(
+          video,
+          { play: "loop.resume", pause: "loop.pause" },
+          { clip_id: a.clip.clip_id, shot_id: a.shot.shot_id },
+        ),
+    }),
+  );
   buttons.appendChild(
     button(a.writing ? state.strings.busy.writing : state.strings.actions.show, {
       disabled: a.writing ? "disabled" : null,
@@ -976,7 +1016,12 @@ function start() {
   window.addEventListener("resize", fitScreen);
   const participant = new URLSearchParams(window.location.search).get("participant");
   state.participant = participant;
-  fetch("/api/session?participant=" + encodeURIComponent(participant || ""))
+  if (!participant) {
+    // A known state, not a failed request: say so without asking the server.
+    notice(PARTICIPANT_MISSING);
+    return;
+  }
+  fetch("/api/session?participant=" + encodeURIComponent(participant))
     .then((response) => (response.ok ? response.json() : Promise.reject(new Error("no session"))))
     .then((session) => {
       state.session = session;
@@ -995,7 +1040,7 @@ function start() {
         render();
       }
     })
-    .catch(() => notice((state.strings || {}).participant_missing || "Open this page with a participant identifier."));
+    .catch(() => notice((state.strings || {}).participant_missing || PARTICIPANT_MISSING));
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") api.flush(true);
