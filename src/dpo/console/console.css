@@ -101,14 +101,19 @@ html {
   overflow: hidden;
 }
 .stage video { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--ink); }
-.stage .shot-label { position: absolute; top: 8px; left: 8px; color: var(--panel); opacity: 0.7; }
-
-/* The placed caption during a viewing: lower third of the frame. */
-.stage .placed {
+/* Words over footage sit on a flat ink scrim, so they read on a bright frame
+   as well as a dark one. The scrim is the ink token at partial cover — no
+   colour is introduced — and falls back to solid ink where color-mix is
+   missing. */
+.stage .shot-label, .stage .placed {
   position: absolute;
-  left: 0; right: 0; bottom: 8%;
-  padding: 8px 24px;
+  color: var(--panel);
+  background: var(--ink);
+  background: color-mix(in srgb, var(--ink) 60%, transparent);
 }
+.stage .shot-label { top: 8px; left: 8px; padding: 4px 8px; }
+/* The placed caption during a viewing: lower third of the frame. */
+.stage .placed { left: 0; right: 0; bottom: 8%; padding: 8px 24px; }
 .stage .placed .caption-prose { color: var(--panel); }
 
 .progress { width: 100%; height: 4px; background: var(--rule); }
