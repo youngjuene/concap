@@ -36,6 +36,16 @@ def _imported_modules(path: Path) -> set[str]:
     return found
 
 
+def _built(package: str) -> bool:
+    """Whether this instrument is still in the tree.
+
+    After the archival one of them is not, and this file has to keep passing:
+    a seam test that goes red the moment the seam is used for what it was for
+    would be the last thing anyone wants on that day.
+    """
+    return (SOURCE / package).is_dir()
+
+
 def _package_files(package: str) -> list[Path]:
     files = sorted((SOURCE / package).rglob("*.py"))
     assert files, f"no sources under {package}"
@@ -53,29 +63,46 @@ def _reaches(package: str, forbidden: str) -> list[str]:
 
 @pytest.mark.parametrize("forbidden", ["dpo.session", "dpo.console"])
 def test_the_shared_package_knows_about_neither_instrument(forbidden: str) -> None:
-    """The dependency runs one way: instruments import dpo.caption, never the reverse."""
+    """The dependency runs one way: instruments import dpo.caption, never the reverse.
+
+    Asserted whether or not that instrument still exists: the shared package
+    must not name an archived one either.
+    """
     assert _reaches("caption", forbidden) == []
 
 
-def test_the_console_never_reaches_into_the_skeleton_instrument() -> None:
-    assert _reaches("console", "dpo.session") == []
+@pytest.mark.parametrize(
+    ("package", "forbidden"),
+    [("console", "dpo.session"), ("session", "dpo.console")],
+)
+def test_neither_instrument_reaches_into_the_other(package: str, forbidden: str) -> None:
+    if not _built(package):
+        pytest.skip(f"{package} is archived")
+    assert _reaches(package, forbidden) == []
 
 
-def test_the_skeleton_instrument_never_reaches_into_the_console() -> None:
-    assert _reaches("session", "dpo.console") == []
+@pytest.mark.parametrize(
+    ("module", "forbidden"),
+    [("console", "dpo.session"), ("session", "dpo.console")],
+)
+def test_each_command_module_touches_only_its_own_instrument(module: str, forbidden: str) -> None:
+    path = SOURCE / "cli" / f"{module}.py"
+    if not path.is_file():
+        pytest.skip(f"{module} is archived")
+    assert not any(name.startswith(forbidden) for name in _imported_modules(path))
 
 
-def test_each_command_module_touches_only_its_own_instrument() -> None:
-    console_cli = _imported_modules(SOURCE / "cli" / "console.py")
-    session_cli = _imported_modules(SOURCE / "cli" / "session.py")
-    assert not any(module.startswith("dpo.session") for module in console_cli)
-    assert not any(module.startswith("dpo.console") for module in session_cli)
-
-
-def test_both_instruments_do_share_the_caption_machinery() -> None:
+@pytest.mark.parametrize("package", ["session", "console"])
+def test_an_instrument_that_is_here_does_share_the_caption_machinery(package: str) -> None:
     """The seam is worth asserting in the other direction too: it is used."""
-    for package in ("session", "console"):
-        assert _reaches(package, "dpo.caption"), f"{package} does not use the shared writers"
+    if not _built(package):
+        pytest.skip(f"{package} is archived")
+    assert _reaches(package, "dpo.caption"), f"{package} does not use the shared writers"
+
+
+def test_at_least_one_instrument_is_built() -> None:
+    """Both, until the decision; exactly one after it; never none."""
+    assert [package for package in ("session", "console") if _built(package)]
 
 
 def _tests_reaching(directory: str, forbidden: str) -> list[str]:
@@ -94,6 +121,8 @@ def _tests_reaching(directory: str, forbidden: str) -> list[str]:
 )
 def test_an_instruments_tests_do_not_reach_into_the_other(directory: str, forbidden: str) -> None:
     """Archiving one instrument deletes its own tests and leaves no red ones behind."""
+    if not (TESTS / directory).is_dir():
+        pytest.skip(f"{directory} is archived")
     assert _tests_reaching(directory, forbidden) == []
 
 
