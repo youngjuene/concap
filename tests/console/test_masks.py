@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -411,6 +412,13 @@ class TestMaskCache:
         monkeypatch.setattr(module, "_decode", counting)
         derive_clip(masks, "clip_001", fps=1.0, downsample=1, cache_dir=cache_dir)
         assert decoded == []
+
+    def test_the_cache_key_does_not_depend_on_how_the_path_is_spelled(self, masks: Path) -> None:
+        from dpo.console.masks import MaskCache
+
+        absolute = masks / "visual" / "c" / "Road" / "00000.png"
+        relative = Path(os.path.relpath(absolute))
+        assert MaskCache.key_for(absolute) == MaskCache.key_for(relative)
 
     def test_a_different_downsample_is_a_different_cache(self, masks: Path, tmp_path: Path) -> None:
         self._clip(masks)

@@ -131,7 +131,9 @@ class MaskCache:
 
     @staticmethod
     def key_for(path: Path) -> str:
-        return str(path)
+        # One spelling per file: a relative --mask-root on one run and an
+        # absolute one on the next are the same masks, not a second decode.
+        return str(Path(path).resolve())
 
     def get(self, path: Path, downsample: int) -> np.ndarray:
         key = self.key_for(path)
