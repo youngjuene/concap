@@ -50,8 +50,8 @@ class ConsoleLogError(ValueError):
     """A participant id or an event batch the log refuses."""
 
 
-def validate_participant(value: str | None) -> str:
-    if value is None or not PARTICIPANT_RE.fullmatch(value):
+def validate_participant(value: object) -> str:
+    if not isinstance(value, str) or not PARTICIPANT_RE.fullmatch(value):
         raise ConsoleLogError("participant must match [A-Za-z0-9_-]{1,64}")
     return value
 

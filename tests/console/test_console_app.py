@@ -86,6 +86,11 @@ class TestGating:
     def test_a_participant_id_of_the_wrong_shape_is_refused(self, client: TestClient) -> None:
         assert client.get("/api/session?participant=../etc").status_code == 400
 
+    def test_a_participant_id_that_is_not_a_string_is_refused_not_a_500(self, client: TestClient) -> None:
+        # A JSON body can carry a number where the page sends a string.
+        response = client.post("/api/events", json={"participant": 123, "events": []})
+        assert response.status_code == 400
+
 
 class TestShot:
     def test_no_measured_number_is_ever_returned(self, client: TestClient, shot_ids: Any) -> None:
