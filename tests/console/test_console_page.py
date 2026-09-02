@@ -269,12 +269,7 @@ class TestCopy:
         # title, the line that says what is needed, a field and Continue,
         # all in copy fetched ungated rather than a second copy in the script.
         landing = SCRIPT[SCRIPT.index("function renderLanding") :].split("\n}\n", 1)[0]
-        for used in (
-            "strings.app_title",
-            "strings.participant_missing",
-            "strings.participant_label",
-            "strings.actions.continue",
-        ):
+        for used in ("strings.app_title", "strings.participant_label", "strings.actions.continue"):
             assert used in landing
         assert 'class: "field"' in landing and 'id: "participant"' in landing
         assert 'fetch("/api/strings")' in SCRIPT

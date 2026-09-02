@@ -488,6 +488,8 @@ function loadClipMedia(clip) {
 
 function setShotLabel(index) {
   const clip = currentClip();
+  // "Shot n of m" says nothing when m is 1.
+  $("shot-label").hidden = clip.shots.length < 2;
   $("shot-label").textContent = fill(STRINGS.shotLabel, index + 1, clip.shots.length);
 }
 
@@ -1940,7 +1942,6 @@ function renderLanding() {
     spellcheck: "false",
     maxlength: "64",
     "aria-label": STRINGS.participantLabel,
-    placeholder: STRINGS.participantLabel,
   });
   const go = button(STRINGS.continue, { class: "button primary", id: "continue", disabled: "disabled" });
   const submit = () => {
@@ -1957,7 +1958,6 @@ function renderLanding() {
   go.addEventListener("click", submit);
   const node = el("div", { class: "card landing" }, [
     el("h1", { class: "heading", text: STRINGS.appTitle }),
-    el("p", { class: "body", text: STRINGS.participantMissing }),
     el("label", { class: "eyebrow", for: "participant", text: STRINGS.participantLabel }),
     field,
     go,

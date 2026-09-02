@@ -399,7 +399,7 @@ class TestKiosk:
         # ... on a landing screen that asks for it: the title, a field for the
         # identifier, and Continue, which reopens the page with it in the URL.
         landing = _js()[_js().index("function renderLanding") :].split("\n}\n", 1)[0]
-        assert "STRINGS.appTitle" in landing and "STRINGS.participantMissing" in landing
+        assert "STRINGS.appTitle" in landing
         assert 'class: "field"' in landing and "STRINGS.continue" in landing
         assert "window.location.search" in landing
 

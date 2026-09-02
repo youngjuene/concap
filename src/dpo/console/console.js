@@ -365,6 +365,13 @@ function loadMedia(clip) {
   return video;
 }
 
+// "Shot n of m" says nothing when m is 1.
+function labelShot(clip, index) {
+  const label = $("shot-label");
+  label.hidden = clip.shots.length < 2;
+  label.textContent = "Shot " + (index + 1) + " of " + clip.shots.length;
+}
+
 function shotAt(clip, ms) {
   for (let index = 0; index < clip.shots.length; index += 1) {
     const shot = clip.shots[index];
@@ -412,7 +419,7 @@ function renderViewing(which) {
     $("played").style.width = Math.min(100, (ms / total) * 100) + "%";
     const index = shotAt(clip, ms);
     const shot = clip.shots[index];
-    $("shot-label").textContent = "Shot " + (index + 1) + " of " + clip.shots.length;
+    labelShot(clip, index);
     const text =
       which === "first"
         ? shot.raw_caption
@@ -553,8 +560,7 @@ function startShotLoop() {
     $("played").style.width = Math.max(0, Math.min(100, (played / span) * 100)) + "%";
     loopHandle = requestAnimationFrame(tick);
   };
-  $("shot-label").textContent =
-    "Shot " + (state.snapshot.shot_index + 1) + " of " + a.clip.shots.length;
+  labelShot(a.clip, state.snapshot.shot_index);
   $("placed").hidden = true;
   loopHandle = requestAnimationFrame(tick);
 }
@@ -1092,7 +1098,6 @@ function renderLanding(strings) {
     spellcheck: "false",
     maxlength: "64",
     "aria-label": strings.participant_label,
-    placeholder: strings.participant_label,
   });
   const go = button(strings.actions.continue, { class: "button primary", id: "continue", disabled: "disabled" });
   const submit = () => {
@@ -1110,7 +1115,6 @@ function renderLanding(strings) {
   clear($("column")).appendChild(
     el("div", { class: "card landing" }, [
       el("h1", { class: "heading", text: strings.app_title }),
-      el("p", { class: "body", text: strings.participant_missing }),
       el("label", { class: "eyebrow", for: "participant", text: strings.participant_label }),
       field,
       el("div", { class: "buttons" }, [go]),

@@ -102,7 +102,7 @@ CARDS: dict[str, dict[str, Any]] = {
     "check": {
         "heading": "Two captions",
         "body": [
-            "For each shot, two captions. One is yours. Choose the one you would rather have.",
+            "For each shot, two captions. One is yours.",
         ],
     },
 }
