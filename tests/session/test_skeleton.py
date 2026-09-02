@@ -18,6 +18,7 @@ from dpo.session.skeleton import (
     head_weights,
     heads_present,
     members_in_order,
+    neighbours,
     orderings,
     resolve,
     settings_key,
@@ -258,3 +259,30 @@ def test_collapsing_a_regime_never_moves_a_source_that_never_crosses() -> None:
     sources = [_source("loud", 1.0, 1.0), *_near_parallel(5)]
     for ordering in orderings(sources):
         assert ordering["order"][0] == "loud"
+
+
+def test_every_neighbour_is_one_gesture_away_and_the_server_would_accept_it() -> None:
+    """What the background writer prefetches: the states one touch from this one."""
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    clip = document["clips"][0]
+    shot = clip["shots"][0]
+    roles = document["role_heads"]["audio"]
+    ids = tuple(source["id"] for source in shot["sources"])
+    order = tuple(orderings(shot["sources"])[0]["order"])
+    current = Settings("itemized", ids, order)
+    near = neighbours(shot, roles, current)
+    keys = {candidate.key for candidate in near}
+    assert len(keys) == len(near) and current.key not in keys
+    for source_id in ids:
+        assert any(c.level == "itemized" and source_id not in c.admitted for c in near)
+    assert any(c.level == "grouped" for c in near)
+    for candidate in near:
+        validate_settings(
+            shot,
+            roles,
+            {
+                "level": candidate.level,
+                "admitted": list(candidate.admitted),
+                "order": list(candidate.order),
+            },
+        )

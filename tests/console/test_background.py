@@ -272,39 +272,3 @@ class TestConsoleNeighbours:
         near = neighbours(field, Settings("atmospheric", (), 0))
         assert [c.grain for c in near] == ["scene"]
         assert set(near[0].admitted) == {source.id for source in field.sources}
-
-
-class TestSessionNeighbours:
-    def test_one_gesture_away_on_the_skeleton(self) -> None:
-        import json
-
-        from dpo.session.skeleton import Settings, neighbours, orderings
-
-        # This file lives beside the console fixtures; the skeleton fixture is next door.
-        fixture = Path(__file__).parent.parent / "session" / "fixtures" / "session.json"
-        document = json.loads(fixture.read_text(encoding="utf-8"))
-        clip = document["clips"][0]
-        shot = clip["shots"][0]
-        roles = document["role_heads"]["audio"]
-        ids = tuple(source["id"] for source in shot["sources"])
-        order = tuple(orderings(shot["sources"])[0]["order"])
-        current = Settings("itemized", ids, order)
-        near = neighbours(shot, roles, current)
-        keys = {candidate.key for candidate in near}
-        assert len(keys) == len(near) and current.key not in keys
-        for source_id in ids:
-            assert any(c.level == "itemized" and source_id not in c.admitted for c in near)
-        assert any(c.level == "grouped" for c in near)
-        # Every neighbour is a settings state the server would accept.
-        from dpo.session.skeleton import validate_settings
-
-        for candidate in near:
-            validate_settings(
-                shot,
-                roles,
-                {
-                    "level": candidate.level,
-                    "admitted": list(candidate.admitted),
-                    "order": list(candidate.order),
-                },
-            )
