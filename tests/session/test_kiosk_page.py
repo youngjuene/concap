@@ -396,6 +396,12 @@ class TestKiosk:
 
     def test_missing_participant_shows_one_line(self) -> None:
         assert '"Open this page with a participant identifier."' in _js()
+        # ... on a landing screen that asks for it: the title, a field for the
+        # identifier, and Continue, which reopens the page with it in the URL.
+        landing = _js()[_js().index("function renderLanding") :].split("\n}\n", 1)[0]
+        assert "STRINGS.appTitle" in landing and "STRINGS.participantMissing" in landing
+        assert 'class: "field"' in landing and "STRINGS.continue" in landing
+        assert "window.location.search" in landing
 
     def test_targets_meet_the_minimums(self) -> None:
         css = _css()

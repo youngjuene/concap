@@ -191,9 +191,11 @@ uv run dpo session serve --session data/session/session.json \
 
 Open **`http://127.0.0.1:8777/?participant=P01`** in the kiosk browser and put
 it in fullscreen (Begin also requests fullscreen). The participant identifier
-comes from the URL; without one the page shows a one-line message and nothing
-else. Every interaction is autosaved, and reopening the same URL resumes from
-the start of the interrupted step.
+comes from the URL; opened without one, the page is a door — the title, a
+field for the identifier, and Continue, which reopens the page with it in the
+URL — so a kiosk can be entered from its own front page. Every interaction is
+autosaved, and reopening the same URL resumes from the start of the
+interrupted step.
 
 On a screen taller than the tablet's 820 (a desk monitor during rehearsal or
 an audit) the page zooms its composition to the screen's height, so type and

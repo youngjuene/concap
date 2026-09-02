@@ -54,6 +54,9 @@ const STRINGS = {
   error: "Caption request failed. Check the connection and try again.",
   // Not in Table 6 — build contract 9 fixes this one line for a missing id.
   participantMissing: "Open this page with a participant identifier.",
+  // Not in Table 6: the landing screen's field label, the follow-up page's
+  // words for the same field.
+  participantLabel: "Participant identifier",
   // Not in Table 6 — instruction card copy and the summary labels are
   // placeholders in the interface's voice (spec 5: all copy is a placeholder).
   intro: {
@@ -1918,12 +1921,57 @@ function wireGlobal() {
   window.addEventListener("pagehide", flushNow);
 }
 
+// The server checks the identifier against this same shape; Continue waits for
+// one that would pass, so the door never opens a session it knows is refused.
+const PARTICIPANT_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+
+// The front door, when the page was opened without an identifier: the title,
+// the one line that says what is needed, a field for it, and Continue, which
+// reopens the page with the identifier in the URL — the entry the session is
+// keyed by, so a returning participant resumes and a new one begins.
+function renderLanding() {
+  document.title = STRINGS.appTitle;
+  const field = el("input", {
+    class: "field",
+    id: "participant",
+    type: "text",
+    autocomplete: "off",
+    autocapitalize: "off",
+    spellcheck: "false",
+    maxlength: "64",
+    "aria-label": STRINGS.participantLabel,
+    placeholder: STRINGS.participantLabel,
+  });
+  const go = button(STRINGS.continue, { class: "button primary", id: "continue", disabled: "disabled" });
+  const submit = () => {
+    const id = field.value.trim();
+    if (!PARTICIPANT_SHAPE.test(id)) return;
+    window.location.search = "?participant=" + encodeURIComponent(id);
+  };
+  field.addEventListener("input", () => {
+    go.disabled = !PARTICIPANT_SHAPE.test(field.value.trim());
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submit();
+  });
+  go.addEventListener("click", submit);
+  const node = el("div", { class: "card landing" }, [
+    el("h1", { class: "heading", text: STRINGS.appTitle }),
+    el("p", { class: "body", text: STRINGS.participantMissing }),
+    el("label", { class: "eyebrow", for: "participant", text: STRINGS.participantLabel }),
+    field,
+    go,
+  ]);
+  clear($("working")).appendChild(node);
+  $("main").classList.add("single");
+  field.focus();
+}
+
 async function boot() {
   state.reducedMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   state.participant = participantFromUrl();
   if (!state.participant) {
-    clear($("working")).appendChild(el("p", { class: "body", text: STRINGS.participantMissing }));
-    $("main").classList.add("single");
+    renderLanding();
     return;
   }
   wireGlobal();
