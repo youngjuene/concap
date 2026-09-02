@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import torch
 
 from dpo.contracts.study_contract import CaptionContract, ContractError
+from dpo.core.safety import screen_checkpoint_directory
 from dpo.models.base import CompletionBatch, MediaBatch, ModalityIsolationError
 from dpo.models.gemma4.backend_config import BackendConfig
 from dpo.models.gemma4.prompt import assistant_message, prompt_messages, template_kwargs
@@ -98,6 +100,12 @@ class GemmaCaptionAdapter:
                 f"backend config serves media_inputs={config.model.media_inputs!r} but the"
                 f" caption contract is for track {contract.track!r}"
             )
+        # Screened at construction rather than at load, so a hostile directory
+        # is refused before any CUDA work and on a machine that has none. Every
+        # caller that names an adapter directory passes through here; the
+        # training backend attaches its own adapter and keeps its own screen.
+        if adapter_dir is not None:
+            screen_checkpoint_directory(Path(adapter_dir))
         self.config = config
         self.contract = contract
         self.media_resolver = media_resolver

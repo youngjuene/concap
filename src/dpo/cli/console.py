@@ -253,6 +253,25 @@ def _gemma_writer(
     """
     if not arguments.backend_config:
         raise ConsoleUsageError("--writer gemma requires --backend-config")
+    from dpo.candidates.candidate_records import CandidateError
+    from dpo.candidates.generation import verify_backend_pin
+    from dpo.contracts.study_contract import load_contract
+    from dpo.models.gemma4.backend_config import load_config
+
+    config = load_config(arguments.backend_config)
+    contract = load_contract(arguments.contract)
+    if config.model.media_inputs != "audio" or "audio" not in contract.tracks:
+        raise ConsoleUsageError(
+            "--writer gemma needs an audio backend config and a contract with [tracks.audio]"
+        )
+    # Ahead of the CUDA gate, so a config the contract does not pin is refused
+    # on any machine rather than only on the one that would have loaded it.
+    # The participant-facing writer is held to the same pin as the pipeline.
+    try:
+        verify_backend_pin(contract, track="audio", backend_config_path=Path(arguments.backend_config))
+    except CandidateError as exc:
+        raise ConsoleUsageError(str(exc)) from exc
+
     import torch
 
     if not torch.cuda.is_available():
@@ -268,22 +287,18 @@ def _gemma_writer(
     from dpo.caption.media import shot_audio
     from dpo.caption.writer import GemmaWriter
     from dpo.console.requests import ConsoleTemplateWriter, RequestBuilder
-    from dpo.contracts.study_contract import load_contract
+    from dpo.core.safety import CheckpointSafetyError
     from dpo.models.gemma4.adapter import GemmaCaptionAdapter
-    from dpo.models.gemma4.backend_config import load_config
 
-    config = load_config(arguments.backend_config)
-    contract = load_contract(arguments.contract)
-    if config.model.media_inputs != "audio" or "audio" not in contract.tracks:
-        raise ConsoleUsageError(
-            "--writer gemma needs an audio backend config and a contract with [tracks.audio]"
+    try:
+        adapter = GemmaCaptionAdapter(
+            config=config,
+            contract=contract.tracks["audio"],
+            media_resolver=lambda reference: reference,
+            adapter_dir=None if arguments.checkpoint is None else str(arguments.checkpoint),
         )
-    adapter = GemmaCaptionAdapter(
-        config=config,
-        contract=contract.tracks["audio"],
-        media_resolver=lambda reference: reference,
-        adapter_dir=None if arguments.checkpoint is None else str(arguments.checkpoint),
-    )
+    except CheckpointSafetyError as exc:
+        raise ConsoleUsageError(str(exc)) from exc
     builder = RequestBuilder(configuration_of(document))
     media_dir = Path(arguments.media_dir)
     cache_dir = Path(arguments.out) / "media-cache"

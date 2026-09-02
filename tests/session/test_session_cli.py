@@ -35,6 +35,26 @@ def _arguments(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
+def _unpinned_backend_config(tmp_path: Path) -> Path:
+    """An audio config the contract does not pin: the live one, edited for a machine."""
+    edited = tmp_path / "e4b-audio.toml"
+    source = Path("configs/gemma4/e4b-audio.toml").read_text(encoding="utf-8")
+    edited.write_text(source + "\n# tuned for this box\n", encoding="utf-8")
+    return edited
+
+
+def test_a_backend_config_the_contract_does_not_pin_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The kiosk is held to [backends.audio], and on a machine with no CUDA device."""
+    arguments = _arguments(backend_config=str(_unpinned_backend_config(tmp_path)))
+    with pytest.raises(SessionUsageError, match="config_hash"):
+        _gemma_writer(arguments)
+    assert _session_serve(arguments) == 2
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["status"] == "error" and emitted["command"] == "session serve"
+
+
 def test_gemma_without_a_backend_config_is_a_usage_error_not_an_invalid_document(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
