@@ -10,6 +10,10 @@ The chain, from §2::
     masks → IoU grouping → {r_g, p_g, w_g} → v_g(r0) → filter
           → rank(α) → band + register → grain → prompt → caption
 
+The grouping step is :func:`dpo.console.masks.group_audio_labels`, which is
+where the mask windows and the AudioSet family constraint live; everything
+from the quantities rightward is here.
+
 Two properties hold it together and both are easy to break by accident.
 
 Normalization happens over the *full* source set and filtering happens after
@@ -27,7 +31,7 @@ this as a revisable theory choice (§13, last row); ``Field`` keeps ``r`` beside
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Any, TypedDict
@@ -43,75 +47,6 @@ UNNAMED_GRAIN = "atmospheric"
 
 class QuantityError(ValueError):
     """A measured quantity is outside the range its definition allows."""
-
-
-# ---- §4 source grouping -----------------------------------------------------
-
-
-def iou(left: Sequence[bool], right: Sequence[bool]) -> float:
-    """Intersection over union of two per-pixel or per-frame occupancies.
-
-    Zero when neither occupies anything, which keeps two absent labels from
-    grouping into one source on the strength of both being absent.
-    """
-    if len(left) != len(right):
-        raise QuantityError(f"masks of different extent: {len(left)} and {len(right)}")
-    intersection = sum(1 for a, b in zip(left, right, strict=True) if a and b)
-    union = sum(1 for a, b in zip(left, right, strict=True) if a or b)
-    return intersection / union if union else 0.0
-
-
-def group_labels(occupancy: Mapping[str, Sequence[bool]], threshold: float) -> list[tuple[str, ...]]:
-    """Merge labels whose masks agree above ``threshold`` into one sound source.
-
-    Prompt-based segmentation returns overlapping masks for labels that share a
-    physical source: prompting with *speech* and with *footsteps* recovers the
-    same pedestrian pixels, and counting area per label would credit that
-    source twice (§4). Agreement is transitive here — a union-find over the
-    pairs above threshold — because a source is a physical thing, and three
-    labels that pairwise overlap on it are one thing however the middle pair
-    scores.
-
-    Labels come back in input order, and each group in the order of its first
-    member, so the grouping is a function of the input and not of dict
-    iteration.
-    """
-    if not 0.0 <= threshold <= 1.0:
-        raise QuantityError(f"IoU threshold must lie in [0, 1]; got {threshold}")
-    labels = list(occupancy)
-    parent = {label: label for label in labels}
-
-    def find(label: str) -> str:
-        while parent[label] != label:
-            parent[label] = parent[parent[label]]
-            label = parent[label]
-        return label
-
-    for left, right in combinations(labels, 2):
-        if iou(occupancy[left], occupancy[right]) >= threshold:
-            a, b = find(left), find(right)
-            if a != b:
-                parent[b] = a
-
-    groups: dict[str, list[str]] = {}
-    for label in labels:
-        groups.setdefault(find(label), []).append(label)
-    return [tuple(members) for members in groups.values()]
-
-
-def union_occupancy(members: Iterable[Sequence[bool]]) -> list[bool]:
-    """The group's mask: a pixel or frame the group occupies if any member does.
-
-    This is what makes area computed once per group rather than summed across
-    its labels (§4).
-    """
-    rows = list(members)
-    if not rows:
-        return []
-    width = len(rows[0])
-    if any(len(row) != width for row in rows):
-        raise QuantityError("group members have different extents")
-    return [any(row[index] for row in rows) for index in range(width)]
 
 
 # ---- §5 quantities ----------------------------------------------------------

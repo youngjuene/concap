@@ -10,8 +10,6 @@ from dpo.console.quantities import (
     Source,
     composition,
     cut_points,
-    group_labels,
-    iou,
     mean_visual_share,
     normalize,
     presence_rate,
@@ -19,7 +17,6 @@ from dpo.console.quantities import (
     segments,
     subsets_of,
     total_variation,
-    union_occupancy,
     visibility,
 )
 
@@ -41,50 +38,6 @@ def _field(*sources: Source, r0: float = 0.02, min_regime: float = 0.02) -> Fiel
 
 
 # ---- §4 grouping ------------------------------------------------------------
-
-
-class TestGrouping:
-    def test_two_labels_over_the_same_pixels_become_one_source(self) -> None:
-        occupancy = {
-            "speech": [True, True, True, False],
-            "footsteps": [True, True, False, False],
-            "siren": [False, False, False, True],
-        }
-        groups = group_labels(occupancy, 0.5)
-        assert sorted(groups, key=len) == [("siren",), ("speech", "footsteps")]
-
-    def test_agreement_is_transitive_because_a_source_is_one_thing(self) -> None:
-        # a↔b and b↔c both clear the threshold; a↔c on its own does not.
-        occupancy = {
-            "a": [True, True, True, False, False, False],
-            "b": [False, True, True, True, False, False],
-            "c": [False, False, True, True, True, False],
-        }
-        assert iou(occupancy["a"], occupancy["c"]) < 0.5
-        assert group_labels(occupancy, 0.4) == [("a", "b", "c")]
-
-    def test_two_absent_labels_do_not_group_on_both_being_absent(self) -> None:
-        occupancy = {"a": [False, False], "b": [False, False]}
-        assert iou(occupancy["a"], occupancy["b"]) == 0.0
-        assert group_labels(occupancy, 0.5) == [("a",), ("b",)]
-
-    def test_masks_of_different_extents_are_refused_rather_than_zipped_short(self) -> None:
-        with pytest.raises(QuantityError):
-            iou([True, False], [True])
-
-    def test_grouping_is_a_function_of_input_order_not_dict_iteration(self) -> None:
-        occupancy = {"z": [True, False], "a": [True, False], "m": [False, True]}
-        assert group_labels(occupancy, 0.5) == [("z", "a"), ("m",)]
-
-    def test_the_group_occupies_the_union_so_area_is_counted_once(self) -> None:
-        assert union_occupancy([[True, False, False], [False, True, False]]) == [True, True, False]
-
-    def test_a_threshold_outside_the_unit_interval_is_refused(self) -> None:
-        with pytest.raises(QuantityError):
-            group_labels({"a": [True]}, 1.5)
-
-
-# ---- §5 quantities ----------------------------------------------------------
 
 
 class TestQuantities:
