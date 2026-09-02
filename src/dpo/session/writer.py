@@ -145,21 +145,6 @@ def audition_requests(
     return requests
 
 
-def warm_auditions(
-    writer: CaptionWriter, document: Mapping[str, Any], shot_media: ShotMedia | None = None
-) -> dict[tuple[str, str], dict[str, str]]:
-    """Write every audition caption up front so holding a row is instant (spec 7)."""
-    table: dict[tuple[str, str], dict[str, str]] = {}
-    for clip in document["clips"]:
-        for shot in clip["shots"]:
-            media = shot_media(str(clip["clip_id"]), shot) if shot_media is not None else None
-            requests = audition_requests(document, clip, shot, media)
-            table[(str(clip["clip_id"]), str(shot["shot_id"]))] = {
-                row_id: writer.write(request) for row_id, request in requests.items()
-            }
-    return table
-
-
 __all__ = [
     "CAPTION_MAX_CHARS",
     "GEMMA_INSTRUCTION",
@@ -185,5 +170,4 @@ __all__ = [
     "settings_key",
     "tighten",
     "visual_messages",
-    "warm_auditions",
 ]

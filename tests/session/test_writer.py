@@ -23,7 +23,6 @@ from dpo.session.writer import (
     audition_requests,
     build_request,
     gemma_instruction,
-    warm_auditions,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "session.json"
@@ -236,11 +235,7 @@ def test_auditions_cover_every_source_and_every_present_head() -> None:
     assert requests["siren"].level == "itemized" and [s.id for s in requests["siren"].sources] == ["siren"]
     head = requests["role:underneath"]
     assert head.level == "grouped" and {m.id for m in head.heads[0].members} == {"footsteps", "chatter"}
-    table = warm_auditions(TemplateWriter(), document)
-    assert set(table) == {(c["clip_id"], s["shot_id"]) for c in document["clips"] for s in c["shots"]}
-    assert table[("demo_tram_stop", "s1")]["siren"] == "A distant siren rises and fades."
-    control = table[("demo_market", "s1")]
-    assert "role:backdrop" in control and control["van"] == "A parked van still."
+    assert TemplateWriter().write(requests["siren"]) == "A distant siren rises and fades."
 
 
 class TestGemmaControl:
