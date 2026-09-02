@@ -137,6 +137,9 @@ function newSnapshot() {
     screen: "intro",
     clip_index: 0,
     shot_index: 0,
+    // Whether the shot at shot_index is open for revision, so a reload during
+    // one returns to the second viewing on Keep rather than to the next shot.
+    revising: false,
     // The start state configuration assigned, recorded as a covariate (§11).
     opened: {},
     committed: {},
@@ -211,6 +214,9 @@ function newAuthoring(clip, shot, opening, committed) {
     writing: false,
     error: null,
     revising: false,
+    // Set while the next shot's payload is on its way after Keep: this shot is
+    // still on screen, and a second Keep must not commit it twice.
+    locked: false,
   };
 }
 
@@ -477,6 +483,7 @@ function renderViewingActions(which) {
 function openShot(index, revising) {
   const clip = currentClip();
   state.snapshot.shot_index = index;
+  state.snapshot.revising = Boolean(revising);
   const shot = clip.shots[index];
   const key = shotKey(clip.clip_id, shot.shot_id);
   const load = state.shots[key]
@@ -715,16 +722,17 @@ function renderAuthoringActions() {
   );
   buttons.appendChild(
     button(a.writing ? state.strings.busy.writing : state.strings.actions.show, {
-      disabled: a.writing ? "disabled" : null,
+      disabled: a.writing || a.locked ? "disabled" : null,
       onclick: onShowCaption,
     }),
   );
   // Keep is disabled whenever the displayed prose is stale relative to current
-  // settings, so a participant cannot keep a caption they have not read (§4.5).
+  // settings, so a participant cannot keep a caption they have not read (§4.5),
+  // and while the next shot is opening.
   buttons.appendChild(
     button(a.revising ? state.strings.actions.revise : state.strings.actions.keep, {
       class: "button primary",
-      disabled: isFresh(a) ? null : "disabled",
+      disabled: isFresh(a) && !a.locked ? null : "disabled",
       onclick: onKeep,
     }),
   );
@@ -827,6 +835,7 @@ function wireSource(node, source) {
 
 function onShowCaption() {
   const a = state.authoring;
+  if (a.writing || a.locked) return;
   const settings = settingsOf(a);
   const key = keyOf(a);
   a.writing = true;
@@ -861,7 +870,7 @@ function onShowCaption() {
 
 function onKeep() {
   const a = state.authoring;
-  if (!isFresh(a)) return;
+  if (!isFresh(a) || a.locked) return;
   const clipId = a.clip.clip_id;
   const shotId = a.shot.shot_id;
   const settings = settingsOf(a);
@@ -885,11 +894,17 @@ function onKeep() {
   });
   if (a.revising) {
     state.authoring = null;
+    state.snapshot.revising = false;
     enter("watch2");
     return;
   }
   const next = state.snapshot.shot_index + 1;
   if (next < a.clip.shots.length) {
+    // The next shot's payload waits on its auditions; until it arrives this
+    // shot stays on screen with its actions locked, so a second press cannot
+    // commit it again and skip the shot after it.
+    a.locked = true;
+    renderAuthoringActions();
     openShot(next);
   } else {
     state.authoring = null;
@@ -1080,7 +1095,7 @@ function start() {
       // half-built console from the snapshot: the shot payload has to be
       // fetched again anyway, and reopening is one path instead of two.
       if (state.snapshot.screen === "author") {
-        openShot(state.snapshot.shot_index);
+        openShot(state.snapshot.shot_index, state.snapshot.revising);
       } else {
         render();
       }

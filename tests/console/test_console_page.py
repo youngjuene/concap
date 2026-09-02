@@ -200,7 +200,7 @@ class TestActions:
         assert "primary" not in show.split("state.strings.actions.keep")[0]
 
     def test_keep_is_disabled_until_the_shown_prose_matches_the_settings(self) -> None:
-        assert 'disabled: isFresh(a) ? null : "disabled"' in SCRIPT
+        assert 'disabled: isFresh(a) && !a.locked ? null : "disabled"' in SCRIPT
 
     def test_freshness_is_a_comparison_so_changing_back_needs_no_new_request(self) -> None:
         assert "a.band.key === keyOf(a)" in SCRIPT
@@ -211,6 +211,16 @@ class TestActions:
     def test_no_reroll_affordance_exists_anywhere(self) -> None:
         for text in (HTML, CSS, SCRIPT):
             assert "reroll" not in text.lower() and "regenerate" not in text.lower()
+
+    def test_keep_is_locked_while_the_next_shot_opens_and_a_revision_survives_a_reload(self) -> None:
+        # A second Keep while /api/shot is pending would commit the shot twice
+        # and skip the one after it; a reload during a revision would reopen
+        # the shot as a fresh commit.
+        keep = SCRIPT[SCRIPT.index("function onKeep") :].split("\n}\n", 1)[0]
+        assert "a.locked" in keep and "a.locked = true" in keep
+        assert "state.snapshot.revising" in SCRIPT
+        resume = SCRIPT[SCRIPT.index('state.snapshot.screen === "author"') :][:200]
+        assert "state.snapshot.revising" in resume
 
     def test_the_writing_state_is_on_the_button_not_a_global_spinner(self) -> None:
         assert "a.writing ? state.strings.busy.writing" in SCRIPT
