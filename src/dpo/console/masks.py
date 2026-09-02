@@ -50,6 +50,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from dpo.caption.ontology import TagRecord
 from dpo.console.config import Calibration
 from dpo.console.quantities import (
     QuantityError,
@@ -163,13 +164,30 @@ def clip_segments(masks: ClipMasks, calibration: Calibration, fps: float) -> lis
 # ---- §4 source grouping -----------------------------------------------------
 
 
-def group_audio_labels(masks: ClipMasks, labels: Sequence[str], threshold: float) -> list[tuple[str, ...]]:
+def group_audio_labels(
+    masks: ClipMasks,
+    labels: Sequence[str],
+    threshold: float,
+    families: Mapping[str, str] | None = None,
+) -> list[tuple[str, ...]]:
     """Merge labels whose masks agree above ``threshold``, over the whole clip.
 
     Intersection and union are accumulated in pixels across every frame, so the
     score is a windowed IoU rather than a mean of per-frame IoUs: a label
     present in two frames of six cannot score highly on the strength of those
     two alone.
+
+    ``families`` maps each label to its top-level AudioSet family, and two
+    labels from different families never merge however their masks overlap.
+    §4's justification for merging is that prompting with two labels "recovers
+    the same pedestrian pixels" — labels that share a *physical source*. On a
+    real clip the unconstrained merge fused *Bird* with *Traffic noise* and
+    *Vehicle horn* because the segmenter returned one blob for all three
+    prompts, which is a fact about the grounding, not about the street: an
+    animal and a vehicle are not one thing. That merge also produced a source
+    whose prose ran to seventy-one characters, which no caption inside the
+    budget could name, so every caption mentioning it fell to the template.
+    Without ``families`` the merge is unconstrained, and the manifest says so.
     """
     if len(labels) < 2:
         return [(label,) for label in labels]
@@ -210,6 +228,8 @@ def group_audio_labels(masks: ClipMasks, labels: Sequence[str], threshold: float
 
     for left in range(len(labels)):
         for right in range(left + 1, len(labels)):
+            if families is not None and families.get(labels[left]) != families.get(labels[right]):
+                continue
             total = union[left, right]
             if total and intersection[left, right] / total >= threshold:
                 root, other = find(left), find(right)
@@ -257,18 +277,24 @@ def derive_clip(
     calibration: Calibration | None = None,
     fps: float = 60.0,
     downsample: int = DOWNSAMPLE,
-    tag_counts: Mapping[str, int] | None = None,
+    tags: TagRecord | None = None,
     provisional_salience: bool = False,
 ) -> dict[str, Any]:
-    """One clip's shots and grouped sources, ready to paste into a document."""
+    """One clip's shots and grouped sources, ready to paste into a document.
+
+    ``tags`` — the clip's audio labels with their families resolved — makes the
+    grouping family-aware and the provisional salience possible. Without it
+    the grouping is by mask agreement alone.
+    """
     settings = calibration or Calibration()
     root = Path(mask_root)
     masks = ClipMasks(root / "visual" / clip_id, root / "audio" / clip_id, downsample)
     frames = masks.visual_frames()
     ranges = clip_segments(masks, settings, fps)
     labels = masks.audio_labels()
-    groups = group_audio_labels(masks, labels, settings.iou_threshold)
-    counts = dict(tag_counts or {})
+    families = dict(tags["parents"]) if tags is not None else None
+    groups = group_audio_labels(masks, labels, settings.iou_threshold, families)
+    counts = dict(tags["counts"]) if tags is not None else {}
     highest = max(counts.values(), default=0)
 
     shots: list[dict[str, Any]] = []
@@ -314,6 +340,8 @@ def derive_clip(
         "shots": shots,
         "opening": {"grain": "itemized", "alpha": 0.5, "admitted": None},
         "grouping": [list(members) for members in groups],
+        "grouping_constraint": "family" if families is not None else "none",
+        "families": families or {},
     }
 
 
@@ -324,7 +352,7 @@ def derive_manifest(
     calibration: Calibration | None = None,
     fps: float = 60.0,
     downsample: int = DOWNSAMPLE,
-    tags: Mapping[str, Mapping[str, int]] | None = None,
+    tags: Mapping[str, TagRecord] | None = None,
     provisional_salience: bool = False,
 ) -> dict[str, Any]:
     """Every clip's preprocessing, with the provenance of every derived number."""
@@ -337,7 +365,7 @@ def derive_manifest(
             calibration=settings,
             fps=fps,
             downsample=downsample,
-            tag_counts=(tags or {}).get(clip_id),
+            tags=(tags or {}).get(clip_id),
             provisional_salience=provisional_salience,
         )
     return {
@@ -350,9 +378,14 @@ def derive_manifest(
             "minimum_shot_ms": settings.minimum_shot_ms,
             "stride_ms": settings.stride_ms,
             "iou_threshold": settings.iou_threshold,
+            "grouping_constraint": "family" if tags else "none",
         },
         "limitations": [
             "shot boundaries are cut on visual composition and are meant to be edited by hand",
+            (
+                "labels merge on mask agreement within one AudioSet family; without --tidy-data and"
+                " --ontology the family constraint is off and cross-family merges are possible"
+            ),
             "audio masks ground a possible visible source and measure neither loudness nor onset",
             (
                 "c_g and e_g are null: no per-label confidence and no band-limited energy exist"
@@ -364,33 +397,6 @@ def derive_manifest(
         "provisional_salience": provisional_salience,
         "clips": per_clip,
     }
-
-
-def load_tag_counts(tidy_data: str | Path) -> dict[str, dict[str, int]]:
-    """``file_index`` to label multiplicities, for a provisional salience only.
-
-    The real file carries one row per participant per clip, all repeating the
-    same ``final_labels`` cell, so the cell is read once per clip and the rows
-    are not summed. A clip whose rows disagree is a data problem the caller
-    should see rather than an average this function should take.
-    """
-    import csv
-    from collections import Counter
-
-    cells: dict[str, set[str]] = {}
-    with Path(tidy_data).open(encoding="utf-8", newline="") as handle:
-        for row in csv.DictReader(handle):
-            clip_id = (row.get("file_index") or "").strip()
-            if clip_id:
-                cells.setdefault(clip_id, set()).add((row.get("final_labels") or "").strip())
-    counts: dict[str, dict[str, int]] = {}
-    for clip_id, distinct in cells.items():
-        if len(distinct) != 1:
-            raise MaskReadError(f"{clip_id}: rows disagree on final_labels")
-        labels = [part.strip() for part in next(iter(distinct)).split("|") if part.strip()]
-        if labels:
-            counts[clip_id] = dict(Counter(labels))
-    return counts
 
 
 def write_manifest(manifest: Mapping[str, Any], out: str | Path) -> Path:
@@ -412,6 +418,5 @@ __all__ = [
     "derive_manifest",
     "group_audio_labels",
     "group_quantities",
-    "load_tag_counts",
     "write_manifest",
 ]

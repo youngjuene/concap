@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from dpo.caption.ontology import OntologyError, TagRecord, load_tags
 from dpo.caption.writer import CaptionWriter, ShotMedia
 from dpo.cli._shared import _emit
 from dpo.console.config import Calibration, Configuration
@@ -37,7 +38,6 @@ from dpo.console.masks import (
     MANIFEST_SCHEMA,
     MaskReadError,
     derive_manifest,
-    load_tag_counts,
     write_manifest,
 )
 
@@ -63,13 +63,24 @@ def _calibration(arguments: argparse.Namespace) -> Calibration:
 
 
 def _console_preprocess(arguments: argparse.Namespace) -> int:
-    tags: Mapping[str, Mapping[str, int]] = {}
+    tags: Mapping[str, TagRecord] = {}
     if arguments.tidy_data:
+        tidy = Path(arguments.tidy_data)
+        ontology = Path(arguments.ontology) if arguments.ontology else tidy.with_name("ontology.json")
         try:
-            tags = load_tag_counts(arguments.tidy_data)
-        except (OSError, MaskReadError) as exc:
+            tags = load_tags(tidy, ontology)
+        except OntologyError as exc:
             _emit({"status": "invalid", "command": "console preprocess", "error": str(exc)})
             return 2
+    elif arguments.provisional_salience:
+        _emit(
+            {
+                "status": "error",
+                "command": "console preprocess",
+                "error": "--provisional-salience needs --tidy-data for the tag multiplicities",
+            }
+        )
+        return 2
     root = Path(arguments.mask_root)
     clips = list(arguments.clips or [])
     if not clips:
@@ -316,7 +327,14 @@ def register(subparsers: Any) -> None:
     preprocess.add_argument("--clips", nargs="*", help="clip ids; default: every clip under audio/")
     preprocess.add_argument("--fps", type=float, default=60.0, help="source video frame rate")
     preprocess.add_argument("--downsample", type=int, default=4, help="read masks at 1/N resolution")
-    preprocess.add_argument("--tidy-data", help="CSV with final_labels, for --provisional-salience")
+    preprocess.add_argument(
+        "--tidy-data",
+        help="CSV with final_labels and top_level_parent_name; turns on family-aware grouping"
+        " and enables --provisional-salience",
+    )
+    preprocess.add_argument(
+        "--ontology", help="AudioSet ontology JSON; default: ontology.json beside --tidy-data"
+    )
     preprocess.add_argument(
         "--provisional-salience",
         action="store_true",

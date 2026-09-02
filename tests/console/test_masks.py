@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+from dpo.caption.ontology import OntologyError, TagRecord, load_tags
 from dpo.console.config import Calibration
 from dpo.console.masks import (
     MANIFEST_SCHEMA,
@@ -20,7 +22,6 @@ from dpo.console.masks import (
     derive_manifest,
     group_audio_labels,
     group_quantities,
-    load_tag_counts,
 )
 
 SIZE = 8
@@ -164,7 +165,13 @@ class TestManifest:
             ["clip_001"],
             fps=1.0,
             downsample=1,
-            tags={"clip_001": {"Siren": 2}},
+            tags={
+                "clip_001": {
+                    "counts": Counter({"Siren": 2}),
+                    "parents": {"Siren": "Sounds of things"},
+                    "family_counts": Counter({"Sounds of things": 2}),
+                }
+            },
             provisional_salience=True,
         )
         assert manifest["schema"] == MANIFEST_SCHEMA
@@ -182,29 +189,98 @@ class TestManifest:
         assert manifest["source"]["iou_threshold"] == Calibration().iou_threshold
 
 
-class TestTagCounts:
-    def _write(self, path: Path, rows: list[dict[str, str]]) -> None:
-        with path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["file_index", "final_labels"])
+class TestTags:
+    """The tidy CSV and the ontology, read through the shared loader."""
+
+    def _write(self, tmp_path: Path, rows: list[dict[str, str]]) -> tuple[Path, Path]:
+        tidy = tmp_path / "tidy.csv"
+        with tidy.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=["file_index", "final_labels", "top_level_parent_name"]
+            )
             writer.writeheader()
             writer.writerows(rows)
+        ontology = tmp_path / "ontology.json"
+        ontology.write_text(
+            json.dumps(
+                [
+                    {"id": "things", "name": "Sounds of things", "child_ids": ["siren", "traffic"]},
+                    {"id": "animal", "name": "Animal", "child_ids": ["bird"]},
+                    {"id": "siren", "name": "Siren", "child_ids": []},
+                    {"id": "traffic", "name": "Traffic noise", "child_ids": []},
+                    {"id": "bird", "name": "Bird", "child_ids": []},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return tidy, ontology
 
     def test_repeated_rows_do_not_multiply_a_count(self, tmp_path: Path) -> None:
-        path = tmp_path / "tidy.csv"
-        self._write(path, [{"file_index": "c", "final_labels": "Siren|Siren|Speech"}] * 3)
-        assert load_tag_counts(path) == {"c": {"Siren": 2, "Speech": 1}}
+        tidy, ontology = self._write(
+            tmp_path,
+            [
+                {
+                    "file_index": "c",
+                    "final_labels": "Siren|Siren|Bird",
+                    "top_level_parent_name": "Sounds of things:2|Animal:1",
+                }
+            ]
+            * 3,
+        )
+        tags = load_tags(tidy, ontology)
+        assert dict(tags["c"]["counts"]) == {"Siren": 2, "Bird": 1}
+        assert tags["c"]["parents"] == {"Siren": "Sounds of things", "Bird": "Animal"}
 
     def test_rows_that_disagree_are_a_data_problem_not_an_average(self, tmp_path: Path) -> None:
-        path = tmp_path / "tidy.csv"
-        self._write(
-            path,
+        tidy, ontology = self._write(
+            tmp_path,
             [
-                {"file_index": "c", "final_labels": "Siren"},
-                {"file_index": "c", "final_labels": "Speech"},
+                {"file_index": "c", "final_labels": "Siren", "top_level_parent_name": "Sounds of things:1"},
+                {"file_index": "c", "final_labels": "Bird", "top_level_parent_name": "Animal:1"},
             ],
         )
-        with pytest.raises(MaskReadError, match="disagree"):
-            load_tag_counts(path)
+        with pytest.raises(OntologyError, match="disagree"):
+            load_tags(tidy, ontology)
+
+
+class TestFamilyConstraint:
+    """§4 merges labels that share a physical source; a bird and a car do not."""
+
+    def _same_blob(self, masks: Path) -> ClipMasks:
+        # Three prompts, one blob: what the segmenter did on a real clip.
+        for index in range(3):
+            for label in ("Bird", "Traffic noise", "Vehicle horn"):
+                _mask(masks / "audio" / "c" / label / f"{index:05d}.png", (0, 0, 4, 4))
+        return ClipMasks(masks / "visual" / "c", masks / "audio" / "c", 1)
+
+    def test_without_families_the_blob_becomes_one_source(self, masks: Path) -> None:
+        reader = self._same_blob(masks)
+        assert group_audio_labels(reader, ["Bird", "Traffic noise", "Vehicle horn"], 0.5) == [
+            ("Bird", "Traffic noise", "Vehicle horn")
+        ]
+
+    def test_with_families_the_animal_stays_apart_from_the_vehicles(self, masks: Path) -> None:
+        reader = self._same_blob(masks)
+        families = {"Bird": "Animal", "Traffic noise": "Sounds of things", "Vehicle horn": "Sounds of things"}
+        groups = group_audio_labels(reader, ["Bird", "Traffic noise", "Vehicle horn"], 0.5, families)
+        assert sorted(groups, key=len) == [("Bird",), ("Traffic noise", "Vehicle horn")]
+
+    def test_the_manifest_records_which_grouping_it_used(self, masks: Path) -> None:
+        _visual(masks, "clip_001", 4)
+        _mask(masks / "audio" / "clip_001" / "Bird" / "00000.png", (0, 0, 4, 4))
+        _mask(masks / "audio" / "clip_001" / "Traffic noise" / "00000.png", (0, 0, 4, 4))
+        loose = derive_clip(masks, "clip_001", fps=1.0, downsample=1)
+        assert loose["grouping_constraint"] == "none"
+        assert loose["grouping"] == [["Bird", "Traffic noise"]]
+        tags: TagRecord = {
+            "counts": Counter({"Bird": 1, "Traffic noise": 1}),
+            "parents": {"Bird": "Animal", "Traffic noise": "Sounds of things"},
+            "family_counts": Counter({"Animal": 1, "Sounds of things": 1}),
+        }
+        strict = derive_clip(masks, "clip_001", fps=1.0, downsample=1, tags=tags)
+        assert strict["grouping_constraint"] == "family"
+        assert strict["grouping"] == [["Bird"], ["Traffic noise"]]
+        assert strict["families"] == tags["parents"]
 
 
 class TestScaffoldedDocument:
