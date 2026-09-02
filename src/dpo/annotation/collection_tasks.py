@@ -29,8 +29,6 @@ TASKS_SCHEMA = "dpo.collection-tasks/v1"
 ANSWERS_SCHEMA = "dpo.collection-answers/v1"
 RESPONSES_SCHEMA = "dpo.collection-responses/v1"
 
-TASK_KINDS = ("pair", "repeat", "attention")
-
 
 def _flip(seed: int, *labels: object) -> bool:
     digest = semantic_hash({"seed": seed, "labels": list(labels)}).removeprefix("sha256:")

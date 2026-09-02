@@ -84,7 +84,6 @@ CANDIDATE_SOURCES = (
 CHALLENGE_SOURCES = frozenset({"controlled_error"})
 
 OBJECTIVE_NAMES = ("sft", "dpo", "ipo", "cdpo", "rdpo", "drdpo", "wdpo")
-TRAINING_VIEWS = ("sft", "pair_strict", "pair_all")
 
 # Per-objective loss knobs that a contract may sweep by giving a list of
 # values (e.g. beta = [0.1, 0.3]). Each list expands to one trained variant
