@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 from dpo.annotation.webapp import VIDEO_SUFFIXES
@@ -81,7 +82,10 @@ def _cut_audio(source: Path, destination: Path, start_ms: int, end_ms: int) -> P
     if destination.is_file():
         return destination
     destination.parent.mkdir(parents=True, exist_ok=True)
-    partial = destination.with_name(destination.name + ".part.wav")
+    # One partial per call: two requests for the same shot cut at once each
+    # write their own, and the last to finish replaces the destination with a
+    # whole file rather than one ffmpeg truncating the other's.
+    partial = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.part.wav")
     _run(
         FFMPEG,
         [
@@ -149,7 +153,7 @@ def shot_still(media_dir: Path, cache_dir: Path, clip_id: str, start_ms: int, en
 
 def _frame(source: Path, at_ms: int, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    partial = destination.with_name(destination.name + ".part.jpg")
+    partial = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.part.jpg")
     _run(
         FFMPEG,
         ["-ss", f"{at_ms / 1000:.3f}", "-i", str(source), "-frames:v", "1", "-q:v", "3", str(partial)],

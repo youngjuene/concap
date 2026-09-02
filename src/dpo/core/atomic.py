@@ -53,4 +53,10 @@ def replace_atomically(path: str | Path, payload: bytes) -> None:
     destination = Path(path)
     temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.tmp"
     atomic_write_bytes(temporary, payload)
-    os.replace(temporary, destination)
+    try:
+        os.replace(temporary, destination)
+    except OSError:
+        # The destination is untouched; the temporary must not stay behind.
+        with suppress(FileNotFoundError):
+            temporary.unlink()
+        raise
