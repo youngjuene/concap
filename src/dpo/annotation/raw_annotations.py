@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -115,14 +114,6 @@ class RawAnnotation:
         displayed_winner = self.display_order[0] if self.choice == "a_better" else self.display_order[1]
         return "a_better" if displayed_winner == self.candidate_a else "b_better"
 
-    def winner_id(self) -> str | None:
-        canonical = self.canonical_choice()
-        if canonical == "a_better":
-            return self.candidate_a
-        if canonical == "b_better":
-            return self.candidate_b
-        return None
-
     def document(self) -> dict[str, object]:
         return {
             "annotation_id": self.annotation_id,
@@ -217,31 +208,6 @@ def parse_annotation(value: Mapping[str, object]) -> RawAnnotation:
         is_attention_check=bool(value["is_attention_check"]),
         repeat_of=None if repeat_of is None else str(repeat_of),
     )
-
-
-def load_annotations(payload: bytes | str) -> tuple[RawAnnotation, ...]:
-    """Parse a JSONL export of the append-only raw annotation store."""
-    text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
-    annotations: list[RawAnnotation] = []
-    seen: set[str] = set()
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise AnnotationError(f"line {line_number}: invalid JSON: {exc}") from exc
-        if not isinstance(value, Mapping):
-            raise AnnotationError(f"line {line_number}: expected a JSON object")
-        annotation = parse_annotation(value)
-        if annotation.annotation_id in seen:
-            raise AnnotationError(
-                f"line {line_number}: duplicate annotation id {annotation.annotation_id!r};"
-                " the raw store is append-only and ids are unique"
-            )
-        seen.add(annotation.annotation_id)
-        annotations.append(annotation)
-    return tuple(annotations)
 
 
 def validate_against_pool(annotations: Sequence[RawAnnotation], pool: FrozenCandidatePool) -> None:

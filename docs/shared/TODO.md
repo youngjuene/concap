@@ -48,3 +48,22 @@ registry and a task file — `candidates generate` (per split, audio track),
 `candidates dedup`, `annotation export-tasks` — and the 212 exported tasks in
 `data/annotation/` are replaced. No human work is lost: `data/annotation/responses/`
 is empty, which is why the knobs were removed now rather than later.
+
+## 4. `annotation ingest` does not refuse a duplicate annotation id
+
+Recorded because a check that stated it was deleted, not because the check was
+load-bearing. `raw_annotations.load_annotations` parsed a JSONL export of the
+raw store and refused a repeated `annotation_id` ("the raw store is append-only
+and ids are unique"). Nothing in `src/` ever called it — the live path is
+`annotation ingest` → `annotations_from_responses` → `ingest_annotations` — so
+it went with the other uncalled helpers.
+
+The intent it carried has no other home. `reliability.py` keys a dict by
+`annotation_id`, so duplicates collapse there silently, while the raw
+annotations artifact keeps both rows. Two `--responses` files naming one
+annotation twice would therefore publish a raw store the reliability report
+disagrees with, and nothing would say so.
+
+Whose call: the researcher, before the collection round. Either ingest refuses
+a repeated id across its `--responses` inputs, or the analysis states that it
+de-duplicates and the raw artifact does not.

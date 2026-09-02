@@ -135,13 +135,3 @@ def parse_frozen_pool(payload: bytes | str | Mapping[str, object]) -> FrozenCand
     if len(pool.candidates) != len(candidates_value) or len(pool.pairs) != len(pairs_value):
         raise CandidateError("frozen pool contains non-object candidate/pair entries")
     return pool
-
-
-def assert_pool_unchanged(pool: FrozenCandidatePool, *, expected_pool_hash: str) -> None:
-    """The freeze condition: after annotation begins, drift is a hard error."""
-    if pool.pool_hash != expected_pool_hash:
-        raise CandidateError(
-            "frozen candidate pool drifted after collection started; a change to candidate text,"
-            " ids, pair mapping, checkpoint, decoding, or audit version requires a new dataset"
-            " version and a new collection round"
-        )

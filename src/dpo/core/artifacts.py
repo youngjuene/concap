@@ -393,31 +393,15 @@ class ArtifactStore:
     def verify(self, artifact_id: str) -> ArtifactManifest:
         """Verify metadata recursively and payloads that do not require protected authority.
 
-        Protected payloads are deliberately manifest-only here.  Call ``verify_full`` or
-        ``read_payload`` with a fenced role capability after the semantic reservation to
-        hash and structurally validate protected bytes.
+        Protected payloads are deliberately manifest-only here.  Call ``read_payload``
+        with a fenced role capability after the semantic reservation to hash and
+        structurally validate protected bytes.
         """
         manifest, manifests = self._metadata_tree(artifact_id)
         for candidate in manifests.values():
             if not self.payload_requires_authority(candidate):
                 self._validate_payload(candidate)
         return manifest
-
-    def verify_full(
-        self,
-        artifact_id: str,
-        *,
-        capability: AccessCapability | None = None,
-        authority: ProtectedAccessAuthority | None = None,
-        semantic_hash: str | None = None,
-    ) -> ArtifactManifest:
-        """Verify every payload in a lineage, fencing before protected byte access."""
-        return self._verify_full_tree(
-            artifact_id,
-            capability=capability,
-            authority=authority,
-            reservation_semantic_hash=semantic_hash,
-        )[0]
 
     def _payload_checked(self, manifest: ArtifactManifest) -> bytes:
         artifact_id = manifest.artifact_id
@@ -795,13 +779,6 @@ class ArtifactStore:
             return {
                 str(row["artifact_id"]) for row in connection.execute("SELECT artifact_id FROM artifacts")
             }
-
-    def find_by_request_id(self, request_id: str) -> str | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT artifact_id FROM artifacts WHERE request_id=?", (request_id,)
-            ).fetchone()
-        return None if row is None else str(row["artifact_id"])
 
     def find_by_type(self, artifact_type: str) -> list[str]:
         with self._connect() as connection:

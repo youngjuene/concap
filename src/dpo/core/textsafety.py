@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Iterable, Mapping
 
 
 class UntrustedTextError(ValueError):
@@ -75,17 +74,3 @@ def validate_untrusted_text(text: str, *, field: str) -> str:
     if any(pattern.search(normalized) for pattern in _INJECTION_PATTERNS):
         raise UntrustedTextError(f"{field}: text contains prompt-injection/control text")
     return text.strip()
-
-
-def validate_untrusted_value(value: object, *, field: str) -> None:
-    """Recursively validate every string leaf in a parsed untrusted value."""
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            if isinstance(key, str):
-                validate_untrusted_text(key, field=f"{field}.<key>")
-            validate_untrusted_value(item, field=f"{field}[value]")
-    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
-        for index, item in enumerate(value):
-            validate_untrusted_value(item, field=f"{field}[{index}]")
-    elif isinstance(value, str):
-        validate_untrusted_text(value, field=field)

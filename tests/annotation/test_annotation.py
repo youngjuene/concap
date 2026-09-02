@@ -48,10 +48,8 @@ def test_canonical_choice_resolves_through_display_order() -> None:
     # Displayed left is cand-b; choosing "a_better" (left) endorses cand-b.
     annotation = _annotation()
     assert annotation.canonical_choice() == "b_better"
-    assert annotation.winner_id() == "cand-b"
     unflipped = _annotation(display_order=("cand-a", "cand-b"))
     assert unflipped.canonical_choice() == "a_better"
-    assert unflipped.winner_id() == "cand-a"
 
 
 def test_decisive_choices_require_strength_and_ties_forbid_it() -> None:
@@ -124,17 +122,6 @@ def test_repeat_inconsistency_and_attention_checks_drive_exclusions(
     assert annotator_report.excluded
     assert "attention_check_failure" in annotator_report.exclusion_reasons
     assert retained_annotations(rows, report) == ()
-
-
-def test_raw_store_is_append_only_and_never_overwritten(world: PreferenceWorld) -> None:
-    from dpo.annotation.raw_annotations import load_annotations
-
-    lines = "\n".join(__import__("json").dumps(annotation.document()) for annotation in world.annotations[:4])
-    parsed = load_annotations(lines)
-    assert len(parsed) == 4
-    duplicated = lines + "\n" + lines.splitlines()[0]
-    with pytest.raises(AnnotationError, match="append-only"):
-        load_annotations(duplicated)
 
 
 def test_annotations_must_match_the_frozen_pool(world: PreferenceWorld) -> None:

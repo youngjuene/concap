@@ -6,10 +6,8 @@ from pathlib import Path
 import pytest
 
 from dpo.core.safety import (
-    CheckpointSafetyError,
     DestructivePathError,
     OwnedWorkspace,
-    validate_safetensors_adapter,
 )
 
 
@@ -89,52 +87,3 @@ def test_workspace_rejects_symlinked_sentinels(tmp_path: Path) -> None:
     (root / ".dpo-workspace.json").symlink_to(external)
     with pytest.raises(DestructivePathError, match="sentinel.*symlink"):
         OwnedWorkspace.open(root)
-
-
-def test_gc_is_dry_run_and_preserves_locked_artifacts(tmp_path: Path) -> None:
-    workspace = OwnedWorkspace.create(tmp_path / "workspace")
-    locked = workspace.claim_child("locked")
-    unreachable = workspace.claim_child("unreachable")
-    assert workspace.gc({locked.name}) == [unreachable]
-    assert locked.exists() and unreachable.exists()
-    assert workspace.gc({locked.name}, execute=True) == [unreachable]
-    assert locked.exists() and not unreachable.exists()
-
-
-def _adapter_manifest() -> dict[str, object]:
-    return {
-        "schema": "dpo.adapter/v1",
-        "model_id": "google/gemma-4-4b-it",
-        "model_revision": "a" * 40,
-        "language": "ko",
-        "template_hash": "sha256:" + "b" * 64,
-        "processor_hash": "sha256:" + "c" * 64,
-        "lora": {"rank": 16, "targets": ["q_proj", "v_proj"]},
-    }
-
-
-def test_adapter_loader_accepts_only_safetensors_and_exact_identity(tmp_path: Path) -> None:
-    adapter = tmp_path / "adapter"
-    adapter.mkdir()
-    (adapter / "adapter_model.safetensors").write_bytes(b"safe-fixture")
-    (adapter / "adapter_manifest.json").write_text(json.dumps(_adapter_manifest()), encoding="utf-8")
-    identity = validate_safetensors_adapter(adapter, _adapter_manifest())
-    assert identity["language"] == "ko"
-
-    (adapter / "training_args.bin").write_bytes(b"pickle")
-    with pytest.raises(CheckpointSafetyError, match="legacy|unsafe"):
-        validate_safetensors_adapter(adapter, _adapter_manifest())
-
-
-def test_adapter_manifest_missing_modified_or_wrong_contract_is_rejected(tmp_path: Path) -> None:
-    adapter = tmp_path / "adapter"
-    adapter.mkdir()
-    (adapter / "adapter_model.safetensors").write_bytes(b"safe-fixture")
-    with pytest.raises(CheckpointSafetyError, match="manifest"):
-        validate_safetensors_adapter(adapter, _adapter_manifest())
-
-    wrong = _adapter_manifest()
-    wrong["language"] = "en"
-    (adapter / "adapter_manifest.json").write_text(json.dumps(wrong), encoding="utf-8")
-    with pytest.raises(CheckpointSafetyError, match="identity"):
-        validate_safetensors_adapter(adapter, _adapter_manifest())

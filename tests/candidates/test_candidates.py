@@ -9,7 +9,6 @@ from dpo.candidates.candidate_records import (
     CollectionPolicy,
     GenerationConfig,
     build_candidate_records,
-    validate_pool_mixture,
 )
 from dpo.candidates.pair_sampler import sample_pairs
 from dpo.contracts.study_contract import PAIR_CATEGORIES
@@ -41,22 +40,6 @@ def test_pool_requires_at_least_four_candidates() -> None:
             track="visual",
             policy=policy,
             generations=[("greedy", "Only one candidate here.", config)],
-        )
-
-
-def test_mixture_composition_is_enforced(world: PreferenceWorld) -> None:
-    validate_pool_mixture(
-        world.pool.candidates,
-        per_clip=4,
-        challenge_fraction_min=0.2,
-        challenge_fraction_max=0.3,
-    )
-    with pytest.raises(CandidateError, match="challenge"):
-        validate_pool_mixture(
-            world.pool.candidates,
-            per_clip=4,
-            challenge_fraction_min=0.4,
-            challenge_fraction_max=0.5,
         )
 
 

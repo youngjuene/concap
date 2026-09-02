@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from dpo.candidates.candidate_records import CandidateError
-from dpo.candidates.freeze import assert_pool_unchanged, freeze_pool, parse_frozen_pool
+from dpo.candidates.freeze import freeze_pool, parse_frozen_pool
 from dpo.data.leakage_audit import (
     LeakageError,
     audit_text_leakage,
@@ -46,7 +46,6 @@ def test_candidate_hashes_are_stable_and_drift_is_detected(world: PreferenceWorl
     document = world.pool.document()
     parsed = parse_frozen_pool(document)
     assert parsed.pool_hash == world.pool.pool_hash
-    assert_pool_unchanged(parsed, expected_pool_hash=world.pool.pool_hash)
     candidates_value = document["candidates"]
     assert isinstance(candidates_value, list)
     first = dict(candidates_value[0])

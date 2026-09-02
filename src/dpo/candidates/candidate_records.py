@@ -166,33 +166,6 @@ def build_candidate_records(
     return tuple(records)
 
 
-def validate_pool_mixture(
-    records: Sequence[CandidateRecord],
-    *,
-    per_clip: int,
-    challenge_fraction_min: float,
-    challenge_fraction_max: float,
-) -> None:
-    """Enforce the per-clip count and natural/challenge composition of the pool."""
-    from dpo.contracts.study_contract import CHALLENGE_SOURCES
-
-    by_clip: dict[str, list[CandidateRecord]] = {}
-    for record in records:
-        by_clip.setdefault(record.clip_id, []).append(record)
-    for clip_id, clip_records in sorted(by_clip.items()):
-        if len(clip_records) != per_clip:
-            raise CandidateError(
-                f"clip {clip_id!r} has {len(clip_records)} candidates; the contract requires {per_clip}"
-            )
-        challenge = sum(1 for record in clip_records if record.source_kind in CHALLENGE_SOURCES)
-        fraction = challenge / len(clip_records)
-        if not challenge_fraction_min <= fraction <= challenge_fraction_max:
-            raise CandidateError(
-                f"clip {clip_id!r}: challenge candidates are {fraction:.2f} of the pool;"
-                f" the contract requires [{challenge_fraction_min}, {challenge_fraction_max}]"
-            )
-
-
 def parse_candidate_record(value: Mapping[str, object]) -> CandidateRecord:
     expected = {
         "candidate_id",
