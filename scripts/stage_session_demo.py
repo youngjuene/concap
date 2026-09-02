@@ -1,4 +1,7 @@
-"""Synthetic media for a caption session document, so the instrument runs without footage.
+"""Synthetic media for either instrument's document, so it runs without footage.
+
+Nothing here is imported from ``dpo``: the script reads two fields, so it
+stages for the skeleton instrument and the console alike.
 
 Every clip in the document gets a 10 s (or the clip's own length) 640x360 mp4
 with sound under ``<out>/unmuted_video/<clip_id>.mp4`` — the layout the
@@ -126,7 +129,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--session", required=True, help="a dpo.caption-session/v1 document")
+    parser.add_argument(
+        "--session",
+        required=True,
+        help="any document with clips[].clip_id and clips[].shots[].end_ms "
+        "(dpo.caption-session/v1 or dpo.caption-console/v1)",
+    )
     parser.add_argument("--out", required=True, help="media directory; clips go under unmuted_video/")
     parser.add_argument(
         "--container",

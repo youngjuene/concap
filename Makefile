@@ -20,14 +20,14 @@ session-demo:
 	uv run dpo session serve --session tests/session/fixtures/session.json \
 	  --media-dir data/session-demo/media --out data/session-demo/responses --writer template
 
-# The console instrument (docs/v2-console/runbook.md) over the same demo media.
-# Serves on 8778, one past the session's 8777, so both can run at once for a
-# side-by-side comparison.
+# The console instrument (docs/v2-console/runbook.md) over its own document and
+# its own staging of the same synthetic clip. Serves on 8778, one past the
+# session's 8777, so both can run at once for a side-by-side comparison.
 console-demo:
 	uv run python scripts/stage_session_demo.py \
-	  --session tests/session/fixtures/session.json --out data/session-demo/media
+	  --session tests/console/fixtures/console.json --out data/console-demo/media
 	uv run dpo console serve --session tests/console/fixtures/console.json \
-	  --media-dir data/session-demo/media --out data/console-demo/responses --writer template
+	  --media-dir data/console-demo/media --out data/console-demo/responses --writer template
 
 sync:
 	uv sync --dev

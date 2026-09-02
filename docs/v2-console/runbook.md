@@ -180,6 +180,14 @@ The command prints one status line before it starts serving — the stamp,
 whether the document is a dry run (`provisional_salience`), the writer and
 the URL — and nothing after it.
 
+With no footage to hand, `make console-demo` serves the whole instrument over
+synthetic clips: it stages one lavfi clip per clip in
+`tests/console/fixtures/console.json` and serves that document on 8778. The
+fixture is the document the demo runs on and a complete example of the schema;
+it is not the authoring path, which is §1 and §2 above. Both instruments can
+run at once — `make session-demo` takes 8777 — which is what a side-by-side
+comparison needs.
+
 Open **`http://127.0.0.1:8778/?participant=P01`** in the kiosk browser. The
 participant identifier comes from the URL; opened without one, the page is a
 door — the title, a field for the identifier, and Continue, which reopens the
