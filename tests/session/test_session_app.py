@@ -256,6 +256,25 @@ class SceneFailsWriter(TemplateWriter):
         return super().write(request)
 
 
+def test_the_start_up_probe_exercises_the_writer_even_over_a_warm_cache(
+    tmp_path: Path, package_files: None
+) -> None:
+    class Counting(TemplateWriter):
+        calls = 0
+
+        def write(self, request: CaptionRequest) -> str:
+            Counting.calls += 1
+            return super().write(request)
+
+    document = _document()
+    media = _fake_media(tmp_path, document)
+    build_app(document, media, tmp_path / "out", Counting(), prefetch=False)
+    first = Counting.calls
+    assert first >= 1
+    build_app(document, media, tmp_path / "out", Counting(), prefetch=False)
+    assert Counting.calls == first + 1
+
+
 def test_a_writer_failure_is_the_table_6_error(tmp_path: Path, package_files: None) -> None:
     document = _document()
     client = TestClient(

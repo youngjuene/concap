@@ -48,7 +48,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from dpo.caption import media as media_tools
 from dpo.caption.background import BackgroundWriter
 from dpo.caption.media import MediaError
-from dpo.caption.writer import CachedWriter, CaptionRequest, CaptionWriter, ShotMedia, WriterError
+from dpo.caption.writer import CachedWriter, CaptionRequest, CaptionWriter, ShotMedia, WriterError, written_by
 from dpo.console.copy import CARDS, STRINGS
 from dpo.console.document import (
     clip_by_id,
@@ -166,7 +166,14 @@ def build_app(
     # background then owns the rest.
     probe = next((requests for requests in audition_requests.values() if requests), {})
     if probe:
-        cached.write(next(iter(probe.values())))
+        request = next(iter(probe.values()))
+        if cached.lookup(request) is None:
+            cached.write(request)
+        else:
+            # A cache hit proves nothing about the writer: over a warm cache
+            # the model would otherwise load on the first miss, mid-session,
+            # on a participant's press. One caption from the writer itself.
+            written_by(cached.inner, request)
 
     def _auditions(key: tuple[str, str]) -> dict[str, str] | None:
         """This shot's auditions, waiting for the writer if it has not reached them."""

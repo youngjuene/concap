@@ -342,6 +342,27 @@ class TestLog:
         assert set(answer) >= {"events", "snapshot", "config_hash", "session_id", "participant"}
 
 
+class TestProbe:
+    def test_the_start_up_probe_exercises_the_writer_even_over_a_warm_cache(
+        self, document: dict[str, Any], tmp_path: Path
+    ) -> None:
+        class Counting(ConsoleTemplateWriter):
+            calls = 0
+
+            def write(self, request: Any) -> str:
+                Counting.calls += 1
+                return super().write(request)
+
+        out = tmp_path / "out"
+        build_app(document, tmp_path / "media", out, Counting(), prefetch=False)
+        first = Counting.calls
+        assert first >= 1
+        # Every audition is cached now; a second start still asks the writer
+        # for one caption, so a writer that cannot write stops the server here.
+        build_app(document, tmp_path / "media", out, Counting(), prefetch=False)
+        assert Counting.calls == first + 1
+
+
 class TestDownload:
     def test_the_log_is_served_as_an_attachment_so_the_done_screen_stays(
         self, client: TestClient, shot_ids: Any
