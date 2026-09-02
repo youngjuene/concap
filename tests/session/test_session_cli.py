@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from dpo.cli import build_parser
 from dpo.cli.session import (
     SessionUsageError,
     _gemma_writer,
@@ -17,6 +18,15 @@ from dpo.cli.session import (
 from dpo.session.document import SessionDocumentError, validate_session_document
 
 FIXTURE = Path(__file__).parent / "fixtures" / "session.json"
+
+
+def test_the_session_command_is_registered_and_serves_on_its_own_port() -> None:
+    """8777, the port the runbook tells an operator to open; asserted in the
+    instrument's own suite, so archiving the console does not take it."""
+    parser = build_parser()
+    arguments = parser.parse_args(["session", "serve", "--session", "s", "--media-dir", "m", "--out", "o"])
+    assert arguments.handler is _session_serve
+    assert arguments.port == 8777
 
 
 def _arguments(**overrides: object) -> argparse.Namespace:

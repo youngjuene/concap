@@ -87,17 +87,16 @@ def _manifest(
 
 
 class TestParser:
-    def test_the_console_command_is_registered_beside_the_session_one(self) -> None:
+    def test_the_console_command_is_registered(self) -> None:
         parser = build_parser()
         arguments = parser.parse_args(["console", "validate", "--session", str(FIXTURE)])
         assert arguments.handler is _console_validate
 
-    def test_the_two_instruments_default_to_different_ports(self) -> None:
+    def test_the_console_serves_on_its_own_port(self) -> None:
+        """8778, one past the skeleton's, so both can run at once for a comparison."""
         parser = build_parser()
         console = parser.parse_args(["console", "serve", "--session", "s", "--media-dir", "m", "--out", "o"])
-        session = parser.parse_args(["session", "serve", "--session", "s", "--media-dir", "m", "--out", "o"])
         assert console.port == 8778
-        assert session.port == 8777
 
 
 class TestValidate:
