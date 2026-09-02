@@ -318,7 +318,7 @@ lower `CAPTION_MAX_CHARS` to what two lines hold at 358 wide.
 | `events-<participant>.jsonl` | append-only, one event per line with `received_at`; the record of the session. Never rewritten. |
 | `snapshot-<participant>.json` | the browser's resumable state, replaced atomically on every save; the follow-up reads `kept` from it. |
 | `followup-<participant>.json` | the follow-up responses (`dpo.caption-session-followup/v1`) with `received_at`, written once at the end; a second submission is refused. |
-| `captions.json` | the caption cache, `clip/shot/settings-key` → caption. Safe to keep across restarts; delete it to force rewriting. |
+| `captions.json` | the caption cache, `clip/shot/settings-key` → caption, stamped with the writer that filled it (`template`, or `gemma:<model>:<checkpoint>:<instruction>:<budget>`). Safe to keep across restarts of the same writer; a file another writer wrote — a template rehearsal before a Gemma pilot, a different checkpoint — is refused at start. Delete it to force rewriting. |
 | `media-cache/` | server-side cuts: `shots/` (16 kHz wav per shot, Gemma only), `stills/` (one jpeg per clip), `excerpts/` (sound-only wavs). Regenerated on demand. |
 
 The download on the kiosk's final screen (`/api/log?participant=P01`) is the

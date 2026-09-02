@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from dpo.caption.media import clip_duration_ms, find_clip_video
+from dpo.caption.writer import CacheMismatch
 from dpo.cli._shared import _emit
 from dpo.session.document import (
     ATTENTION_POLES,
@@ -331,6 +332,9 @@ def _session_serve(arguments: argparse.Namespace) -> int:
             port=arguments.port,
         )
     except SessionUsageError as exc:
+        _emit({"status": "error", "command": "session serve", "error": str(exc)})
+        return 2
+    except CacheMismatch as exc:
         _emit({"status": "error", "command": "session serve", "error": str(exc)})
         return 2
     except SessionDocumentError as exc:

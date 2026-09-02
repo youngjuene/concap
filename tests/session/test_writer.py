@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from dpo.caption.writer import Written, names_excluded
+from dpo.caption.writer import CacheMismatch, Written, names_excluded
 from dpo.session.document import clip_by_id
 from dpo.session.skeleton import Settings, orderings
 from dpo.session.writer import (
@@ -193,7 +193,7 @@ def test_concurrent_misses_on_one_key_call_the_inner_writer_once(tmp_path: Path)
     assert sorted(hit for _, hit in results) == [False, True, True, True]
     # The file carries the provenance beside the caption; a writer that does
     # not report one is recorded as such rather than guessed at.
-    assert json.loads((tmp_path / "captions.json").read_text(encoding="utf-8")) == {
+    assert json.loads((tmp_path / "captions.json").read_text(encoding="utf-8"))["captions"] == {
         "demo_tram_stop/s1/itemized|tram,siren": {
             "caption": "caption 1 for itemized|tram,siren",
             "writer": "unknown",
@@ -470,7 +470,7 @@ class TestProvenance:
     def test_the_cache_keeps_the_provenance_across_a_restart(self, tmp_path: Path) -> None:
         path = tmp_path / "captions.json"
         CachedWriter(TemplateWriter(), path).write_attributed_cached(_request("itemized", (TRAM,)))
-        written, hit = CachedWriter(CountingWriter(), path).write_attributed_cached(
+        written, hit = CachedWriter(TemplateWriter(), path).write_attributed_cached(
             _request("itemized", (TRAM,))
         )
         assert hit is True and written.writer == "template"
@@ -483,6 +483,52 @@ class TestProvenance:
         )
         assert hit is True
         assert written == Written("An old caption.", "unknown")
+
+
+class TestCacheIdentity:
+    """The file says who wrote it; another writer's captions are not this writer's."""
+
+    @staticmethod
+    def _gemma(tmp_path: Path, checkpoint: str | None = None) -> GemmaWriter:
+        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.SHORT)
+        adapter.adapter_dir = checkpoint  # type: ignore[attr-defined]
+        return GemmaWriter(adapter)
+
+    def test_a_template_rehearsal_is_refused_by_a_gemma_run_over_the_same_out(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        CachedWriter(TemplateWriter(), path).write(_request("itemized", (TRAM,)))
+        with pytest.raises(CacheMismatch, match="written by template"):
+            CachedWriter(self._gemma(tmp_path), path)
+
+    def test_another_checkpoint_is_another_writer(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        CachedWriter(self._gemma(tmp_path, "runs/base"), path).write(
+            _request("itemized", (TRAM,), media_path=tmp_path)
+        )
+        with pytest.raises(CacheMismatch, match="runs/base"):
+            CachedWriter(self._gemma(tmp_path, "runs/dpo-v3"), path)
+        # The same checkpoint is the same writer.
+        assert CachedWriter(self._gemma(tmp_path, "runs/base"), path).entries
+
+    def test_the_identity_names_the_instruction_so_an_edit_is_a_new_writer(self, tmp_path: Path) -> None:
+        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.SHORT)
+        plain = GemmaWriter(adapter).identity
+        other = GemmaWriter(adapter, instruction=lambda request: "say nothing").identity
+        assert plain.startswith("gemma:") and plain != other
+
+    def test_a_writer_that_does_not_say_who_it_is_cannot_take_a_named_cache(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        CachedWriter(TemplateWriter(), path).write(_request("itemized", (TRAM,)))
+        with pytest.raises(CacheMismatch):
+            CachedWriter(CountingWriter(), path)
+
+    def test_an_old_file_loads_when_its_captions_could_be_this_writers(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        old = {"demo_tram_stop/s1/itemized|tram": {"caption": "A tram.", "writer": "gemma-tightened"}}
+        path.write_text(json.dumps(old), encoding="utf-8")
+        assert CachedWriter(self._gemma(tmp_path), path).lookup(_request("itemized", (TRAM,))) == "A tram."
+        with pytest.raises(CacheMismatch, match="gemma writer"):
+            CachedWriter(TemplateWriter(), path)
 
 
 class TestNamesExcluded:

@@ -245,6 +245,8 @@ class ConsoleTemplateWriter:
     caption move in the same direction when the grain changes.
     """
 
+    identity = "template"
+
     def write(self, request: CaptionRequest) -> str:
         if request.level == UNNAMED_GRAIN:
             return "Steady, with the sound moving through."

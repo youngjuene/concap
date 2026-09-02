@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from dpo.caption.ontology import OntologyError, TagRecord, load_tags
-from dpo.caption.writer import CaptionWriter, ShotMedia
+from dpo.caption.writer import CacheMismatch, CaptionWriter, ShotMedia
 from dpo.cli._shared import _emit
 from dpo.console.config import Calibration, Configuration
 from dpo.console.document import (
@@ -323,15 +323,19 @@ def _console_serve(arguments: argparse.Namespace) -> int:
             "url": f"http://{arguments.host}:{int(arguments.port)}/",
         }
     )
-    run_console_app(
-        document,
-        arguments.media_dir,
-        arguments.out,
-        writer=writer,
-        shot_media=shot_media,
-        host=arguments.host,
-        port=int(arguments.port),
-    )
+    try:
+        run_console_app(
+            document,
+            arguments.media_dir,
+            arguments.out,
+            writer=writer,
+            shot_media=shot_media,
+            host=arguments.host,
+            port=int(arguments.port),
+        )
+    except CacheMismatch as exc:
+        _emit({"status": "error", "command": "console serve", "error": str(exc)})
+        return 2
     return 0
 
 

@@ -192,7 +192,7 @@ def test_caption_round_trip_cached_flag_and_refusals(client: TestClient, tmp_pat
     }
     again = client.post("/api/caption", json=body)
     assert again.json()["cached"] is True and again.json()["caption"] == first.json()["caption"]
-    assert json.loads((tmp_path / "out" / "captions.json").read_text())[
+    assert json.loads((tmp_path / "out" / "captions.json").read_text())["captions"][
         "demo_tram_stop/s1/itemized|tram,siren"
     ]
     # The other ordering of the same pair is reachable too (they cross).

@@ -363,5 +363,5 @@ class TestScope:
         client = TestClient(build_app(document, tmp_path / "media", out, ConsoleTemplateWriter()))
         clip_id, shot_id = shot_ids
         _sources(client, clip_id, shot_id)
-        entries = json.loads((out / "captions.json").read_text(encoding="utf-8"))
+        entries = json.loads((out / "captions.json").read_text(encoding="utf-8"))["captions"]
         assert entries  # the auditions were written before the first request

@@ -217,7 +217,7 @@ participant.
 |---|---|
 | `events-<participant>.jsonl` | append-only, one event per line, each stamped with `received_at` and the configuration hash |
 | `snapshot-<participant>.json` | the browser's resumable state, replaced atomically; the check reads `committed` from it |
-| `captions.json` | the caption cache, `clip/shot/settings-key` → caption |
+| `captions.json` | the caption cache, `clip/shot/settings-key` → caption, stamped with the writer that filled it; a file another writer wrote (a template rehearsal, another checkpoint) is refused at start — delete it or serve from another `--out` |
 | `media-cache/` | server-side cuts: shot audio for the Gemma writer, clip stills |
 
 Two things in the event stream are written by the server and were never in a

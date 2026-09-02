@@ -26,6 +26,8 @@ written up front and read from the cache while a row is held.
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import re
 import threading
@@ -107,6 +109,22 @@ class Written:
 
 class CaptionWriter(Protocol):
     def write(self, request: CaptionRequest) -> str: ...
+
+
+def writer_identity(writer: CaptionWriter) -> str:
+    """Who a writer is, for the cache: ``template``, ``gemma:<model>:<checkpoint>:<instruction>:<budget>``,
+    or ``unknown`` for a writer that does not say."""
+    return str(getattr(writer, "identity", "unknown"))
+
+
+def _family(tag: str) -> str:
+    """The kind of writer a provenance tag or an identity belongs to."""
+    head = tag.split(":", 1)[0]
+    if head == "template":
+        return "template"
+    if head.startswith("gemma") or head == "template-fallback":
+        return "gemma"
+    return "unknown"
 
 
 def written_by(writer: CaptionWriter, request: CaptionRequest) -> Written:
@@ -194,6 +212,9 @@ def as_sentence(text: str) -> str:
 class TemplateWriter:
     """Deterministic sentence prose from the request; no model, no randomness.
 
+    ``identity`` names the writer to the cache: every template writer is the
+    same writer, so its captions are interchangeable across runs.
+
     Rules (contract §4): sentence case, one sentence, sources mentioned in the
     request's order and nothing else.
 
@@ -208,6 +229,8 @@ class TemplateWriter:
       budget, the clauses keep their order and lose their leads.
     * scene — the shot's scene prose. atmospheric — its atmosphere prose.
     """
+
+    identity = "template"
 
     def write_attributed(self, request: CaptionRequest) -> Written:
         # The template never names anything it was not handed, so the only
@@ -432,6 +455,10 @@ class GemmaWriter:
         # things by the last two, so each supplies its own system text while
         # sharing the generation, the retry, and the budget enforcement below.
         self.instruction = gemma_instruction if instruction is None else instruction
+        # What the cache keys a file to: the model, the checkpoint, the
+        # instruction's source and the budget. A caption written under any
+        # other of these is a different caption, however alike the settings.
+        self.identity = gemma_identity(adapter, self.instruction)
 
     def messages(self, request: CaptionRequest) -> list[dict[str, Any]]:
         from dpo.models.gemma4.prompt import stimulus_messages
@@ -485,7 +512,24 @@ class GemmaWriter:
         return self.write_attributed(request).caption
 
 
+def gemma_identity(adapter: StimulusAdapter, instruction: Callable[[CaptionRequest], str]) -> str:
+    """``gemma:<model>:<checkpoint>:<instruction digest>:<budget>`` for the cache."""
+    config = getattr(adapter, "config", None)
+    model = getattr(getattr(config, "model", None), "model_id", None) or "?"
+    checkpoint = getattr(adapter, "adapter_dir", None) or "base"
+    try:
+        source = inspect.getsource(instruction)
+    except (OSError, TypeError):
+        source = getattr(instruction, "__qualname__", repr(instruction))
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
+    return f"gemma:{model}:{checkpoint}:{digest}:{CAPTION_MAX_CHARS}"
+
+
 # ---- the cache --------------------------------------------------------------
+
+
+class CacheMismatch(RuntimeError):
+    """The cache file was written by a different writer than this run's."""
 
 
 class CachedWriter:
@@ -493,6 +537,15 @@ class CachedWriter:
 
     Keyed ``"{clip_id}/{shot_id}/{settings_key}"`` in one JSON file under
     ``--out``, loaded at start and replaced atomically after every miss.
+
+    The file records who wrote it. A cache the template writer filled during
+    a rehearsal would otherwise answer every warmed audition and neighbour
+    of a Gemma pilot over the same ``--out`` as a hit — template prose in
+    what the log stamps as a model session — and the same holds between the
+    base model and a trained adapter, or two versions of the instruction. A
+    file whose writer differs from this run's is refused at start; delete it,
+    or serve from another ``--out``. A file written before the writer was
+    recorded loads if every caption in it could be this writer's kind.
 
     One lock serialises ``write_cached``: FastAPI runs the sync caption route
     in a threadpool, so two requests for one key could otherwise both miss,
@@ -504,13 +557,31 @@ class CachedWriter:
 
     def __init__(self, inner: CaptionWriter, cache_path: Path) -> None:
         self.inner = inner
+        self.identity = writer_identity(inner)
         self.cache_path = Path(cache_path)
         self.entries: dict[str, Written] = {}
         self._lock = threading.Lock()
         if self.cache_path.is_file():
             loaded = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                self.entries = {str(key): _cache_entry(value) for key, value in loaded.items()}
+            if isinstance(loaded, dict) and isinstance(loaded.get("captions"), dict):
+                written_by_whom = str(loaded.get("writer", "unknown"))
+                if written_by_whom != self.identity:
+                    raise CacheMismatch(
+                        f"{self.cache_path} was written by {written_by_whom}; this run's writer is "
+                        f"{self.identity}. Delete the file, or serve from another --out."
+                    )
+                self.entries = {str(key): _cache_entry(value) for key, value in loaded["captions"].items()}
+            elif isinstance(loaded, dict):
+                # Before the writer was recorded on the file, only on each caption.
+                entries = {str(key): _cache_entry(value) for key, value in loaded.items()}
+                mine = _family(self.identity)
+                foreign = sorted({_family(w.writer) for w in entries.values()} - {"unknown", mine})
+                if foreign and mine != "unknown":
+                    raise CacheMismatch(
+                        f"{self.cache_path} holds captions written by a {', '.join(foreign)} writer; "
+                        f"this run's writer is {self.identity}. Delete the file, or serve from another --out."
+                    )
+                self.entries = entries
 
     @staticmethod
     def key_for(request: CaptionRequest) -> str:
@@ -531,7 +602,7 @@ class CachedWriter:
             self.entries[key] = written
             payload = (
                 json.dumps(
-                    {k: asdict(v) for k, v in self.entries.items()},
+                    {"writer": self.identity, "captions": {k: asdict(v) for k, v in self.entries.items()}},
                     ensure_ascii=False,
                     indent=2,
                     sort_keys=True,
