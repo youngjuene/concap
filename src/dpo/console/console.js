@@ -463,7 +463,9 @@ function renderViewingActions(which) {
       button(state.strings.actions.finish, {
         class: "button primary",
         disabled: state.playthrough ? null : "disabled",
-        onclick: () => enter("check"),
+        // The check reads the committed captions from the server's copy of
+        // the snapshot, so the autosave goes first.
+        onclick: () => api.flush(false).then(() => enter("check")),
       }),
     );
   } else {

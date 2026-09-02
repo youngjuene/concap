@@ -212,6 +212,9 @@ class TestActions:
         for text in (HTML, CSS, SCRIPT):
             assert "reroll" not in text.lower() and "regenerate" not in text.lower()
 
+    def test_the_check_waits_for_the_autosave_it_reads(self) -> None:
+        assert 'api.flush(false).then(() => enter("check"))' in SCRIPT
+
     def test_a_viewing_starts_from_the_top_and_the_shot_loop_survives_the_clip_ending(self) -> None:
         viewing = SCRIPT[SCRIPT.index("function renderViewing(") :].split("\n}\n", 1)[0]
         assert "video.currentTime = 0;" in viewing
