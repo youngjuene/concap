@@ -138,9 +138,13 @@ weights set it. On the two clips measured on 2026-09-01:
 Two things to know about that table. The audio side is coarse because the Ear
 weight is `final_labels` multiplicity, which is usually 1 and quantizes to
 `{0.5, 1.0}`, so most pairs never cross and the crossfader is close to a
-two-position switch. That is honest about what the data supports, and it is
-the ceiling until a salience measure with more resolution than a tag count
-exists.
+two-position switch. Over the whole corpus (48 clips linked and scaffolded on
+2026-09-02, 24 shaped and 24 control) it is worse than that: of the 24 shaped
+shots, **16 offer a single ordering** — no balance to choose at all — 6 offer
+two, one three and one four. The control shots, eight visual categories each,
+offer eight orderings on 23 and six on one. That is honest about what the data
+supports, and it is the ceiling until a salience measure with more resolution
+than a tag count exists; on the 16, the balance measure records nothing.
 
 The visual side is the opposite problem. Eight sources cross into as many as
 twenty-nine rankings, several separated by less than a thousandth of the axis.
