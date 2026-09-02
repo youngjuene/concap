@@ -11,7 +11,6 @@ from dpo.models.base import (
     MediaBatch,
     ModalityIsolationError,
     PreferencePairBatch,
-    ensure_single_track,
 )
 from dpo.models.tiny import TinyAdapter, synthetic_media
 from dpo.models.visual_media import build_visual_media
@@ -33,13 +32,6 @@ def test_audio_batches_contain_no_video_tensor() -> None:
             clip_ids=("clip-a",),
             features={"waveform": torch.zeros(1, 16), "frames": torch.zeros(1, 4, 8)},
         )
-
-
-def test_mixed_track_batches_fail() -> None:
-    visual = build_visual_media(["clip-a"], torch.zeros(1, 4, 8))
-    audio = build_audio_media(["clip-a"], torch.zeros(1, 16))
-    with pytest.raises(ModalityIsolationError, match="mixed-track"):
-        ensure_single_track([visual, audio])
 
 
 def test_adapters_reject_wrong_track_media() -> None:

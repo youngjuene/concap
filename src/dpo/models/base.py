@@ -8,7 +8,7 @@ completions physically cannot receive different media inputs.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -137,10 +137,3 @@ class ModelAdapter(Protocol):
         contract's LoRA dropout never applies. Neither failure raises.
         """
         ...
-
-
-def ensure_single_track(batches: Sequence[MediaBatch]) -> str:
-    tracks = {batch.track for batch in batches}
-    if len(tracks) != 1:
-        raise ModalityIsolationError(f"mixed-track batches are rejected: {sorted(tracks)}")
-    return next(iter(tracks))
