@@ -224,8 +224,12 @@ def test_the_check_frame_is_the_kiosk_stage_scaled_not_reflowed() -> None:
     # width, so the follow-up lays the frame out at that width and scales the
     # picture; the constant must be the kiosk's.
     kiosk_css = files("dpo.session").joinpath("kiosk.css").read_text(encoding="utf-8")
-    assert "--stage-w: 640px" in kiosk_css
-    assert "const KIOSK_STAGE_WIDTH = 640;" in _js()
+    # On a larger screen the kiosk's stage grows past the tablet's width; the
+    # follow-up still lays the frame out at that width, so the two constants
+    # must be one number, whatever it is.
+    kiosk_px = re.search(r"--kiosk-stage-w:\s*(\d+)px", kiosk_css)
+    followup_px = re.search(r"const KIOSK_STAGE_WIDTH = (\d+);", _js())
+    assert kiosk_px and followup_px and kiosk_px.group(1) == followup_px.group(1) == "640"
     css = _css()
     stage = css.split(".stage {", 1)[1].split("}", 1)[0]
     assert "aspect-ratio: 16 / 9" in stage and "overflow: hidden" in stage

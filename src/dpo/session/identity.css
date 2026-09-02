@@ -237,7 +237,10 @@ button:disabled { cursor: default; }
   gap: 16px;
   width: 100%;
   min-height: 44px;
-  padding: 8px 8px 8px 10px;
+  /* 4 above and below: a one-line row is still the 44 minimum, and a control
+     shot's eight rows with wrapped phrases beside eight columns fit the 820
+     kiosk without scrolling. */
+  padding: 4px 8px 4px 10px;
   border-left: 2px solid var(--bench);
   background: var(--bench);
   text-align: left;

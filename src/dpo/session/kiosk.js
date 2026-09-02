@@ -84,6 +84,9 @@ const LEVELS = ["itemized", "grouped", "scene", "atmospheric"];
 const HOLD_MS = 400; // spec Table 5: hold >= 400 ms auditions
 const FOLD_STEP_PX = 40; // each 40 px of drag or pinch = one level
 const MOTION_MS = 160; // spec-identity.md Motion: short linear motion
+// The root zoom fitScreen sets (kiosk.css html { zoom }); measured rects are
+// in zoomed units, transforms are not, so every slide divides by it.
+let pageZoom = 1;
 const AUTOSAVE_MS = 250; // build contract 9: debounce
 const INVENTORY_RETRY_MS = 2000; // a resume whose inventory fetch failed asks again
 const SNAPSHOT_SCHEMA = "dpo.caption-session-snapshot/v1";
@@ -1163,7 +1166,7 @@ function moveCaption(target, className) {
   capobj.className = className;
   if (motionCut()) return Promise.resolve();
   const after = capobj.getBoundingClientRect();
-  const dy = before.top - after.top;
+  const dy = (before.top - after.top) / pageZoom;
   if (!dy) return Promise.resolve();
   capobj.style.transform = "translateY(" + dy + "px)";
   void capobj.offsetHeight; // commit the start position before animating
@@ -1366,7 +1369,7 @@ function flipRows(before) {
     .forEach((node) => {
       const id = node.getAttribute("data-id");
       if (!before.has(id)) return;
-      const dy = before.get(id) - node.getBoundingClientRect().top;
+      const dy = (before.get(id) - node.getBoundingClientRect().top) / pageZoom;
       if (!dy) return;
       node.style.transform = "translateY(" + dy + "px)";
       void node.offsetHeight;
@@ -1950,4 +1953,15 @@ async function boot() {
   enter("intro");
 }
 
+// The composition is set for the kiosk's 820 tall. A taller screen shows it
+// at the same proportions, larger, rather than small in the middle; the
+// stylesheet gives the width that scale leaves over to the stage. Never
+// below one, so the tablet itself is untouched.
+function fitScreen() {
+  pageZoom = Math.max(1, window.innerHeight / 820);
+  document.documentElement.style.setProperty("--k", String(pageZoom));
+}
+
+fitScreen();
+window.addEventListener("resize", fitScreen);
 boot();

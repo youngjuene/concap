@@ -9,14 +9,28 @@
    never referenced: identity.css already gives it to the primary action and
    the current lower-lane segment, the only two places it may appear. */
 
+/* Larger screens: kiosk.js sets --k and the root zooms by it, so the
+   composition keeps its hand size; zoom scales viewport units too, so --vh
+   and --vw are the viewport in the page's own units. */
+html {
+  zoom: var(--k, 1);
+  --vh: calc(100vh / var(--k, 1));
+  --vw: calc(100vw / var(--k, 1));
+  --kiosk-w: 1180px;
+}
+
+/* The shell is the viewport, not a page: the timeline, the stage and the
+   actions hold their positions (spec 3.1) whatever the working column holds,
+   and a working column taller than the space between them scrolls inside
+   itself rather than pushing the actions off the kiosk's 820. No width cap:
+   on a wider screen the stage below takes the width. */
 .app {
-  max-width: 1180px;
-  min-height: 100vh;
+  height: var(--vh);
   margin: 0 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 /* ---- Timeline (spec 3.1): clip count eyebrow, two lanes ------------------ */
@@ -35,13 +49,34 @@
    columns (spec 7) beside a legible row, which does not fit. 640 leaves 484:
    eight columns at 42 beside rows of at least 148. One value, so every stage
    screen holds the same frame (spec 3.1). */
-.stage-layout { --stage-w: 640px; display: flex; align-items: flex-start; gap: 24px; flex: 1 1 auto; }
+/* On a larger screen the stage grows: to what the width leaves after the
+   working column, or to what the height leaves after the timeline, the strip
+   and the actions — whichever binds. */
+.stage-layout {
+  /* The tablet's stage, and the width the follow-up lays its check frame out
+     at (followup.js KIOSK_STAGE_WIDTH): the floor below. */
+  --kiosk-stage-w: 640px;
+  /* Rows of at least 148 beside eight ordering columns at 42, and the gap. */
+  --working-min: 492px;
+  --gutter: 24px;
+  /* Above and below the stage: the app's padding, the timeline and its gap,
+     the parked strip, the actions row and its gap. */
+  --stage-h-budget: calc(32px + 40px + 16px + var(--caption-box) + 76px + 16px);
+  --stage-w: max(
+    var(--kiosk-stage-w),
+    min(
+      calc(var(--vw) - 32px - var(--gutter) - var(--working-min)),
+      calc((var(--vh) - var(--stage-h-budget)) * 16 / 9)
+    )
+  );
+  display: flex; align-items: stretch; gap: var(--gutter); flex: 1 1 auto; min-height: 0;
+}
 .stage-column { flex: 0 0 var(--stage-w); width: var(--stage-w); max-width: 100%; }
 .stage-column[hidden] { display: none; }
-.working { flex: 1 1 0; min-width: 0; }
+.working { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; }
 /* Listing, cards, measures, probe: no live frame to keep beside them, so the
    working column widens across the layout (spec 3.1). */
-.stage-layout.single .working { flex-basis: 100%; }
+.stage-layout.single .working { flex-basis: 100%; max-width: calc(var(--kiosk-w) - 32px); margin: 0 auto; }
 
 /* The 16:9 frame: footage, a small shot label, the placed caption, and
    nothing else (spec 3.1 "Keep the stage neutral otherwise"). */
@@ -128,7 +163,7 @@
 
 /* Orderings (spec 4.2): labels at the ends over the columns, an SVG drawing
    beside the rows, and a button per column overlaying it as the hit area. */
-.orderings-labels { display: flex; justify-content: space-between; margin-left: auto; padding-bottom: 8px; }
+.orderings-labels { display: flex; justify-content: space-between; margin-left: auto; padding-bottom: 4px; }
 .orderings { position: relative; flex: 0 0 auto; max-width: 100%; overflow-x: auto; }
 .orderings svg { display: block; }
 .orderings .column {

@@ -195,6 +195,16 @@ comes from the URL; without one the page shows a one-line message and nothing
 else. Every interaction is autosaved, and reopening the same URL resumes from
 the start of the interrupted step.
 
+On a screen taller than the tablet's 820 (a desk monitor during rehearsal or
+an audit) the page zooms its composition to the screen's height, so type and
+targets keep their proportions instead of sitting small in the middle, and
+the stage takes whatever width that leaves beyond the working column's 492
+(rows beside eight ordering columns). On a 27-inch 2560×1440 the stage is
+about 910 wide in the page's units against the tablet's 640. The tablet is
+untouched, and the follow-up's check frame is still laid out at the tablet's
+640, so a caption shaped on a wider kiosk can break across lines differently
+there.
+
 Launch the kiosk browser with autoplay allowed, so a resume into a viewing
 starts the clip with sound without a tap:
 
