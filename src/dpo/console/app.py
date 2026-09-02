@@ -217,6 +217,11 @@ def build_app(
 
     # ---- the session -------------------------------------------------------
 
+    @app.get("/api/strings")
+    def strings() -> Any:
+        """The copy alone, ungated: the landing screen asks for the identifier in these words."""
+        return {"strings": STRINGS, "cards": CARDS}
+
     @app.get("/api/session")
     def session(participant: str | None = None) -> Any:
         checked = _participant(participant)

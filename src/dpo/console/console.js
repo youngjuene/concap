@@ -1073,6 +1073,52 @@ function notice(text) {
   clear($("column")).appendChild(el("p", { class: "notice body", text }));
 }
 
+// The server checks the identifier against this same shape; the button waits
+// for one that would pass, so the door never sends a request it knows fails.
+const PARTICIPANT_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+
+// The front door, when the page was opened without an identifier: the title,
+// the one line that says what is needed, a field for it, and Continue, which
+// reopens the page with the identifier in the URL — the entry the session is
+// keyed by, so a returning participant resumes and a new one begins.
+function renderLanding(strings) {
+  show("column", true);
+  const field = el("input", {
+    class: "field",
+    id: "participant",
+    type: "text",
+    autocomplete: "off",
+    autocapitalize: "off",
+    spellcheck: "false",
+    maxlength: "64",
+    "aria-label": strings.participant_label,
+    placeholder: strings.participant_label,
+  });
+  const go = button(strings.actions.continue, { class: "button primary", id: "continue", disabled: "disabled" });
+  const submit = () => {
+    const id = field.value.trim();
+    if (!PARTICIPANT_SHAPE.test(id)) return;
+    window.location.search = "?participant=" + encodeURIComponent(id);
+  };
+  field.addEventListener("input", () => {
+    go.disabled = !PARTICIPANT_SHAPE.test(field.value.trim());
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submit();
+  });
+  go.addEventListener("click", submit);
+  clear($("column")).appendChild(
+    el("div", { class: "card landing" }, [
+      el("h1", { class: "heading", text: strings.app_title }),
+      el("p", { class: "body", text: strings.participant_missing }),
+      el("label", { class: "eyebrow", for: "participant", text: strings.participant_label }),
+      field,
+      el("div", { class: "buttons" }, [go]),
+    ]),
+  );
+  field.focus();
+}
+
 // The composition is set for the kiosk's 820 tall. A taller screen shows it
 // at the same proportions, larger, rather than small in the middle; the
 // stylesheet gives the width that scale leaves over to the footage. Never
@@ -1088,8 +1134,11 @@ function start() {
   const participant = new URLSearchParams(window.location.search).get("participant");
   state.participant = participant;
   if (!participant) {
-    // A known state, not a failed request: say so without asking the server.
-    notice(PARTICIPANT_MISSING);
+    // The front door: the copy is ungated, the session is not.
+    fetch("/api/strings")
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("no strings"))))
+      .then((copy) => renderLanding(copy.strings))
+      .catch(() => notice(PARTICIPANT_MISSING));
     return;
   }
   fetch("/api/session?participant=" + encodeURIComponent(participant))

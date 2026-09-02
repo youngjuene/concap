@@ -264,6 +264,22 @@ class TestCopy:
         assert match and match.group(1) == STRINGS["participant_missing"]
         assert SCRIPT.count(STRINGS["participant_missing"]) == 1
 
+    def test_the_landing_screen_asks_for_the_identifier_in_the_tables_words(self) -> None:
+        # Opened without an identifier the page is a door, not a dead end: the
+        # title, the line that says what is needed, a field and Continue,
+        # all in copy fetched ungated rather than a second copy in the script.
+        landing = SCRIPT[SCRIPT.index("function renderLanding") :].split("\n}\n", 1)[0]
+        for used in (
+            "strings.app_title",
+            "strings.participant_missing",
+            "strings.participant_label",
+            "strings.actions.continue",
+        ):
+            assert used in landing
+        assert 'class: "field"' in landing and 'id: "participant"' in landing
+        assert 'fetch("/api/strings")' in SCRIPT
+        assert STRINGS["participant_label"] == "Participant identifier"
+
     def test_every_instruction_card_the_screens_need_exists(self) -> None:
         assert set(CARDS) == {"intro", "author", "check"}
         for card in CARDS.values():

@@ -33,6 +33,9 @@ STRINGS: dict[str, Any] = {
         "finish": "Finish viewing",
         "submit": "Submit",
         "download": "Download session log",
+        # Not in Table 3: the landing screen's one action, which takes the
+        # participant identifier to the session's own Begin.
+        "continue": "Continue",
     },
     "helpers": {
         "replay": "Replay shot",
@@ -68,6 +71,9 @@ STRINGS: dict[str, Any] = {
     # identifier, since the session is "gated by a participant identifier" (§7)
     # and a blank screen states nothing.
     "participant_missing": "Open this page with a participant identifier.",
+    # Not in Table 3: the landing screen's field label, the other
+    # instrument's words for the same field on its follow-up page.
+    "participant_label": "Participant identifier",
 }
 
 # Instruction-card copy. §3.2 requires the cards; the table does not write

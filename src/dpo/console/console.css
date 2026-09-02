@@ -276,6 +276,23 @@ html {
 .pair .choice .caption-prose { text-align: left; }
 .pair .choice[aria-pressed="true"] { border-color: var(--ink); border-width: 2px; padding: 19px; }
 
+/* The landing screen's field: the identifier in the mono register, at the
+   touch height everything else keeps. */
+.field {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+.field::placeholder { color: var(--dim); opacity: 1; }
+.field:focus-visible { outline-offset: 0; border-color: var(--ink); }
+.landing label { display: block; }
+
 .probe-field, .column textarea {
   width: 100%; min-height: 120px; padding: 12px;
   background: var(--panel); border: 1px solid var(--rule);

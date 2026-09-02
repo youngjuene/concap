@@ -170,8 +170,9 @@ whether the document is a dry run (`provisional_salience`), the writer and
 the URL — and nothing after it.
 
 Open **`http://127.0.0.1:8778/?participant=P01`** in the kiosk browser. The
-participant identifier comes from the URL; without one the page shows a
-one-line message and nothing else. Every interaction is autosaved and a reload
+participant identifier comes from the URL; opened without one, the page is a
+door — the title, a field for the identifier, and Continue, which reopens the
+page with it in the URL. Every interaction is autosaved and a reload
 resumes at the interrupted step. That identifier is the only thing the server
 checks, which is right for a supervised kiosk on its own machine; if the
 server is ever bound to a network address (`--host 0.0.0.0`), use identifiers

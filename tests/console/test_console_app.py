@@ -72,6 +72,14 @@ class TestPage:
 
 
 class TestGating:
+    def test_the_copy_alone_is_not_gated_because_the_landing_screen_asks_in_its_words(
+        self, client: TestClient
+    ) -> None:
+        answer = client.get("/api/strings")
+        assert answer.status_code == 200
+        assert answer.json()["strings"]["app_title"] == STRINGS["app_title"]
+        assert "clips" not in answer.json()
+
     def test_every_api_route_needs_a_participant(self, client: TestClient, shot_ids: Any) -> None:
         clip_id, shot_id = shot_ids
         for path in (
