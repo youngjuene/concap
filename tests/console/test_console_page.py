@@ -212,6 +212,12 @@ class TestActions:
         for text in (HTML, CSS, SCRIPT):
             assert "reroll" not in text.lower() and "regenerate" not in text.lower()
 
+    def test_a_viewing_starts_from_the_top_and_the_shot_loop_survives_the_clip_ending(self) -> None:
+        viewing = SCRIPT[SCRIPT.index("function renderViewing(") :].split("\n}\n", 1)[0]
+        assert "video.currentTime = 0;" in viewing
+        loop = SCRIPT[SCRIPT.index("function startShotLoop") :].split("\n}\n", 1)[0]
+        assert "video.onended = () => {" in loop and "video.play()" in loop.split("video.onended")[1]
+
     def test_keep_is_locked_while_the_next_shot_opens_and_a_revision_survives_a_reload(self) -> None:
         # A second Keep while /api/shot is pending would commit the shot twice
         # and skip the one after it; a reload during a revision would reopen

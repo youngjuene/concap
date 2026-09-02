@@ -381,6 +381,9 @@ function renderViewing(which) {
   const video = loadMedia(clip);
   video.loop = false;
   video.controls = false;
+  // A viewing is the whole clip from the top (§3.2): after shaping, the
+  // element is parked inside the last shot, and a resume may be anywhere.
+  video.currentTime = 0;
   $("placed").hidden = true;
   $("band-text").textContent = "";
   $("band-note").textContent =
@@ -534,6 +537,12 @@ function startShotLoop() {
   // The helpers read the element's state, so their labels follow its events.
   video.onplay = renderAuthoringActions;
   video.onpause = renderAuthoringActions;
+  // The last shot ends where the clip does, and there the element pauses on
+  // 'ended' by itself; the loop must start it again, not only seek.
+  video.onended = () => {
+    video.currentTime = start;
+    video.play().catch(() => undefined);
+  };
   video.play().catch(() => undefined);
   const tick = () => {
     if (video.currentTime >= end) video.currentTime = start;
