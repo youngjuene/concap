@@ -65,10 +65,11 @@ def build_objective(table: Mapping[str, object]) -> PreferenceObjective:
     if name == "cdpo":
         return CDPOObjective(beta=beta, epsilon=float(str(table["epsilon"])))
     if name == "rdpo":
-        mode = str(table["epsilon_mode"])
-        suffix = "_epsilon"
-        mode_name = mode.removesuffix(suffix) if mode.endswith(suffix) else mode
-        return RDPOObjective(beta=beta, epsilon=float(str(table["epsilon"])), epsilon_mode=mode_name)
+        return RDPOObjective(
+            beta=beta,
+            epsilon=float(str(table["epsilon"])),
+            epsilon_mode=str(table["epsilon_mode"]),
+        )
     if name == "drdpo":
         return DrDPOObjective(beta=beta, beta_prime=float(str(table["beta_prime"])))
     return WDPOObjective(

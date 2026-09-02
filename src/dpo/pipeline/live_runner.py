@@ -313,10 +313,6 @@ class LiveMatrixRunner:
     def seed_adapter(self, track: str) -> ModelAdapter:
         return self.backend.seed_adapter(track)
 
-    @property
-    def seed_adapters(self) -> dict[str, ModelAdapter]:
-        return {track: self.backend.seed_adapter(track) for track in sorted(self.contract.tracks)}
-
     def cell_directory(
         self, experiment_id: str, variant_id: str, track: str, seed: int, flip_rate: float = 0.0
     ) -> Path:
