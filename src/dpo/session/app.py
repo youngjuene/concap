@@ -38,6 +38,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from dpo.caption import media as media_tools
+from dpo.caption.background import BackgroundWriter
 from dpo.caption.media import MediaError
 from dpo.session.document import (
     clip_by_id,
@@ -56,14 +57,14 @@ from dpo.session.log import (
     kept_caption_in,
     validate_participant,
 )
-from dpo.session.skeleton import SettingsError, all_orderings, validate_settings
+from dpo.session.skeleton import SettingsError, all_orderings, neighbours, validate_settings
 from dpo.session.writer import (
     CachedWriter,
     CaptionWriter,
     ShotMedia,
     WriterError,
+    audition_requests,
     build_request,
-    warm_auditions,
 )
 
 # Spec Table 6 `error`, the one string the server itself puts in front of a participant.
@@ -119,6 +120,7 @@ def build_app(
     writer: CaptionWriter,
     *,
     shot_media: ShotMedia | None = None,
+    prefetch: bool = True,
 ) -> FastAPI:
     """The app over one validated document.
 
@@ -137,7 +139,33 @@ def build_app(
     log = EventLog(out_dir)
     cached = writer if isinstance(writer, CachedWriter) else CachedWriter(writer, out_dir / CACHE_FILE)
     narrowed = participant_document(document)
-    auditions = warm_auditions(cached, document, shot_media)
+    # Every audition is written off the request path, in document order; a
+    # clip's own auditions jump the queue when its inventory is requested and
+    # the route waits for them (spec 7: the audition is instant). After every
+    # caption, the settings one gesture away are written the same way.
+    background = BackgroundWriter(cached, enabled=prefetch)
+    audition_table: dict[tuple[str, str], dict[str, Any]] = {}
+    for clip in document["clips"]:
+        for shot in clip["shots"]:
+            key = (str(clip["clip_id"]), str(shot["shot_id"]))
+            media = shot_media(str(clip["clip_id"]), shot) if shot_media is not None else None
+            audition_table[key] = audition_requests(document, clip, shot, media)
+            background.warm(audition_table[key].values(), key=key)
+    # One caption is written here, synchronously, before anything is served: a
+    # writer that cannot write must stop the server at start-up, not the
+    # participant at the first shot. The background then owns the rest.
+    probe = next((requests for requests in audition_table.values() if requests), {})
+    if probe:
+        cached.write(next(iter(probe.values())))
+
+    def _auditions(key: tuple[str, str]) -> dict[str, str] | None:
+        background.urgent(audition_table[key].values(), key=key)
+        background.wait_for(key)
+        found = {row_id: cached.lookup(request) for row_id, request in audition_table[key].items()}
+        if any(caption is None for caption in found.values()):
+            return None
+        return {row_id: caption for row_id, caption in found.items() if caption is not None}
+
     excerpts = {entry["excerpt_id"]: entry for entry in document["followup"]["sound_only"]}
 
     def _participant(value: str | None) -> str | JSONResponse:
@@ -240,7 +268,7 @@ def build_app(
                     "atmosphere": {"phrase": shot["atmosphere"]["phrase"]},
                     "orderings": all_orderings(shot, roles),
                     "opening": dict(clip["opening"]),
-                    "auditions": dict(auditions[(clip["clip_id"], shot["shot_id"])]),
+                    "auditions": _auditions((str(clip["clip_id"]), str(shot["shot_id"]))) or {},
                 }
                 for shot in clip["shots"]
             ],
@@ -268,15 +296,25 @@ def build_app(
             # a bare 500 (contract §7 "On writer failure").
             media = shot_media(clip_id, shot) if shot_media is not None else None
             request = build_request(document, clip, shot, validated, media)
-            written, hit = cached.write_attributed_cached(request)
+            with background.foreground():
+                written, hit = cached.write_attributed_cached(request)
         except (WriterError, MediaError):
             return _error(502, CAPTION_FAILED)
+        # What the participant is likeliest to press next, written while they
+        # read this one.
+        background.urgent(
+            build_request(document, clip, shot, near, media)
+            for near in neighbours(shot, roles_for(document, clip), validated)
+        )
         # ``writer`` and ``names_excluded`` are for the log, not the screen:
         # the page records them on caption.written and shows neither.
         return {
             "caption": written.caption,
             "key": validated.key,
             "cached": hit,
+            # A hit is not a revisit if the prefetcher wrote it first; revisits
+            # are read from the participant's own request events.
+            "prefetched": hit and background.wrote(request),
             "writer": written.writer,
             "names_excluded": list(written.names_excluded),
         }

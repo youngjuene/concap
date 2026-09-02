@@ -337,3 +337,88 @@ def balance_of(shot: Mapping[str, Any], roles: Mapping[str, str], settings: Sett
             lo, hi = candidate["span"]
             return (lo + hi) / 2.0
     return 0.5
+
+
+def neighbours(shot: Mapping[str, Any], roles: Mapping[str, str], settings: Settings) -> list[Settings]:
+    """The settings one gesture away on the skeleton (spec Table 5).
+
+    One strike or restore per source, one ordering column either way, one fold
+    level either way. Written in the background while the current caption is
+    read, so the next Show caption is usually a cache hit; what the skeleton
+    cannot reach in one gesture is not here.
+
+    Balance carries across an admission change the way the browser carries it
+    (spec 4.2): the λ midpoint of the current ordering resolves to the ordering
+    whose span contains it in the new subset. Folding to grouped ranks the
+    heads present at the same λ; folding to scene or atmospheric has no free
+    parameter, and unfolding from them opens itemized at the middle column.
+    """
+    sources = list(shot["sources"])
+    all_ids = [str(source["id"]) for source in sources]
+    levels = list(LEVELS)
+    position = levels.index(settings.level)
+    found: list[Settings] = []
+
+    def add(candidate: Settings) -> None:
+        if candidate.key != settings.key and all(candidate.key != other.key for other in found):
+            found.append(candidate)
+
+    def itemized(subset: Sequence[str], balance: float) -> Settings:
+        chosen = [source for source in sources if source["id"] in subset]
+        reachable = orderings(chosen)
+        return Settings("itemized", tuple(subset), tuple(reachable[resolve(reachable, balance)]["order"]))
+
+    def grouped(subset: Sequence[str], balance: float) -> Settings:
+        chosen = [source for source in sources if source["id"] in subset]
+        reachable = orderings(head_weights(chosen, roles))
+        return Settings("grouped", tuple(subset), tuple(reachable[resolve(reachable, balance)]["order"]))
+
+    if settings.level in ("scene", "atmospheric"):
+        # No rows to strike, one ordering: the only moves are up and down the fold.
+        for step in (-1, 1):
+            index = position + step
+            if not 0 <= index < len(levels):
+                continue
+            level = levels[index]
+            if level == "itemized":
+                add(itemized(all_ids, 0.5))
+            elif level == "grouped":
+                add(grouped(all_ids, 0.5))
+            else:
+                add(Settings(level, (), ()))
+        return found
+
+    admitted = list(settings.admitted)
+    balance = balance_of(shot, roles, settings)
+    build = itemized if settings.level == "itemized" else grouped
+
+    for source_id in all_ids:
+        if source_id in admitted:
+            if len(admitted) > 1:
+                add(build([item for item in admitted if item != source_id], balance))
+        else:
+            add(build([*admitted, source_id], balance))
+
+    chosen = [source for source in sources if source["id"] in admitted]
+    reachable = orderings(chosen) if settings.level == "itemized" else orderings(head_weights(chosen, roles))
+    current = next(
+        (index for index, candidate in enumerate(reachable) if candidate["order"] == list(settings.order)),
+        0,
+    )
+    for step in (-1, 1):
+        index = current + step
+        if 0 <= index < len(reachable):
+            add(Settings(settings.level, tuple(admitted), tuple(reachable[index]["order"])))
+
+    for step in (-1, 1):
+        index = position + step
+        if not 0 <= index < len(levels):
+            continue
+        level = levels[index]
+        if level == "itemized":
+            add(itemized(admitted, balance))
+        elif level == "grouped":
+            add(grouped(admitted, balance))
+        else:
+            add(Settings(level, (), ()))
+    return found

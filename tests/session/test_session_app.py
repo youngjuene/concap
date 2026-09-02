@@ -186,6 +186,7 @@ def test_caption_round_trip_cached_flag_and_refusals(client: TestClient, tmp_pat
         "caption": "A tram braking once, briefly and a distant siren rises and fades.",
         "key": "itemized|tram,siren",
         "cached": False,
+        "prefetched": False,
         "writer": "template",
         "names_excluded": [],
     }
@@ -224,6 +225,7 @@ def test_caption_round_trip_cached_flag_and_refusals(client: TestClient, tmp_pat
         "caption": "A tram stop on a wide street.",
         "key": "scene",
         "cached": False,
+        "prefetched": False,
         # Provenance travels with every caption for the log; the page shows neither.
         "writer": "template",
         "names_excluded": [],

@@ -19,6 +19,7 @@ Nothing in this package may import from ``dpo.session`` or ``dpo.console``.
 The dependency runs one way.
 """
 
+from dpo.caption.background import BackgroundWriter
 from dpo.caption.writer import (
     CAPTION_MAX_CHARS,
     CachedWriter,
@@ -33,6 +34,7 @@ from dpo.caption.writer import (
 )
 
 __all__ = [
+    "BackgroundWriter",
     "CAPTION_MAX_CHARS",
     "CachedWriter",
     "CaptionRequest",

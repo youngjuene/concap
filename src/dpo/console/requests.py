@@ -275,3 +275,69 @@ def audition_settings(source_id: str) -> Settings:
 
 def every_audition(field: Field) -> dict[str, Settings]:
     return {source.id: audition_settings(source.id) for source in field.sources}
+
+
+def neighbours(field: Field, settings: Settings) -> list[Settings]:
+    """The settings one gesture away: what the participant most likely asks for next.
+
+    One mute or restore per source, one segment of balance either way, one
+    detent of grain either way. These are written in the background while the
+    current caption is read (see ``dpo.caption.background``), so the next Show
+    caption is usually a cache hit. The list is what the console can reach in
+    one gesture and nothing more — a prefetch that wandered further would spend
+    the GPU on settings nobody is about to choose.
+
+    At the unnamed grain there is nothing to mute and no balance to move, so
+    its only neighbour is the grain below it.
+    """
+    grains = list(GRAINS)
+    position = grains.index(settings.grain)
+    found: list[Settings] = []
+
+    def add(candidate: Settings) -> None:
+        if candidate.key != settings.key and all(candidate.key != other.key for other in found):
+            found.append(candidate)
+
+    if settings.grain == UNNAMED_GRAIN:
+        # Down from atmospheric, the console reopens with every source admitted
+        # at the middle of the axis — the same state the page restores.
+        ids = tuple(source.id for source in field.sources)
+        regimes = field.regimes(ids)
+        add(Settings(grains[position - 1], ids, len(regimes) // 2))
+        return found
+
+    admitted = list(settings.admitted)
+    regimes = field.regimes(admitted)
+    alpha = (regimes[settings.regime]["span"][0] + regimes[settings.regime]["span"][1]) / 2.0
+
+    def regime_at(subset: tuple[str, ...]) -> int:
+        # Carry α across an admission change, as the page does.
+        for index, regime in enumerate(field.regimes(subset)):
+            low, high = regime["span"]
+            if low <= alpha <= high:
+                return index
+        return max(0, len(field.regimes(subset)) - 1)
+
+    for source in field.sources:
+        if source.id in admitted:
+            if len(admitted) > 1:
+                subset = tuple(item for item in admitted if item != source.id)
+                add(Settings(settings.grain, subset, regime_at(subset)))
+        else:
+            subset = tuple(item for item in (*admitted, source.id))
+            add(Settings(settings.grain, subset, regime_at(subset)))
+
+    for step in (-1, 1):
+        index = settings.regime + step
+        if 0 <= index < len(regimes):
+            add(Settings(settings.grain, tuple(admitted), index))
+
+    for step in (-1, 1):
+        index = position + step
+        if 0 <= index < len(grains):
+            grain = grains[index]
+            if grain == UNNAMED_GRAIN:
+                add(Settings(grain, (), 0))
+            else:
+                add(Settings(grain, tuple(admitted), settings.regime))
+    return found
