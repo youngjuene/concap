@@ -158,8 +158,8 @@ palette.
 
 | Token | Hex | Role |
 |---|---|---|
-| ground | #DFE2DE | app background, concrete |
-| panel | #F1F2EF | surfaces, cards |
+| ground | #FFFFFF | app background — white, set 2026-09-02 for a clean-room clarity (was concrete #DFE2DE) |
+| panel | #F7F8F7 | surfaces, cards — a hair off the ground so hairlines still read (was #F1F2EF) |
 | ink | #191D1C | text, active states |
 | dim | #6E7674 | secondary text |
 | rule | #BFC5C0 | hairlines, borders |

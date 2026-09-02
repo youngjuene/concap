@@ -19,8 +19,8 @@
 
 :root {
   /* §6 Table 4 — the seven tokens. */
-  --ground: #DFE2DE;   /* app background, concrete */
-  --panel: #F1F2EF;    /* surfaces, cards */
+  --ground: #FFFFFF;   /* app background: white, a clean room's clarity */
+  --panel: #F7F8F7;    /* surfaces, cards: a hair off the ground, so a hairline still reads */
   --ink: #191D1C;      /* text, active states */
   --dim: #6E7674;      /* secondary text */
   --rule: #BFC5C0;     /* hairlines, borders */

@@ -47,8 +47,8 @@ class TestPalette:
     """§6 Table 4: seven tokens and no others."""
 
     TOKENS = {
-        "--ground": "#DFE2DE",
-        "--panel": "#F1F2EF",
+        "--ground": "#FFFFFF",
+        "--panel": "#F7F8F7",
         "--ink": "#191D1C",
         "--dim": "#6E7674",
         "--rule": "#BFC5C0",
