@@ -247,8 +247,9 @@ change the declaration beside it.
 
 Table 5 of the system document lists what remains unsettled. As built:
 
-- `r0`, the band cut points and the IoU threshold are all calibration flags on
-  `preprocess` and `scaffold`, defaulted and hashed, awaiting the admin
+- `r0` is a flag on `scaffold`; θ, the shot floor and the IoU threshold are
+  flags on `preprocess`, and `scaffold` stamps the document with the values the
+  manifest was computed under — all defaulted and hashed, awaiting the admin
   calibration protocol;
 - the Korean wording of the criterion sentence is a construct decision, and
   every string sits in `dpo/console/copy.py` so it changes in one place;

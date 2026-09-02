@@ -139,11 +139,22 @@ def _console_scaffold(arguments: argparse.Namespace) -> int:
     # The manifest says whether c_g and e_g were measured or filled from tag
     # multiplicity for a dry run; the document carries that into its stamp.
     provisional = bool(manifest["provisional_salience"])
+    # The thresholds that cut the shots and grouped the labels are the
+    # manifest's, not a flag's: r_g, p_g and the grouping were computed under
+    # them, and the stamp has to say so. r0 alone is applied at serve time.
+    source = manifest.get("source") or {}
+    preprocessing = {
+        name: source[name]
+        for name in ("iou_threshold", "cut_threshold", "minimum_shot_ms", "stride_ms")
+        if name in source
+    }
+    if arguments.half_saturation is not None:
+        preprocessing["half_saturation"] = arguments.half_saturation
     configuration = Configuration(
         study_id=arguments.study_id,
         corpus_id=arguments.corpus_id,
         provisional_salience=provisional,
-        calibration=_calibration(arguments),
+        calibration=Calibration(**preprocessing),
     )
     wanted = list(arguments.clips or manifest["clips"])
     missing = [clip_id for clip_id in wanted if clip_id not in manifest["clips"]]
@@ -384,7 +395,9 @@ def register(subparsers: Any) -> None:
     scaffold.add_argument("--study-id", required=True)
     scaffold.add_argument("--corpus-id", required=True)
     scaffold.add_argument("--clips", nargs="*", help="clip ids in session order; default: the manifest's")
-    calibration_flags(scaffold)
+    # The preprocessing thresholds come from the manifest, where they were
+    # applied; only r0, applied when the document is served, is set here.
+    scaffold.add_argument("--half-saturation", type=float, help="r0, the area counting as half visible")
     scaffold.set_defaults(handler=_console_scaffold)
 
     validate = actions.add_parser("validate", help="refuse a document that is not yet authored")

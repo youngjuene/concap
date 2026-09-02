@@ -33,12 +33,21 @@ def _scaffold_arguments(tmp_path: Path, manifest: Path, **overrides: object) -> 
     return argparse.Namespace(**values)
 
 
-def _manifest(path: Path, clip_id: str = "clip_001", *, provisional: bool = False) -> Path:
+def _manifest(
+    path: Path, clip_id: str = "clip_001", *, provisional: bool = False, iou_threshold: float = 0.5
+) -> Path:
     path.write_text(
         json.dumps(
             {
                 "schema": MANIFEST_SCHEMA,
-                "source": {"fps": 60.0, "downsample": 4},
+                "source": {
+                    "fps": 60.0,
+                    "downsample": 4,
+                    "iou_threshold": iou_threshold,
+                    "cut_threshold": 0.25,
+                    "minimum_shot_ms": 2000,
+                    "stride_ms": 250,
+                },
                 "limitations": [],
                 "provisional_salience": provisional,
                 "clips": {
@@ -149,6 +158,45 @@ class TestScaffold:
         assert document["config"]["provisional_salience"] is True
         assert emitted["provisional_salience"] is True
         assert "never recruit" in emitted["next"]
+
+    def test_the_stamp_carries_the_thresholds_the_manifest_was_computed_under(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        loose = _manifest(tmp_path / "loose.json", iou_threshold=0.3)
+        tight = _manifest(tmp_path / "tight.json", iou_threshold=0.7)
+        assert (
+            _console_scaffold(_scaffold_arguments(tmp_path, loose, out=str(tmp_path / "loose-doc.json"))) == 0
+        )
+        first = json.loads(capsys.readouterr().out)
+        assert (
+            _console_scaffold(_scaffold_arguments(tmp_path, tight, out=str(tmp_path / "tight-doc.json"))) == 0
+        )
+        second = json.loads(capsys.readouterr().out)
+        document = json.loads((tmp_path / "loose-doc.json").read_text(encoding="utf-8"))
+        # Two preprocessings under different thresholds are two studies; the
+        # stamp says which, from the manifest and not from a scaffold flag.
+        assert document["config"]["calibration"]["iou_threshold"] == 0.3
+        assert first["config_hash"] != second["config_hash"]
+
+    def test_scaffold_takes_no_preprocessing_threshold_of_its_own(self) -> None:
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "console",
+                    "scaffold",
+                    "--manifest",
+                    "m",
+                    "--out",
+                    "o",
+                    "--study-id",
+                    "s",
+                    "--corpus-id",
+                    "c",
+                    "--iou-threshold",
+                    "0.3",
+                ]
+            )
 
     def test_the_calibration_flags_change_the_stamp(self, tmp_path: Path) -> None:
         manifest = _manifest(tmp_path / "manifest.json")
