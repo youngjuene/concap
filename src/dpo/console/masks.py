@@ -302,8 +302,14 @@ def group_audio_labels(
 
     for left in range(len(labels)):
         for right in range(left + 1, len(labels)):
-            if families is not None and families.get(labels[left]) != families.get(labels[right]):
-                continue
+            if families is not None:
+                # Under the constraint a label with no family on record has no
+                # physical source on record either, so it merges with nothing:
+                # two unlisted labels are not "the same family" for being
+                # equally unknown.
+                mine, theirs = families.get(labels[left]), families.get(labels[right])
+                if mine is None or theirs is None or mine != theirs:
+                    continue
             total = union[left, right]
             if total and intersection[left, right] / total >= threshold:
                 root, other = find(left), find(right)

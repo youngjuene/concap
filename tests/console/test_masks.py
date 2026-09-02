@@ -297,6 +297,15 @@ class TestFamilyConstraint:
         groups = group_audio_labels(reader, ["Bird", "Traffic noise", "Vehicle horn"], 0.5, families)
         assert sorted(groups, key=len) == [("Bird",), ("Traffic noise", "Vehicle horn")]
 
+    def test_two_labels_with_no_family_on_record_do_not_merge_for_being_equally_unknown(
+        self, masks: Path
+    ) -> None:
+        _mask(masks / "audio" / "c" / "Hum" / "00000.png", (0, 0, 4, 4))
+        _mask(masks / "audio" / "c" / "Whir" / "00000.png", (0, 0, 4, 4))
+        reader = ClipMasks(masks / "visual" / "c", masks / "audio" / "c", 1)
+        assert group_audio_labels(reader, ["Hum", "Whir"], 0.5) == [("Hum", "Whir")]
+        assert group_audio_labels(reader, ["Hum", "Whir"], 0.5, families={}) == [("Hum",), ("Whir",)]
+
     def test_the_manifest_records_which_grouping_it_used(self, masks: Path) -> None:
         _visual(masks, "clip_001", 4)
         _mask(masks / "audio" / "clip_001" / "Bird" / "00000.png", (0, 0, 4, 4))
