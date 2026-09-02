@@ -168,6 +168,18 @@ class ClipMasks:
     def read(self, path: Path) -> np.ndarray:
         return self.cache.get(path, self.downsample)
 
+    def index_unit_ms(self, fps: float) -> float:
+        """How long one frame index stands for.
+
+        The propagated layout names a mask by its frame number, so an index
+        is a frame at ``fps``; the release layout names one mask per second,
+        so an index is a second. Times and floors are converted through this,
+        never through ``fps`` alone, or a ten-second clip in the per-second
+        layout becomes a shot a sixth of a second long.
+        """
+        per_frame = any((self.clip_dir_visual / label).is_dir() for label in VISUAL_CATEGORIES)
+        return 1000.0 / fps if per_frame else 1000.0
+
     def visual_frames(self) -> list[int]:
         indices: set[int] = set()
         for label in VISUAL_CATEGORIES:
@@ -209,8 +221,9 @@ def clip_segments(masks: ClipMasks, calibration: Calibration, fps: float) -> lis
             mask = masks.read(path)
             shares[label] = float(mask.mean())
         shares_by_frame.append(composition(shares))
-    stride = max(1, round(calibration.stride_ms * fps / 1000.0))
-    minimum = max(1, round(calibration.minimum_shot_ms * fps / 1000.0))
+    unit = masks.index_unit_ms(fps)
+    stride = max(1, round(calibration.stride_ms / unit))
+    minimum = max(1, round(calibration.minimum_shot_ms / unit))
     cuts = cut_points(
         shares_by_frame,
         threshold=calibration.cut_threshold,
@@ -364,6 +377,7 @@ def derive_clip(
     cache = MaskCache(None if cache_dir is None else Path(cache_dir) / f"{clip_id}-x{downsample}.npz")
     masks = ClipMasks(root / "visual" / clip_id, root / "audio" / clip_id, downsample, cache)
     frames = masks.visual_frames()
+    unit = masks.index_unit_ms(fps)
     ranges = clip_segments(masks, settings, fps)
     labels = masks.audio_labels()
     families = dict(tags["parents"]) if tags is not None else None
@@ -398,15 +412,18 @@ def derive_clip(
                     "review_required": ["prose", "confidence", "energy"],
                 }
             )
+        # ``low``/``high`` are positions in the sorted frame list; the frame
+        # indices they stand for carry the time, and need not be consecutive.
+        first, last = frames[low], frames[high - 1]
         shots.append(
             {
                 "shot_id": f"s{index + 1}",
-                "start_ms": round(low * 1000.0 / fps),
-                "end_ms": round(high * 1000.0 / fps),
+                "start_ms": round(first * unit),
+                "end_ms": round((last + 1) * unit),
                 "raw_caption": "",
                 "default_caption": "",
                 "sources": sources,
-                "frames": [low, high],
+                "frames": [first, last + 1],
             }
         )
     cache.save()

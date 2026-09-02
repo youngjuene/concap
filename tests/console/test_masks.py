@@ -120,6 +120,13 @@ class TestGrouping:
         assert share == pytest.approx(16 / 64 / 2)
 
 
+def _visual_per_second(root: Path, clip: str, seconds: int) -> None:
+    """The release layout: one mask per label per second, named ``{label}_{second}``."""
+    for second in range(seconds):
+        for label in VISUAL_CATEGORIES:
+            _mask(root / "visual" / clip / f"{label}_{second}.png", (0, 0, 8, 8) if label == "Road" else None)
+
+
 class TestLayouts:
     def test_the_one_frame_per_second_release_layout_is_read(self, masks: Path) -> None:
         _mask(masks / "audio" / "c" / "Siren_0.png", (0, 0, 4, 4))
@@ -127,6 +134,29 @@ class TestLayouts:
         reader = ClipMasks(masks / "visual" / "c", masks / "audio" / "c", 1)
         assert reader.audio_labels() == ["Siren"]
         assert group_quantities(reader, ["Siren"], [0, 1])[1] == 1.0
+
+    def test_a_per_second_index_is_a_second_whatever_the_video_frame_rate(self, masks: Path) -> None:
+        _visual_per_second(masks, "c", 10)
+        _mask(masks / "audio" / "c" / "Siren_0.png", (0, 0, 4, 4))
+        clip = derive_clip(masks, "c", fps=60.0, downsample=1)
+        shot = clip["shots"][0]
+        # Ten masks a second apart are ten seconds of clip, not ten frames of sixty.
+        assert (shot["start_ms"], shot["end_ms"]) == (0, 10000)
+        assert shot["frames"] == [0, 10]
+
+    def test_a_per_frame_index_is_a_frame_at_the_rate_even_when_frames_are_missing(self, masks: Path) -> None:
+        for index in (0, 2, 4, 6):
+            for label in VISUAL_CATEGORIES:
+                _mask(
+                    masks / "visual" / "c" / label / f"{index:05d}.png",
+                    (0, 0, 8, 8) if label == "Road" else None,
+                )
+        _mask(masks / "audio" / "c" / "Siren" / "00000.png", (0, 0, 4, 4))
+        clip = derive_clip(masks, "c", fps=2.0, downsample=1)
+        shot = clip["shots"][0]
+        # Frames 0..6 at two a second: the shot runs to the end of frame 6.
+        assert (shot["start_ms"], shot["end_ms"]) == (0, 3500)
+        assert shot["frames"] == [0, 7]
 
 
 class TestManifest:
