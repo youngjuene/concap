@@ -28,7 +28,7 @@ from dpo.pipeline.live_runner import (
     TinyBackend,
     TrainingBackend,
 )
-from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM
+from dpo.pipeline.run_matrix import tiny_selection_identity
 
 
 @dataclass(frozen=True)
@@ -127,16 +127,14 @@ def _require_media_coverage(choice: _BackendChoice, clips_by_track: Mapping[str,
 def _selection_identity(contract: StudyContract, choice: _BackendChoice) -> dict[str, str]:
     """The processor/preprocessing identities the lock manifest freezes.
 
-    Tiny: the byte tokenizer and the synthetic media generator, exactly as the
-    canary records them. Gemma: the pinned checkpoint plus the hash of the
-    backend config that produced the processor, and the media-file convention
-    (one directory, one file per clip by suffix) that preprocessing consists of.
+    Tiny: the byte tokenizer and the synthetic media generator, from the one
+    place that spells them, so this and the canary cannot disagree. Gemma: the
+    pinned checkpoint plus the hash of the backend config that produced the
+    processor, and the media-file convention (one directory, one file per clip
+    by suffix) that preprocessing consists of.
     """
     if choice.implementation == TINY_IMPLEMENTATION:
-        return {
-            "processor_hash": semantic_hash({"processor": "tiny-byte/v1"}),
-            "preprocessing_hash": semantic_hash({"media": "synthetic/v1", "media_dim": DEFAULT_MEDIA_DIM}),
-        }
+        return tiny_selection_identity()
     return {
         "processor_hash": semantic_hash(
             {

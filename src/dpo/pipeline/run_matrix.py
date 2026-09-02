@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from dpo.contracts.study_contract import ContractError, StudyContract
+from dpo.core.identity import semantic_hash
 from dpo.data.derive_pairs import MetadataPair, StrictPair
 from dpo.data.derive_sft import SftExample
 from dpo.data.noise import FlipManifest, apply_flips
@@ -42,6 +43,22 @@ from dpo.trainers.preference_trainer import (
 from dpo.trainers.sft_trainer import SftTrainer, build_sft_batches
 
 DEFAULT_MEDIA_DIM = 16
+
+
+def tiny_selection_identity() -> dict[str, str]:
+    """The processor and preprocessing hashes the offline backend locks under.
+
+    One construction site, because the CLI's tiny path and the canary are meant
+    to be the same offline reference and the agreement was prose only: two
+    dict literals in two files, and an edit to either would have given the two
+    paths different lock ids with nothing to say so. It lives here rather than
+    beside the byte tokenizer it names because ``DEFAULT_MEDIA_DIM`` is this
+    module's, and dpo.models must not import dpo.pipeline.
+    """
+    return {
+        "processor_hash": semantic_hash({"processor": "tiny-byte/v1"}),
+        "preprocessing_hash": semantic_hash({"media": "synthetic/v1", "media_dim": DEFAULT_MEDIA_DIM}),
+    }
 
 
 @dataclass(frozen=True)

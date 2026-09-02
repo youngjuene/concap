@@ -52,7 +52,7 @@ from dpo.pipeline.candidate_stage import publish_frozen_pool
 from dpo.pipeline.corpus_stage import publish_corpus_ingest, publish_lock_splits
 from dpo.pipeline.experiments import expand_experiment
 from dpo.pipeline.publishing import ArtifactPublisher
-from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM, OfflineMatrixRunner
+from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM, OfflineMatrixRunner, tiny_selection_identity
 from dpo.pipeline.selection_stage import publish_selection
 from dpo.pipeline.training_stage import publish_training_matrix
 from dpo.pipeline.view_stage import TrackViews, publish_track_views
@@ -457,6 +457,7 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
     )
 
     # Common validation scoring, selection, and the configuration lock.
+    tiny_identity = tiny_selection_identity()
     selection = publish_selection(
         publisher, contract, variants_by_experiment=variants_by_experiment,
         canonical_seed=canonical_seed,
@@ -466,8 +467,8 @@ def run_canary(workspace: str | Path, contract_path: str | Path) -> CanaryResult
         seed_adapters={track: runner.seed_adapter(track) for track in TRACKS},
         media_provider=_synthetic_media, view_artifacts=view_artifacts,
         cells=cells, cell_artifacts=cell_artifacts,
-        processor_hash=semantic_hash({"processor": "tiny-byte/v1"}),
-        preprocessing_hash=semantic_hash({"media": "synthetic/v1", "media_dim": DEFAULT_MEDIA_DIM}),
+        processor_hash=tiny_identity["processor_hash"],
+        preprocessing_hash=tiny_identity["preprocessing_hash"],
         evaluation_version="evaluation/v1",
         metric_versions={"compliance": "v1", "preference": "v1"},
         selection_note="canary selection: validation preference accuracy, lexical tie-break",
