@@ -217,10 +217,10 @@ def load_configuration(raw: Mapping[str, Any]) -> Configuration:
             "results computed here could not carry its hash honestly"
         )
     calibration = dict(raw.get("calibration") or {})
-    for name in ("visibility_bands", "registers"):
-        if name in calibration:
-            calibration[name] = tuple(Band(**band) for band in calibration[name])
     try:
+        for name in ("visibility_bands", "registers"):
+            if name in calibration:
+                calibration[name] = tuple(Band(**band) for band in calibration[name])
         provisional = raw["provisional_salience"]
         if not isinstance(provisional, bool):
             raise ConfigError("provisional_salience must be true or false")

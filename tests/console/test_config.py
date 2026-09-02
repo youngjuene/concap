@@ -114,6 +114,12 @@ class TestLoading:
         with pytest.raises(ConfigError, match=CONFIG_SCHEMA):
             load_configuration(artifact)
 
+    def test_a_band_missing_its_phrase_is_refused_not_a_traceback(self) -> None:
+        artifact = _configuration().artifact()
+        artifact["calibration"]["registers"] = [{"at_least": 0.0}]
+        with pytest.raises(ConfigError, match="missing or misnames"):
+            load_configuration(artifact)
+
     def test_a_missing_field_names_itself(self) -> None:
         artifact = _configuration().artifact()
         del artifact["corpus_id"]
