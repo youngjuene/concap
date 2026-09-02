@@ -43,7 +43,9 @@ def shot(shot_id: str, start_ms: int, end_ms: int, sources: list[dict[str, Any]]
 
 @pytest.fixture
 def configuration() -> Configuration:
-    return Configuration(study_id="street2026", corpus_id="amsterdam", calibration=Calibration())
+    return Configuration(
+        study_id="street2026", corpus_id="amsterdam", provisional_salience=False, calibration=Calibration()
+    )
 
 
 @pytest.fixture

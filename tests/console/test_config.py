@@ -20,6 +20,7 @@ def _configuration(**overrides: object) -> Configuration:
     return Configuration(
         study_id=str(overrides.pop("study_id", "street2026")),
         corpus_id=str(overrides.pop("corpus_id", "amsterdam")),
+        provisional_salience=bool(overrides.pop("provisional_salience", False)),
         calibration=Calibration(**overrides),  # type: ignore[arg-type]
     )
 
@@ -47,6 +48,15 @@ class TestHash:
         artifact = _configuration().artifact()
         assert artifact["schema"] == CONFIG_SCHEMA
         assert artifact["method_constants"] == dict(METHOD_CONSTANTS)
+
+    def test_a_dry_run_never_shares_a_stamp_with_a_measured_study(self) -> None:
+        # Same corpus, same calibration: c_g and e_g from tag multiplicity is a
+        # different instrument from c_g and e_g from an acoustic measurement.
+        assert _configuration(provisional_salience=True).hash != _configuration().hash
+
+    def test_the_artifact_says_where_salience_came_from(self) -> None:
+        assert _configuration(provisional_salience=True).artifact()["provisional_salience"] is True
+        assert _configuration().artifact()["provisional_salience"] is False
 
 
 class TestBands:
@@ -108,4 +118,15 @@ class TestLoading:
         artifact = _configuration().artifact()
         del artifact["corpus_id"]
         with pytest.raises(ConfigError, match="missing or misnames"):
+            load_configuration(artifact)
+
+    def test_an_artifact_silent_about_its_salience_is_refused_not_assumed_measured(self) -> None:
+        artifact = _configuration().artifact()
+        del artifact["provisional_salience"]
+        with pytest.raises(ConfigError, match="missing or misnames"):
+            load_configuration(artifact)
+
+    def test_salience_provenance_is_a_flag_not_a_word(self) -> None:
+        artifact = {**_configuration().artifact(), "provisional_salience": "yes"}
+        with pytest.raises(ConfigError, match="true or false"):
             load_configuration(artifact)

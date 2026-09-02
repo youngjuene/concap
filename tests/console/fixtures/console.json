@@ -5,6 +5,7 @@
     "schema": "dpo.caption-console-config/v1",
     "study_id": "street2026",
     "corpus_id": "demo",
+    "provisional_salience": false,
     "method_constants": {
       "ordering_saturates": true,
       "salience": "w_g = c_g * e_g",

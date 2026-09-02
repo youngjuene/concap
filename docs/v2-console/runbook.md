@@ -151,7 +151,12 @@ uv run dpo console preprocess ... --provisional-salience \
 ```
 
 which fills both from tag multiplicity and stamps `provisional_salience: true`
-into the manifest and its limitations. Never recruit on one.
+into the manifest and its limitations. `scaffold` carries that flag into the
+document's `config`, where it is part of the stamp (§5): a dry run's
+`config_hash` can never equal a measured study's, `validate` and `serve` both
+report `provisional_salience` on their status line, and a document whose
+config does not say either way is refused rather than assumed measured. Never
+recruit on one.
 
 ## 3. Serve the kiosk
 
@@ -159,6 +164,10 @@ into the manifest and its limitations. Never recruit on one.
 uv run dpo console serve --session data/console/session.json \
   --media-dir data/live/media --out data/console/responses
 ```
+
+The command prints one status line before it starts serving — the stamp,
+whether the document is a dry run (`provisional_salience`), the writer and
+the URL — and nothing after it.
 
 Open **`http://127.0.0.1:8778/?participant=P01`** in the kiosk browser. The
 participant identifier comes from the URL; without one the page shows a
@@ -199,8 +208,9 @@ with an old calibration.
 
 Method constants and calibrations freeze into a versioned artifact carried in
 the document, and its hash goes on every caption, every endpoint response, and
-every log line (§10). Change `r0`, a band phrase, the IoU threshold, or the
-corpus id and the hash changes; two studies cannot then share a stamp.
+every log line (§10). Change `r0`, a band phrase, the IoU threshold, the
+corpus id, or where `c_g` and `e_g` came from (`provisional_salience`) and the
+hash changes; two studies cannot then share a stamp.
 
 The method constants in the artifact are *declarations* of what
 `dpo.console.quantities` computes. Nothing dispatches on them, but they are

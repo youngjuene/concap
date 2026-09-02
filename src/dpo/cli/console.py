@@ -136,9 +136,13 @@ def _console_scaffold(arguments: argparse.Namespace) -> int:
     except ConsoleUsageError as exc:
         _emit({"status": "error", "command": "console scaffold", "error": str(exc)})
         return 2
+    # The manifest says whether c_g and e_g were measured or filled from tag
+    # multiplicity for a dry run; the document carries that into its stamp.
+    provisional = bool(manifest["provisional_salience"])
     configuration = Configuration(
         study_id=arguments.study_id,
         corpus_id=arguments.corpus_id,
+        provisional_salience=provisional,
         calibration=_calibration(arguments),
     )
     wanted = list(arguments.clips or manifest["clips"])
@@ -183,19 +187,23 @@ def _console_scaffold(arguments: argparse.Namespace) -> int:
     out = Path(arguments.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # Nothing here validates yet, and the reason is not an oversight:
+    # w_g = c_g * e_g needs an acoustic measurement no mask supplies.
+    authoring = (
+        "author raw_caption and default_caption; confidence and energy are provisional, "
+        "so this document is a dry run and its stamp says so: never recruit on it"
+        if provisional
+        else "author raw_caption, default_caption, and every source's confidence and energy"
+    )
     _emit(
         {
             "status": "scaffolded",
             "out": str(out),
             "config_hash": configuration.hash,
+            "provisional_salience": provisional,
             "clips": len(clips),
             "shots": sum(len(clip["shots"]) for clip in clips),
-            # Nothing here validates yet, and the reason is not an oversight:
-            # w_g = c_g * e_g needs an acoustic measurement no mask supplies.
-            "next": (
-                "author raw_caption, default_caption, and every source's confidence and energy, "
-                f"then: dpo console validate --session {out}"
-            ),
+            "next": f"{authoring}, then: dpo console validate --session {out}",
         }
     )
     return 0
@@ -207,12 +215,14 @@ def _console_validate(arguments: argparse.Namespace) -> int:
     except ConsoleDocumentError as exc:
         _emit({"status": "invalid", "session": str(arguments.session), "error": str(exc)})
         return 2
+    configuration = configuration_of(document)
     _emit(
         {
             "status": "valid",
             "session": str(arguments.session),
             "session_id": document["session_id"],
-            "config_hash": configuration_of(document).hash,
+            "config_hash": configuration.hash,
+            "provisional_salience": configuration.provisional_salience,
             "clips": len(document["clips"]),
             "shots": sum(len(clip["shots"]) for clip in document["clips"]),
         }
@@ -220,7 +230,9 @@ def _console_validate(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def _gemma_writer(arguments: argparse.Namespace) -> tuple[CaptionWriter, ShotMedia] | None:
+def _gemma_writer(
+    arguments: argparse.Namespace, document: Mapping[str, Any]
+) -> tuple[CaptionWriter, ShotMedia] | None:
     """The Gemma writer and its shot-media resolver, or None when blocked (exit 3).
 
     Gate on CUDA before loading anything, then build the adapter from the
@@ -244,7 +256,6 @@ def _gemma_writer(arguments: argparse.Namespace) -> tuple[CaptionWriter, ShotMed
         return None
     from dpo.caption.media import shot_audio
     from dpo.caption.writer import GemmaWriter
-    from dpo.console.document import configuration_of
     from dpo.console.requests import ConsoleTemplateWriter, RequestBuilder
     from dpo.contracts.study_contract import load_contract
     from dpo.models.gemma4.adapter import GemmaCaptionAdapter
@@ -262,7 +273,6 @@ def _gemma_writer(arguments: argparse.Namespace) -> tuple[CaptionWriter, ShotMed
         media_resolver=lambda reference: reference,
         adapter_dir=None if arguments.checkpoint is None else str(arguments.checkpoint),
     )
-    document = load_console_document(Path(arguments.session))
     builder = RequestBuilder(configuration_of(document))
     media_dir = Path(arguments.media_dir)
     cache_dir = Path(arguments.out) / "media-cache"
@@ -282,8 +292,10 @@ def _console_serve(arguments: argparse.Namespace) -> int:
     from dpo.console.app import run_console_app
 
     try:
+        # One read of the document serves the writer, the status line and the app.
+        document = load_console_document(Path(arguments.session))
         if arguments.writer == "gemma":
-            built = _gemma_writer(arguments)
+            built = _gemma_writer(arguments, document)
             if built is None:
                 return 3
             writer, shot_media = built
@@ -297,8 +309,22 @@ def _console_serve(arguments: argparse.Namespace) -> int:
     except ConsoleDocumentError as exc:
         _emit({"status": "invalid", "session": str(arguments.session), "error": str(exc)})
         return 2
+    # Said once, on the console the operator is watching: the stamp this run
+    # writes on every line, and whether it is a dry run's.
+    configuration = configuration_of(document)
+    _emit(
+        {
+            "status": "serving",
+            "command": "console serve",
+            "session": str(arguments.session),
+            "config_hash": configuration.hash,
+            "provisional_salience": configuration.provisional_salience,
+            "writer": arguments.writer,
+            "url": f"http://{arguments.host}:{int(arguments.port)}/",
+        }
+    )
     run_console_app(
-        arguments.session,
+        document,
         arguments.media_dir,
         arguments.out,
         writer=writer,

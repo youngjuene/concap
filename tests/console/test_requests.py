@@ -113,14 +113,15 @@ class TestInstruction:
         assert positions == sorted(positions)
 
     def test_the_out_of_frame_rule_quotes_the_configuration_not_a_literal(
-        self, field: Field, document: dict[str, Any]
+        self, field: Field, document: dict[str, Any], configuration: Configuration
     ) -> None:
+        from dataclasses import replace
+
         from dpo.console.config import Band, Calibration
 
-        renamed = Configuration(
-            "s",
-            "c",
-            Calibration(visibility_bands=(Band(0.5, "well seen"), Band(0.0, "nowhere in shot"))),
+        renamed = replace(
+            configuration,
+            calibration=Calibration(visibility_bands=(Band(0.5, "well seen"), Band(0.0, "nowhere in shot"))),
         )
         builder = RequestBuilder(renamed)
         settings = Settings("itemized", tuple(_all(field)), 0)

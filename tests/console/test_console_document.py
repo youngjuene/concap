@@ -122,10 +122,12 @@ class TestField:
     def test_the_field_is_built_from_the_configuration_in_force_not_stored(
         self, document: dict[str, Any], configuration: Any
     ) -> None:
-        from dpo.console.config import Calibration, Configuration
+        from dataclasses import replace
 
-        loose = Configuration("s", "c", Calibration(half_saturation=0.5))
-        tight = Configuration("s", "c", Calibration(half_saturation=0.001))
+        from dpo.console.config import Calibration
+
+        loose = replace(configuration, calibration=Calibration(half_saturation=0.5))
+        tight = replace(configuration, calibration=Calibration(half_saturation=0.001))
         shot = _first_shot(document)
         assert field_of(shot, loose).visibility["idling"] < field_of(shot, tight).visibility["idling"]
 

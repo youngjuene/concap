@@ -153,10 +153,19 @@ class Configuration:
     ``study_id`` and ``corpus_id`` are in the hash on purpose. Two corpora
     calibrated to identical numbers are still two corpora, and a result should
     not claim to be reproducible from the other's footage.
+
+    ``provisional_salience`` is in the hash for the same reason, and it has no
+    default so that nothing can build a configuration without saying. A dry
+    run fills ``c_g`` and ``e_g`` from tag multiplicity (``console preprocess
+    --provisional-salience``) and the audio axis it yields is detectional, the
+    failure §5.1 names; a result computed on it must never share a stamp with
+    one computed on an acoustic measurement, and a document must say which it
+    is at serve time, not only in the manifest it was scaffolded from.
     """
 
     study_id: str
     corpus_id: str
+    provisional_salience: bool = field(kw_only=True)
     calibration: Calibration = field(default_factory=Calibration)
 
     def artifact(self) -> dict[str, Any]:
@@ -165,6 +174,7 @@ class Configuration:
             "schema": CONFIG_SCHEMA,
             "study_id": self.study_id,
             "corpus_id": self.corpus_id,
+            "provisional_salience": self.provisional_salience,
             "method_constants": dict(METHOD_CONSTANTS),
             "calibration": asdict(self.calibration),
         }
@@ -211,9 +221,13 @@ def load_configuration(raw: Mapping[str, Any]) -> Configuration:
         if name in calibration:
             calibration[name] = tuple(Band(**band) for band in calibration[name])
     try:
+        provisional = raw["provisional_salience"]
+        if not isinstance(provisional, bool):
+            raise ConfigError("provisional_salience must be true or false")
         return Configuration(
             study_id=str(raw["study_id"]),
             corpus_id=str(raw["corpus_id"]),
+            provisional_salience=provisional,
             calibration=Calibration(**calibration),
         )
     except (KeyError, TypeError) as exc:

@@ -396,7 +396,7 @@ def build_app(
 
 
 def run_console_app(
-    session: str | Path,
+    session: str | Path | Mapping[str, Any],
     media_dir: str | Path,
     out_dir: str | Path,
     *,
@@ -405,8 +405,11 @@ def run_console_app(
     host: str = "127.0.0.1",
     port: int = 8778,
 ) -> None:
-    """Serve one document. Port 8778, one past the skeleton instrument's 8777."""
-    document = load_console_document(session)
+    """Serve one document, given as a path or already loaded.
+
+    Port 8778, one past the skeleton instrument's 8777.
+    """
+    document = session if isinstance(session, Mapping) else load_console_document(session)
     chosen = ConsoleTemplateWriter() if writer is None else writer
     app = build_app(document, Path(media_dir), Path(out_dir), chosen, shot_media=shot_media)
     uvicorn.run(app, host=host, port=port, log_level="warning")

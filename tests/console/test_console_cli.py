@@ -33,14 +33,14 @@ def _scaffold_arguments(tmp_path: Path, manifest: Path, **overrides: object) -> 
     return argparse.Namespace(**values)
 
 
-def _manifest(path: Path, clip_id: str = "clip_001") -> Path:
+def _manifest(path: Path, clip_id: str = "clip_001", *, provisional: bool = False) -> Path:
     path.write_text(
         json.dumps(
             {
                 "schema": MANIFEST_SCHEMA,
                 "source": {"fps": 60.0, "downsample": 4},
                 "limitations": [],
-                "provisional_salience": False,
+                "provisional_salience": provisional,
                 "clips": {
                     clip_id: {
                         "clip_id": clip_id,
@@ -100,6 +100,8 @@ class TestValidate:
         assert emitted["status"] == "valid"
         assert len(emitted["config_hash"]) == 12
         assert emitted["shots"] == 2
+        # The operator sees on the same line whether this is a dry run.
+        assert emitted["provisional_salience"] is False
 
     def test_an_invalid_document_names_the_path_and_never_the_command_line(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -129,6 +131,24 @@ class TestScaffold:
         assert document["config"]["study_id"] == "street2026"
         # The stamp the command reported is the stamp the document carries.
         assert emitted["config_hash"] == load_configuration(document["config"]).hash
+        assert document["config"]["provisional_salience"] is False
+        assert emitted["provisional_salience"] is False
+        assert "never recruit" not in emitted["next"]
+
+    def test_a_provisional_manifest_scaffolds_a_document_that_says_so_in_its_stamp(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        provisional = _manifest(tmp_path / "provisional.json", provisional=True)
+        assert _console_scaffold(_scaffold_arguments(tmp_path, provisional)) == 0
+        emitted = json.loads(capsys.readouterr().out)
+
+        document = json.loads((tmp_path / "console.json").read_text(encoding="utf-8"))
+        # The flag travels from the manifest into the document (and so into
+        # the stamp: test_config pins that a dry run never shares one), and
+        # the operator is told on the same line.
+        assert document["config"]["provisional_salience"] is True
+        assert emitted["provisional_salience"] is True
+        assert "never recruit" in emitted["next"]
 
     def test_the_calibration_flags_change_the_stamp(self, tmp_path: Path) -> None:
         manifest = _manifest(tmp_path / "manifest.json")
@@ -180,7 +200,7 @@ class TestServe:
         from dpo.cli.console import _gemma_writer
 
         with pytest.raises(ConsoleUsageError, match="--backend-config"):
-            _gemma_writer(self._arguments())
+            _gemma_writer(self._arguments(), {})
         assert _console_serve(self._arguments()) == 2
         emitted = json.loads(capsys.readouterr().out)
         assert emitted["status"] == "error" and emitted["command"] == "console serve"

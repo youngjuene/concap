@@ -61,6 +61,9 @@ DOMAIN_ERRORS = (
 
 def _emit(document: Mapping[str, object]) -> None:
     sys.stdout.write(json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+    # A long-running command (serve) reports once and then stays up; under a
+    # redirected stdout that line would otherwise sit in the buffer until exit.
+    sys.stdout.flush()
 
 
 @dataclass(frozen=True)
