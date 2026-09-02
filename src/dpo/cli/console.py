@@ -98,6 +98,7 @@ def _console_preprocess(arguments: argparse.Namespace) -> int:
             downsample=int(arguments.downsample),
             tags=tags,
             provisional_salience=bool(arguments.provisional_salience),
+            cache_dir=Path(arguments.cache_dir) if arguments.cache_dir else None,
         )
     except (MaskReadError, ValueError) as exc:
         _emit({"status": "invalid", "command": "console preprocess", "error": str(exc)})
@@ -327,6 +328,10 @@ def register(subparsers: Any) -> None:
     preprocess.add_argument("--clips", nargs="*", help="clip ids; default: every clip under audio/")
     preprocess.add_argument("--fps", type=float, default=60.0, help="source video frame rate")
     preprocess.add_argument("--downsample", type=int, default=4, help="read masks at 1/N resolution")
+    preprocess.add_argument(
+        "--cache-dir",
+        help="keep decoded masks here between runs, one .npz per clip, so a recalibration reads no PNG twice",
+    )
     preprocess.add_argument(
         "--tidy-data",
         help="CSV with final_labels and top_level_parent_name; turns on family-aware grouping"

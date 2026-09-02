@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +93,7 @@ def _label_frames(clip_dir: Path, label: str) -> dict[int, Path]:
     return found
 
 
-def _read(path: Path, downsample: int) -> np.ndarray:
+def _decode(path: Path, downsample: int) -> np.ndarray:
     with Image.open(path) as raw:
         image = raw.convert("L")
         if downsample > 1:
@@ -101,13 +101,72 @@ def _read(path: Path, downsample: int) -> np.ndarray:
         return np.asarray(image) > 0
 
 
+class MaskCache:
+    """Decoded, downsampled masks for one clip, packed to bits on disk.
+
+    ``preprocess`` decodes about 7,200 PNGs per clip, and the calibration the
+    specification describes — sweep θ, the IoU threshold, r₀ and read what
+    changes — runs it again every time. The masks do not change between
+    sweeps; only what is computed from them does. So the arrays ``_decode``
+    returns are kept, one file per clip and downsample factor, packed eight
+    pixels to a byte and compressed. A second run over the same clip reads no
+    PNG at all. The numbers are the same by construction: the cache holds
+    exactly what the decoder would have returned.
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self.path = path
+        self.arrays: dict[str, np.ndarray] = {}
+        self.shapes: dict[str, tuple[int, int]] = {}
+        self.dirty = False
+        if path is not None and path.is_file():
+            with np.load(path) as stored:
+                for key in stored.files:
+                    if key.endswith("__shape"):
+                        continue
+                    height, width = (int(v) for v in stored[key + "__shape"])
+                    self.arrays[key] = (
+                        np.unpackbits(stored[key])[: height * width].reshape(height, width).astype(bool)
+                    )
+
+    @staticmethod
+    def key_for(path: Path) -> str:
+        return str(path)
+
+    def get(self, path: Path, downsample: int) -> np.ndarray:
+        key = self.key_for(path)
+        found = self.arrays.get(key)
+        if found is None:
+            found = _decode(path, downsample)
+            self.arrays[key] = found
+            self.dirty = True
+        return found
+
+    def save(self) -> None:
+        if self.path is None or not self.dirty:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        packed: dict[str, np.ndarray] = {}
+        for key, array in self.arrays.items():
+            packed[key] = np.packbits(array.reshape(-1))
+            packed[key + "__shape"] = np.asarray(array.shape, dtype=np.int64)
+        # Never pickled: the file holds arrays only, and saying so also settles
+        # the overload for the type checker.
+        np.savez_compressed(self.path, allow_pickle=False, **packed)
+        self.dirty = False
+
+
 @dataclass(frozen=True)
 class ClipMasks:
-    """One clip's mask tree, read lazily by frame."""
+    """One clip's mask tree, read lazily by frame, through an optional cache."""
 
     clip_dir_visual: Path
     clip_dir_audio: Path
     downsample: int
+    cache: MaskCache = field(default_factory=lambda: MaskCache(None))
+
+    def read(self, path: Path) -> np.ndarray:
+        return self.cache.get(path, self.downsample)
 
     def visual_frames(self) -> list[int]:
         indices: set[int] = set()
@@ -127,7 +186,7 @@ class ClipMasks:
 
     def frame(self, branch: Path, label: str, index: int) -> np.ndarray | None:
         path = _label_frames(branch, label).get(index)
-        return None if path is None else _read(path, self.downsample)
+        return None if path is None else self.read(path)
 
 
 # ---- §3.1 shot segmentation -------------------------------------------------
@@ -147,7 +206,7 @@ def clip_segments(masks: ClipMasks, calibration: Calibration, fps: float) -> lis
             if path is None:
                 shares[label] = 0.0
                 continue
-            mask = _read(path, masks.downsample)
+            mask = masks.read(path)
             shares[label] = float(mask.mean())
         shares_by_frame.append(composition(shares))
     stride = max(1, round(calibration.stride_ms * fps / 1000.0))
@@ -199,7 +258,7 @@ def group_audio_labels(
         loaded: list[np.ndarray | None] = []
         for label in labels:
             path = paths[label].get(index)
-            loaded.append(None if path is None else _read(path, masks.downsample))
+            loaded.append(None if path is None else masks.read(path))
         for left in range(len(labels)):
             for right in range(left + 1, len(labels)):
                 first, second = loaded[left], loaded[right]
@@ -251,7 +310,7 @@ def group_quantities(masks: ClipMasks, members: Sequence[str], frames: Sequence[
             path = paths[label].get(index)
             if path is None:
                 continue
-            mask = _read(path, masks.downsample)
+            mask = masks.read(path)
             union = mask if union is None else np.logical_or(union, mask)
         areas.append(0.0 if union is None else float(union.mean()))
     return mean_visual_share(areas), presence_rate(areas)
@@ -291,16 +350,19 @@ def derive_clip(
     downsample: int = DOWNSAMPLE,
     tags: TagRecord | None = None,
     provisional_salience: bool = False,
+    cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     """One clip's shots and grouped sources, ready to paste into a document.
 
     ``tags`` — the clip's audio labels with their families resolved — makes the
     grouping family-aware and the provisional salience possible. Without it
-    the grouping is by mask agreement alone.
+    the grouping is by mask agreement alone. ``cache_dir`` keeps the decoded
+    masks between runs (see :class:`MaskCache`).
     """
     settings = calibration or Calibration()
     root = Path(mask_root)
-    masks = ClipMasks(root / "visual" / clip_id, root / "audio" / clip_id, downsample)
+    cache = MaskCache(None if cache_dir is None else Path(cache_dir) / f"{clip_id}-x{downsample}.npz")
+    masks = ClipMasks(root / "visual" / clip_id, root / "audio" / clip_id, downsample, cache)
     frames = masks.visual_frames()
     ranges = clip_segments(masks, settings, fps)
     labels = masks.audio_labels()
@@ -347,6 +409,7 @@ def derive_clip(
                 "frames": [low, high],
             }
         )
+    cache.save()
     return {
         "clip_id": clip_id,
         "shots": shots,
@@ -366,6 +429,7 @@ def derive_manifest(
     downsample: int = DOWNSAMPLE,
     tags: Mapping[str, TagRecord] | None = None,
     provisional_salience: bool = False,
+    cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Every clip's preprocessing, with the provenance of every derived number."""
     settings = calibration or Calibration()
@@ -379,6 +443,7 @@ def derive_manifest(
             downsample=downsample,
             tags=(tags or {}).get(clip_id),
             provisional_salience=provisional_salience,
+            cache_dir=cache_dir,
         )
     return {
         "schema": MANIFEST_SCHEMA,
@@ -423,6 +488,7 @@ __all__ = [
     "MANIFEST_SCHEMA",
     "VISUAL_CATEGORIES",
     "ClipMasks",
+    "MaskCache",
     "MaskReadError",
     "QuantityError",
     "clip_segments",

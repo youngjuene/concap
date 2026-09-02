@@ -6,6 +6,7 @@ import csv
 import json
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -334,3 +335,61 @@ class TestSourceNaming:
             _mask(masks / "audio" / "clip_001" / label / "00000.png", (0, 0, 4, 4))
         clip = derive_clip(masks, "clip_001", fps=1.0, downsample=1)
         assert clip["shots"][0]["sources"][0]["prose"] == "traffic noise and vehicle horn"
+
+
+class TestMaskCache:
+    """A second run over the same clip reads no PNG and gets the same numbers."""
+
+    def _clip(self, masks: Path) -> None:
+        _visual(masks, "clip_001", 6, split_at=3)
+        for index in range(6):
+            _mask(
+                masks / "audio" / "clip_001" / "Siren" / f"{index:05d}.png",
+                (0, 0, 4, 4) if index < 4 else None,
+            )
+            _mask(masks / "audio" / "clip_001" / "Speech" / f"{index:05d}.png", (2, 2, 6, 6))
+
+    def test_the_cached_run_reproduces_the_uncached_manifest(self, masks: Path, tmp_path: Path) -> None:
+        self._clip(masks)
+        calibration = Calibration(cut_threshold=0.5, minimum_shot_ms=1000, stride_ms=1000)
+        plain = derive_clip(masks, "clip_001", calibration=calibration, fps=1.0, downsample=1)
+        cache_dir = tmp_path / "cache"
+        first = derive_clip(
+            masks, "clip_001", calibration=calibration, fps=1.0, downsample=1, cache_dir=cache_dir
+        )
+        second = derive_clip(
+            masks, "clip_001", calibration=calibration, fps=1.0, downsample=1, cache_dir=cache_dir
+        )
+        assert first == plain == second
+        assert (cache_dir / "clip_001-x1.npz").is_file()
+
+    def test_the_second_run_decodes_nothing(
+        self, masks: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import dpo.console.masks as module
+
+        self._clip(masks)
+        cache_dir = tmp_path / "cache"
+        derive_clip(masks, "clip_001", fps=1.0, downsample=1, cache_dir=cache_dir)
+        decoded: list[Path] = []
+        original = module._decode
+
+        def counting(path: Path, downsample: int) -> Any:
+            decoded.append(path)
+            return original(path, downsample)
+
+        monkeypatch.setattr(module, "_decode", counting)
+        derive_clip(masks, "clip_001", fps=1.0, downsample=1, cache_dir=cache_dir)
+        assert decoded == []
+
+    def test_a_different_downsample_is_a_different_cache(self, masks: Path, tmp_path: Path) -> None:
+        self._clip(masks)
+        cache_dir = tmp_path / "cache"
+        derive_clip(masks, "clip_001", fps=1.0, downsample=1, cache_dir=cache_dir)
+        derive_clip(masks, "clip_001", fps=1.0, downsample=2, cache_dir=cache_dir)
+        assert {p.name for p in cache_dir.iterdir()} == {"clip_001-x1.npz", "clip_001-x2.npz"}
+
+    def test_without_a_cache_dir_nothing_is_written(self, masks: Path, tmp_path: Path) -> None:
+        self._clip(masks)
+        derive_clip(masks, "clip_001", fps=1.0, downsample=1)
+        assert not list(tmp_path.rglob("*.npz"))
