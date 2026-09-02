@@ -197,9 +197,19 @@ def test_raw_partition_is_available_and_covers_the_axis() -> None:
     assert min(o["span"][1] - o["span"][0] for o in raw) < MIN_SPAN
 
 
-def test_collapsing_leaves_no_regime_narrower_than_min_span() -> None:
+def test_collapsing_leaves_no_interior_regime_narrower_than_min_span() -> None:
     kept = orderings(_near_parallel(6))
-    assert all(o["span"][1] - o["span"][0] >= MIN_SPAN - 1e-12 for o in kept)
+    assert all(o["span"][1] - o["span"][0] >= MIN_SPAN - 1e-12 for o in kept[1:-1])
+
+
+def test_a_narrow_endpoint_regime_is_kept_because_it_is_the_poles_own_ordering() -> None:
+    # The two cross a hair past the eye pole: eye-first holds a sliver of the
+    # axis, and it is still the ordering the eye pole names.
+    sources = [_source("a", 0.5001, 0.0), _source("b", 0.5, 1.0)]
+    kept = orderings(sources)
+    assert [o["order"][0] for o in kept] == ["a", "b"]
+    assert kept[0]["span"][0] == 0.0 and kept[-1]["span"][1] == 1.0
+    assert kept[0]["span"][1] == pytest.approx(kept[1]["span"][0])
 
 
 def test_collapsing_keeps_the_spans_a_partition_of_the_axis() -> None:

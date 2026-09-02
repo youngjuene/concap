@@ -136,21 +136,19 @@ def _collapse(result: list[Ordering], min_span: float, max_count: int) -> list[O
     ordering, which then fuse. The endpoints are never lost: the eye-first and
     ear-first orderings hold at λ=0 and λ=1 whatever is collapsed between them.
     """
-    while len(result) > 1:
+    # Only interior regimes are candidates: the first and the last are the
+    # eye-first and ear-first orderings, and a narrow one of those is still the
+    # ordering the pole names — the column it draws is as wide as any other.
+    while len(result) > 2:
         widths = [ordering["span"][1] - ordering["span"][0] for ordering in result]
-        narrowest = min(range(len(result)), key=widths.__getitem__)
+        narrowest = min(range(1, len(result) - 1), key=widths.__getitem__)
         if widths[narrowest] >= min_span and len(result) <= max_count:
             break
         lo, hi = result[narrowest]["span"]
         del result[narrowest]
-        if narrowest == 0:
-            result[0]["span"][0] = lo
-        elif narrowest == len(result):
-            result[-1]["span"][1] = hi
-        else:
-            middle = (lo + hi) / 2.0
-            result[narrowest - 1]["span"][1] = middle
-            result[narrowest]["span"][0] = middle
+        middle = (lo + hi) / 2.0
+        result[narrowest - 1]["span"][1] = middle
+        result[narrowest]["span"][0] = middle
         _merge_adjacent(result)
     return result
 
