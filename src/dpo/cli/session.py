@@ -230,6 +230,17 @@ def _session_link_masks(arguments: argparse.Namespace) -> int:
     """Summarize Sa2VA masks as auditable admission/balance/detail evidence."""
     tidy_data = Path(arguments.tidy_data)
     ontology = Path(arguments.ontology) if arguments.ontology else tidy_data.with_name("ontology.json")
+    if arguments.clips is not None and not arguments.clips:
+        # `--clips` with nothing after it selected nothing and wrote an empty
+        # manifest that looked finished; naming no clip is a mistake to say.
+        _emit(
+            {
+                "status": "error",
+                "command": "session link-masks",
+                "error": "--clips names no clip; give at least one id, or omit it to link every clip",
+            }
+        )
+        return 2
     try:
         document = derive_mask_links(
             mask_root=Path(arguments.mask_root),

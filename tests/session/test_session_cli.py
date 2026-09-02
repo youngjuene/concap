@@ -116,6 +116,24 @@ def _scaffold_arguments(tmp_path: Path, **overrides: object) -> argparse.Namespa
     return argparse.Namespace(**values)
 
 
+def test_link_masks_with_an_empty_clips_flag_refuses_rather_than_linking_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from dpo.cli.session import _session_link_masks
+
+    arguments = argparse.Namespace(
+        mask_root=str(tmp_path / "masks"),
+        tidy_data=str(tmp_path / "tidy.csv"),
+        ontology=None,
+        fps=60.0,
+        out=str(tmp_path / "links.json"),
+        clips=[],
+    )
+    assert _session_link_masks(arguments) == 2
+    assert "names no clip" in json.loads(capsys.readouterr().out)["error"]
+    assert not (tmp_path / "links.json").exists()
+
+
 def test_scaffold_without_mask_links_leaves_the_sources_empty(tmp_path: Path) -> None:
     assert _session_scaffold(_scaffold_arguments(tmp_path)) == 0
     document = json.loads((tmp_path / "session.json").read_text(encoding="utf-8"))
