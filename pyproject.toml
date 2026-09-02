@@ -64,4 +64,14 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["dpo"]
+# scripts/ is on the pilot's critical path (docs/shared/study-runbook.md stages
+# the served renders with stage_media.py), so it is checked too. `files` rather
+# than `packages` because scripts/ is not one.
+files = ["src/dpo", "scripts"]
+
+# regenerate_golden.py imports the test fixtures to build the golden snapshot,
+# which would otherwise put tests/conftest.py alone under --strict while the
+# rest of tests/ stays out. Follow it for names, do not check it.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+follow_imports = "silent"

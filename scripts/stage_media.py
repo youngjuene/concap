@@ -38,13 +38,9 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src"))
-
-from dpo.core.identity import sha256_file  # noqa: E402
+from dpo.core.identity import sha256_file
 
 # The audio tower's working rate; the processor resamples anyway, but staging
 # at the target rate keeps the files small and the decode trivial.
