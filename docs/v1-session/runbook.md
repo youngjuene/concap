@@ -284,7 +284,11 @@ nothing again.
 Serve the same document, media, and `--out` (the follow-up reads the kept
 captions from the kiosk's snapshot) and open **`http://<host>:8777/followup`**
 on the participant's phone; pass `--host 0.0.0.0` to reach it from another
-device. The page asks for the participant identifier; a participant with no
+device. The identifier in the URL is the only thing the server checks — a
+supervised kiosk needs no other credential — so on a network anyone else can
+reach, use identifiers nobody could guess and keep the network to the study's
+own devices; anyone who knows a participant's identifier can read or replace
+that participant's record. The page asks for the participant identifier; a participant with no
 kiosk session gets a 409 and the page says so. An unfinished kiosk session
 (a check clip with a shot no caption was kept for) is the same 409 to the
 participant, and the response body names the first missing `clip_id` and

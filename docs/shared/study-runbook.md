@@ -15,6 +15,13 @@ different contract slice.
 | audio candidate pool, train — deduped (104 candidates / 150 pairs) | `sha256:b0cdf7b437659a26bad749c021d2cbb0950c060f77b7d77bfac936ee1523e817` |
 | audio candidate pool, validation — deduped (24 / 30) | `sha256:12929dba2e67ceb63ab5ed93c73f3ea1b47a007f0f2c5c39fcfb15cdf310fe2f` |
 
+**The two pool ids above are stale.** Dropping the three dead `[tracks]`
+knobs (`afdf381`) re-keyed the contract and the `candidates` slice, so
+`annotation ingest` refuses both pools as minted under a different contract —
+and the task files exported from them would be rated for nothing. Regenerate
+the pools first (`docs/shared/TODO.md` §3), export new task files, and
+replace the ids here before anyone annotates.
+
 Sessions already exported from the deduped pools:
 `data/annotation/tasks-{train,validation}.json` (176 and 36 tasks). The
 pre-dedup pools (`e0d01e87…`, `7c8c8e38…`) remain in the store as the new
