@@ -233,7 +233,7 @@ participant.
 |---|---|
 | `events-<participant>.jsonl` | append-only, one event per line, each stamped with `received_at` and the configuration hash |
 | `snapshot-<participant>.json` | the browser's resumable state, replaced atomically; the check reads `committed` from it |
-| `captions.json` | the caption cache, `clip/shot/settings-key` → caption, stamped with the writer that filled it; a file another writer wrote (a template rehearsal, another checkpoint) is refused at start — delete it or serve from another `--out` |
+| `captions.json` | the caption cache, `clip/shot/settings-key` → caption, stamped with the writer that filled it; a file another writer wrote (a template rehearsal, another checkpoint) is refused at start — delete it or serve from another `--out`. Each caption also records a digest of the system text the model was given, so an edited grain rule or framing line is rewritten rather than served; a **recalibrated** document is not covered, because its phrases change inside a prompt the settings key does not distinguish — serve one from a new `--out` |
 | `media-cache/` | server-side cuts: shot audio for the Gemma writer, clip stills |
 
 Two things in the event stream are written by the server and were never in a

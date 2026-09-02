@@ -32,7 +32,7 @@ import json
 import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -100,11 +100,19 @@ class Written:
     the caption nevertheless appears to name. Detection is by content word and
     is deliberately not enforced: a false positive that forced the template
     would cost more than the violation it caught, so this is measured first.
+
+    ``prompt`` digests the system text the model was actually given for this
+    request, empty for a writer that gives none. The file-level writer identity
+    cannot cover it: both instructions are thin dispatchers over module
+    constants, so editing a rule leaves the identity unchanged and the cache
+    valid. Recorded per caption because that is the granularity at which it
+    changes.
     """
 
     caption: str
     writer: str
     names_excluded: tuple[str, ...] = ()
+    prompt: str = ""
 
 
 class CaptionWriter(Protocol):
@@ -135,6 +143,23 @@ def written_by(writer: CaptionWriter, request: CaptionRequest) -> Written:
         assert isinstance(result, Written)
         return result
     return Written(writer.write(request), "unknown")
+
+
+def prompt_digest(writer: CaptionWriter, request: CaptionRequest) -> str:
+    """Digest of the system text this writer would give for this request.
+
+    Empty for a writer that has no instruction, and empty rather than raising
+    if building the text fails: this is the cache's staleness check, and a
+    writer that cannot render its prompt will fail loudly on the write itself.
+    """
+    instruction = getattr(writer, "instruction", None)
+    if instruction is None:
+        return ""
+    try:
+        text = str(instruction(request))
+    except Exception:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 # Words too generic to identify a source on their own: "traffic noise" is not
@@ -553,10 +578,23 @@ class CachedWriter:
     a rehearsal would otherwise answer every warmed audition and neighbour
     of a Gemma pilot over the same ``--out`` as a hit — template prose in
     what the log stamps as a model session — and the same holds between the
-    base model and a trained adapter, or two versions of the instruction. A
-    file whose writer differs from this run's is refused at start; delete it,
-    or serve from another ``--out``. A file written before the writer was
-    recorded loads if every caption in it could be this writer's kind.
+    base model and a trained adapter. A file whose writer differs from this
+    run's is refused at start; delete it, or serve from another ``--out``. A
+    file written before the writer was recorded loads if every caption in it
+    could be this writer's kind.
+
+    That identity cannot see an edited instruction: both instruments build
+    their system text from module constants the identity does not digest, so
+    a rule changed between a rehearsal and a run would leave the file valid
+    and serve the older prose under the current writer's name. Each entry
+    therefore carries the digest of the text the model was actually given, and
+    an entry written under another one is missed rather than served. Entries
+    from before this was recorded are missed once, under a writer that has an
+    instruction at all; a template run reads them all.
+
+    Not covered: the request itself. A recalibrated document changes the
+    phrases inside the prompt but is keyed by the same settings, so a cache
+    outlives it. Serve a recalibrated document from a new ``--out``.
 
     One lock serialises ``write_cached``: FastAPI runs the sync caption route
     in a threadpool, so two requests for one key could otherwise both miss,
@@ -605,11 +643,17 @@ class CachedWriter:
     def write_attributed_cached(self, request: CaptionRequest) -> tuple[Written, bool]:
         """(the caption with its provenance, whether it came from the cache)."""
         key = self.key_for(request)
+        digest = prompt_digest(self.inner, request)
         with self._lock:
             cached = self.entries.get(key)
-            if cached is not None:
+            # A hit is only a hit if the model was told the same thing. When
+            # this run has no instruction (the template) every entry stands;
+            # when it has one, an entry carrying another digest — or none,
+            # from a file written before this was recorded — is stale and is
+            # written again rather than served.
+            if cached is not None and (not digest or cached.prompt == digest):
                 return cached, True
-            written = written_by(self.inner, request)
+            written = replace(written_by(self.inner, request), prompt=digest)
             self.entries[key] = written
             payload = (
                 json.dumps(
@@ -642,6 +686,7 @@ def _cache_entry(value: object) -> Written:
             str(value["caption"]),
             str(value.get("writer", "unknown")),
             tuple(str(item) for item in value.get("names_excluded", ())),
+            str(value.get("prompt", "")),
         )
     raise ValueError(f"unreadable caption cache entry: {value!r}")
 
@@ -676,6 +721,7 @@ __all__ = [
     "join_clauses",
     "gemma_instruction",
     "names_excluded",
+    "prompt_digest",
     "tighten",
     "visual_messages",
     "written_by",

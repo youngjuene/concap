@@ -198,6 +198,8 @@ def test_concurrent_misses_on_one_key_call_the_inner_writer_once(tmp_path: Path)
             "caption": "caption 1 for itemized|tram,siren",
             "writer": "unknown",
             "names_excluded": [],
+            # A writer with no instruction gives the model no text to go stale.
+            "prompt": "",
         }
     }
 
@@ -540,6 +542,66 @@ class TestCacheIdentity:
         assert CachedWriter(self._gemma(tmp_path), path).lookup(_request("itemized", (TRAM,))) == "A tram."
         with pytest.raises(CacheMismatch, match="gemma writer"):
             CachedWriter(TemplateWriter(), path)
+
+
+class TestPromptStaleness:
+    """The identity cannot see an edited rule; the per-caption digest can."""
+
+    class Rule:
+        """A writer whose instruction is assembled from a constant it can edit."""
+
+        def __init__(self) -> None:
+            self.rule = "name every source"
+            self.calls = 0
+
+        def instruction(self, request: CaptionRequest) -> str:
+            return f"{self.rule}: {request.settings_key}"
+
+        def write(self, request: CaptionRequest) -> str:
+            self.calls += 1
+            return f"caption {self.calls}"
+
+    def test_a_caption_records_the_text_the_model_was_given(self, tmp_path: Path) -> None:
+        writer = self.Rule()
+        cached = CachedWriter(writer, tmp_path / "captions.json")
+        written, _ = cached.write_attributed_cached(_request("itemized", (TRAM,)))
+        assert written.prompt and len(written.prompt) == 12
+
+    def test_an_edited_rule_is_missed_rather_than_served(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        writer = self.Rule()
+        request = _request("itemized", (TRAM,))
+        first, hit = CachedWriter(writer, path).write_cached(request)
+        assert hit is False and first == "caption 1"
+        # Untouched, the cache still answers: the digest matches.
+        again, hit = CachedWriter(writer, path).write_cached(request)
+        assert hit is True and again == first and writer.calls == 1
+        # The identity is unchanged by this, which is exactly the hole.
+        writer.rule = "name only what is admitted"
+        rewritten, hit = CachedWriter(writer, path).write_cached(request)
+        assert hit is False and rewritten == "caption 2"
+
+    def test_a_file_written_before_the_digest_is_missed_once(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        writer = self.Rule()
+        entry = {"caption": "A tram.", "writer": "gemma"}
+        path.write_text(
+            json.dumps({"writer": "unknown", "captions": {"demo_tram_stop/s1/itemized|tram": entry}}),
+            encoding="utf-8",
+        )
+        cached = CachedWriter(writer, path)
+        first, hit = cached.write_cached(_request("itemized", (TRAM,)))
+        assert hit is False and first == "caption 1"
+        second, hit = cached.write_cached(_request("itemized", (TRAM,)))
+        assert hit is True and second == first
+
+    def test_a_writer_with_no_instruction_reads_every_entry(self, tmp_path: Path) -> None:
+        """The template is a function of the request, so nothing about it can go stale."""
+        path = tmp_path / "captions.json"
+        request = _request("itemized", (TRAM, SIREN))
+        inner = CountingWriter()
+        first = CachedWriter(inner, path).write(request)
+        assert CachedWriter(CountingWriter(), path).write(request) == first
 
 
 class TestNamesExcluded:
