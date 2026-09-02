@@ -126,6 +126,7 @@ button:disabled { cursor: default; }
   text-transform: uppercase;
   padding: 12px 20px;
   min-height: 44px;
+  white-space: nowrap;
   border: 1px solid var(--ink);
   background: var(--panel);
   color: var(--ink);

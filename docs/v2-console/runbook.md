@@ -174,6 +174,30 @@ participant identifier comes from the URL; without one the page shows a
 one-line message and nothing else. Every interaction is autosaved and a reload
 resumes at the interrupted step.
 
+### The layout at kiosk width
+
+`spec-uiux.md` §3.1 stacks the rail, the stage, the band, the console, the
+skeleton and the actions top to bottom, and §1 sizes the kiosk at about 1180
+by 820. Those two do not fit together: at the 760 content column the stage
+alone is 428 tall and the author screen runs to about 1100, with the detail
+detents and Show/Keep below the fold. As built, at 1100 and wider the stage
+and the band take the left column and the console, the skeleton and the
+actions stack beside them, so a shot with eight sources still fits in 820
+without scrolling; narrower than that the screen lays out in §3.1's order.
+The DOM order is §3.1's either way. The stage is 720 wide, which is what the
+side column leaves once the four detents sit on one line; Replay shot and
+Pause loop sit under the footage they act on, and the primary actions hold
+one place, bottom right on the band's baseline, on every stage screen.
+
+On a screen taller than 820 the page zooms the composition to the screen's
+height, so the console keeps its hand size, and the stage takes every pixel of
+width that leaves beyond the 388 side column until its 16:9 height meets the
+band; the shell stops widening past that, so the console stays beside the
+footage. On a 27-inch 2560×1440 that is a 972-wide stage in the page's units
+against the kiosk's 720. The kiosk itself is untouched. If the researcher would rather keep the single
+stack at kiosk width, the stage has to shrink to about 220 tall to fit, or
+the page has to scroll.
+
 `--writer gemma` conditions the study's Gemma 4 E4B on the shot's audio with
 this instrument's own instruction — grain, the ordered sources with their band
 and register, and the rule that a source out of frame is heard but not seen. It

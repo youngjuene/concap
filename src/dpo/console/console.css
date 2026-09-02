@@ -8,15 +8,66 @@
 
    Section numbers cite spec-uiux.md. */
 
+/* §3.1 stacks rail, stage, band, console, skeleton and actions top to bottom,
+   and §1 gives the kiosk about 1180 by 820. Stacked at the 760 column the
+   author screen runs to about 1100 tall, with the detents and the actions
+   below the fold, so at kiosk width the stage and the band take the left
+   column and the console, the skeleton and the actions the right; the DOM
+   keeps the briefed order and narrower screens lay it out as written. The
+   stage is as wide as the side column allows: the four detents on one line
+   need about 360, so the stage takes 720 (405 tall, 27% more footage than
+   640) and holds that place on every stage screen. */
+/* Larger screens. The composition is set for the kiosk's 820 tall; on a taller
+   screen console.js sets --k and the root zooms by it (below), so the page
+   keeps its hand size. Zoom scales viewport units too, so --vh and --vw are
+   the viewport in the page's own units. Every pixel of width the screen has
+   beyond the side column goes to the footage: the stage grows until its 16:9
+   height meets the band, and the shell stops widening past that, so the
+   console stays beside the stage. */
+html {
+  zoom: var(--k, 1);
+  --vh: calc(100vh / var(--k, 1));
+  --vw: calc(100vw / var(--k, 1));
+}
+
 .shell {
-  max-width: 1180px;
-  min-height: 100vh;
+  --side-w: 388px;
+  --gutter: 24px;
+  /* What stands above and below the stage in its column: the rail (11px mono
+     at 1.7, its padding and rules), the progress bar, the helpers row, the
+     band, three row gaps and two stage-block gaps, and the shell's padding. */
+  --stage-h-budget: calc(38px + 4px + 44px + var(--caption-band) + 48px + 16px + 40px);
+  --stage-max: calc((var(--vh) - var(--stage-h-budget)) * 16 / 9);
+  max-width: calc(var(--stage-max) + var(--gutter) + var(--side-w) + 48px);
+  min-height: var(--vh);
   margin: 0 auto;
   padding: 16px 24px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  /* Three rows, not four: an empty fourth row for the single-column screens
+     would still contribute a row gap to every stage screen, and at a screen
+     height where the stage is sized to the pixel that gap is the pixel. */
+  grid-template-areas:
+    "rail rail"
+    "stage side"
+    "band side";
+  align-content: start;
+  align-items: start;
+  column-gap: var(--gutter);
+  row-gap: 16px;
 }
+.rail { grid-area: rail; }
+.stage-block { grid-area: stage; width: 100%; }
+.band { grid-area: band; width: 100%; }
+/* The side column runs the height of the stage and the band, and the actions
+   sit at its foot, so the primary action is in one place — bottom right, on
+   the band's baseline — on every stage screen, whatever the console and the
+   skeleton above it hold. */
+.side { grid-area: side; align-self: stretch; display: flex; flex-direction: column; gap: 16px; }
+.side .actions { margin-top: auto; }
+/* Single-column screens take the stage row across both columns; the stage,
+   the band and the side column's sections are hidden while they show. */
+.column { grid-column: 1 / -1; grid-row: 2; }
 
 /* ---- Phase rail (§3.1) ---------------------------------------------------- */
 
@@ -42,7 +93,6 @@
 .stage {
   position: relative;
   width: 100%;
-  max-width: var(--column);
   aspect-ratio: 16 / 9;
   background: var(--ink);
   border: 1px solid var(--rule);
@@ -59,14 +109,15 @@
 }
 .stage .placed .caption-prose { color: var(--panel); }
 
-.progress { width: 100%; max-width: var(--column); height: 4px; background: var(--rule); }
+.progress { width: 100%; height: 4px; background: var(--rule); }
 .progress .played { height: 100%; width: 0; background: var(--ink); }
+/* The clip's own controls, under the clip. */
+.stage-actions { width: 100%; display: flex; gap: 8px; }
+.stage-actions:empty { display: none; }
 
 /* ---- Caption band (§3.1, the hero) ---------------------------------------- */
 
 .band {
-  width: 100%;
-  max-width: var(--column);
   margin: 0 auto;
   min-height: var(--caption-band);
   display: flex;
@@ -89,12 +140,10 @@
   width: 100%;
   max-width: var(--column);
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px 24px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-.console .detail { grid-column: 1 / -1; }
 .console .control { display: flex; flex-direction: column; gap: 8px; }
 
 /* At the atmospheric detent nothing is named, so the admitted set and the
@@ -128,7 +177,9 @@
    they stand for do; each keeps a touch minimum. */
 .crossfader { display: flex; align-items: center; gap: 12px; }
 .crossfader .pole { flex: 0 0 auto; }
-.segments { display: flex; flex: 1 1 auto; height: 44px; border: 1px solid var(--rule); }
+/* The segments are the targets and inherit the bar's inner height, so the
+   44 is measured inside the hairlines, not across them. */
+.segments { display: flex; flex: 1 1 auto; height: 44px; box-sizing: content-box; border: 1px solid var(--rule); }
 .segments .segment {
   flex-grow: 1;
   flex-basis: 0;
@@ -195,7 +246,9 @@
 
 .actions { width: 100%; max-width: var(--column); margin: 0 auto; display: flex;
   flex-direction: column; gap: 8px; }
-.actions .buttons { display: flex; gap: 16px; align-items: center; }
+/* Four actions beside the stage do not share one line; whole buttons wrap
+   rather than their labels, so each keeps its name on one line. */
+.actions .buttons { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
 .actions .criterion { color: var(--dim); }
 
 /* ---- Single-column screens ------------------------------------------------ */
@@ -230,7 +283,12 @@
 
 /* ---- Below the kiosk width ------------------------------------------------ */
 
-@media (max-width: 900px) {
-  .console { grid-template-columns: 1fr; }
+/* Narrower than the kiosk the side column has no room beside a stage worth
+   watching, so the screen returns to §3.1's single stack. */
+@media (max-width: 1100px) {
+  .shell { display: flex; flex-direction: column; gap: 16px; max-width: 1180px; }
+  .stage-block, .band { width: 100%; max-width: var(--column); }
+  .side { display: contents; }
+  .side .actions { margin-top: 0; }
   .pair { grid-template-columns: 1fr; }
 }

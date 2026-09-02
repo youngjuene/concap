@@ -21,6 +21,11 @@ const SOLO_MS = 120; // a press past this is an inspection, not a mute
 const GRAINS = ["itemized", "grouped", "scene", "atmospheric"];
 const UNNAMED_GRAIN = "atmospheric";
 const SNAPSHOT_SCHEMA = "dpo.caption-console-snapshot/v1";
+// The one string the page must hold itself: /api/session is gated on the
+// participant, so the line for a missing one cannot come from copy.py.
+const PARTICIPANT_MISSING = "Open this page with a participant identifier.";
+// The root zoom fitScreen sets; rect deltas are in zoomed units, transforms are not.
+let pageZoom = 1;
 
 const state = {
   participant: null,
@@ -259,6 +264,7 @@ function render() {
   ["stage-block", "band", "console", "skeleton", "actions", "column"].forEach((id) => show(id, false));
   clear($("column"));
   clear($("buttons"));
+  clear($("stage-actions"));
   $("criterion").textContent = "";
   const screens = {
     intro: renderIntro,
@@ -956,7 +962,18 @@ function notice(text) {
   clear($("column")).appendChild(el("p", { class: "notice body", text }));
 }
 
+// The composition is set for the kiosk's 820 tall. A taller screen shows it
+// at the same proportions, larger, rather than small in the middle; the
+// stylesheet gives the width that scale leaves over to the footage. Never
+// below one, so the kiosk itself is untouched.
+function fitScreen() {
+  pageZoom = Math.max(1, window.innerHeight / 820);
+  document.documentElement.style.setProperty("--k", String(pageZoom));
+}
+
 function start() {
+  fitScreen();
+  window.addEventListener("resize", fitScreen);
   const participant = new URLSearchParams(window.location.search).get("participant");
   state.participant = participant;
   fetch("/api/session?participant=" + encodeURIComponent(participant || ""))
