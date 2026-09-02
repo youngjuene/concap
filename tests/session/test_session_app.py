@@ -186,6 +186,8 @@ def test_caption_round_trip_cached_flag_and_refusals(client: TestClient, tmp_pat
         "caption": "A tram braking once, briefly and a distant siren rises and fades.",
         "key": "itemized|tram,siren",
         "cached": False,
+        "writer": "template",
+        "names_excluded": [],
     }
     again = client.post("/api/caption", json=body)
     assert again.json()["cached"] is True and again.json()["caption"] == first.json()["caption"]
@@ -218,7 +220,14 @@ def test_caption_round_trip_cached_flag_and_refusals(client: TestClient, tmp_pat
     scene = client.post(
         "/api/caption", json={**body, "settings": {"level": "scene", "admitted": [], "order": []}}
     )
-    assert scene.json() == {"caption": "A tram stop on a wide street.", "key": "scene", "cached": False}
+    assert scene.json() == {
+        "caption": "A tram stop on a wide street.",
+        "key": "scene",
+        "cached": False,
+        # Provenance travels with every caption for the log; the page shows neither.
+        "writer": "template",
+        "names_excluded": [],
+    }
     grouped = client.post(
         "/api/caption",
         json={

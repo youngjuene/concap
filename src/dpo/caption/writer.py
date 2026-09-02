@@ -27,9 +27,10 @@ written up front and read from the cache while a row is held.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -72,10 +73,99 @@ class CaptionRequest:
     # Gemma only: the shot's audio excerpt on a shaped clip, a still from the
     # middle of the shot on a control clip (spec 4.6: a visual description).
     media_path: Path | None
+    # The shot's sources the settings left OUT. Admission is a participant
+    # variable, so a caption that names a muted source has silently undone the
+    # participant's choice; the writers report when that happens (see
+    # ``Written.names_excluded``) so the log can tell. Empty where admission
+    # has no surface (the unnamed grains).
+    excluded: tuple[SourceSpec, ...] = ()
+
+
+@dataclass(frozen=True)
+class Written:
+    """A caption and the path that produced it.
+
+    ``writer`` is one of ``template``, ``gemma``, ``gemma-tightened`` (the
+    model's second try after an overrun), ``gemma-cut`` (its first try, ended
+    at the last full sentence inside the budget), ``template-fallback`` (the
+    model would not fit twice) or ``unknown`` (a writer that does not say).
+    Real captions on the real model landed on the fallback one time in six on
+    a real clip, and a template sentence in the middle of model prose is a
+    quality cliff the participant cannot see and the analysis must — so the
+    path is recorded beside every caption rather than lost at the cache.
+
+    ``names_excluded`` lists the ids of sources outside the admitted set that
+    the caption nevertheless appears to name. Detection is by content word and
+    is deliberately not enforced: a false positive that forced the template
+    would cost more than the violation it caught, so this is measured first.
+    """
+
+    caption: str
+    writer: str
+    names_excluded: tuple[str, ...] = ()
 
 
 class CaptionWriter(Protocol):
     def write(self, request: CaptionRequest) -> str: ...
+
+
+def written_by(writer: CaptionWriter, request: CaptionRequest) -> Written:
+    """``Written`` from any writer: its own attribution if it reports one."""
+    attributed = getattr(writer, "write_attributed", None)
+    if attributed is not None:
+        result = attributed(request)
+        assert isinstance(result, Written)
+        return result
+    return Written(writer.write(request), "unknown")
+
+
+# Words too generic to identify a source on their own: "traffic noise" is not
+# named by a caption that says "the noise of the street".
+_GENERIC_WORDS = frozenset(
+    {
+        "noise",
+        "noises",
+        "sound",
+        "sounds",
+        "with",
+        "from",
+        "that",
+        "this",
+        "then",
+        "into",
+        "over",
+        "near",
+        "some",
+        "very",
+        "distant",
+        "loud",
+        "quiet",
+        "steady",
+    }
+)
+
+
+def names_excluded(caption: str, excluded: Sequence[SourceSpec]) -> tuple[str, ...]:
+    """The excluded sources the caption appears to name.
+
+    A source counts as named when its whole prose appears, or any of its
+    distinctive words does — four letters or more, not in the generic list,
+    matched as a whole word so "bird" does not fire on "birdsong"'s cousin
+    "third". Written to be conservative in the false-positive direction and
+    reported rather than acted on; see :class:`Written`.
+    """
+    lowered = caption.lower()
+    found: list[str] = []
+    for source in excluded:
+        prose = source.prose.lower().strip()
+        words = [w.strip(".,;:") for w in prose.split()]
+        distinctive = [w for w in words if len(w) >= 4 and w not in _GENERIC_WORDS]
+        if prose and prose in lowered:
+            found.append(source.id)
+            continue
+        if any(re.search(rf"\b{re.escape(word)}s?\b", lowered) for word in distinctive):
+            found.append(source.id)
+    return tuple(found)
 
 
 class WriterError(RuntimeError):
@@ -118,6 +208,12 @@ class TemplateWriter:
       budget, the clauses keep their order and lose their leads.
     * scene — the shot's scene prose. atmospheric — its atmosphere prose.
     """
+
+    def write_attributed(self, request: CaptionRequest) -> Written:
+        # The template never names anything it was not handed, so the only
+        # excluded source it could name is one whose words another shares.
+        caption = self.write(request)
+        return Written(caption, "template", names_excluded(caption, request.excluded))
 
     def write(self, request: CaptionRequest) -> str:
         if request.level == "scene":
@@ -353,11 +449,12 @@ class GemmaWriter:
             raise WriterError(f"Gemma generation failed: {exc}") from exc
         return " ".join(text.split()).strip()
 
-    def write(self, request: CaptionRequest) -> str:
+    def write_attributed(self, request: CaptionRequest) -> Written:
         messages = self.messages(request)
         caption = self._generate(messages)
         if not caption:
             raise WriterError("Gemma returned an empty caption")
+        writer = "gemma"
         if len(caption) > CAPTION_MAX_CHARS:
             # The two-line box clips a longer caption mid-word behind an
             # ellipsis, which the participant would read as the caption. One
@@ -366,15 +463,17 @@ class GemmaWriter:
             # what is read is whole sentences in the skeleton's order.
             shorter = self._generate(tighten(messages, len(caption), [s.prose for s in request.sources]))
             if shorter and len(shorter) < len(caption):
-                caption = shorter
+                caption, writer = shorter, "gemma-tightened"
             if len(caption) > CAPTION_MAX_CHARS:
                 templated = self.fallback.write(request)
-                caption = (
-                    templated
-                    if len(templated) <= CAPTION_MAX_CHARS
-                    else cut_at_sentence(caption, CAPTION_MAX_CHARS)
-                )
-        return caption
+                if len(templated) <= CAPTION_MAX_CHARS:
+                    caption, writer = templated, "template-fallback"
+                else:
+                    caption, writer = cut_at_sentence(caption, CAPTION_MAX_CHARS), "gemma-cut"
+        return Written(caption, writer, names_excluded(caption, request.excluded))
+
+    def write(self, request: CaptionRequest) -> str:
+        return self.write_attributed(request).caption
 
 
 # ---- the cache --------------------------------------------------------------
@@ -397,37 +496,63 @@ class CachedWriter:
     def __init__(self, inner: CaptionWriter, cache_path: Path) -> None:
         self.inner = inner
         self.cache_path = Path(cache_path)
-        self.entries: dict[str, str] = {}
+        self.entries: dict[str, Written] = {}
         self._lock = threading.Lock()
         if self.cache_path.is_file():
             loaded = json.loads(self.cache_path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
-                self.entries = {str(key): str(value) for key, value in loaded.items()}
+                self.entries = {str(key): _cache_entry(value) for key, value in loaded.items()}
 
     @staticmethod
     def key_for(request: CaptionRequest) -> str:
         return f"{request.clip_id}/{request.shot_id}/{request.settings_key}"
 
     def lookup(self, request: CaptionRequest) -> str | None:
-        return self.entries.get(self.key_for(request))
+        found = self.entries.get(self.key_for(request))
+        return None if found is None else found.caption
 
-    def write_cached(self, request: CaptionRequest) -> tuple[str, bool]:
-        """(caption, whether it came from the cache)."""
+    def write_attributed_cached(self, request: CaptionRequest) -> tuple[Written, bool]:
+        """(the caption with its provenance, whether it came from the cache)."""
         key = self.key_for(request)
         with self._lock:
             cached = self.entries.get(key)
             if cached is not None:
                 return cached, True
-            caption = self.inner.write(request)
-            self.entries[key] = caption
+            written = written_by(self.inner, request)
+            self.entries[key] = written
             payload = (
-                json.dumps(self.entries, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+                json.dumps(
+                    {k: asdict(v) for k, v in self.entries.items()},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                ).encode("utf-8")
+                + b"\n"
             )
             replace_atomically(self.cache_path, payload)
-        return caption, False
+        return written, False
+
+    def write_cached(self, request: CaptionRequest) -> tuple[str, bool]:
+        """(caption, whether it came from the cache)."""
+        written, hit = self.write_attributed_cached(request)
+        return written.caption, hit
 
     def write(self, request: CaptionRequest) -> str:
         return self.write_cached(request)[0]
+
+
+def _cache_entry(value: object) -> Written:
+    """One cache entry, from the current shape or from a file written before
+    provenance was recorded (a bare string, which is honestly ``unknown``)."""
+    if isinstance(value, str):
+        return Written(value, "unknown")
+    if isinstance(value, dict) and isinstance(value.get("caption"), str):
+        return Written(
+            str(value["caption"]),
+            str(value.get("writer", "unknown")),
+            tuple(str(item) for item in value.get("names_excluded", ())),
+        )
+    raise ValueError(f"unreadable caption cache entry: {value!r}")
 
 
 # (clip_id, shot) -> the media the Gemma writer listens to or looks at for that
@@ -454,10 +579,13 @@ __all__ = [
     "StimulusAdapter",
     "TemplateWriter",
     "WriterError",
+    "Written",
     "as_sentence",
     "cut_at_sentence",
     "join_clauses",
     "gemma_instruction",
+    "names_excluded",
     "tighten",
     "visual_messages",
+    "written_by",
 ]

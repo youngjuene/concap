@@ -94,6 +94,12 @@ def build_request(
         sources = tuple(member for head in heads for member in head.members)
     else:
         sources = ()
+    # What admission left out, where admission has a surface. At scene and
+    # atmospheric there are no rows to strike (spec 4.3), so nothing is excluded.
+    excluded: tuple[SourceSpec, ...] = ()
+    if settings.level in ("itemized", "grouped"):
+        admitted_ids = set(settings.admitted)
+        excluded = tuple(_source_spec(s) for s in shot["sources"] if str(s["id"]) not in admitted_ids)
     return CaptionRequest(
         clip_id=str(clip["clip_id"]),
         shot_id=str(shot["shot_id"]),
@@ -105,6 +111,7 @@ def build_request(
         scene_prose=str(shot["scene"]["prose"]),
         atmosphere_prose=str(shot["atmosphere"]["prose"]),
         media_path=media_path,
+        excluded=excluded,
     )
 
 

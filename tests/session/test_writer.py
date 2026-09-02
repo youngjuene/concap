@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from dpo.caption.writer import Written, names_excluded
 from dpo.session.document import clip_by_id
 from dpo.session.skeleton import Settings, orderings
 from dpo.session.writer import (
@@ -190,8 +191,14 @@ def test_concurrent_misses_on_one_key_call_the_inner_writer_once(tmp_path: Path)
     assert inner.calls == 1
     assert {caption for caption, _ in results} == {"caption 1 for itemized|tram,siren"}
     assert sorted(hit for _, hit in results) == [False, True, True, True]
+    # The file carries the provenance beside the caption; a writer that does
+    # not report one is recorded as such rather than guessed at.
     assert json.loads((tmp_path / "captions.json").read_text(encoding="utf-8")) == {
-        "demo_tram_stop/s1/itemized|tram,siren": "caption 1 for itemized|tram,siren"
+        "demo_tram_stop/s1/itemized|tram,siren": {
+            "caption": "caption 1 for itemized|tram,siren",
+            "writer": "unknown",
+            "names_excluded": [],
+        }
     }
 
 
@@ -426,3 +433,97 @@ class TestGemmaControl:
             adapter = FakeAdapter("A shopping street with a tram crossing.")
             GemmaWriter(adapter).write(_request(level, task="control", media_path=tmp_path / "s.jpg"))
             assert "sound" not in adapter.messages[0]["content"]
+
+
+# ---- provenance: which path wrote a caption, and whether it named a muted source
+
+
+class TestProvenance:
+    def test_the_template_reports_itself(self) -> None:
+        written = TemplateWriter().write_attributed(_request("itemized", (TRAM, SIREN)))
+        assert written.writer == "template"
+        assert written.caption == TemplateWriter().write(_request("itemized", (TRAM, SIREN)))
+
+    def test_a_first_try_within_budget_is_the_models(self, tmp_path: Path) -> None:
+        written = GemmaWriter(FakeAdapter()).write_attributed(_request("scene", media_path=tmp_path))
+        assert written.writer == "gemma"
+
+    def test_a_second_try_that_fits_is_marked_as_tightened(self, tmp_path: Path) -> None:
+        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.LONG, TestGemmaBudget.SHORT)
+        written = GemmaWriter(adapter).write_attributed(_request("scene", media_path=tmp_path))
+        assert written.writer == "gemma-tightened"
+        assert written.caption == TestGemmaBudget.SHORT
+
+    def test_two_overruns_are_marked_as_the_fallback(self, tmp_path: Path) -> None:
+        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.LONG, TestGemmaBudget.LONG)
+        written = GemmaWriter(adapter).write_attributed(
+            _request("itemized", (TRAM, SIREN), media_path=tmp_path)
+        )
+        assert written.writer == "template-fallback"
+        assert written.caption == TemplateWriter().write(_request("itemized", (TRAM, SIREN)))
+
+    def test_a_writer_that_does_not_report_is_recorded_as_unknown(self, tmp_path: Path) -> None:
+        cached = CachedWriter(CountingWriter(), tmp_path / "captions.json")
+        written, hit = cached.write_attributed_cached(_request("itemized", (TRAM,)))
+        assert written.writer == "unknown" and hit is False
+
+    def test_the_cache_keeps_the_provenance_across_a_restart(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        CachedWriter(TemplateWriter(), path).write_attributed_cached(_request("itemized", (TRAM,)))
+        written, hit = CachedWriter(CountingWriter(), path).write_attributed_cached(
+            _request("itemized", (TRAM,))
+        )
+        assert hit is True and written.writer == "template"
+
+    def test_a_cache_written_before_provenance_still_loads(self, tmp_path: Path) -> None:
+        path = tmp_path / "captions.json"
+        path.write_text(json.dumps({"demo_tram_stop/s1/itemized|tram": "An old caption."}), encoding="utf-8")
+        written, hit = CachedWriter(CountingWriter(), path).write_attributed_cached(
+            _request("itemized", (TRAM,))
+        )
+        assert hit is True
+        assert written == Written("An old caption.", "unknown")
+
+
+class TestNamesExcluded:
+    def test_a_muted_source_the_caption_still_names_is_reported(self) -> None:
+        assert names_excluded("A tram brakes as a siren fades.", [SIREN]) == ("siren",)
+
+    def test_a_caption_that_leaves_the_muted_source_out_reports_nothing(self) -> None:
+        assert names_excluded("A tram brakes at the stop.", [SIREN, STEPS]) == ()
+
+    def test_generic_words_do_not_count_as_naming(self) -> None:
+        noise = SourceSpec("traffic", "TRAFFIC NOISE", "traffic noise", ("in frame", "steady"))
+        # "noise" alone is not the source; "traffic" is.
+        assert names_excluded("The noise of the street carries.", [noise]) == ()
+        assert names_excluded("Traffic passes steadily.", [noise]) == ("traffic",)
+
+    def test_matching_is_by_whole_word(self) -> None:
+        bird = SourceSpec("bird", "BIRD", "a bird", ("small", "comes and goes"))
+        assert names_excluded("A third tram passes.", [bird]) == ()
+        assert names_excluded("Birds call overhead.", [bird]) == ("bird",)
+
+    def test_it_is_measured_not_enforced(self, tmp_path: Path) -> None:
+        """The caption is returned as the model wrote it; the log learns, the participant does not."""
+        adapter = FakeAdapter("A tram brakes as a siren fades.")
+        written = GemmaWriter(adapter).write_attributed(
+            _request("itemized", (TRAM,), media_path=tmp_path, excluded=(SIREN,))
+        )
+        assert written.caption == "A tram brakes as a siren fades."
+        assert written.names_excluded == ("siren",)
+        assert written.writer == "gemma"
+
+
+class TestExcludedInRequests:
+    def test_v1_carries_the_muted_sources_at_the_levels_with_rows(self) -> None:
+        document = _document()
+        clip, shot = document["clips"][0], document["clips"][0]["shots"][0]
+        request = build_request(document, clip, shot, Settings("itemized", ("tram",), ("tram",)), None)
+        assert {s.id for s in request.excluded} == {s["id"] for s in shot["sources"]} - {"tram"}
+
+    def test_v1_excludes_nothing_where_admission_has_no_surface(self) -> None:
+        document = _document()
+        clip, shot = document["clips"][0], document["clips"][0]["shots"][0]
+        for level in ("scene", "atmospheric"):
+            request = build_request(document, clip, shot, Settings(level, (), ()), None)
+            assert request.excluded == ()

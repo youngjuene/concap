@@ -268,10 +268,18 @@ def build_app(
             # a bare 500 (contract §7 "On writer failure").
             media = shot_media(clip_id, shot) if shot_media is not None else None
             request = build_request(document, clip, shot, validated, media)
-            text, hit = cached.write_cached(request)
+            written, hit = cached.write_attributed_cached(request)
         except (WriterError, MediaError):
             return _error(502, CAPTION_FAILED)
-        return {"caption": text, "key": validated.key, "cached": hit}
+        # ``writer`` and ``names_excluded`` are for the log, not the screen:
+        # the page records them on caption.written and shows neither.
+        return {
+            "caption": written.caption,
+            "key": validated.key,
+            "cached": hit,
+            "writer": written.writer,
+            "names_excluded": list(written.names_excluded),
+        }
 
     @app.get("/api/log")
     def download_log(participant: str | None = None) -> Any:

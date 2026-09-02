@@ -203,6 +203,26 @@ class RequestBuilder:
             scene_prose="",
             atmosphere_prose="",
             media_path=media_path,
+            excluded=self.excluded(field, settings),
+        )
+
+    def excluded(self, field: Field, settings: Settings) -> tuple[SourceSpec, ...]:
+        """The shot's sources the admitted set left out; none at the unnamed grain."""
+        if settings.grain == UNNAMED_GRAIN:
+            return ()
+        admitted = set(settings.admitted)
+        return tuple(
+            SourceSpec(
+                id=source.id,
+                token=source.prose.upper(),
+                prose=source.prose,
+                phrases=(
+                    self.configuration.visibility_phrase(field.visibility[source.id]),
+                    self.configuration.register_phrase(source.presence),
+                ),
+            )
+            for source in field.sources
+            if source.id not in admitted
         )
 
     def instruction(self, request: CaptionRequest) -> str:

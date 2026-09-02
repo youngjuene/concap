@@ -1086,6 +1086,10 @@ async function showCaption() {
       key: written.key,
       caption: written.caption,
       cached: !!written.cached,
+      // Provenance for the analysis, never shown: which path wrote it, and
+      // any muted source it names anyway.
+      writer: written.writer,
+      names_excluded: written.names_excluded || [],
       latency_ms: Math.round(performance.now() - started),
     });
   } catch (error) {

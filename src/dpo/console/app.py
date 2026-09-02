@@ -248,17 +248,21 @@ def build_app(
             return _error(400, str(exc))
         request = builder.build(clip_id, shot, field, settings, _media_for(clip_id, shot))
         try:
-            text, from_cache = cached.write_cached(request)
+            written, from_cache = cached.write_attributed_cached(request)
         except WriterError:
             return _error(502, CAPTION_FAILED)
+        # ``writer`` and ``names_excluded`` are for the log, not the screen:
+        # the page records them on caption.written and shows neither.
         return configuration.stamped(
             {
                 "clip_id": clip_id,
                 "shot_id": shot_id,
                 "settings": settings.as_json(),
                 "key": settings.key,
-                "caption": text,
+                "caption": written.caption,
                 "cached": from_cache,
+                "writer": written.writer,
+                "names_excluded": list(written.names_excluded),
             }
         )
 

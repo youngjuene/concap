@@ -755,6 +755,10 @@ function onShowCaption() {
         key: answer.key,
         caption: answer.caption,
         cached: answer.cached,
+        // Provenance for the analysis, never shown: which path wrote it, and
+        // any muted source it names anyway.
+        writer: answer.writer,
+        names_excluded: answer.names_excluded || [],
       });
       afterChange();
     })
