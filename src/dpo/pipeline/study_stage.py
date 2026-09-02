@@ -29,8 +29,7 @@ from collections.abc import Mapping, Sequence
 from dpo.candidates.freeze import FrozenCandidatePool
 from dpo.contracts.study_contract import StudyContract
 from dpo.core.artifacts import ParentEdge
-from dpo.evaluation.caption_generation import training_candidate_reuse_rate
-from dpo.evaluation.compliance import GeneratedCaption
+from dpo.evaluation.caption_reuse import GeneratedCaption, training_candidate_reuse_rate
 from dpo.evaluation.congruency import ClipLadder, ladder_summary
 from dpo.pipeline.publishing import ArtifactPublisher
 

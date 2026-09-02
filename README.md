@@ -461,8 +461,8 @@ src/dpo/
 ├── objectives/    # base protocol + dpo, ipo, cdpo, rdpo, drdpo, wdpo, sft
 ├── trainers/      # one preference trainer for every preference arm,
 │                  # SFT trainer, diagnostics
-├── evaluation/    # compliance, preference accuracy, caption_generation,
-│                  # congruency (the measured audiovisual axis)
+├── evaluation/    # preference accuracy, caption reuse (the memorization
+│                  # gate), ablation, congruency (the measured audiovisual axis)
 ├── analysis/      # compare (the `report analyze` layer), Bradley-Terry,
 │                  # clip-cluster bootstrap + BH correction, robustness slices
 │                  # and flip curves, the human study's analysis

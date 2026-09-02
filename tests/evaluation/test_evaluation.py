@@ -1,4 +1,4 @@
-"""Evaluation tests: compliance, preference accuracy, candidate reuse."""
+"""Evaluation tests: preference accuracy and the candidate-reuse gate."""
 
 from __future__ import annotations
 
@@ -6,9 +6,7 @@ import math
 
 import pytest
 
-from dpo.contracts.study_contract import StudyContract
-from dpo.evaluation.caption_generation import training_candidate_reuse_rate
-from dpo.evaluation.compliance import GeneratedCaption, compute_compliance
+from dpo.evaluation.caption_reuse import GeneratedCaption, training_candidate_reuse_rate
 from dpo.evaluation.preference_accuracy import ScoredPair, evaluate_preferences
 from tests.conftest import PreferenceWorld
 
@@ -33,21 +31,6 @@ def test_preference_report_accuracy_and_logloss() -> None:
     expected = (-math.log(1 / (1 + math.exp(-2.0))) - math.log(1 / (1 + math.exp(1.0)))) / 2
     assert report.log_loss == pytest.approx(expected, rel=1e-6)
     assert "easy" in report.accuracy_by_difficulty
-
-
-def test_compliance_metrics_over_generated_captions(contract: StudyContract) -> None:
-    captions = [
-        GeneratedCaption("clip-1", "A cyclist crosses the junction toward the market."),
-        GeneratedCaption("clip-2", "A cyclist crosses the junction toward the market."),
-        GeneratedCaption("clip-3", ""),
-        GeneratedCaption("clip-4", "Loud music plays while a cyclist rides away quickly."),
-    ]
-    metrics = compute_compliance(captions, contract.tracks["visual"])
-    assert metrics.caption_count == 4
-    assert metrics.empty_rate == pytest.approx(0.25)
-    assert metrics.duplicate_output_rate == pytest.approx(0.25)
-    assert metrics.modality_violation_rate == pytest.approx(0.25)
-    assert metrics.grammar == "blocked_pending_external_operation"
 
 
 def test_generated_captions_must_not_reuse_training_candidates(

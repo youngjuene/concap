@@ -1,9 +1,4 @@
-"""Study-export stage: caption generation and the memorization gate.
-
-``generate_captions`` had no test at all before this — it was defined and never
-called from ``src``. The gate it feeds is the one that decides what a human
-participant reads, so both are covered here.
-"""
+"""Study-export stage: the memorization gate that decides what a participant reads."""
 
 from __future__ import annotations
 
@@ -12,9 +7,8 @@ from pathlib import Path
 import pytest
 
 from dpo.contracts.study_contract import StudyContract
-from dpo.evaluation.caption_generation import generate_captions
 from dpo.evaluation.congruency import ClipLadder, ScoredCaption
-from dpo.models.tiny import TinyAdapter, synthetic_media
+from dpo.models.tiny import TinyAdapter
 from dpo.pipeline.run_matrix import DEFAULT_MEDIA_DIM
 from dpo.pipeline.study_stage import STUDY_EXPORT_TYPE, StudyError, publish_study_export
 from tests.conftest import PreferenceWorld, study_publisher
@@ -33,32 +27,6 @@ def _ladder(clip_id: str, low: str, high: str) -> ClipLadder:
 
 def _adapter(contract: StudyContract, track: str) -> TinyAdapter:
     return TinyAdapter(track=track, prompt=contract.tracks[track].prompt, media_dim=DEFAULT_MEDIA_DIM, seed=0)
-
-
-def test_generate_captions_is_deterministic_and_clip_aligned(
-    contract: StudyContract, world: PreferenceWorld
-) -> None:
-    track = world.pool.track
-    clip_ids = sorted({candidate.clip_id for candidate in world.pool.candidates})[:3]
-    media = synthetic_media(track, clip_ids, media_dim=DEFAULT_MEDIA_DIM)
-    adapter = _adapter(contract, track)
-
-    first = generate_captions(adapter, clip_ids, media, temperature=0.0, top_p=1.0, max_new_tokens=8, seed=1)
-    second = generate_captions(adapter, clip_ids, media, temperature=0.0, top_p=1.0, max_new_tokens=8, seed=1)
-    assert [caption.clip_id for caption in first] == clip_ids
-    assert first == second, "greedy decoding under a frozen config must be reproducible"
-
-
-def test_generate_captions_rejects_a_media_batch_for_other_clips(
-    contract: StudyContract, world: PreferenceWorld
-) -> None:
-    track = world.pool.track
-    clip_ids = sorted({candidate.clip_id for candidate in world.pool.candidates})[:2]
-    media = synthetic_media(track, list(reversed(clip_ids)), media_dim=DEFAULT_MEDIA_DIM)
-    with pytest.raises(ValueError, match="do not match"):
-        generate_captions(
-            _adapter(contract, track), clip_ids, media, temperature=0.0, top_p=1.0, max_new_tokens=4, seed=1
-        )
 
 
 def test_study_export_refuses_captions_that_reuse_training_candidates(

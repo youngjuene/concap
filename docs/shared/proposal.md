@@ -349,9 +349,13 @@ its adapter plus a semantic hash of everything it trained from, so a crash
 resumes where it stopped and a changed input retrains exactly the cells it
 affects.
 
-Evaluation: per-variant preference accuracy on held-out validation,
-compliance screening against the caption contracts, and caption generation
-under fixed decoding (T=0, top-p 1.0, 48 new tokens). The inferential layer is
+Evaluation: per-variant preference accuracy on held-out validation, the
+memorization gate (no validation caption may byte-match a frozen training
+candidate), and the congruency ladders the human study is built from,
+generated through the adapter under the contract's validation decoding. The
+deterministic compliance screens run where the captions are made — in
+`candidates audit`, against the per-track caption contracts — not a second
+time over generated output. The inferential layer is
 `dpo report analyze` — clip-clustered bootstrap intervals at the contract's
 `validation.bootstrap_samples` (10000 on the live study; 200 only on the
 canary, where it is a speed fixture), exact paired sign tests against SEED
