@@ -394,7 +394,7 @@ async function renderAuditory() {
     const select = document.createElement("button");
     select.textContent = strings.select;
 
-    play.onclick = () => toggle(stem, play);
+    play.onclick = () => toggle(stem, play, lane);
     select.onclick = () => {
       const index = state.selected.indexOf(stem.id);
       if (index === -1) state.selected.push(stem.id);
@@ -438,7 +438,7 @@ async function renderAuditory() {
     state.playing = null;
   }
 
-  function toggle(stem, button) {
+  function toggle(stem, button, lane) {
     if (state.playing && state.playing.stem.id === stem.id) return stop();
     // §5: starting another lane stops the previous one. Enforced here rather
     // than by pausing on the element's own play event, so the listening time
@@ -453,16 +453,34 @@ async function renderAuditory() {
     const gain = state.audio.createGain();
     gain.gain.value = stem.gain;
     source.connect(gain).connect(state.audio.destination);
-    const lane = state.lanes.get(stem.id);
-    lane.plays += 1;
-    state.playing = { stem, element, since: Date.now(), button };
-    button.textContent = strings.stop;
-    note("lane.played", { stem: stem.id, plays: lane.plays });
     element.ontimeupdate = () => {
       if (element.duration) drawWave(canvases.get(stem.id), stem, element.currentTime / element.duration);
     };
     element.onended = stop;
-    element.play().catch((error) => fail(`the stem would not play: ${error.message}`));
+    element.play().then(
+      () => {
+        // The play count is what §5 reports a selection against, so it moves
+        // when sound actually starts rather than when the control was pressed.
+        const counts = state.lanes.get(stem.id);
+        counts.plays += 1;
+        state.playing = { stem, element, since: Date.now(), button };
+        button.textContent = strings.stop;
+        note("lane.played", { stem: stem.id, plays: counts.plays });
+      },
+      (error) => {
+        // A lane that will not play is this lane's problem and not the
+        // session's. Ending the run here would lose §6, §7 and §8 to one
+        // missing or undecodable file, and the participant has already given
+        // two of the study's measures by this point. The lane says it has no
+        // sound, its selection control is untouched — they may well have
+        // heard the source in the clip — and the log carries the failure so
+        // the researcher sees it without the participant losing the session.
+        lane.classList.add("unplayable");
+        button.textContent = strings.unavailable;
+        button.disabled = true;
+        note("lane.unplayable", { stem: stem.id, error: String((error && error.message) || error) });
+      }
+    );
   }
 
   $("auditory-submit").onclick = async () => {

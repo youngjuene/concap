@@ -55,6 +55,11 @@ STRINGS: dict[str, Any] = {
         "Play any of them, then select the ones you noticed while watching.",
         "play": "Play",
         "stop": "Stop",
+        # A lane whose audio will not play. §5 keeps the selection control
+        # live — the participant may have heard the source in the clip even
+        # though this screen cannot replay it — so the word is about the
+        # button, not about the source.
+        "unavailable": "No sound",
         "select": "Select",
         "selected": "Selected",
         "none": "You can continue without selecting any.",
