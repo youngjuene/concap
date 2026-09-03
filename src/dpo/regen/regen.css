@@ -103,6 +103,7 @@ p.lede { color: var(--dim); margin-bottom: 24px; }
 
 .lane.selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .lane .label { font: 13px/1.3 var(--body); }
+.lane .label small { display: block; margin-top: 2px; font: 10px/1.3 var(--mono); color: var(--dim); }
 .lane canvas { width: 100%; height: 48px; display: block; }
 .lane .lane-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .lane button { padding: 6px 10px; font-size: 13px; }

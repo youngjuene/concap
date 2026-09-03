@@ -13,6 +13,7 @@ from dpo.regen.document import (
     load_regen_document,
     objects_of,
     participant_document,
+    slug,
     track_of,
     validate_regen_document,
 )
@@ -93,7 +94,51 @@ class TestWhatTheBrowserGets:
 
     def test_the_lanes_carry_what_they_need_to_be_drawn_and_played(self, document: dict[str, Any]) -> None:
         stem = participant_document(document, "A")["stems"][0]
-        assert set(stem) == {"id", "label", "colour", "gain", "waveform"}
+        assert set(stem) == {"id", "label", "parent", "colour", "gain", "waveform"}
+
+    def test_a_lane_carries_its_family_when_the_document_names_one(self, document: dict[str, Any]) -> None:
+        document["segments"]["A"]["stems"][0]["parent"] = "Sounds of things"
+        validate_regen_document(document)
+        assert participant_document(document, "A")["stems"][0]["parent"] == "Sounds of things"
+
+    def test_a_lane_without_a_family_still_serves(self, document: dict[str, Any]) -> None:
+        assert participant_document(document, "A")["stems"][0]["parent"] is None
+
+    def test_a_family_that_is_not_words_is_refused(self, document: dict[str, Any]) -> None:
+        document["segments"]["A"]["stems"][0]["parent"] = 7
+        with pytest.raises(RegenDocumentError, match="parent"):
+            validate_regen_document(document)
+
+
+class TestSlug:
+    """Source vocabularies are written for people; ids are not."""
+
+    @pytest.mark.parametrize(
+        ("label", "expected"),
+        [
+            ("Traffic noise, roadway noise", "traffic_noise_roadway_noise"),
+            ("Police car (siren)", "police_car_siren"),
+            ("Vehicle horn, car horn, honking", "vehicle_horn_car_horn_honking"),
+            ("Road transport", "road_transport"),
+            ("Beep, bleep", "beep_bleep"),
+            ("  Bird  ", "bird"),
+        ],
+    )
+    def test_a_label_becomes_an_id_the_document_accepts(self, label: str, expected: str) -> None:
+        assert slug(label) == expected
+
+    def test_a_label_with_no_usable_character_is_refused(self) -> None:
+        with pytest.raises(RegenDocumentError, match="identifier"):
+            slug("(,)")
+
+    def test_two_labels_that_slug_alike_are_caught_as_a_repeated_id(self, document: dict[str, Any]) -> None:
+        # Not slug's job — a collision is a property of the set a segment
+        # declares, and the document already refuses one id declared twice.
+        stems = document["segments"]["A"]["stems"]
+        stems[0]["id"] = slug("Car, horn")
+        stems[1]["id"] = slug("Car (horn)")
+        with pytest.raises(RegenDocumentError, match="declared twice"):
+            validate_regen_document(document)
 
 
 class TestResolution:

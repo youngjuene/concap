@@ -34,6 +34,7 @@ from dpo.regen.document import (
     RegenDocumentError,
     configuration_of,
     load_regen_document,
+    slug,
 )
 from dpo.regen.items import ItemsError, load_items
 
@@ -92,7 +93,7 @@ def _segment(
         "duration_ms": duration_ms,
         "objects": [
             {
-                "id": path.stem.lower().replace(" ", "_"),
+                "id": slug(path.stem),
                 "label": path.stem,
                 "mask": str(base / MASKS / path.name),
             }
@@ -105,7 +106,7 @@ def _segment(
         # researcher knows they are placeholders.
         "stems": [
             {
-                "id": path.stem.lower().replace(" ", "_"),
+                "id": slug(path.stem),
                 "label": path.stem,
                 "audio": str(base / STEMS / path.name),
                 "colour": "#666666",

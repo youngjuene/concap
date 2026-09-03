@@ -93,6 +93,26 @@ def _identifier(value: object, path: str) -> str:
     return text
 
 
+def slug(label: str) -> str:
+    """A source vocabulary's label as a document identifier.
+
+    The vocabularies this instrument is staged from are written for people to
+    read — ``"Vehicle horn, car horn, honking"``, ``"Police car (siren)"`` —
+    and ten of the thirty-four audio labels in the study's corpus carry a
+    comma or a bracket that :data:`ID_RE` refuses. Runs of anything outside
+    the id alphabet collapse to one underscore.
+
+    Two labels can slug to one id. That is not checked here, because it is not
+    a property of a label: it is a property of the set a segment declares, and
+    :func:`validate_regen_document` already refuses a segment that declares one
+    id twice. Naming it there names the segment as well.
+    """
+    text = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_").lower()
+    if not text:
+        raise _fail("slug", f"{label!r} has no character an identifier could be built from")
+    return text
+
+
 def _relative(value: object, path: str) -> str:
     """A media reference, resolved under ``--media-dir`` and never above it."""
     text = _string(value, path)
@@ -133,6 +153,14 @@ def _validate_stem(raw: object, path: str) -> str:
     entry = _mapping(raw, path)
     stem_id = _identifier(entry.get("id"), f"{path}.id")
     _string(entry.get("label"), f"{path}.label")
+    # The family the label sits in, where the source vocabulary has one.
+    # Optional because a study may name its sources itself and owe no
+    # taxonomy; carried when it does, because a label alone can be a
+    # narrower claim than its neighbour ("Speech" beside "Male speech, man
+    # speaking") and a participant asked to pick between them is being asked
+    # about the vocabulary rather than about what they heard.
+    if entry.get("parent") is not None:
+        _string(entry.get("parent"), f"{path}.parent")
     _relative(entry.get("audio"), f"{path}.audio")
     colour = _string(entry.get("colour"), f"{path}.colour")
     if not COLOUR_RE.fullmatch(colour):
@@ -285,6 +313,7 @@ def participant_document(document: Mapping[str, Any], name: str) -> dict[str, An
             {
                 "id": stem["id"],
                 "label": stem["label"],
+                "parent": stem.get("parent"),
                 "colour": stem["colour"],
                 "gain": stem["gain"],
                 "waveform": list(stem["waveform"]),

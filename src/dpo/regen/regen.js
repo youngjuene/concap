@@ -373,6 +373,14 @@ async function renderAuditory() {
     const label = document.createElement("div");
     label.className = "label";
     label.textContent = stem.label;
+    // The family, where the source vocabulary has one. A label can be a
+    // narrower claim than its neighbour, and the colour already groups by
+    // family; naming it makes what the colour is doing legible.
+    if (stem.parent) {
+      const family = document.createElement("small");
+      family.textContent = stem.parent;
+      label.append(family);
+    }
 
     const canvas = document.createElement("canvas");
     canvas.width = 600;
