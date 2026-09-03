@@ -470,6 +470,20 @@ def build_segment(
 # ---- the command ------------------------------------------------------------
 
 
+def fits_slot(text: Mapping[str, str], calibration: Calibration) -> bool:
+    """Whether this clip's prepared caption fits the slot in every language.
+
+    The caption is the stimulus and shortening it is the researcher's call, so
+    a clip that overruns is not trimmed here — it is left out of the pool and
+    named on the way past, so a sample run can be built from the clips that are
+    ready without deciding anything about the ones that are not.
+    """
+    return all(
+        len(said) <= calibration.slot_max_chars and len(said.splitlines()) <= calibration.slot_max_lines
+        for said in text.values()
+    )
+
+
 def _fallback(entries: Sequence[str], languages: Sequence[str]) -> dict[str, str]:
     """§6's default track, one text per language the study offers.
 
@@ -589,6 +603,11 @@ def main(argv: list[str] | None = None) -> int:
         default=list(STIMULUS_CONDITIONS),
         help="the condition directories to draw candidates from (default: the captioned audio one)",
     )
+    parser.add_argument(
+        "--fits-slot",
+        action="store_true",
+        help="keep only the clips whose prepared caption fits the slot in every language offered",
+    )
     parser.add_argument("--pool", action="store_true", help="list the candidate clips and stop")
     parser.add_argument("--segments", nargs=2, metavar=("A", "B"), help="the two clip ids to stage")
     parser.add_argument("--out", type=Path, help="media directory to stage into")
@@ -620,6 +639,21 @@ def main(argv: list[str] | None = None) -> int:
         palette = json.loads(arguments.palette.read_text(encoding="utf-8"))["audio"]
         ids, descendants = read_ontology(arguments.ontology)
         candidates = stimulus_clips(clips, arguments.conditions)
+        if arguments.fits_slot:
+            calibration = Calibration(cue_slots=arguments.cue_slots, languages=languages)
+            dropped = [
+                clip
+                for clip in candidates
+                if not fits_slot(_captions(clip, clips[clip], korean, languages), calibration)
+            ]
+            candidates = [clip for clip in candidates if clip not in dropped]
+            if dropped:
+                print(
+                    f"--fits-slot leaves out {len(dropped)}: {', '.join(dropped)}\n"
+                    "  Their prepared caption runs past the slot in one language or both;\n"
+                    "  shortening it is the study's decision, so they are left out rather than cut.",
+                    file=sys.stderr,
+                )
         sources = {clip: sources_of(clip, clips[clip], palette, ids, descendants) for clip in candidates}
 
         budget = Calibration().slot_max_chars
