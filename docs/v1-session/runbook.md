@@ -146,6 +146,31 @@ offer eight orderings on 23 and six on one. That is honest about what the data
 supports, and it is the ceiling until a salience measure with more resolution
 than a tag count exists; on the 16, the balance measure records nothing.
 
+### What the itemized level costs on the real model
+
+Measured 2026-09-03 on the base E4B over the linked corpus, driving every
+level, every admission and every balance position the server declares: 123
+settings, no errors, and every level reaching the model. The itemized level is
+where the character budget bites. The writer asks the model for a draft, asks
+again once naming the overrun, and only then falls back to the template's
+sentence, which keeps every admitted source in order:
+
+| Task | Sources admitted | Settings | Fell back |
+|---|---|---|---|
+| shaped | 1 | 4 | 0% |
+| shaped | 3 | 6 | 50% |
+| shaped | 4 | 2 | 50% |
+| control | 1 | 8 | 0% |
+| control | 7 | 47 | 91% |
+| control | 8 | 6 | 83% |
+
+Grouped, scene and atmospheric never fell back. So on a control clip with its
+eight visual categories the participant reads template prose at the itemized
+level nearly every time, and model prose at every other level — a difference in
+register the analysis has to know about, since the caption path is recorded per
+caption in `caption.written`. It is the budget, not the wiring: the same
+settings at the grouped level are the model's own sentences.
+
 The visual side is the opposite problem. Eight sources cross into as many as
 twenty-nine rankings, several separated by less than a thousandth of the axis.
 `skeleton.MIN_SPAN` and `skeleton.MAX_ORDERINGS` collapse the ones a
