@@ -76,6 +76,16 @@ you will shorten every analysis window for no visual reason (§5.2). The floor
 on shot length binds on the last shot as well as the first, so a clip that
 cannot be split into shots that all clear the floor stays whole.
 
+**How far the crossfader actually travels.** Asking the server for the regimes
+of every admitted set on all 68 shots (2026-09-03): of 364 sets, **331 reach a
+single regime**, 24 reach two, 8 reach three, and exactly one — the four
+sources of `singapore_091` — reaches all four detents. The crossfader is
+therefore a live control on a tenth of the sets and a fixed label on the rest,
+for the same reason the skeleton instrument's balance is coarse: the ear weight
+is a tag count. Driven on `singapore_091` against the base E4B, all four
+detents return four different captions from the model at every named grain, so
+the control is wired; what limits it is the salience measure, not the code.
+
 **The IoU threshold.** On `amsterdam_006` the pairwise agreements were:
 
 | pair | IoU |
