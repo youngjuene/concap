@@ -510,6 +510,34 @@ class TestSurface:
         assert all(set(frame) == {"index", "at_ms"} for frame in detail["frames"])
         assert detail["minimum"] == 2, "the fixture's own calibration, echoed"
 
+    def test_the_session_log_downloads_rather_than_replacing_the_page(self, client: TestClient) -> None:
+        # The done screen navigates here. A bare JSON body replaces the kiosk
+        # with the log's text, which is a state a fullscreen kiosk cannot be
+        # brought back from — the same defect the console fixed.
+        participant = enrol(client)
+        response = client.get(f"/api/log?participant={participant}")
+        assert response.status_code == 200
+        assert response.headers["content-disposition"].startswith("attachment;")
+        assert participant in response.headers["content-disposition"]
+
+    def test_events_are_refused_for_a_participant_nobody_enrolled(self, client: TestClient) -> None:
+        # Every other write goes through the roster first. Without this one, a
+        # well-formed identifier opened its own events file, and a file in
+        # --out with no roster entry beside it is a record of a session that
+        # never happened.
+        response = client.post(
+            "/api/events", json={"participant": "ghost99", "events": [{"type": "injected"}]}
+        )
+        assert response.status_code == 404
+        assert "enrolled" in response.json()["error"]
+
+    def test_events_are_taken_for_a_participant_who_was_enrolled(self, client: TestClient) -> None:
+        participant = enrol(client)
+        response = client.post(
+            "/api/events", json={"participant": participant, "events": [{"type": "step.entered"}]}
+        )
+        assert response.json() == {"written": 1}
+
     def test_the_masks_are_not_reachable(self, client: TestClient) -> None:
         participant = enrol(client)
         served = client.get(f"/api/step/auditory?participant={participant}")

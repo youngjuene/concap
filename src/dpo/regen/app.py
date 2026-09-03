@@ -556,6 +556,13 @@ def build_app(
         person = _participant(payload.get("participant"))
         if isinstance(person, JSONResponse):
             return person
+        # Every other route that writes goes through the roster first; this one
+        # did not, so a well-formed identifier nobody enrolled opened its own
+        # `events-<p>.jsonl`. A file in --out with no roster entry and no
+        # viewing beside it is a record of a session that never happened, and
+        # an analyst reading the directory has no way to know that.
+        if roster.sequence_of(person) is None:
+            return _error(404, f"no participant {person!r} has been enrolled")
         batch = payload.get("events")
         if not isinstance(batch, Sequence) or isinstance(batch, str):
             return _error(400, "events must be a list")
@@ -580,7 +587,14 @@ def build_app(
         person = _participant(participant)
         if isinstance(person, JSONResponse):
             return person
-        return log.export(person, str(document["session_id"]))
+        # The done screen navigates here; as an attachment the browser saves
+        # the file and stays on the screen, where a bare JSON body would
+        # replace the kiosk with the log's text — which is the state a
+        # fullscreen kiosk cannot be brought back from.
+        return JSONResponse(
+            log.export(person, str(document["session_id"])),
+            headers={"Content-Disposition": f'attachment; filename="regen-log-{person}.json"'},
+        )
 
     @app.get("/media/video/{segment}")
     def video(segment: str) -> Any:

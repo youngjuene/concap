@@ -166,10 +166,25 @@ class TestFallback:
         assert result.duration_ms >= 1
 
 
+class TestPrompt:
+    def test_both_label_sets_read_as_prose_in_the_framing_sentence(self) -> None:
+        # The vocabulary title-cases its labels. Left as they came, the
+        # sentence read "these things in the frame: Person and Building. They
+        # picked out these sounds: bus" — one list as proper nouns, the other
+        # as description, from the same report.
+        prompt = _run(RegenTemplateWriter()).record()["prompt"]
+        assert "building and person" in prompt or "person and building" in prompt
+        assert "Building" not in prompt and "Person" not in prompt
+
+    def test_the_record_keeps_the_vocabularys_own_casing(self) -> None:
+        record = _run(RegenTemplateWriter()).record()
+        assert record["visual_labels"] == ["Building", "Person"]
+
+
 class TestRecord:
     def test_the_record_carries_the_prompt_the_output_and_both_label_sets(self) -> None:
         record = _run(RegenTemplateWriter()).record()
-        assert "Building" in record["prompt"] and "traffic" in record["prompt"].lower()
+        assert "building" in record["prompt"] and "traffic" in record["prompt"]
         assert len(record["raw_output"]) == 4
         assert record["visual_labels"] == ["Building", "Person"]
         assert record["auditory_labels"] == ["Traffic", "Bird"]

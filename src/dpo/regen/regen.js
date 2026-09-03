@@ -688,7 +688,13 @@ function renderDone() {
   $("done-body").textContent = state.strings.done.body;
   const button = $("done-download");
   button.textContent = state.strings.actions.download;
-  button.onclick = () => window.open(`/api/log?participant=${state.participant}`, "_blank");
+  // Navigate rather than open a tab: the server sends the log as an
+  // attachment, so the browser saves it and leaves the participant on this
+  // screen. A new tab in a fullscreen kiosk is one the participant cannot
+  // close.
+  button.onclick = () => {
+    window.location.href = `/api/log?participant=${encodeURIComponent(state.participant)}`;
+  };
   show("screen-done");
 }
 

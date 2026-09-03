@@ -205,7 +205,13 @@ class RegenRequestBuilder:
     def request(
         self, clip_id: str, cue: Cue, total: int, report: Report, media: Path | None
     ) -> CaptionRequest:
-        seen = _listed(report.visual_labels, NOTHING_SEEN)
+        # Lowercased like the auditory prose beside it. The labels are common
+        # nouns from a vocabulary that title-cases them; left as they came,
+        # the framing sentence read "these things in the frame: Person and
+        # Building. They picked out these sounds: bus", which invites a model
+        # to treat one list as proper nouns and the other as description. The
+        # record keeps the vocabulary's own casing; only the prose changes.
+        seen = _listed([label.lower() for label in report.visual_labels], NOTHING_SEEN)
         slot = REGEN_SLOT.format(
             position=cue.index + 1, total=total, start=cue.start_ms / 1000, end=cue.end_ms / 1000
         )
