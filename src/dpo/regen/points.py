@@ -10,6 +10,12 @@ the mask tree's answer on screen while the participant is still deciding, and a
 point that lights up as "Building" invites them to keep clicking until it says
 something, which measures the mask tree rather than their perception.
 
+**One frame each.** §4 shows a strip of frames from the segment and the
+participant marks whichever one they scrolled to, so a point carries the frame
+it was placed on and is matched against that frame's masks. Objects move; a
+mask cut two seconds earlier would put a click on empty road where a person was
+standing, and the record would name an object nobody pointed at.
+
 **Overlap.** Masks overlap by construction: a person stands in front of a
 building, and both masks contain that pixel. The smallest containing mask wins.
 A smaller mask is the more specific claim about a pixel, and it is also what
@@ -49,9 +55,10 @@ class PointError(ValueError):
 
 @dataclass(frozen=True)
 class Point:
-    """One click, normalised to the image (§4)."""
+    """One click, normalised to the image, on one frame of §4's strip."""
 
     order: int
+    frame: int
     x: float
     y: float
 
@@ -85,6 +92,7 @@ class Match:
     def record(self) -> dict[str, Any]:
         return {
             "order": self.point.order,
+            "frame": self.point.frame,
             "x": self.point.x,
             "y": self.point.y,
             "object_id": self.object_id,
@@ -92,8 +100,13 @@ class Match:
         }
 
 
-def parse_points(raw: object) -> tuple[Point, ...]:
-    """Read the page's points, in the creation order it sends them in."""
+def parse_points(raw: object, frames: int) -> tuple[Point, ...]:
+    """Read the page's points, in the creation order it sends them in.
+
+    ``frames`` is how many frames the strip has, so a point can only name one
+    that exists: a frame index out of range would otherwise match against no
+    masks and read as an honest ``unclassified``.
+    """
     if not isinstance(raw, Sequence) or isinstance(raw, str):
         raise PointError("points must be a list")
     points = []
@@ -106,7 +119,10 @@ def parse_points(raw: object) -> tuple[Point, ...]:
             raise PointError(f"points[{index}] needs numeric x and y: {exc}") from exc
         if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
             raise PointError(f"points[{index}] must be normalised to [0, 1]; got ({x}, {y})")
-        points.append(Point(order=index, x=x, y=y))
+        frame = entry.get("frame", 0)
+        if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < frames:
+            raise PointError(f"points[{index}].frame must be a frame of the strip (0..{frames - 1})")
+        points.append(Point(order=index, frame=frame, x=x, y=y))
     return tuple(points)
 
 
@@ -137,18 +153,22 @@ def _contains(path: Path, x: float, y: float) -> tuple[bool, int]:
     return bool(inside[top, column]), area
 
 
-def match_points(points: Sequence[Point], objects: Sequence[MaskObject]) -> tuple[Match, ...]:
-    """Match every point against every mask, smallest container winning.
+def match_points(points: Sequence[Point], objects: Mapping[int, Sequence[MaskObject]]) -> tuple[Match, ...]:
+    """Match every point against its own frame's masks, smallest container winning.
 
-    Runs once per submission (§4). Objects are tested in document order, and a
-    strictly smaller area is needed to displace an incumbent, so equal-area
-    masks resolve to the first one declared.
+    Runs once per submission (§4). ``objects`` is keyed by the frame's position
+    in the strip: a point is matched against the masks cut from the frame it was
+    placed on, never from another, or the click would be read against a picture
+    the participant was not looking at.
+
+    Objects are tested in document order, and a strictly smaller area is needed
+    to displace an incumbent, so equal-area masks resolve to the first declared.
     """
     matches = []
     for point in points:
         best: MaskObject | None = None
         best_area = 0
-        for candidate in objects:
+        for candidate in objects.get(point.frame, ()):
             inside, area = _contains(candidate.path, point.x, point.y)
             if inside and (best is None or area < best_area):
                 best, best_area = candidate, area

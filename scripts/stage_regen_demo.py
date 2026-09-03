@@ -11,14 +11,16 @@ Per segment under ``<out>/<segment>/``:
     report on one and then watch the other; identical clips would make the
     second viewing a repeat of the first even in a demo.
 
-``still.png``
-    Pulled from the clip at five seconds, which is the frame §10 prepares —
-    extracted rather than drawn, so the still and the footage agree.
+``frames/<n>.png``
+    One picture per frame of §4's strip, pulled from the clip at the moment the
+    document says that frame is from — extracted rather than drawn, so the
+    strip and the footage agree.
 
-``masks/<object>.png``
-    One binary mask per object the document declares, laid out as horizontal
-    bands in document order with the last object a small square inside the
-    others. §4's rule is that the smallest containing mask wins, so a demo
+``masks/<n>/<object>.png``
+    One binary mask per object per frame, laid out as horizontal bands in
+    document order with the last object a small square inside the others, and
+    the square shifted along the strip so a mark on one frame is not a mark on
+    another. §4's rule is that the smallest containing mask wins, so a demo
     where nothing overlaps would never exercise it.
 
 ``stems/<source>.wav``
@@ -47,7 +49,6 @@ from typing import Any
 
 WIDTH, HEIGHT, RATE = 640, 360, 25
 AUDIO_RATE = 16000
-STILL_AT = 5.0
 PATTERNS = ("testsrc2", "smptebars")
 BASE_HZ = (220.0, 330.0)
 
@@ -91,7 +92,7 @@ def stage_clip(path: Path, seconds: float, pattern: str, hertz: float) -> None:
     )
 
 
-def stage_still(clip: Path, path: Path) -> None:
+def stage_still(clip: Path, path: Path, at_seconds: float) -> None:
     if path.exists():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +104,7 @@ def stage_still(clip: Path, path: Path) -> None:
             "error",
             "-y",
             "-ss",
-            str(STILL_AT),
+            f"{at_seconds:.3f}",
             "-i",
             str(clip),
             "-frames:v",
@@ -113,8 +114,13 @@ def stage_still(clip: Path, path: Path) -> None:
     )
 
 
-def stage_mask(path: Path, index: int, total: int) -> None:
+def stage_mask(path: Path, index: int, total: int, drift: int = 0) -> None:
     """A band per object, and a square inside them for the last one.
+
+    ``drift`` moves the square along the frame, so the strip's frames do not
+    all carry the same masks: a mark placed on one frame must be matched
+    against that frame's masks, and a demo where every frame agreed could not
+    show the difference.
 
     Written as a minimal 8-bit greyscale PNG by hand: the mask is the one asset
     a demo cannot fake with ffmpeg, and pulling in an image library for four
@@ -125,11 +131,12 @@ def stage_mask(path: Path, index: int, total: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     last = index == total - 1
     top, bottom = (HEIGHT * index) // total, (HEIGHT * (index + 1)) // total
+    left = max(0, min(WIDTH - 120, 200 + drift))
     rows = []
     for y in range(HEIGHT):
         if last:
             inside = 120 <= y < 220
-            row = bytes(255 if inside and 260 <= x < 380 else 0 for x in range(WIDTH))
+            row = bytes(255 if inside and left <= x < left + 120 else 0 for x in range(WIDTH))
         else:
             row = bytes(255 if top <= y < bottom else 0 for x in range(WIDTH))
         rows.append(b"\x00" + row)
@@ -182,10 +189,11 @@ def stage(document: dict[str, Any], out: Path) -> None:
         seconds = segment["duration_ms"] / 1000
         clip = out / segment["video"]
         stage_clip(clip, seconds, PATTERNS[index % len(PATTERNS)], BASE_HZ[index % len(BASE_HZ)])
-        stage_still(clip, out / segment["still"])
-        objects = segment["objects"]
-        for position, entry in enumerate(objects):
-            stage_mask(out / entry["mask"], position, len(objects))
+        for step, frame in enumerate(segment["frames"]):
+            stage_still(clip, out / frame["still"], frame["at_ms"] / 1000)
+            objects = frame["objects"]
+            for position, entry in enumerate(objects):
+                stage_mask(out / entry["mask"], position, len(objects), drift=step * 60)
         for position, stem in enumerate(segment["stems"]):
             stage_stem(
                 out / stem["audio"],

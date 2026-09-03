@@ -43,12 +43,17 @@ from dpo.regen.captions import Cue, TrackError, cues_of, validate_track
 from dpo.regen.config import Configuration, load_configuration
 from dpo.regen.points import MaskObject
 
-REGEN_SCHEMA = "dpo.caption-regen/v1"
+REGEN_SCHEMA = "dpo.caption-regen/v2"
 ID_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
 COLOUR_RE = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 # §5 draws the lanes stacked over one ten-second timeline. Past this the lanes
 # are thinner than a playback control and the waveform stops being readable.
 MAX_STEMS = 8
+# §4 shows a strip of frames from the segment, evenly spaced. Fewer than three
+# and there is nothing to scroll between; past nine the strip is longer than
+# the task, and every extra frame is another set of masks to cut and store.
+MIN_FRAMES = 3
+MAX_FRAMES = 9
 # Enough envelope to draw a ten-second lane at kiosk width without the browser
 # resampling a longer array down to the same picture.
 MIN_WAVEFORM = 64
@@ -140,12 +145,35 @@ def _number(value: object, path: str, *, low: float = 0.0, high: float = 1.0) ->
 
 
 def _validate_object(raw: object, path: str) -> str:
-    """One segmented object of the still: what §4 matches a point against."""
+    """One segmented object of one frame: what §4 matches a point against."""
     entry = _mapping(raw, path)
     object_id = _identifier(entry.get("id"), f"{path}.id")
     _string(entry.get("label"), f"{path}.label")
     _relative(entry.get("mask"), f"{path}.mask")
     return object_id
+
+
+def _validate_frame(raw: object, path: str, duration: int) -> int:
+    """One frame of §4's strip: when it is from, its picture, and its masks.
+
+    Masks belong to the frame rather than to the segment. A participant marks
+    whichever frame they scrolled to, and a mask cut from a different moment
+    would put the click somewhere the object has moved away from — which is
+    the one way this screen could report a perception nobody had.
+    """
+    entry = _mapping(raw, path)
+    at_ms = _integer(entry.get("at_ms"), f"{path}.at_ms", minimum=0)
+    if at_ms >= duration:
+        raise _fail(f"{path}.at_ms", f"is at {at_ms}ms, past the segment's {duration}ms")
+    _relative(entry.get("still"), f"{path}.still")
+    objects = _sequence(entry.get("objects"), f"{path}.objects", minimum=1)
+    seen: set[str] = set()
+    for index, candidate in enumerate(objects):
+        object_id = _validate_object(candidate, f"{path}.objects[{index}]")
+        if object_id in seen:
+            raise _fail(f"{path}.objects[{index}].id", f"{object_id!r} is declared twice")
+        seen.add(object_id)
+    return at_ms
 
 
 def _validate_stem(raw: object, path: str) -> str:
@@ -199,16 +227,17 @@ def _validate_segment(raw: object, path: str, name: str, configuration: Configur
         raise _fail(f"{path}.segment", f"must be {name!r}, to match the key it is filed under")
     clip_id = _identifier(segment.get("clip_id"), f"{path}.clip_id")
     _relative(segment.get("video"), f"{path}.video")
-    _relative(segment.get("still"), f"{path}.still")
     duration = _integer(segment.get("duration_ms"), f"{path}.duration_ms", minimum=1)
 
-    objects = _sequence(segment.get("objects"), f"{path}.objects", minimum=1)
-    seen_objects: set[str] = set()
-    for index, entry in enumerate(objects):
-        object_id = _validate_object(entry, f"{path}.objects[{index}]")
-        if object_id in seen_objects:
-            raise _fail(f"{path}.objects[{index}].id", f"{object_id!r} is declared twice")
-        seen_objects.add(object_id)
+    frames = _sequence(segment.get("frames"), f"{path}.frames", minimum=MIN_FRAMES, maximum=MAX_FRAMES)
+    previous = -1
+    for index, entry in enumerate(frames):
+        at_ms = _validate_frame(entry, f"{path}.frames[{index}]", duration)
+        # In clock order, because the strip is scrolled through as time and a
+        # shuffled list would read as one.
+        if at_ms <= previous:
+            raise _fail(f"{path}.frames[{index}].at_ms", f"is not after the previous frame's {previous}ms")
+        previous = at_ms
 
     stems = _sequence(segment.get("stems"), f"{path}.stems", minimum=1, maximum=MAX_STEMS)
     seen_stems: set[str] = set()
@@ -277,13 +306,27 @@ def segment_of(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     return _mapping(segments[name], f"segments.{name}")
 
 
-def objects_of(document: Mapping[str, Any], media_dir: Path, name: str) -> tuple[MaskObject, ...]:
-    """The masks §4 matches points against, resolved under the media directory."""
-    segment = segment_of(document, name)
-    return tuple(
-        MaskObject(id=str(entry["id"]), label=str(entry["label"]), path=Path(media_dir) / str(entry["mask"]))
-        for entry in segment["objects"]
-    )
+def frames_of(document: Mapping[str, Any], name: str) -> tuple[Mapping[str, Any], ...]:
+    """The strip §4 shows, in clock order."""
+    return tuple(segment_of(document, name)["frames"])
+
+
+def objects_of(document: Mapping[str, Any], media_dir: Path, name: str) -> dict[int, tuple[MaskObject, ...]]:
+    """The masks §4 matches against, per frame, resolved under the media directory.
+
+    Keyed by the frame's position in the strip, which is what a point names:
+    the page has no other handle on a frame, and the position is stable for
+    one document.
+    """
+    return {
+        index: tuple(
+            MaskObject(
+                id=str(entry["id"]), label=str(entry["label"]), path=Path(media_dir) / str(entry["mask"])
+            )
+            for entry in frame["objects"]
+        )
+        for index, frame in enumerate(frames_of(document, name))
+    }
 
 
 def track_of(document: Mapping[str, Any], name: str, which: str) -> tuple[Cue, ...]:
@@ -308,7 +351,9 @@ def participant_document(document: Mapping[str, Any], name: str) -> dict[str, An
         "segment": name,
         "clip_id": segment["clip_id"],
         "duration_ms": segment["duration_ms"],
-        "objects": [{"id": entry["id"]} for entry in segment["objects"]],
+        "frames": [
+            {"index": index, "at_ms": frame["at_ms"]} for index, frame in enumerate(segment["frames"])
+        ],
         "stems": [
             {
                 "id": stem["id"],

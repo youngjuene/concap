@@ -76,18 +76,42 @@ class TestRefusals:
             validate_regen_document(document)
 
     def test_a_repeated_object_id_is_refused(self, document: dict[str, Any]) -> None:
-        document["segments"]["A"]["objects"][1]["id"] = document["segments"]["A"]["objects"][0]["id"]
+        objects = document["segments"]["A"]["frames"][0]["objects"]
+        objects[1]["id"] = objects[0]["id"]
         with pytest.raises(RegenDocumentError, match="declared twice"):
+            validate_regen_document(document)
+
+    def test_a_frame_past_the_end_of_the_clip_is_refused(self, document: dict[str, Any]) -> None:
+        document["segments"]["A"]["frames"][-1]["at_ms"] = 99000
+        with pytest.raises(RegenDocumentError, match="past the segment"):
+            validate_regen_document(document)
+
+    def test_a_strip_out_of_clock_order_is_refused(self, document: dict[str, Any]) -> None:
+        frames = document["segments"]["A"]["frames"]
+        frames[1]["at_ms"], frames[2]["at_ms"] = frames[2]["at_ms"], frames[1]["at_ms"]
+        with pytest.raises(RegenDocumentError, match="not after the previous"):
+            validate_regen_document(document)
+
+    def test_a_frame_without_masks_is_refused(self, document: dict[str, Any]) -> None:
+        document["segments"]["A"]["frames"][0]["objects"] = []
+        with pytest.raises(RegenDocumentError, match="objects"):
+            validate_regen_document(document)
+
+    def test_a_strip_of_one_frame_is_refused(self, document: dict[str, Any]) -> None:
+        document["segments"]["A"]["frames"] = document["segments"]["A"]["frames"][:1]
+        with pytest.raises(RegenDocumentError, match="at least"):
             validate_regen_document(document)
 
 
 class TestWhatTheBrowserGets:
     def test_the_masks_never_leave_the_server(self, document: dict[str, Any]) -> None:
         # §4 matches once, on submit. A browser holding the masks could match
-        # on every click, which is the thing that rule prevents.
+        # on every click, which is the thing that rule prevents. The strip
+        # travels as timings only; the pictures come one route at a time.
         served = participant_document(document, "A")
-        assert all(set(entry) == {"id"} for entry in served["objects"])
+        assert all(set(entry) == {"index", "at_ms"} for entry in served["frames"])
         assert "mask" not in json.dumps(served)
+        assert "still" not in json.dumps(served)
 
     def test_the_fallback_track_never_leaves_the_server(self, document: dict[str, Any]) -> None:
         assert "Fallback" not in json.dumps(participant_document(document, "A"))
@@ -146,5 +170,11 @@ class TestResolution:
         self, document: dict[str, Any], media_dir: Path
     ) -> None:
         objects = objects_of(document, media_dir, "A")
-        assert [entry.label for entry in objects] == ["Building", "Person"]
-        assert all(entry.path.is_file() for entry in objects)
+        assert sorted(objects) == [0, 1, 2, 3, 4]
+        for entries in objects.values():
+            assert [entry.label for entry in entries] == ["Building", "Person"]
+            assert all(entry.path.is_file() for entry in entries)
+
+    def test_each_frame_resolves_to_its_own_masks(self, document: dict[str, Any], media_dir: Path) -> None:
+        objects = objects_of(document, media_dir, "A")
+        assert len({entries[0].path for entries in objects.values()}) == len(objects)

@@ -42,7 +42,10 @@
       <section id="screen-visual" hidden>
         <h1 id="visual-heading"></h1>
         <p class="lede" id="visual-instruction"></p>
-        <div class="still-wrap" id="still-wrap"><img id="still" alt="" /></div>
+        <!-- The strip is the control and the canvas at once: the frame in the
+             middle is the one being marked, its neighbours are there to be
+             scrolled to. Marks live on the frame they were placed on. -->
+        <div class="strip" id="strip" role="group"></div>
         <div class="actions">
           <button class="primary" id="visual-next" disabled></button>
           <button id="visual-clear"></button>

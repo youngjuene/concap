@@ -64,9 +64,84 @@ p.lede { color: var(--dim); margin-bottom: 24px; }
   white-space: pre-line;
 }
 
-/* §4 — the still, and the points on it. */
-.still-wrap { position: relative; display: inline-block; line-height: 0; user-select: none; }
-.still-wrap img { max-width: 100%; display: block; border: 1px solid var(--rule); }
+/* §4 — the strip of moments, and the marks on them.
+
+   One horizontal scroller. The frame in the middle is the one being marked, at
+   full size and full clarity; its neighbours are smaller, dimmer and softened,
+   which is the whole of the affordance: the sharp one takes marks, the blurred
+   ones take you to them. Scroll snapping puts a frame in the middle rather
+   than half of two. */
+/* §4 is the one screen wider than the column: the strip needs the marked frame
+   at a size a mark can be placed precisely on, and a neighbour either side of
+   it. Centred on the shell's centre, which is the viewport's. */
+#screen-visual {
+  width: min(1120px, calc(100vw - 32px));
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+.strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* No scroll snapping: the frames change width as the selection moves, and a
+     snap point that shifts under the scroll is what makes a strip feel like it
+     is fighting you. The page centres the chosen frame itself instead. */
+  padding: 8px calc(50% - var(--frame-w) / 2) 16px;
+  scrollbar-width: thin;
+}
+
+.frame {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--frame-side);
+  scroll-snap-align: center;
+  line-height: 0;
+  user-select: none;
+  cursor: pointer;
+  opacity: 0.45;
+  filter: blur(3px);
+  /* One eased motion, and the page holds the chosen frame in the middle for
+     its whole length — see renderVisual. A width that animates without the
+     scroll following it is what threw the frame off centre. */
+  transition:
+    width var(--strip-motion) var(--strip-ease),
+    opacity var(--strip-motion) var(--strip-ease),
+    filter var(--strip-motion) var(--strip-ease);
+}
+
+.frame.at {
+  width: var(--frame-w);
+  opacity: 1;
+  filter: none;
+  cursor: crosshair;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frame { transition: none; }
+  .strip { scroll-behavior: auto; }
+}
+
+/* Below the kiosk width the neighbours stop fitting beside the marked frame;
+   the strip still scrolls to them, one at a time. */
+@media (max-width: 900px) {
+  :root { --frame-w: min(640px, calc(100vw - 64px)); --frame-side: 120px; }
+}
+
+.frame img { width: 100%; display: block; border: 1px solid var(--rule); }
+.frame.at img { border-color: var(--accent); }
+
+.frame .moment {
+  display: block;
+  margin-top: 6px;
+  font: 10px/1.4 var(--mono);
+  color: var(--dim);
+  text-align: center;
+}
+.frame.at .moment { color: var(--ink); }
 
 .point {
   position: absolute;

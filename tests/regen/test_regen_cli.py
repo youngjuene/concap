@@ -56,7 +56,11 @@ class TestScaffold:
         document = json.loads((tmp_path / "session.json").read_text(encoding="utf-8"))
         assert document["schema"] == REGEN_SCHEMA
         assert set(document["segments"]) == {"A", "B"}
-        assert [entry["label"] for entry in document["segments"]["A"]["objects"]] == ["building", "person"]
+        strip = document["segments"]["A"]["frames"]
+        assert len(strip) == 5, "one entry per frame the media directory staged"
+        assert [entry["label"] for entry in strip[0]["objects"]] == ["building", "person"]
+        # Every frame carries the masks cut from that frame, not the segment's.
+        assert len({frame["objects"][0]["mask"] for frame in strip}) == len(strip)
 
     def test_it_says_what_a_researcher_still_has_to_author(
         self, media_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -65,6 +69,7 @@ class TestScaffold:
         emitted = json.loads(capsys.readouterr().out)
         assert emitted["status"] == "scaffolded"
         assert "segments.*.prepared_track[*].text" in emitted["authoring_required"]
+        assert "segments.*.frames[*].at_ms" in emitted["authoring_required"]
 
     def test_the_slot_count_reaches_both_tracks_of_both_segments(
         self, media_dir: Path, tmp_path: Path
@@ -87,14 +92,14 @@ class TestScaffold:
         assert _regen_validate(arguments) == 2
         assert json.loads(capsys.readouterr().out)["status"] == "invalid"
 
-    def test_a_media_directory_without_masks_is_refused(
+    def test_a_media_directory_without_frames_is_refused(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bare = tmp_path / "bare"
-        (bare / "A" / "masks").mkdir(parents=True)
+        (bare / "A" / "frames").mkdir(parents=True)
         (bare / "A" / "stems").mkdir(parents=True)
         assert _regen_scaffold(_scaffold_arguments(tmp_path, bare)) == 2
-        assert "no masks" in json.loads(capsys.readouterr().out)["error"]
+        assert "no frames" in json.loads(capsys.readouterr().out)["error"]
 
     def test_one_clip_id_is_refused(
         self, media_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]

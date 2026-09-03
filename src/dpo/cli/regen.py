@@ -41,7 +41,7 @@ from dpo.regen.items import ItemsError, load_items
 # Where ``scaffold`` looks under --media-dir. One directory per segment, named
 # for the segment, so a document's references are readable as paths.
 VIDEO = "clip.mp4"
-STILL = "still.png"
+FRAMES = "frames"
 MASKS = "masks"
 STEMS = "stems"
 SEGMENTS = ("A", "B")
@@ -79,26 +79,46 @@ def _segment(
     root: Path, segment: str, clip_id: str, calibration: Calibration, duration_ms: int
 ) -> dict[str, Any]:
     base = Path(segment)
-    masks = sorted((root / segment / MASKS).glob("*.png"))
+    frames = sorted((root / segment / FRAMES).glob("*.png"))
     stems = sorted((root / segment / STEMS).glob("*.wav")) + sorted((root / segment / STEMS).glob("*.mp3"))
-    if not masks:
-        raise RegenUsageError(f"no masks under {root / segment / MASKS}; §10 prepares one per object")
+    if not frames:
+        raise RegenUsageError(
+            f"no frames under {root / segment / FRAMES}; §4 shows a strip of moments from the clip"
+        )
     if not stems:
         raise RegenUsageError(f"no stems under {root / segment / STEMS}; §10 prepares the separated sources")
+    strip = []
+    step = duration_ms // (len(frames) + 1)
+    for position, frame in enumerate(frames):
+        masks = sorted((root / segment / MASKS / frame.stem).glob("*.png"))
+        if not masks:
+            raise RegenUsageError(
+                f"no masks under {root / segment / MASKS / frame.stem}; "
+                "each frame of the strip carries the masks cut from that frame"
+            )
+        strip.append(
+            {
+                # Evenly spaced, as a starting point: only the person who cut
+                # the frames knows where in the clip each one came from, and a
+                # scaffold that guessed a timestamp would be guessing.
+                "at_ms": (position + 1) * step,
+                "still": str(base / FRAMES / frame.name),
+                "objects": [
+                    {
+                        "id": slug(path.stem),
+                        "label": path.stem,
+                        "mask": str(base / MASKS / frame.stem / path.name),
+                    }
+                    for path in masks
+                ],
+            }
+        )
     return {
         "segment": segment,
         "clip_id": clip_id,
         "video": str(base / VIDEO),
-        "still": str(base / STILL),
         "duration_ms": duration_ms,
-        "objects": [
-            {
-                "id": slug(path.stem),
-                "label": path.stem,
-                "mask": str(base / MASKS / path.name),
-            }
-            for path in masks
-        ],
+        "frames": strip,
         # Waveform, colour and gain cannot be derived from a file listing:
         # the envelope has to be computed and the gain measured against the
         # original mix (§5). Left at values the validator accepts so the
@@ -164,6 +184,7 @@ def _regen_scaffold(arguments: argparse.Namespace) -> int:
             "config_hash": configuration.hash,
             "cue_slots": calibration.cue_slots,
             "authoring_required": [
+                "segments.*.frames[*].at_ms",
                 "segments.*.prepared_track[*].text",
                 "segments.*.fallback_track[*].text",
                 "segments.*.stems[*].waveform",

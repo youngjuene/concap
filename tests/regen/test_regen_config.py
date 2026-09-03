@@ -80,6 +80,12 @@ class TestScale:
 
 
 class TestCalibration:
+    def test_one_mark_is_enough_to_go_on(self) -> None:
+        # The floor exists to stop an empty submission and nothing more. A
+        # higher one makes a participant invent marks to get past the screen,
+        # which corrupts the measure rather than thinning it.
+        assert Calibration().minimum_points == 1
+
     @pytest.mark.parametrize(
         "overrides",
         [

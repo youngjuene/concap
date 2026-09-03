@@ -46,7 +46,7 @@ which files are missing.
 
     uv run python scripts/stage_regen_media.py --pool
     uv run python scripts/stage_regen_media.py \\
-        --segments amsterdam_006 amsterdam_012 \\
+        --segments amsterdam_181 bangkok_034 \\
         --out data/live/regen-media --document data/live/regen.json
 
 Idempotent: existing staged files are left alone. Needs ffmpeg with libx264.
@@ -68,7 +68,10 @@ from dpo.regen.config import Calibration, Configuration
 from dpo.regen.document import REGEN_SCHEMA, slug
 
 AVMASK = Path("/mnt/hdd/research/2026/Sa2VA/avmask")
-STILL_FRAME = 300  # five seconds at 60 fps — the frame §10 names, and §4 matches against
+# §4 shows a strip of moments rather than one still. Five frames at equal
+# intervals across the clip; with 599 frames the middle one lands on 300, the
+# five-second frame §10 names, so the strip is centred on it.
+FRAME_COUNT = 5
 LOUDNESS_TARGET = -23.0  # LUFS, EBU R128
 # The same threshold dpo.regen.points reads a mask at, so an object this keeps
 # is an object a point can hit.
@@ -246,8 +249,43 @@ def stage_clip(source: Path, target: Path) -> None:
     )
 
 
-def stage_still(source: Path, target: Path) -> None:
-    """The five-second frame, selected by index so it is the masks' frame."""
+def frame_indices(total: int, count: int = FRAME_COUNT) -> list[int]:
+    """``count`` frame indices at equal intervals across ``total`` frames.
+
+    Spaced at the midpoints of equal slices rather than from the first frame to
+    the last: neither end of a cut is a moment anyone chose, and the middle
+    index lands on the middle of the clip — frame 300 of 599, the five-second
+    frame §10 names.
+    """
+    return [round((2 * index + 1) * total / (2 * count)) for index in range(count)]
+
+
+def frame_count(path: Path) -> int:
+    """How many frames the clip has, counted rather than derived from a rate."""
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-count_frames",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip().isdigit():
+        raise StagingError(f"{path}: cannot count frames")
+    return int(probe.stdout.strip())
+
+
+def stage_frame(source: Path, index: int, target: Path) -> None:
+    """One frame of the strip, selected by index so it is exactly the masks' frame."""
     if target.exists():
         return
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +299,7 @@ def stage_still(source: Path, target: Path) -> None:
             "-i",
             str(source),
             "-vf",
-            f"select=eq(n\\,{STILL_FRAME})",
+            f"select=eq(n\\,{index})",
             "-frames:v",
             "1",
             "-vsync",
@@ -271,17 +309,17 @@ def stage_still(source: Path, target: Path) -> None:
     )
 
 
-def stage_masks(masks: Path, clip: str, out: Path) -> tuple[list[dict[str, str]], list[str]]:
-    """One PNG per object, taken from the frame the still is.
+def stage_masks(masks: Path, clip: str, index: int, out: Path) -> tuple[list[dict[str, str]], list[str]]:
+    """One PNG per object, taken from one frame of the strip.
 
-    The run stores a mask per object per frame; the document wants the object's
-    mask, once. Which frame that is is not a detail — it is the frame the
-    participant is looking at.
+    The run stores a mask per object per frame; a frame of the strip wants the
+    masks of that frame and no other. Objects move, and a mask from two seconds
+    away would put a click on empty road where a person was standing.
 
-    An object whose mask has no pixels in that frame is left out, and returned
-    as the second value. It is in the clip somewhere but not in the picture the
-    participant marks, so declaring it would put a label in the document that
-    no point could ever reach and that §6 could never be given.
+    An object with no pixels in this frame is left out of it, and returned as
+    the second value. It may well be in the next frame along; here it is not in
+    the picture being marked, and a label no point could reach is a label §6
+    could never be given.
     """
     import numpy as np
     from PIL import Image
@@ -293,9 +331,9 @@ def stage_masks(masks: Path, clip: str, out: Path) -> tuple[list[dict[str, str]]
     objects: list[dict[str, str]] = []
     empty: list[str] = []
     for label in sorted(path.name for path in root.iterdir() if path.is_dir()):
-        frame = root / label / f"{STILL_FRAME:05d}.png"
+        frame = root / label / f"{index:05d}.png"
         if not frame.is_file():
-            raise StagingError(f"{clip}/{label}: no mask at frame {STILL_FRAME:05d}")
+            raise StagingError(f"{clip}/{label}: no mask at frame {index:05d}")
         with Image.open(frame) as handle:
             if not bool((np.asarray(handle.convert("L")) > MASK_INSIDE).any()):
                 empty.append(label)
@@ -306,7 +344,7 @@ def stage_masks(masks: Path, clip: str, out: Path) -> tuple[list[dict[str, str]]
             shutil.copyfile(frame, target)
         objects.append({"id": identifier, "label": label, "mask": target.name})
     if not objects:
-        raise StagingError(f"{clip}: no object is visible in the five-second frame")
+        raise StagingError(f"{clip}: no object is visible in frame {index:05d}")
     return objects, empty
 
 
@@ -354,15 +392,33 @@ def stage_one(clip: str, videos: Path, masks: Path, out: Path) -> dict[str, Any]
         raise StagingError(f"{clip}: no uncaptioned source at {source}")
     home = out / clip
     stage_clip(source, home / "clip.mp4")
-    stage_still(home / "clip.mp4", home / "still.png")
-    objects, empty = stage_masks(masks, clip, home / "masks")
+    span = duration_ms(home / "clip.mp4")
+    total = frame_count(home / "clip.mp4")
+    frames: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for index in frame_indices(total):
+        still = home / "frames" / f"{index:05d}.png"
+        stage_frame(home / "clip.mp4", index, still)
+        objects, empty = stage_masks(masks, clip, index, home / "masks" / f"{index:05d}")
+        missing.extend(f"{index:05d}:{label}" for label in empty)
+        frames.append(
+            {
+                # The frame's own position in the clip, in the units the
+                # document speaks: the page shows it, and the log needs to say
+                # which moment a mark was placed on.
+                "at_ms": round(index * span / total),
+                "still": f"{clip}/frames/{still.name}",
+                "objects": [
+                    {**entry, "mask": f"{clip}/masks/{index:05d}/{entry['mask']}"} for entry in objects
+                ],
+            }
+        )
     return {
         "clip_id": clip,
         "video": f"{clip}/clip.mp4",
-        "still": f"{clip}/still.png",
-        "duration_ms": duration_ms(home / "clip.mp4"),
-        "objects": [{**entry, "mask": f"{clip}/masks/{entry['mask']}"} for entry in objects],
-        "not_in_the_frame": empty,
+        "duration_ms": span,
+        "frames": frames,
+        "not_in_the_frame": missing,
     }
 
 
@@ -394,9 +450,8 @@ def build_segment(
         "segment": name,
         "clip_id": clip,
         "video": staged["video"],
-        "still": staged["still"],
         "duration_ms": span,
-        "objects": list(staged["objects"]),
+        "frames": list(staged["frames"]),
         "stems": stems,
         "prepared_track": cue_track(row["caption"], span, slots),
         "fallback_track": cue_track(fallback, span, slots),
@@ -436,12 +491,17 @@ def _pool(
 
 def _staged_report(staged: Mapping[str, Mapping[str, Any]], out: Path) -> None:
     """What the pool now holds, and where the segmentation left gaps."""
-    print(f"\nStaged {len(staged)} clips under {out}: clip, five-second still, one mask per object.")
-    print(f"\n{'clip':<16}{'objects':>8}   objects the five-second frame does not show")
+    print(
+        f"\nStaged {len(staged)} clips under {out}: the clip, {FRAME_COUNT} frames at equal "
+        "intervals, and one mask per object per frame."
+    )
+    print(f"\n{'clip':<16}{'frames':>7}{'objects':>10}   objects absent from at least one frame")
     for clip in sorted(staged):
         entry = staged[clip]
-        gone = ", ".join(entry["not_in_the_frame"]) or "—"
-        print(f"{clip:<16}{len(entry['objects']):>8}   {gone}")
+        counts = [len(frame["objects"]) for frame in entry["frames"]]
+        gone = ", ".join(sorted({item.split(":", 1)[1] for item in entry["not_in_the_frame"]})) or "—"
+        span = f"{min(counts)}-{max(counts)}" if min(counts) != max(counts) else str(counts[0])
+        print(f"{clip:<16}{len(counts):>7}{span:>10}   {gone}")
 
 
 def _report(document: Mapping[str, Any], out: Path) -> list[str]:
@@ -451,8 +511,8 @@ def _report(document: Mapping[str, Any], out: Path) -> list[str]:
         segment = document["segments"][name]
         references: Iterable[str] = [
             segment["video"],
-            segment["still"],
-            *[entry["mask"] for entry in segment["objects"]],
+            *[frame["still"] for frame in segment["frames"]],
+            *[entry["mask"] for frame in segment["frames"] for entry in frame["objects"]],
             *[stem["audio"] for stem in segment["stems"]],
         ]
         missing.extend(str(reference) for reference in references if not (out / reference).is_file())
@@ -565,10 +625,12 @@ def main(argv: list[str] | None = None) -> int:
         if len(clips[clip]["caption"]) > configuration.calibration.slot_max_chars
     ]
     for name, clip in zip(SEGMENTS, chosen, strict=True):
-        stems = document["segments"][name]["stems"]
+        segment = document["segments"][name]
+        stems = segment["stems"]
+        counts = [len(frame["objects"]) for frame in segment["frames"]]
         print(
-            f"staged {name} = {clip}: {len(document['segments'][name]['objects'])} objects, "
-            f"{len(stems)} sources ({', '.join(stem['label'] for stem in stems)})"
+            f"staged {name} = {clip}: {len(counts)} frames carrying {min(counts)}-{max(counts)} "
+            f"objects, {len(stems)} sources ({', '.join(stem['label'] for stem in stems)})"
         )
     print(f"\ndocument: {arguments.document}")
     print(f"media:    {out}")

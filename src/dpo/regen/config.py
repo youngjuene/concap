@@ -101,7 +101,12 @@ class Calibration:
     an authored prepared track is validated against on load — one rule, applied
     to both tracks, because §9.6 stores them under one schema.
 
-    ``minimum_points`` is §4's floor on the visual selection. ``latency_ceiling_ms``
+    ``minimum_points`` is §4's floor on the visual selection. One, because the
+    floor is there to stop an empty submission and nothing more: a participant
+    who found one thing worth marking has answered the question, and a higher
+    floor makes them invent marks to get past the screen — which is the one
+    failure that would corrupt the measure rather than thin it.
+    ``latency_ceiling_ms``
     is §6's: past it the regeneration is abandoned for the fallback track, and
     the participant waits a bounded time rather than an unbounded one.
 
@@ -114,7 +119,7 @@ class Calibration:
     cue_slots: int = 4
     slot_max_chars: int = 96
     slot_max_lines: int = 2
-    minimum_points: int = 3
+    minimum_points: int = 1
     latency_ceiling_ms: int = 20000
     language: str = "en"
     scale: Scale = field(default_factory=Scale)

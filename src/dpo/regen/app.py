@@ -48,6 +48,7 @@ from dpo.regen.captions import Cue, cues_of, record_of
 from dpo.regen.copy import STRINGS
 from dpo.regen.document import (
     configuration_of,
+    frames_of,
     objects_of,
     participant_document,
     segment_of,
@@ -226,7 +227,18 @@ def build_app(
             }
         if step == progress.VISUAL:
             segment = assignment.prepared_segment
-            return {"step": step, "segment": segment, "minimum": configuration.calibration.minimum_points}
+            # The strip, and when each frame is from. The masks stay here: §4
+            # matches once, on submit, and a page holding them could match on
+            # every click.
+            return {
+                "step": step,
+                "segment": segment,
+                "minimum": configuration.calibration.minimum_points,
+                "frames": [
+                    {"index": index, "at_ms": frame["at_ms"]}
+                    for index, frame in enumerate(frames_of(document, segment))
+                ],
+            }
         if step == progress.AUDITORY:
             segment = assignment.prepared_segment
             return {"step": step, **participant_document(document, segment)}
@@ -354,14 +366,14 @@ def build_app(
         assignment = _assignment(person)
         if isinstance(assignment, JSONResponse):
             return assignment
+        segment = assignment.prepared_segment
         try:
-            points = parse_points(payload.get("points"))
+            points = parse_points(payload.get("points"), len(frames_of(document, segment)))
         except PointError as exc:
             return _error(400, str(exc))
         minimum = configuration.calibration.minimum_points
         if len(points) < minimum:
             return _error(400, f"§4 requires at least {minimum} points; {len(points)} were submitted")
-        segment = assignment.prepared_segment
         try:
             matches = match_points(points, objects_of(document, media_dir, segment))
         except PointError as exc:
@@ -517,9 +529,17 @@ def build_app(
     def video(segment: str) -> Any:
         return _file_response(segment, "video")
 
-    @app.get("/media/still/{segment}")
-    def still(segment: str) -> Any:
-        return _file_response(segment, "still")
+    @app.get("/media/frame/{segment}/{index}")
+    def frame(segment: str, index: int) -> Any:
+        """One frame of §4's strip. The masks for it never leave the server."""
+        try:
+            strip = frames_of(document, segment)
+        except ValueError as exc:
+            return _error(404, str(exc))
+        if not 0 <= index < len(strip):
+            return _error(404, f"segment {segment} has no frame {index}")
+        resolved = _media(str(strip[index]["still"]))
+        return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
 
     @app.get("/media/stem/{segment}/{stem_id}")
     def stem(segment: str, stem_id: str) -> Any:

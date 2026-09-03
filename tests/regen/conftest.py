@@ -22,16 +22,25 @@ def track(texts: list[str]) -> list[dict[str, Any]]:
     ]
 
 
+FRAMES = (1000, 3000, 5000, 7000, 9000)
+
+
 def segment(name: str, clip_id: str, *, objects: list[tuple[str, str]], stems: list[str]) -> dict[str, Any]:
     return {
         "segment": name,
         "clip_id": clip_id,
         "video": f"{name}/clip.mp4",
-        "still": f"{name}/still.png",
         "duration_ms": DURATION_MS,
-        "objects": [
-            {"id": object_id, "label": label, "mask": f"{name}/masks/{object_id}.png"}
-            for object_id, label in objects
+        "frames": [
+            {
+                "at_ms": at_ms,
+                "still": f"{name}/frames/{index}.png",
+                "objects": [
+                    {"id": object_id, "label": label, "mask": f"{name}/masks/{index}/{object_id}.png"}
+                    for object_id, label in objects
+                ],
+            }
+            for index, at_ms in enumerate(FRAMES)
         ],
         "stems": [
             {
@@ -94,24 +103,28 @@ def media_dir(document: dict[str, Any], tmp_path: Path) -> Path:
     from PIL import Image
 
     root = tmp_path / "media"
+    # The first object covers the left half; the second is a 20x20 square
+    # inside it, at (10, 10). Both are the same in every frame, so a test that
+    # moves a point between frames is testing the routing and not the masks.
+    big = Image.new("L", (100, 100), 0)
+    for x in range(50):
+        for y in range(100):
+            big.putpixel((x, y), 255)
+    small = Image.new("L", (100, 100), 0)
+    for x in range(10, 30):
+        for y in range(10, 30):
+            small.putpixel((x, y), 255)
     for name in ("A", "B"):
-        (root / name / "masks").mkdir(parents=True)
         (root / name / "stems").mkdir(parents=True)
+        (root / name / "frames").mkdir(parents=True)
         (root / name / "clip.mp4").write_bytes(b"\x00")
-        Image.new("L", (100, 100), 0).save(root / name / "still.png")
         for stem in document["segments"][name]["stems"]:
             (root / name / "stems" / f"{stem['id']}.wav").write_bytes(b"\x00")
-        entries = document["segments"][name]["objects"]
-        # The first object covers the left half; the second is a 20x20 square
-        # inside it, at (10, 10).
-        big = Image.new("L", (100, 100), 0)
-        for x in range(50):
-            for y in range(100):
-                big.putpixel((x, y), 255)
-        big.save(root / name / "masks" / f"{entries[0]['id']}.png")
-        small = Image.new("L", (100, 100), 0)
-        for x in range(10, 30):
-            for y in range(10, 30):
-                small.putpixel((x, y), 255)
-        small.save(root / name / "masks" / f"{entries[1]['id']}.png")
+        for index, frame in enumerate(document["segments"][name]["frames"]):
+            Image.new("L", (100, 100), 0).save(root / name / "frames" / f"{index}.png")
+            masks = root / name / "masks" / str(index)
+            masks.mkdir(parents=True)
+            entries = frame["objects"]
+            big.save(masks / f"{entries[0]['id']}.png")
+            small.save(masks / f"{entries[1]['id']}.png")
     return root

@@ -39,6 +39,16 @@
   /* The caption band of a viewing reserves its height so a cue appearing never
      moves the picture. Two lines at 24 on 32, plus 16 above and below. */
   --caption-band: 96px;
+  /* §4's strip. The marked frame is the full column width so a mark can be
+     placed precisely; a neighbour is a third of it, which is enough to
+     recognise the moment and not enough to invite a click. */
+  --frame-w: 640px;
+  --frame-side: 200px;
+  /* Long enough to read as one movement rather than a jump, short enough that
+     scrolling the strip does not feel held up. Eased out hard, so the frame
+     arrives rather than drifts. */
+  --strip-motion: 380ms;
+  --strip-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

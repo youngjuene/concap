@@ -419,9 +419,25 @@ class TestSurface:
         assert len(body["steps"]) == 6
 
     def test_media_is_served_by_segment(self, client: TestClient) -> None:
-        assert client.get("/media/still/A").status_code == 200
+        assert client.get("/media/frame/A/0").status_code == 200
+        assert client.get("/media/frame/A/4").status_code == 200
+        assert client.get("/media/frame/A/5").status_code == 404, "the strip has five frames"
         assert client.get("/media/stem/A/traffic").status_code == 200
         assert client.get("/media/stem/A/helicopter").status_code == 404
+
+    def test_the_strip_is_served_as_timings_only(self, client: TestClient) -> None:
+        # §4 matches once, on submit. The page is told when each frame is from
+        # and nothing about what is in it.
+        participant = enrol(client)
+        client.post(
+            "/api/viewing",
+            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
+        )
+        answer(client, participant, "art")
+        detail = client.get(f"/api/step/visual?participant={participant}").json()
+        assert [frame["index"] for frame in detail["frames"]] == [0, 1, 2, 3, 4]
+        assert all(set(frame) == {"index", "at_ms"} for frame in detail["frames"])
+        assert detail["minimum"] == 2, "the fixture's own calibration, echoed"
 
     def test_the_masks_are_not_reachable(self, client: TestClient) -> None:
         participant = enrol(client)

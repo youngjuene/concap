@@ -1,5 +1,5 @@
 {
-  "schema": "dpo.caption-regen/v1",
+  "schema": "dpo.caption-regen/v2",
   "session_id": "regen-demo",
   "config": {
     "schema": "dpo.caption-regen-config/v1",
@@ -36,28 +36,137 @@
       "segment": "A",
       "clip_id": "demo_a",
       "video": "A/clip.mp4",
-      "still": "A/still.png",
       "duration_ms": 10000,
-      "objects": [
+      "frames": [
         {
-          "id": "sky",
-          "label": "Sky",
-          "mask": "A/masks/sky.png"
+          "at_ms": 1000,
+          "still": "A/frames/0.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "A/masks/0/sky.png"
+            },
+            {
+              "id": "building",
+              "label": "Building",
+              "mask": "A/masks/0/building.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "A/masks/0/road.png"
+            },
+            {
+              "id": "person",
+              "label": "Person",
+              "mask": "A/masks/0/person.png"
+            }
+          ]
         },
         {
-          "id": "building",
-          "label": "Building",
-          "mask": "A/masks/building.png"
+          "at_ms": 3000,
+          "still": "A/frames/1.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "A/masks/1/sky.png"
+            },
+            {
+              "id": "building",
+              "label": "Building",
+              "mask": "A/masks/1/building.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "A/masks/1/road.png"
+            },
+            {
+              "id": "person",
+              "label": "Person",
+              "mask": "A/masks/1/person.png"
+            }
+          ]
         },
         {
-          "id": "road",
-          "label": "Road",
-          "mask": "A/masks/road.png"
+          "at_ms": 5000,
+          "still": "A/frames/2.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "A/masks/2/sky.png"
+            },
+            {
+              "id": "building",
+              "label": "Building",
+              "mask": "A/masks/2/building.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "A/masks/2/road.png"
+            },
+            {
+              "id": "person",
+              "label": "Person",
+              "mask": "A/masks/2/person.png"
+            }
+          ]
         },
         {
-          "id": "person",
-          "label": "Person",
-          "mask": "A/masks/person.png"
+          "at_ms": 7000,
+          "still": "A/frames/3.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "A/masks/3/sky.png"
+            },
+            {
+              "id": "building",
+              "label": "Building",
+              "mask": "A/masks/3/building.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "A/masks/3/road.png"
+            },
+            {
+              "id": "person",
+              "label": "Person",
+              "mask": "A/masks/3/person.png"
+            }
+          ]
+        },
+        {
+          "at_ms": 9000,
+          "still": "A/frames/4.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "A/masks/4/sky.png"
+            },
+            {
+              "id": "building",
+              "label": "Building",
+              "mask": "A/masks/4/building.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "A/masks/4/road.png"
+            },
+            {
+              "id": "person",
+              "label": "Person",
+              "mask": "A/masks/4/person.png"
+            }
+          ]
         }
       ],
       "stems": [
@@ -530,28 +639,137 @@
       "segment": "B",
       "clip_id": "demo_b",
       "video": "B/clip.mp4",
-      "still": "B/still.png",
       "duration_ms": 10000,
-      "objects": [
+      "frames": [
         {
-          "id": "sky",
-          "label": "Sky",
-          "mask": "B/masks/sky.png"
+          "at_ms": 1000,
+          "still": "B/frames/0.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "B/masks/0/sky.png"
+            },
+            {
+              "id": "vegetation",
+              "label": "Vegetation",
+              "mask": "B/masks/0/vegetation.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "B/masks/0/road.png"
+            },
+            {
+              "id": "road_transport",
+              "label": "Road transport",
+              "mask": "B/masks/0/road_transport.png"
+            }
+          ]
         },
         {
-          "id": "vegetation",
-          "label": "Vegetation",
-          "mask": "B/masks/vegetation.png"
+          "at_ms": 3000,
+          "still": "B/frames/1.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "B/masks/1/sky.png"
+            },
+            {
+              "id": "vegetation",
+              "label": "Vegetation",
+              "mask": "B/masks/1/vegetation.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "B/masks/1/road.png"
+            },
+            {
+              "id": "road_transport",
+              "label": "Road transport",
+              "mask": "B/masks/1/road_transport.png"
+            }
+          ]
         },
         {
-          "id": "road",
-          "label": "Road",
-          "mask": "B/masks/road.png"
+          "at_ms": 5000,
+          "still": "B/frames/2.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "B/masks/2/sky.png"
+            },
+            {
+              "id": "vegetation",
+              "label": "Vegetation",
+              "mask": "B/masks/2/vegetation.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "B/masks/2/road.png"
+            },
+            {
+              "id": "road_transport",
+              "label": "Road transport",
+              "mask": "B/masks/2/road_transport.png"
+            }
+          ]
         },
         {
-          "id": "road_transport",
-          "label": "Road transport",
-          "mask": "B/masks/road_transport.png"
+          "at_ms": 7000,
+          "still": "B/frames/3.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "B/masks/3/sky.png"
+            },
+            {
+              "id": "vegetation",
+              "label": "Vegetation",
+              "mask": "B/masks/3/vegetation.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "B/masks/3/road.png"
+            },
+            {
+              "id": "road_transport",
+              "label": "Road transport",
+              "mask": "B/masks/3/road_transport.png"
+            }
+          ]
+        },
+        {
+          "at_ms": 9000,
+          "still": "B/frames/4.png",
+          "objects": [
+            {
+              "id": "sky",
+              "label": "Sky",
+              "mask": "B/masks/4/sky.png"
+            },
+            {
+              "id": "vegetation",
+              "label": "Vegetation",
+              "mask": "B/masks/4/vegetation.png"
+            },
+            {
+              "id": "road",
+              "label": "Road",
+              "mask": "B/masks/4/road.png"
+            },
+            {
+              "id": "road_transport",
+              "label": "Road transport",
+              "mask": "B/masks/4/road_transport.png"
+            }
+          ]
         }
       ],
       "stems": [

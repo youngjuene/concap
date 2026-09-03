@@ -33,7 +33,9 @@ STRINGS: dict[str, Any] = {
         "start": "Start",
         "next": "Next",
         "submit": "Submit",
-        "clear": "Clear all points",
+        # "mark" throughout §4: the instruction, the count and this button say
+        # the same word for the same thing.
+        "clear": "Clear all marks",
         "download": "Download session log",
     },
     "view": {
@@ -42,13 +44,20 @@ STRINGS: dict[str, Any] = {
         "ready": "Press Start when you are ready.",
     },
     "visual": {
-        "instruction": "Click on the things that make this scene what it is. "
-        "Click a point again to remove it, or drag it to move it.",
+        "instruction": "Scroll through the moments below, then click on the things "
+        "that make this scene what it is. Click a mark again to remove it, or drag it to move it.",
         # The floor is a configuration value (§9.4's sibling in the same
         # calibration), so the sentence is completed by the server rather than
-        # stating a number this file would have to be kept in step with.
-        "minimum": "Select at least {minimum} before continuing.",
-        "placed": "{count} selected",
+        # stating a number this file would have to be kept in step with. One is
+        # the default and reads badly as a numeral, so it has its own line.
+        "minimum": "Mark at least {minimum} things to continue.",
+        "minimum_one": "Mark at least one thing to continue.",
+        "placed": "{count} marked",
+        # The strip. Each frame says when in the clip it is from, because the
+        # scene changes across ten seconds and the participant is choosing a
+        # moment as much as a thing.
+        "moment": "{seconds}s",
+        "strip": "Moments from the clip",
     },
     "auditory": {
         "instruction": "These are the separated sounds of the clip you just watched. "

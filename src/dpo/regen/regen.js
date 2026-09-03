@@ -29,6 +29,7 @@ const state = {
   steps: [],
   entered: null,
   points: [],
+  frame: 0,
   lanes: new Map(),
   selected: [],
   audio: null,
@@ -248,43 +249,105 @@ async function renderSurvey(page) {
   };
 }
 
-/* §4 — points on the still. Click to place, click a point to remove it, drag
-   to move it. Coordinates are normalised to the image, so a window resize
-   between placing and submitting does not move what was meant. */
+/* §4 — marks on a strip of moments. Scroll to a frame, click to mark it. The
+   frame in the middle is the one being marked; its neighbours are smaller and
+   softened, so which surface takes a click is never in doubt. Coordinates are
+   normalised to the image, so a resize between marking and submitting does not
+   move what was meant, and each mark carries the frame it belongs to. */
 async function renderVisual() {
   const detail = await api(`/api/step/visual?participant=${state.participant}`);
   if (!detail) return;
   state.points = [];
   state.minimumPoints = detail.minimum;
-  const wrap = $("still-wrap");
-  const image = $("still");
-  image.src = `/media/still/${detail.segment}`;
+  state.frame = Math.floor(detail.frames.length / 2);
+  const strip = $("strip");
+  const copy = state.strings.visual;
   $("visual-heading").textContent = state.strings.app_title;
-  $("visual-instruction").textContent = state.strings.visual.instruction;
   $("visual-clear").textContent = state.strings.actions.clear;
   $("visual-next").textContent = state.strings.actions.next;
+  strip.setAttribute("aria-label", copy.strip);
 
-  const paint = () => {
-    for (const node of [...wrap.querySelectorAll(".point")]) node.remove();
-    state.points.forEach((point, index) => {
-      const dot = document.createElement("div");
-      dot.className = "point";
-      dot.style.left = `${point.x * 100}%`;
-      dot.style.top = `${point.y * 100}%`;
-      dot.textContent = String(index + 1);
-      dot.onpointerdown = (event) => beginDrag(event, index, dot);
-      wrap.append(dot);
-    });
-    const count = state.points.length;
-    $("visual-count").textContent = state.strings.visual.placed.replace("{count}", count);
-    const short = count < state.minimumPoints;
-    $("visual-next").disabled = short;
-    $("visual-instruction").textContent = short
-      ? `${state.strings.visual.instruction} ${state.strings.visual.minimum.replace("{minimum}", state.minimumPoints)}`
-      : state.strings.visual.instruction;
+  const shells = detail.frames.map((frame) => {
+    const shell = document.createElement("div");
+    shell.className = "frame";
+    shell.dataset.index = String(frame.index);
+    const image = document.createElement("img");
+    image.src = `/media/frame/${detail.segment}/${frame.index}`;
+    image.alt = "";
+    image.draggable = false;
+    const when = document.createElement("span");
+    when.className = "moment";
+    when.textContent = copy.moment.replace("{seconds}", (frame.at_ms / 1000).toFixed(1));
+    shell.append(image, when);
+    // A neighbour is a place to go, not a place to mark: clicking one brings
+    // it to the middle instead of dropping a point on a frame the participant
+    // cannot see properly.
+    shell.onclick = (event) => {
+      if (Number(shell.dataset.index) === state.frame) return placeAt(event, shell, image);
+      select(Number(shell.dataset.index));
+    };
+    strip.append(shell);
+    return { shell, image, frame };
+  });
+
+  // How long the width transition runs, read from the stylesheet so the two
+  // cannot drift apart, and zero when the viewer asks for less motion.
+  const eased = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const motion = eased
+    ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--strip-motion")) || 380
+    : 0;
+  // While this is in the future, the strip is scrolling under its own hand and
+  // scroll events are not the participant's.
+  let settling = 0;
+  let resting = null;
+
+  function middleOf(index) {
+    const target = shells[index].shell;
+    return target.offsetLeft + target.offsetWidth / 2 - strip.clientWidth / 2;
+  }
+
+  function select(index) {
+    if (index < 0 || index >= shells.length) return;
+    const changed = index !== state.frame;
+    state.frame = index;
+    for (const { shell } of shells) {
+      shell.classList.toggle("at", Number(shell.dataset.index) === index);
+    }
+    // The chosen frame is held in the middle for the whole of its growth, one
+    // frame at a time, rather than being centred once against a width it is
+    // about to leave. That is the difference between the strip arriving
+    // centred and arriving wherever the old widths put it.
+    settling = performance.now() + motion + 60;
+    const hold = () => {
+      strip.scrollLeft = middleOf(index);
+      if (performance.now() < settling) requestAnimationFrame(hold);
+    };
+    requestAnimationFrame(hold);
+    if (changed) note("frame.selected", { frame: index, at_ms: shells[index].frame.at_ms });
+    paint();
+  }
+
+  // Scrolling is a way of choosing, not just of looking: when the strip comes
+  // to rest, whichever frame is nearest the middle becomes the marked one.
+  strip.onscroll = () => {
+    if (performance.now() < settling) return;
+    window.clearTimeout(resting);
+    resting = window.setTimeout(() => {
+      const middle = strip.scrollLeft + strip.clientWidth / 2;
+      let nearest = state.frame;
+      let closest = Infinity;
+      shells.forEach(({ shell }, index) => {
+        const gap = Math.abs(shell.offsetLeft + shell.offsetWidth / 2 - middle);
+        if (gap < closest) {
+          closest = gap;
+          nearest = index;
+        }
+      });
+      if (nearest !== state.frame) select(nearest);
+    }, 110);
   };
 
-  const at = (event) => {
+  const at = (event, image) => {
     const box = image.getBoundingClientRect();
     return {
       x: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
@@ -292,7 +355,38 @@ async function renderVisual() {
     };
   };
 
-  function beginDrag(event, index, dot) {
+  function placeAt(event, shell, image) {
+    if (event.target.classList.contains("point")) return;
+    const point = { frame: state.frame, ...at(event, image) };
+    state.points.push(point);
+    note("point.placed", { index: state.points.length - 1, ...point });
+    paint();
+  }
+
+  function paint() {
+    for (const { shell } of shells) {
+      for (const node of [...shell.querySelectorAll(".point")]) node.remove();
+    }
+    const here = shells[state.frame].shell;
+    state.points.forEach((point, index) => {
+      if (point.frame !== state.frame) return;
+      const dot = document.createElement("div");
+      dot.className = "point";
+      dot.style.left = `${point.x * 100}%`;
+      dot.style.top = `${point.y * 100}%`;
+      dot.textContent = String(index + 1);
+      dot.onpointerdown = (event) => beginDrag(event, index, dot, shells[state.frame].image);
+      here.append(dot);
+    });
+    const count = state.points.length;
+    $("visual-count").textContent = copy.placed.replace("{count}", count);
+    const short = count < state.minimumPoints;
+    $("visual-next").disabled = short;
+    const floor = state.minimumPoints === 1 ? copy.minimum_one : copy.minimum.replace("{minimum}", state.minimumPoints);
+    $("visual-instruction").textContent = short ? `${copy.instruction} ${floor}` : copy.instruction;
+  }
+
+  function beginDrag(event, index, dot, image) {
     // A press that never moves is a delete; one that moves is a drag. Deciding
     // on pointerup rather than on pointerdown means neither gesture has to be
     // learned, and a shaky hand does not delete a point it meant to nudge.
@@ -303,7 +397,7 @@ async function renderVisual() {
     let moved = false;
     const move = (moveEvent) => {
       moved = true;
-      const next = at(moveEvent);
+      const next = at(moveEvent, image);
       state.points[index] = { ...state.points[index], ...next };
       dot.style.left = `${next.x * 100}%`;
       dot.style.top = `${next.y * 100}%`;
@@ -323,13 +417,6 @@ async function renderVisual() {
     dot.addEventListener("pointerup", up, { once: true });
   }
 
-  image.onclick = (event) => {
-    const point = at(event);
-    state.points.push(point);
-    note("point.placed", { index: state.points.length - 1, ...point });
-    paint();
-  };
-
   $("visual-clear").onclick = () => {
     note("points.cleared", { count: state.points.length });
     state.points = [];
@@ -343,7 +430,7 @@ async function renderVisual() {
     else paint();
   };
 
-  paint();
+  select(state.frame);
   show("screen-visual");
 }
 
