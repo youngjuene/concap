@@ -26,17 +26,52 @@ Two 10 s clips, four masks and three stems each, the placeholder item set. The
 stems' envelopes are generated *from* the document's own `waveform` arrays, so
 what the §5 lane draws is what the lane plays.
 
+## This study's own corpus
+
+`scripts/stage_regen_media.py` builds §10's assets out of what the street corpus
+already holds — the Sa2VA run's masks, the uncaptioned 10 s pool, and the
+response table — for the 24 clips that carried sound in the earlier study
+(conditions c1 and c2; c3 and c4 have no audio stream, so nobody could report on
+them by ear).
+
+```bash
+uv run python scripts/stage_regen_media.py --pool          # the 24 candidates
+uv run python scripts/stage_regen_media.py --out data/live/regen-media
+uv run python scripts/stage_regen_media.py \
+  --segments amsterdam_170 singapore_303 \
+  --out data/live/regen-media --document data/live/regen.json
+```
+
+The pool is filed by clip id, so re-pairing costs nothing: which clip is A and
+which is B is a per-document decision, and §1 flips the condition per
+participant anyway. Four things it decides, each stated in the script's own
+docstring: the clip comes from the **uncaptioned** pool, because the c2
+deliverables carry a burnt-in Korean caption and the instrument draws its own
+band; loudness is normalised to one target, because the corpus runs from −34.0
+to −14.9 LUFS and §10 asks for the two segments to match; the still and the
+masks are taken at **frame 00300**, one index rather than one timestamp, so a
+point is matched against the frame the participant is looking at; and sound
+labels are de-confused against the AudioSet ontology, so a clip never shows
+`Speech` beside `Male speech, man speaking`.
+
+Each source carries its top-level family and the run palette's colour for it,
+so the §5 lanes are coloured by family and say which family they are — a
+label alone can be a narrower claim than its neighbour.
+
+Objects whose mask is empty in the five-second frame are left out. They are in
+the clip somewhere but not in the picture being marked, and declaring one would
+put a label in the document that no point could reach.
+
 ## A real study
 
 ### 1. Stage the assets §10 prepares
 
 ```text
 <media-dir>/
-  A/clip.mp4          matched encoding, resolution and loudness with B
-  A/still.png         the frame at five seconds
-  A/masks/*.png       one binary mask per object; the stem is the label
-  A/stems/*.wav       the separated sources
-  B/…                 the same, for the other segment
+  <clip>/clip.mp4     matched encoding, resolution and loudness across the pair
+  <clip>/still.png    the frame at five seconds
+  <clip>/masks/*.png  one binary mask per object; the file stem is the id
+  <clip>/stems/*.wav  the separated sources
 ```
 
 ### 2. Scaffold, then author
