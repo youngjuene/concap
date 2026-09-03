@@ -1,0 +1,166 @@
+# Running the regeneration instrument
+
+`dpo regen`, built to [`spec-behavior.md`](spec-behavior.md). Serves on **8779**,
+one past the console's 8778 and two past the session's 8777, so all three run at
+once.
+
+## What a participant does
+
+Four pages, six steps, one direction. §2 they watch one segment under a
+**prepared** caption track; §3 they answer the ART sub-factors; §4 they mark the
+five-second still; §5 they pick sources out of the separated stems; §6 the track
+for the other segment is written from those two reports; §7 they watch that
+segment; §8 they answer ART again plus the caption measures and the PRSS.
+
+Which segment is prepared alternates by participant sequence number, so segment
+and condition are not the same variable. Nothing in the document says which is
+which — one document serves everyone.
+
+## Try it without footage
+
+```bash
+make regen-demo          # stages synthetic media, then serves on 8779
+```
+
+Two 10 s clips, four masks and three stems each, the placeholder item set. The
+stems' envelopes are generated *from* the document's own `waveform` arrays, so
+what the §5 lane draws is what the lane plays.
+
+## A real study
+
+### 1. Stage the assets §10 prepares
+
+```text
+<media-dir>/
+  A/clip.mp4          matched encoding, resolution and loudness with B
+  A/still.png         the frame at five seconds
+  A/masks/*.png       one binary mask per object; the stem is the label
+  A/stems/*.wav       the separated sources
+  B/…                 the same, for the other segment
+```
+
+### 2. Scaffold, then author
+
+```bash
+uv run dpo regen scaffold \
+  --media-dir data/live/regen-media --out data/live/regen.json \
+  --session-id street-regen --study-id street2026 --corpus-id amsterdam \
+  --clips amsterdam_006 amsterdam_012 --cue-slots 4
+```
+
+The scaffold fills in every asset it can see and **does not validate**. Five
+things only a researcher can supply are left for them, and `scaffold` lists them
+on stdout:
+
+| Field | Why a tool cannot write it |
+|---|---|
+| `prepared_track[*].text` | the study's stimulus |
+| `fallback_track[*].text` | what a participant reads when §6 fails; it must be defensible on its own |
+| `stems[*].waveform` | the envelope, computed from the audio |
+| `stems[*].gain` | measured against the original mix (§5) |
+| `stems[*].colour` | which sources must stay apart on one screen |
+
+Cue timings are scaffolded evenly across the clip. Even spacing is the one
+arrangement that encodes no assumption about where the interesting sound is;
+move them deliberately.
+
+### 3. Author the items
+
+The shipped set (`src/dpo/regen/items/default.json`) is **placeholder wording**
+in the right shape. Copy it, replace the wording with the study's validated
+items, set `"provenance": "authored"`, and pass `--items`. The provenance and a
+digest of the wording go on every response row, so a pilot on placeholders can
+never be mistaken for the study.
+
+The ART block is defined once and asked by both survey pages. Do not duplicate
+it for §8 — the change between the two askings is the study's main measure, and
+two copies would drift.
+
+### 4. Validate
+
+```bash
+uv run dpo regen validate --session data/live/regen.json --items data/live/items.json
+```
+
+Refuses on the first bad path and names it. `status: valid` reports the config
+hash, the cue-slot count and the item provenance.
+
+### 5. Serve
+
+```bash
+uv run dpo regen serve \
+  --session data/live/regen.json --media-dir data/live/regen-media \
+  --out data/live/regen-responses --items data/live/items.json --writer template
+```
+
+With a GPU and the study's model:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 uv run dpo regen serve … \
+  --writer gemma --backend-config configs/backends/gemma4-audio.toml
+```
+
+`--writer gemma` is held to the same backend pin as the pipeline and refuses a
+config the contract does not pin, on any machine, before it touches CUDA.
+
+Launch the participant's browser with
+`--autoplay-policy=no-user-gesture-required`; the viewing screens go fullscreen
+on a click, but the clip must start without a second gesture.
+
+## What lands on disk
+
+Under `--out`, per participant:
+
+| File | What it is |
+|---|---|
+| `viewings-<p>.jsonl` | **the analysis unit** — one row per viewing: key, index, condition, segment, clip, the full caption text with timings, playback start and end |
+| `responses-<p>.jsonl` | one row per survey submission, carrying the `view_id` it is about, plus the item digest and provenance |
+| `events-<p>.jsonl` | the full stream: every step, every point placed, moved and removed, every lane played, the regeneration with its prompt and raw output |
+| `snapshot-<p>.json` | resumable state, replaced atomically |
+| `roster.json` | participant identifier → sequence number |
+| `captions.json` | the caption cache |
+
+Join `responses.view_id` to `viewings.view_id`. Two viewing rows and two
+response rows per completed session.
+
+Every line carries `config_hash`, applied on the server from the configuration
+in force — never from anything a browser sent.
+
+## Things that will look like bugs and are not
+
+**A step returns 409.** The steps run in order and neither go back nor skip
+(§9.1). The body carries the step the session is actually on; the page follows
+the server. A reload and a typed URL in the same tab both land on the screen
+the session is actually on.
+
+**A new tab is a new participant, not the same one resumed.** The page keeps
+its identifier in `sessionStorage`, which is per tab: opening a second tab
+enrols afresh and spends the next sequence number, so §1's alternation runs one
+step out for everyone after it. This is the right trade for a kiosk — an
+identifier outliving the tab would sit participant two inside participant one's
+session — but it means *don't open a second tab mid-run*. One that was opened
+is identifiable in `roster.json`: an entry with no `viewings-<p>.jsonl` against
+it. Exclude it and read the sequence numbers around it as they stand.
+
+**`/api/step/art` is refused before the first viewing ends.** The gate is on
+reading a step as well as submitting it.
+
+**The visual response never says what a point hit.** §4 matches once, on
+submit. Telling the participant would turn the task into hunting for a mask.
+The matched labels are in `events-<p>.jsonl`.
+
+**A second `POST /api/regenerate` returns `cached: true`.** §6 runs once per
+participant. A reload during the wait must not spend the model again, and must
+not hand the participant a second, different track their §8 answers are about.
+
+**`fallback: true`.** The model took longer than the ceiling, returned
+something that failed validation, or raised. The reason is on the
+`regeneration.written` event. Those viewings are not generated viewings —
+separate them in the analysis.
+
+## Archiving it
+
+`rm -rf src/dpo/regen tests/regen docs/v3-regen src/dpo/cli/regen.py`, drop the
+`register_regen` line in `src/dpo/cli/__init__.py` and the `regen-demo` target.
+Nothing in `dpo.caption` or the other instruments refers to it;
+`tests/caption/test_detachment.py` asserts that, and keeps passing afterwards.

@@ -1,0 +1,215 @@
+"""The versioned configuration artifact, and the hash every result carries.
+
+Sorted by the same criterion the other instruments use. If varying it within a
+session is the point of the session, it is an experimental variable; if varying
+it between sessions would invalidate comparison, it is a method constant; if it
+must be fixed to the study once and then hold still, it is a calibration.
+
+    | Quantity                          | Tier                  | Cadence      |
+    |-----------------------------------|-----------------------|--------------|
+    | condition-segment assignment rule | method constant       | per study    |
+    | caption track schema (§9.6)       | method constant       | per study    |
+    | ART block reused across 2a and 4  | method constant       | per study    |
+    | cue slot count (§9.4)             | calibration           | per study    |
+    | minimum point count (§4)          | calibration           | per study    |
+    | latency ceiling (§6)              | calibration           | per study    |
+    | per-slot character and line caps  | calibration           | per study    |
+    | scale points and anchors (§9.3)   | calibration           | per study    |
+    | which segment a participant gets  | experimental variable | per person   |
+
+This instrument has exactly one experimental variable, and it is not something
+a participant moves: it is the condition-segment assignment, fixed on entry
+from the sequence number (§1). Everything else is frozen here, hashed, and
+stamped onto every caption, every endpoint and every log line, so a result is
+reproducible from its stamp.
+
+``cue_slots`` is the single value §9.4 requires. The prepared track is
+validated against it and so is the regenerated one, which is what makes the two
+conditions comparable at all: a prepared track of six cues against a
+regenerated track of four would confound provenance with density. It lives here
+rather than in the document so that a document cannot disagree with the rules
+its captions were validated under.
+
+The scale (§9.3) is here for the same reason. Two survey pages carry the same
+items and must carry the same response format; holding the format beside the
+items would let one page's copy drift from the other's.
+
+Section numbers cite ``docs/v3-regen/spec-behavior.md``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+CONFIG_SCHEMA = "dpo.caption-regen-config/v1"
+HASH_LENGTH = 12
+
+# Declared, hashed, never dispatched on. Each line states what some module in
+# this package does, so a study's stamp changes when the method changes.
+# Changing a formula without changing the declaration beside it leaves two
+# studies sharing one stamp, which is the failure the stamp exists to prevent.
+METHOD_CONSTANTS: Mapping[str, Any] = {
+    "assignment": "prepared on segment A when the sequence number is even, on B when it is odd",
+    "assignment_from": "participant sequence number alone; no stored table",
+    "caption_schema": "identical for prepared and regenerated tracks",
+    "cue_timings": "pre-set per slot; regeneration writes text only",
+    "art_block": "one definition, referenced by both survey pages",
+    "point_matching": "once, on the submitted coordinates; smallest containing mask wins",
+    "unclassified": "points outside every mask are kept with their coordinates",
+    "regeneration_inputs": "matched visual labels excluding unclassified, plus selected source labels",
+}
+
+
+class ConfigError(ValueError):
+    """The configuration is not one a study could be run under."""
+
+
+@dataclass(frozen=True)
+class Scale:
+    """The response format both survey pages share (§9.3).
+
+    ``anchors`` are the words at the ends. They are copy, they are hashed, and
+    they are served to the page from here, so the two survey pages cannot come
+    to disagree about what a 1 or a 7 means. ``points`` is the range: responses
+    are integers in ``1..points`` and nothing else is accepted.
+    """
+
+    points: int = 7
+    anchors: tuple[str, str] = ("Not at all", "Very much")
+
+    def __post_init__(self) -> None:
+        if self.points < 2:
+            raise ConfigError("a scale needs at least two points")
+        if len(self.anchors) != 2 or not all(anchor.strip() for anchor in self.anchors):
+            raise ConfigError("a scale needs a low and a high anchor, both non-empty")
+
+    def accepts(self, value: object) -> bool:
+        """True for an answer this scale could have produced."""
+        return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= self.points
+
+
+@dataclass(frozen=True)
+class Calibration:
+    """What is fixed to the study once and then holds still.
+
+    ``cue_slots`` is §9.4's single value. ``slot_max_chars`` and
+    ``slot_max_lines`` are what §6 validates a generated slot against, and what
+    an authored prepared track is validated against on load — one rule, applied
+    to both tracks, because §9.6 stores them under one schema.
+
+    ``minimum_points`` is §4's floor on the visual selection. ``latency_ceiling_ms``
+    is §6's: past it the regeneration is abandoned for the fallback track, and
+    the participant waits a bounded time rather than an unbounded one.
+
+    ``language`` is validated per slot. It is a language *tag*, not a locale to
+    format with: the check is that generated text is in the study's language,
+    which is the failure mode a model that answers in English to a Korean
+    prompt produces.
+    """
+
+    cue_slots: int = 4
+    slot_max_chars: int = 96
+    slot_max_lines: int = 2
+    minimum_points: int = 3
+    latency_ceiling_ms: int = 20000
+    language: str = "en"
+    scale: Scale = field(default_factory=Scale)
+
+    def __post_init__(self) -> None:
+        if self.cue_slots < 1:
+            raise ConfigError("a caption track needs at least one cue slot")
+        if self.slot_max_chars < 1:
+            raise ConfigError("the per-slot character cap is a positive length")
+        if self.slot_max_lines < 1:
+            raise ConfigError("the per-slot line cap is a positive count")
+        if self.minimum_points < 1:
+            raise ConfigError("§4 requires at least one point before Next enables")
+        if self.latency_ceiling_ms < 1:
+            raise ConfigError("the latency ceiling is a positive duration")
+        if not self.language.strip():
+            raise ConfigError("the study language must be named")
+
+
+@dataclass(frozen=True)
+class Configuration:
+    """The frozen artifact, and its hash.
+
+    ``study_id`` and ``corpus_id`` are in the hash on purpose: two studies
+    calibrated to identical numbers over different footage are still two
+    studies, and neither result should claim to be reproducible from the
+    other's clips.
+    """
+
+    study_id: str
+    corpus_id: str
+    calibration: Calibration = field(default_factory=Calibration)
+
+    def artifact(self) -> dict[str, Any]:
+        """The hashable document: everything frozen, nothing computed."""
+        return {
+            "schema": CONFIG_SCHEMA,
+            "study_id": self.study_id,
+            "corpus_id": self.corpus_id,
+            "method_constants": dict(METHOD_CONSTANTS),
+            "calibration": asdict(self.calibration),
+        }
+
+    @property
+    def hash(self) -> str:
+        """The stamp: sha256 over the canonical artifact, truncated.
+
+        Canonical means sorted keys and no incidental whitespace, so the stamp
+        depends on the values and not on how the file was written.
+        """
+        payload = json.dumps(self.artifact(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:HASH_LENGTH]
+
+    def stamped(self, document: Mapping[str, Any]) -> dict[str, Any]:
+        """``document`` with the stamp on it. Every result leaves through here."""
+        return {**document, "config_hash": self.hash}
+
+    @property
+    def cue_slots(self) -> int:
+        return self.calibration.cue_slots
+
+    @property
+    def scale(self) -> Scale:
+        return self.calibration.scale
+
+
+def load_configuration(raw: Mapping[str, Any]) -> Configuration:
+    """Rebuild a configuration from an artifact, refusing a changed method.
+
+    A stored artifact whose ``method_constants`` differ from this build's was
+    written by a different instrument. Loading it would produce results stamped
+    with a hash that no longer describes how they were computed, so it is an
+    error rather than a warning.
+    """
+    if raw.get("schema") != CONFIG_SCHEMA:
+        raise ConfigError(f"not a {CONFIG_SCHEMA} artifact")
+    if raw.get("method_constants") != dict(METHOD_CONSTANTS):
+        raise ConfigError(
+            "the artifact's method constants are not this build's; "
+            "results computed here could not carry its hash honestly"
+        )
+    calibration = dict(raw.get("calibration") or {})
+    try:
+        scale = calibration.pop("scale", None)
+        if scale is not None:
+            anchors = scale.get("anchors")
+            if not isinstance(anchors, Sequence) or isinstance(anchors, str):
+                raise ConfigError("calibration.scale.anchors must be a pair of strings")
+            calibration["scale"] = Scale(
+                points=int(scale["points"]), anchors=(str(anchors[0]), str(anchors[1]))
+            )
+        return Configuration(
+            study_id=str(raw["study_id"]),
+            corpus_id=str(raw["corpus_id"]),
+            calibration=Calibration(**calibration),
+        )
+    except (IndexError, KeyError, TypeError) as exc:
+        raise ConfigError(f"the artifact is missing or misnames a field: {exc}") from exc

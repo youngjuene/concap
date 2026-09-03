@@ -1,0 +1,47 @@
+{
+  "schema": "dpo.caption-regen-items/v1",
+  "provenance": "placeholder",
+  "note": "Placeholder wording in the right shape, so the instrument runs end to end before the study's validated items exist. Replace with the researcher's own scale wording and set provenance to \"authored\"; `dpo regen serve` announces which is loaded and stamps it on every response record.",
+  "blocks": [
+    {
+      "id": "art",
+      "title": "This scene",
+      "items": [
+        { "id": "art_away_1", "text": "Being in this scene is an escape from my everyday demands." },
+        { "id": "art_away_2", "text": "This scene is a place away from the things I usually have to attend to." },
+        { "id": "art_fascination_1", "text": "This scene holds my attention without any effort." },
+        { "id": "art_fascination_2", "text": "There are things in this scene I would like to keep looking at and listening to." },
+        { "id": "art_extent_1", "text": "This scene hangs together as one place." },
+        { "id": "art_extent_2", "text": "There is enough going on here to explore for a while." },
+        { "id": "art_compatibility_1", "text": "What I would want to do here fits what this place invites." },
+        { "id": "art_compatibility_2", "text": "I could settle into this scene easily." }
+      ]
+    },
+    {
+      "id": "caption",
+      "title": "The captions",
+      "items": [
+        { "id": "caption_credible_1", "text": "The captions described sounds that were actually there." },
+        { "id": "caption_credible_2", "text": "I trusted the captions to name what I was hearing." },
+        { "id": "caption_credible_3", "text": "The captions named sounds I could not hear.", "reverse": true },
+        { "id": "caption_restorative_1", "text": "The captions made the scene feel more restful." },
+        { "id": "caption_restorative_2", "text": "The captions helped me take in the place rather than distracting me from it." },
+        { "id": "caption_restorative_3", "text": "Reading the captions pulled my attention away from the scene.", "reverse": true }
+      ]
+    },
+    {
+      "id": "prss",
+      "title": "The sounds of this place",
+      "items": [
+        { "id": "prss_away_1", "text": "The sounds here are different from the ones I usually have around me." },
+        { "id": "prss_away_2", "text": "Listening here is a break from the noise of my ordinary day." },
+        { "id": "prss_fascination_1", "text": "The sounds here draw my attention on their own." },
+        { "id": "prss_fascination_2", "text": "I would happily go on listening to this place." },
+        { "id": "prss_extent_1", "text": "The sounds here belong to one place rather than several." },
+        { "id": "prss_extent_2", "text": "There is enough to hear here to keep listening for a while." },
+        { "id": "prss_compatibility_1", "text": "The sounds here suit what I would want to be doing in this place." },
+        { "id": "prss_compatibility_2", "text": "I could be comfortable in the sound of this place." }
+      ]
+    }
+  ]
+}

@@ -1,22 +1,25 @@
-# The caption stack — what both instruments share
+# The caption stack — what the instruments share
 
-`dpo.caption` is the only code the two participant instruments have in common.
-It exists so that `dpo.session` (v1) and `dpo.console` (v2) cannot drift apart
-on the expensive, model-shaped half of the problem, and so that archiving
-either one is a directory deletion rather than an untangling.
+`dpo.caption` is the only code the participant instruments have in common. It
+exists so that `dpo.session` (v1), `dpo.console` (v2) and `dpo.regen` (v3)
+cannot drift apart on the expensive, model-shaped half of the problem, and so
+that archiving any one of them is a directory deletion rather than an
+untangling.
 
 ```text
 src/dpo/caption/     writer.py, media.py, background.py, ontology.py   ← shared
 tests/caption/       its tests, and the seam test                      ← survives either archival
 src/dpo/session/     v1, docs/v1-session/    ← imports dpo.caption
 src/dpo/console/     v2, docs/v2-console/    ← imports dpo.caption
+src/dpo/regen/       v3, docs/v3-regen/      ← imports dpo.caption
 ```
 
 The dependency runs one way and a test asserts it
-(`tests/caption/test_detachment.py`): nothing in `dpo.caption` may import
-either instrument, and neither instrument may import the other. The same test
-watches the test tree, because the seam leaked there first: an instrument's
-tests may not import the other's package, and every module of the shared
+(`tests/caption/test_detachment.py`): nothing in `dpo.caption` may import any
+instrument, and no instrument may import another. The test is parameterised
+over the list of instruments, so a fourth extends the seam rather than sitting
+outside it. The same test watches the test tree, because the seam leaked there
+first: an instrument's tests may not import another's package, and every module of the shared
 package has a test file under `tests/caption`, so no archival can take the
 last tests of code that survives it.
 
@@ -24,10 +27,12 @@ last tests of code that survives it.
 
 Each instrument reaches a caption its own way. v1 builds a request from a
 skeleton ordering (`dpo.session.writer.build_request`); v2 builds one from a
-regime and a grain (`dpo.console.requests.RequestBuilder`). Everything upstream
-of that — what a control surface is, what a source's weights mean, what the
-participant touched — is the instrument's own business, and the two disagree
-about all of it.
+regime and a grain (`dpo.console.requests.RequestBuilder`); v3 builds one per
+cue slot from what a participant reported seeing and hearing
+(`dpo.regen.regeneration.RegenRequestBuilder`). Everything upstream of that —
+what a control surface is, what a source's weights mean, what the participant
+touched — is the instrument's own business, and the three disagree about all of
+it.
 
 From the request onward the machinery is identical:
 

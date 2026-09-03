@@ -22,6 +22,7 @@ from dpo.cli.candidates import _candidates_dedup, _candidates_generate
 from dpo.cli.console import register as register_console
 from dpo.cli.contract import _contract_lock, _contract_validate
 from dpo.cli.corpus import _corpus_ingest, _corpus_lock_splits
+from dpo.cli.regen import register as register_regen
 from dpo.cli.report import _report_analyze, _report_show
 from dpo.cli.select import _select_run
 from dpo.cli.session import register as register_session
@@ -218,10 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     study_ingest.set_defaults(handler=_study_ingest)
 
     # Each instrument attaches its own command group from its own module, so
-    # whichever of the two is not adopted is removed by deleting that module
+    # whichever of the three is not adopted is removed by deleting that module
     # and one line here (docs/shared/caption-stack.md).
     register_session(commands)
     register_console(commands)
+    register_regen(commands)
 
     return parser
 

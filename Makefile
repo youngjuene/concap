@@ -1,7 +1,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo
+.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -28,6 +28,16 @@ console-demo:
 	  --session tests/console/fixtures/console.json --out data/console-demo/media
 	uv run dpo console serve --session tests/console/fixtures/console.json \
 	  --media-dir data/console-demo/media --out data/console-demo/responses --writer template
+
+# The regeneration instrument (docs/v3-regen/runbook.md) over its own synthetic
+# staging: two segments, masks, stems whose envelopes match the document's
+# waveforms, and the placeholder item set. Serves on 8779, one past the
+# console's 8778, so all three can run at once.
+regen-demo:
+	uv run python scripts/stage_regen_demo.py \
+	  --session tests/regen/fixtures/regen.json --out data/regen-demo/media
+	uv run dpo regen serve --session tests/regen/fixtures/regen.json \
+	  --media-dir data/regen-demo/media --out data/regen-demo/responses --writer template
 
 sync:
 	uv sync --dev
