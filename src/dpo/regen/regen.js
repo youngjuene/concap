@@ -405,6 +405,18 @@ async function renderVisual() {
 
   function placeAt(event, shell, image) {
     if (event.target.classList.contains("point")) return;
+    // Only the picture takes a mark. A frame's box is taller and wider than
+    // its image — the moment label sits under it, and the strip's gutter beside
+    // it — and `at` clamps to [0,1], so a click on the label used to land as a
+    // mark pinned to the image's bottom edge. A mark nobody placed is a
+    // reported perception nobody had.
+    const box = image.getBoundingClientRect();
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+    if (!inside) return;
     const point = { frame: state.frame, ...at(event, image) };
     state.points.push(point);
     note("point.placed", { index: state.points.length - 1, ...point });
@@ -564,13 +576,17 @@ async function renderAuditory() {
 
   function stop() {
     if (!state.playing) return;
-    const { stem, element, since, button } = state.playing;
+    const { stem, element, since, button, opening } = state.playing;
+    state.playing = null;
     element.pause();
-    state.lanes.get(stem.id).listened_ms += Date.now() - since;
     button.textContent = strings.play;
     drawWave(canvases.get(stem.id), stem, 0);
-    note("lane.stopped", { stem: stem.id, ...state.lanes.get(stem.id) });
-    state.playing = null;
+    // A lane stopped before it ever made a sound contributes no listening
+    // time and no stop worth recording: nothing was heard.
+    if (opening) return;
+    const counts = state.lanes.get(stem.id);
+    counts.listened_ms += Date.now() - since;
+    note("lane.stopped", { stem: stem.id, ...counts });
   }
 
   function toggle(stem, button, lane) {
@@ -591,18 +607,38 @@ async function renderAuditory() {
     element.ontimeupdate = () => {
       if (element.duration) drawWave(canvases.get(stem.id), stem, element.currentTime / element.duration);
     };
-    element.onended = stop;
+    element.onended = () => {
+      if (state.playing && state.playing.element === element) stop();
+    };
+    // The lane is claimed here, synchronously, and not when play() settles.
+    // Two presses in one task both used to find no lane playing, so neither
+    // stopped the other and both were heard at once — which §5 forbids and
+    // which a sequential click is too slow to reach.
+    state.playing = { stem, element, since: Date.now(), button, opening: true };
+    button.textContent = strings.stop;
     element.play().then(
       () => {
+        if (!state.playing || state.playing.element !== element) {
+          // Stopped, or overtaken by another lane, while this one was opening.
+          element.pause();
+          return;
+        }
         // The play count is what §5 reports a selection against, so it moves
-        // when sound actually starts rather than when the control was pressed.
+        // when sound actually starts rather than when the control was pressed,
+        // and the clock starts here for the same reason.
+        state.playing.opening = false;
+        state.playing.since = Date.now();
         const counts = state.lanes.get(stem.id);
         counts.plays += 1;
-        state.playing = { stem, element, since: Date.now(), button };
-        button.textContent = strings.stop;
         note("lane.played", { stem: stem.id, plays: counts.plays });
       },
       (error) => {
+        // Pausing a play() that has not settled rejects it, so stopping a lane
+        // while it opens arrives here as an AbortError. That is this code's
+        // own doing and says nothing about the lane: if it is no longer the
+        // one playing, the rejection is ours and the lane stays usable.
+        if (!state.playing || state.playing.element !== element) return;
+        state.playing = null;
         // A lane that will not play is this lane's problem and not the
         // session's. Ending the run here would lose §6, §7 and §8 to one
         // missing or undecodable file, and the participant has already given
