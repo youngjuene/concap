@@ -63,16 +63,43 @@ class TrackError(ValueError):
 
 @dataclass(frozen=True)
 class Cue:
-    """One slot: when it is on screen, and what it says."""
+    """One slot: when it is on screen, and what it says, in each language offered.
+
+    ``text`` is keyed by language tag. A study offering one language has one
+    key; the slot, its timings and its position are the same either way, which
+    is what §9.6 asks for — the schema does not change with the language, only
+    which key is read.
+    """
 
     index: int
     start_ms: int
     end_ms: int
-    text: str
+    text: Mapping[str, str]
 
-    def record(self) -> dict[str, Any]:
-        """The stored form. §2 and §7 log "per-cue text + start/end times"."""
-        return {"index": self.index, "start_ms": self.start_ms, "end_ms": self.end_ms, "text": self.text}
+    def say(self, language: str) -> str:
+        """What this cue reads as on screen, in one language."""
+        try:
+            return self.text[language]
+        except KeyError:
+            raise TrackError(
+                f"cue {self.index} has no text in {language!r}; it has {sorted(self.text)}"
+            ) from None
+
+    def record(self, language: str) -> dict[str, Any]:
+        """The stored form: what was displayed, and which language it was in.
+
+        §2 and §7 log "per-cue text + start/end times". The text is the text a
+        participant actually read, so a row is legible without the document —
+        and ``language`` says which, because a study offering two would
+        otherwise leave that to be inferred from the characters.
+        """
+        return {
+            "index": self.index,
+            "start_ms": self.start_ms,
+            "end_ms": self.end_ms,
+            "text": self.say(language),
+            "language": language,
+        }
 
 
 def _script_of(text: str) -> set[str]:
@@ -103,21 +130,33 @@ def in_language(text: str, language: str) -> bool:
     return required in _script_of(text)
 
 
-def cues_of(raw: Sequence[Mapping[str, Any]]) -> tuple[Cue, ...]:
+def text_of(raw: object, default: str) -> Mapping[str, str]:
+    """A cue's text, however the document wrote it.
+
+    A study in one language may write ``"text": "..."`` and mean that language;
+    one offering two writes ``{"en": "...", "ko": "..."}``. Both arrive here as
+    a mapping, so nothing downstream has to know which shape was used.
+    """
+    if isinstance(raw, Mapping):
+        return {str(tag): str(value) for tag, value in raw.items()}
+    return {default: str(raw)}
+
+
+def cues_of(raw: Sequence[Mapping[str, Any]], default: str = "en") -> tuple[Cue, ...]:
     """Read a stored track back into cues, without validating it."""
     return tuple(
         Cue(
             index=int(cue["index"]),
             start_ms=int(cue["start_ms"]),
             end_ms=int(cue["end_ms"]),
-            text=str(cue["text"]),
+            text=text_of(cue["text"], default),
         )
         for cue in raw
     )
 
 
-def validate_track(cues: Sequence[Cue], calibration: Calibration, *, path: str) -> None:
-    """The rules both tracks obey (§9.4, §9.6). Raises naming the failing slot.
+def _validate_timings(cues: Sequence[Cue], calibration: Calibration, *, path: str) -> None:
+    """The shape both tracks obey (§9.4, §9.6). Raises naming the failing slot.
 
     Timings must not overlap, because two cues on screen at once is a third
     caption the study did not design. They are checked in the order given, and
@@ -143,7 +182,26 @@ def validate_track(cues: Sequence[Cue], calibration: Calibration, *, path: str) 
                 f"{where}: starts at {cue.start_ms} before the previous cue ends at {previous_end}"
             )
         previous_end = cue.end_ms
-        _validate_text(cue.text, calibration, where=where)
+
+
+def validate_track(cues: Sequence[Cue], calibration: Calibration, *, path: str) -> None:
+    """An authored track: the shape, and the text in every language offered.
+
+    Every language, because the participant picks one before §2 and a slot
+    missing the language they picked is a gap they would read, discovered with
+    them sitting in front of it rather than at ``dpo regen validate``.
+    """
+    _validate_timings(cues, calibration, path=path)
+    for position, cue in enumerate(cues):
+        where = f"{path}[{position}]"
+        missing = [tag for tag in calibration.languages if tag not in cue.text]
+        if missing:
+            raise TrackError(
+                f"{where}.text: the study offers {list(calibration.languages)} and this slot "
+                f"has no text in {missing}; a participant reading that language would find a gap"
+            )
+        for tag in calibration.languages:
+            _validate_text(cue.text[tag], calibration, where=f"{where}.text[{tag}]")
 
 
 def _validate_text(text: str, calibration: Calibration, *, where: str) -> None:
@@ -154,8 +212,12 @@ def _validate_text(text: str, calibration: Calibration, *, where: str) -> None:
         raise TrackError(f"{where}.text: must be at most {calibration.slot_max_lines} lines")
 
 
-def validate_generated(cues: Sequence[Cue], calibration: Calibration) -> None:
+def validate_generated(cues: Sequence[Cue], calibration: Calibration, language: str) -> None:
     """§6's output validation: the track rules, plus empty and wrong-language.
+
+    Checked in the one language the track was generated in — the language the
+    participant is reading — rather than in every language the study offers: §6
+    writes for the session in front of it, not for the study's whole menu.
 
     Raised rather than returned, because the caller's response to any of these
     is the same — fall back to the default track — and a boolean would lose
@@ -163,23 +225,35 @@ def validate_generated(cues: Sequence[Cue], calibration: Calibration) -> None:
     """
     for position, cue in enumerate(cues):
         where = f"generated[{position}]"
-        if not cue.text.strip():
+        written = cue.text.get(language, "")
+        if not written.strip():
             raise TrackError(f"{where}.text: the model returned nothing for this slot")
-        if not in_language(cue.text, calibration.language):
-            raise TrackError(f"{where}.text: is not in the study's language ({calibration.language})")
-    validate_track(cues, calibration, path="generated")
+        if not in_language(written, language):
+            raise TrackError(f"{where}.text: is not in the language on screen ({language})")
+        _validate_text(written, calibration, where=where)
+    _validate_timings(cues, calibration, path="generated")
 
 
-def retimed(cues: Sequence[Cue], texts: Sequence[str]) -> tuple[Cue, ...]:
-    """The slots of ``cues`` carrying ``texts``: §6 writes text, never timings."""
+def retimed(cues: Sequence[Cue], texts: Sequence[str], language: str) -> tuple[Cue, ...]:
+    """The slots of ``cues`` carrying ``texts``: §6 writes text, never timings.
+
+    The result speaks one language — the one the session is being read in. A
+    regenerated track is written for the participant in front of it and there
+    is no second reading to offer.
+    """
     if len(texts) != len(cues):
         raise TrackError(f"expected {len(cues)} slot texts, got {len(texts)}")
     return tuple(
-        Cue(index=cue.index, start_ms=cue.start_ms, end_ms=cue.end_ms, text=text.strip())
+        Cue(
+            index=cue.index,
+            start_ms=cue.start_ms,
+            end_ms=cue.end_ms,
+            text={language: text.strip()},
+        )
         for cue, text in zip(cues, texts, strict=True)
     )
 
 
-def record_of(cues: Sequence[Cue]) -> list[dict[str, Any]]:
+def record_of(cues: Sequence[Cue], language: str) -> list[dict[str, Any]]:
     """The full text of a displayed track, as §2 and §7 log it."""
-    return [cue.record() for cue in cues]
+    return [cue.record(language) for cue in cues]

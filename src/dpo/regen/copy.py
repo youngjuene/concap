@@ -28,6 +28,13 @@ from typing import Any
 
 STRINGS: dict[str, Any] = {
     "app_title": "Sound captions",
+    # The language toggle. Each button is labelled in its own language, so a
+    # participant who cannot read the other one can still find theirs.
+    "languages": {
+        "label": "Language",
+        "names": {"en": "English", "ko": "한국어"},
+        "locked": "Fixed for the rest of this session.",
+    },
     "steps": ["Watch", "Questions", "What you saw", "What you heard", "Watch again", "Survey"],
     "actions": {
         "start": "Start",

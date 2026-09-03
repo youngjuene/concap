@@ -155,6 +155,15 @@ def build_app(
             return _error(409, str(exc), step=progress.current(snapshot))
         return snapshot
 
+    def _language(participant: str) -> str:
+        """The language this session is being read in."""
+        chosen = (log.snapshot(participant) or {}).get("language")
+        return str(chosen) if configuration.calibration.offers(chosen) else configuration.language
+
+    def _started_viewing(participant: str) -> bool:
+        """Whether a clip has already played, which is what locks the language."""
+        return bool(log.viewings(participant))
+
     def _slots(segment: str) -> tuple[Cue, ...]:
         """The fixed slots §6 writes into: the segment's own prepared timings."""
         return track_of(document, segment, "prepared_track")
@@ -173,6 +182,7 @@ def build_app(
             },
             "minimum_points": configuration.calibration.minimum_points,
             "steps": list(progress.PARTICIPANT_STEPS),
+            "languages": list(configuration.languages),
         }
 
     @app.post("/api/session")
@@ -197,7 +207,35 @@ def build_app(
             "session_id": document["session_id"],
             "config_hash": configuration.hash,
             "items_provenance": item_set.provenance,
+            "language": _language(participant),
+            "languages": list(configuration.languages),
+            "language_locked": _started_viewing(participant),
         }
+
+    @app.post("/api/language")
+    def language(payload: Mapping[str, Any]) -> Any:
+        """Which of the study's languages this participant reads (§9.3).
+
+        Refused once a clip has played. The measure is the change in the ART
+        answers between §3 and §8, and a session read half in one language and
+        half in the other has moved something else as well.
+        """
+        person = _participant(payload.get("participant"))
+        if isinstance(person, JSONResponse):
+            return person
+        wanted = payload.get("language")
+        if not configuration.calibration.offers(wanted):
+            return _error(400, f"this study offers {list(configuration.languages)}", asked=wanted)
+        if _started_viewing(person):
+            return _error(
+                409,
+                "the language is fixed once the first clip has played; both viewings are read "
+                "in one language (§9.3)",
+                language=_language(person),
+            )
+        snapshot = {**(log.snapshot(person) or {"step": progress.VIEW_PREPARED}), "language": wanted}
+        log.append(person, [{"type": "language.chosen", "language": wanted}], snapshot)
+        return {"language": str(wanted), "language_locked": False}
 
     @app.get("/api/step/{step}")
     def step_detail(step: str, participant: str | None = None) -> Any:
@@ -223,7 +261,7 @@ def build_app(
                 "segment": segment,
                 "clip_id": segment_of(document, segment)["clip_id"],
                 "duration_ms": segment_of(document, segment)["duration_ms"],
-                "captions": record_of(captions),
+                "captions": record_of(captions, _language(person)),
             }
         if step == progress.VISUAL:
             segment = assignment.prepared_segment
@@ -262,7 +300,7 @@ def build_app(
         stored = snapshot.get("regenerated")
         if not isinstance(stored, list):
             return _error(409, "the regenerated track has not been written yet")
-        return cues_of(stored)
+        return cues_of(stored, configuration.language)
 
     @app.post("/api/viewing")
     def viewing(payload: Mapping[str, Any]) -> Any:
@@ -280,6 +318,7 @@ def build_app(
         if isinstance(assignment, JSONResponse):
             return assignment
         index, condition = VIEWS[str(step)]
+        reading = _language(person)
         segment = assignment.segment_of(condition)
         captions = _prepared_or_regenerated(person, condition, segment)
         if isinstance(captions, JSONResponse):
@@ -293,10 +332,13 @@ def build_app(
             condition=condition,
             segment=segment,
             clip_id=str(segment_of(document, segment)["clip_id"]),
-            captions=record_of(captions),
+            captions=record_of(captions, reading),
             started_at=started,
             ended_at=ended,
-            extra=assignment.record(),
+            # The language is on the viewing, not only in the caption text: a
+            # row should say what a participant read without anyone having to
+            # look at the characters to work it out.
+            extra={**assignment.record(), "language": reading},
         )
         log.append(
             person,
@@ -460,7 +502,11 @@ def build_app(
             # A reload during the wait: return what was written rather than
             # spending the model again on the same report, and rather than
             # handing the participant a second, different track.
-            return {"track": stored, "fallback": bool(snapshot.get("regeneration_fallback")), "cached": True}
+            return {
+                "track": record_of(cues_of(stored, configuration.language), _language(person)),
+                "fallback": bool(snapshot.get("regeneration_fallback")),
+                "cached": True,
+            }
         gated = _gate(person, progress.REGENERATING)
         if isinstance(gated, JSONResponse):
             return gated
@@ -473,6 +519,7 @@ def build_app(
             auditory_labels=tuple(snapshot.get("auditory_labels") or ()),
             auditory_ids=tuple(snapshot.get("auditory_ids") or ()),
         )
+        reading = _language(person)
         video = _media(str(segment_of(document, segment)["video"]))
         result = regenerate(
             cached,
@@ -481,17 +528,27 @@ def build_app(
             slots=_slots(segment),
             fallback=track_of(document, segment, "fallback_track"),
             report=report,
+            language=reading,
             media=video if isinstance(video, Path) else None,
-            settings={"segment": segment, "config_hash": configuration.hash},
+            settings={"segment": segment, "config_hash": configuration.hash, "language": reading},
         )
-        track = record_of(result.cues)
+        # Stored under the document's own shape — text keyed by language — so
+        # reading it back needs nothing but the track itself.
+        track = [
+            {"index": cue.index, "start_ms": cue.start_ms, "end_ms": cue.end_ms, "text": dict(cue.text)}
+            for cue in result.cues
+        ]
         advanced = {
             **progress.advance(gated, progress.REGENERATING),
             "regenerated": track,
             "regeneration_fallback": result.fallback,
         }
         log.append(person, [{"type": "regeneration.written", **result.record()}], advanced)
-        return {"track": track, "fallback": result.fallback, "cached": False}
+        return {
+            "track": record_of(result.cues, reading),
+            "fallback": result.fallback,
+            "cached": False,
+        }
 
     @app.post("/api/events")
     def events(payload: Mapping[str, Any]) -> Any:

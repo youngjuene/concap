@@ -15,13 +15,19 @@ must be fixed to the study once and then hold still, it is a calibration.
     | latency ceiling (§6)              | calibration           | per study    |
     | per-slot character and line caps  | calibration           | per study    |
     | scale points and anchors (§9.3)   | calibration           | per study    |
+    | the languages offered (§9.3)      | calibration           | per study    |
+    | which language a participant reads| experimental variable | per person   |
     | which segment a participant gets  | experimental variable | per person   |
 
-This instrument has exactly one experimental variable, and it is not something
-a participant moves: it is the condition-segment assignment, fixed on entry
-from the sequence number (§1). Everything else is frozen here, hashed, and
-stamped onto every caption, every endpoint and every log line, so a result is
-reproducible from its stamp.
+The condition-segment assignment is the variable the design turns: fixed on
+entry from the sequence number (§1), never moved after. A study offering two
+languages adds a second thing that varies per person, and it is the only one a
+participant chooses — before the first clip, and then locked, because the
+study's main measure is the change in the ART answers between §3 and §8 and a
+participant who read one viewing in Korean and the other in English would have
+changed two things. Everything else is frozen here, hashed, and stamped onto
+every caption, every endpoint and every log line, so a result is reproducible
+from its stamp.
 
 ``cue_slots`` is the single value §9.4 requires. The prepared track is
 validated against it and so is the regenerated one, which is what makes the two
@@ -110,10 +116,15 @@ class Calibration:
     is §6's: past it the regeneration is abandoned for the fallback track, and
     the participant waits a bounded time rather than an unbounded one.
 
-    ``language`` is validated per slot. It is a language *tag*, not a locale to
-    format with: the check is that generated text is in the study's language,
-    which is the failure mode a model that answers in English to a Korean
-    prompt produces.
+    ``languages`` are the language tags the study offers, the first being the
+    one a session opens in. They are tags, not locales to format with: the
+    check is that generated text is in the language on screen, which is the
+    failure mode a model that answers in English to a Korean prompt produces.
+
+    A study offering two puts the choice in front of the participant and fixes
+    it before the first clip plays (§2). Both are in the hash, because a
+    bilingual study and a monolingual one over the same footage are two
+    studies, and because which language came first is part of what was run.
     """
 
     cue_slots: int = 4
@@ -121,7 +132,7 @@ class Calibration:
     slot_max_lines: int = 2
     minimum_points: int = 1
     latency_ceiling_ms: int = 20000
-    language: str = "en"
+    languages: tuple[str, ...] = ("en",)
     scale: Scale = field(default_factory=Scale)
 
     def __post_init__(self) -> None:
@@ -135,8 +146,21 @@ class Calibration:
             raise ConfigError("§4 requires at least one point before Next enables")
         if self.latency_ceiling_ms < 1:
             raise ConfigError("the latency ceiling is a positive duration")
-        if not self.language.strip():
-            raise ConfigError("the study language must be named")
+        object.__setattr__(self, "languages", tuple(self.languages))
+        if not self.languages:
+            raise ConfigError("a study runs in at least one language")
+        if any(not tag.strip() for tag in self.languages):
+            raise ConfigError("every study language must be named")
+        if len(set(self.languages)) != len(self.languages):
+            raise ConfigError(f"a language is offered twice: {list(self.languages)}")
+
+    @property
+    def language(self) -> str:
+        """The one a session opens in, and the only one a study that offers one has."""
+        return self.languages[0]
+
+    def offers(self, tag: object) -> bool:
+        return isinstance(tag, str) and tag in self.languages
 
 
 @dataclass(frozen=True)
@@ -182,6 +206,15 @@ class Configuration:
         return self.calibration.cue_slots
 
     @property
+    def languages(self) -> tuple[str, ...]:
+        return self.calibration.languages
+
+    @property
+    def language(self) -> str:
+        """The one a session opens in."""
+        return self.calibration.language
+
+    @property
     def scale(self) -> Scale:
         return self.calibration.scale
 
@@ -202,6 +235,9 @@ def load_configuration(raw: Mapping[str, Any]) -> Configuration:
             "results computed here could not carry its hash honestly"
         )
     calibration = dict(raw.get("calibration") or {})
+    if "languages" in calibration:
+        # JSON has no tuples; the frozen dataclass wants one.
+        calibration["languages"] = tuple(calibration["languages"])
     try:
         scale = calibration.pop("scale", None)
         if scale is not None:

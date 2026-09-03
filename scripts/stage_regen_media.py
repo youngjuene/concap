@@ -68,6 +68,11 @@ from dpo.regen.config import Calibration, Configuration
 from dpo.regen.document import REGEN_SCHEMA, slug
 
 AVMASK = Path("/mnt/hdd/research/2026/Sa2VA/avmask")
+# The Korean each c2 clip carried, transcribed by eye from the burnt-in text.
+# It exists nowhere as data — see the file's own note — so it is beside this
+# script rather than read out of the corpus, and it is the one input here a
+# researcher should check against the footage before running on it.
+KOREAN = Path(__file__).with_name("c2-korean-captions.json")
 # §4 shows a strip of moments rather than one still. Five frames at equal
 # intervals across the clip; with 599 frames the middle one lands on 300, the
 # five-second frame §10 names, so the strip is centred on it.
@@ -359,8 +364,11 @@ def duration_ms(path: Path) -> int:
     return int(round(float(probe.stdout.strip()) * 1000))
 
 
-def cue_track(text: str, span: int, slots: int) -> list[dict[str, Any]]:
+def cue_track(text: Mapping[str, str], span: int, slots: int) -> list[dict[str, Any]]:
     """The prepared track: the study's own caption over the fixed slots.
+
+    ``text`` is keyed by language, and every language the study offers goes
+    into the slot, so a participant reading either finds a caption there.
 
     At one slot this is the stimulus the corpus already carries, whole. At more
     than one the text goes in the first slot and the rest are left empty, which
@@ -373,7 +381,7 @@ def cue_track(text: str, span: int, slots: int) -> list[dict[str, Any]]:
             "index": index,
             "start_ms": index * step,
             "end_ms": (index + 1) * step if index < slots - 1 else span,
-            "text": text if index == 0 else "",
+            "text": dict(text) if index == 0 else dict.fromkeys(text, ""),
         }
         for index in range(slots)
     ]
@@ -428,7 +436,8 @@ def build_segment(
     row: Mapping[str, str],
     sources: Sequence[Mapping[str, Any]],
     slots: int,
-    fallback: str,
+    fallback: Mapping[str, str],
+    captions: Mapping[str, str],
 ) -> dict[str, Any]:
     clip = staged["clip_id"]
     span = int(staged["duration_ms"])
@@ -453,12 +462,58 @@ def build_segment(
         "duration_ms": span,
         "frames": list(staged["frames"]),
         "stems": stems,
-        "prepared_track": cue_track(row["caption"], span, slots),
+        "prepared_track": cue_track(captions, span, slots),
         "fallback_track": cue_track(fallback, span, slots),
     }
 
 
 # ---- the command ------------------------------------------------------------
+
+
+def _fallback(entries: Sequence[str], languages: Sequence[str]) -> dict[str, str]:
+    """§6's default track, one text per language the study offers.
+
+    One string across two languages would show a Korean session an English
+    fallback under its own language tag, which is worse than showing nothing:
+    the row would say ``ko`` and read as English.
+    """
+    if not entries:
+        return dict.fromkeys(languages, "")
+    if len(entries) == 1 and "=" not in entries[0]:
+        if len(languages) > 1:
+            raise StagingError(
+                f"--fallback-text needs one text per language ({list(languages)}), "
+                'as --fallback-text en="..." ko="..."'
+            )
+        return {languages[0]: entries[0]}
+    written: dict[str, str] = {}
+    for entry in entries:
+        tag, _, text = entry.partition("=")
+        if tag not in languages:
+            raise StagingError(f"--fallback-text names {tag!r}; the study offers {list(languages)}")
+        written[tag] = text
+    missing = [tag for tag in languages if tag not in written]
+    if missing:
+        raise StagingError(f"--fallback-text has nothing for {missing}")
+    return {tag: written[tag] for tag in languages}
+
+
+def _captions(
+    clip: str, row: Mapping[str, str], korean: Mapping[str, str], languages: Sequence[str]
+) -> dict[str, str]:
+    """The prepared caption in every language the study offers.
+
+    English is the response table's ``orig_text``. Korean is the transcription
+    of what the clip actually showed, and the two are not always the same
+    claim about the sound — three of the twelve describe different events
+    entirely. Both are staged as they are; reconciling them is the study's
+    decision and not a staging step.
+    """
+    available = {"en": row["caption"], "ko": korean.get(clip, "")}
+    missing = [tag for tag in languages if not available.get(tag)]
+    if missing:
+        raise StagingError(f"{clip}: no prepared caption in {missing}")
+    return {tag: available[tag] for tag in languages}
 
 
 def _pool(
@@ -542,17 +597,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--study-id", default="street2026")
     parser.add_argument("--corpus-id", default="wtour-24")
     parser.add_argument("--cue-slots", type=int, default=1, help="§9.4's slot count; 1 matches the corpus")
-    parser.add_argument("--language", default="en", help="the language the prepared track is written in")
+    parser.add_argument(
+        "--languages",
+        nargs="+",
+        default=["en", "ko"],
+        help="the languages the prepared track carries; the first is the one a session opens in",
+    )
     parser.add_argument(
         "--fallback-text",
-        default="",
-        help="what §6 shows when generation fails; empty leaves it for the researcher, and "
-        "`dpo regen validate` refuses the document until it is written",
+        nargs="+",
+        default=[],
+        help="what §6 shows when generation fails, as <lang>=<text> per language offered "
+        "(a bare string is accepted only by a single-language study); left out, the slots stay "
+        "empty and `dpo regen validate` refuses the document until they are written",
     )
     arguments = parser.parse_args(argv)
 
     try:
         clips = read_clips(arguments.tidy)
+        languages = tuple(arguments.languages)
+        korean = json.loads(KOREAN.read_text(encoding="utf-8"))["captions"] if "ko" in languages else {}
         palette = json.loads(arguments.palette.read_text(encoding="utf-8"))["audio"]
         ids, descendants = read_ontology(arguments.ontology)
         candidates = stimulus_clips(clips, arguments.conditions)
@@ -592,7 +656,7 @@ def main(argv: list[str] | None = None) -> int:
         configuration = Configuration(
             study_id=arguments.study_id,
             corpus_id=arguments.corpus_id,
-            calibration=Calibration(cue_slots=arguments.cue_slots, language=arguments.language),
+            calibration=Calibration(cue_slots=arguments.cue_slots, languages=tuple(arguments.languages)),
         )
         document = {
             "schema": REGEN_SCHEMA,
@@ -605,7 +669,8 @@ def main(argv: list[str] | None = None) -> int:
                     clips[clip],
                     sources[clip],
                     arguments.cue_slots,
-                    arguments.fallback_text,
+                    _fallback(arguments.fallback_text, languages),
+                    _captions(clip, clips[clip], korean, languages),
                 )
                 for name, clip in zip(SEGMENTS, chosen, strict=True)
             },
@@ -619,10 +684,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     missing = _report(document, out)
+    caps = configuration.calibration
     long_captions = [
-        (name, clip, len(clips[clip]["caption"]))
+        (f"{name} = {clip}", tag, len(text), len(text.splitlines()))
         for name, clip in zip(SEGMENTS, chosen, strict=True)
-        if len(clips[clip]["caption"]) > configuration.calibration.slot_max_chars
+        for tag, text in _captions(clip, clips[clip], korean, languages).items()
+        if len(text) > caps.slot_max_chars or len(text.splitlines()) > caps.slot_max_lines
     ]
     for name, clip in zip(SEGMENTS, chosen, strict=True):
         segment = document["segments"][name]
@@ -635,10 +702,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\ndocument: {arguments.document}")
     print(f"media:    {out}")
     if long_captions:
-        budget = configuration.calibration.slot_max_chars
-        print(f"\nThe prepared caption runs past the {budget}-character slot on:")
-        for name, clip, length in long_captions:
-            print(f"  {name} = {clip}: {length} characters")
+        print(
+            f"\nThe prepared caption does not fit the slot ({caps.slot_max_chars} chars, "
+            f"{caps.slot_max_lines} lines) on:"
+        )
+        for where, tag, length, lines in long_captions:
+            print(f"  {where} [{tag}]: {length} characters, {lines} lines")
         print("`dpo regen validate` will refuse the document until the text fits or the budget moves.")
     if missing:
         print(f"\n{len(missing)} files the document names are not staged:")
@@ -646,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {reference}")
         print("Each also needs its envelope in `waveform` and its level in `gain`; both are")
         print("placeholders until the audio exists, and neither can be measured without it.")
-    if not arguments.fallback_text:
+    if not any(_fallback(arguments.fallback_text, languages).values()):
         print("\nStill to author, in the document:")
         print("  segments.*.fallback_track[*].text — what a participant reads when §6 fails.")
         print("  It has to be defensible on its own, so it is left empty and `dpo regen validate`")

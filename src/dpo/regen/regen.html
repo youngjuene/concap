@@ -14,7 +14,13 @@
     <main class="shell" id="shell">
       <!-- Progress, not navigation: the rail says where the participant is and
            has nothing to click, because there is nowhere to go but forward. -->
-      <nav class="rail" id="rail" aria-label="Progress"></nav>
+      <!-- The rail says where the participant is; the toggle beside it says
+           which language they are reading. The toggle stops being one once a
+           clip has played: both viewings are read in one language (§9.3). -->
+      <div class="topline">
+        <nav class="rail" id="rail" aria-label="Progress"></nav>
+        <div class="languages" id="languages" hidden></div>
+      </div>
 
       <!-- §2, §7 — the start screen. The headphone line is here rather than on
            a preamble page because it is the last thing read before audio. -->

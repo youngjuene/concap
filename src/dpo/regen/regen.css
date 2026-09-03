@@ -14,6 +14,24 @@
   padding: 32px 24px 64px;
 }
 
+/* The progress rail and the language toggle share the top line: the rail
+   takes what is left after the toggle, which is as wide as its own words. */
+.topline { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+.topline .rail { flex: 1; margin-bottom: 0; }
+
+.languages { display: flex; gap: 4px; align-items: center; flex: 0 0 auto; }
+.languages button {
+  padding: 4px 9px;
+  font: 11px/1.4 var(--mono);
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--dim);
+  cursor: pointer;
+}
+.languages button.at { border-color: var(--accent); color: var(--accent); }
+.languages[data-locked="yes"] button { cursor: default; }
+.languages[data-locked="yes"] button:not(.at) { display: none; }
+
 .rail { display: flex; gap: 4px; margin-bottom: 32px; }
 .rail span { flex: 1; height: 2px; background: var(--rule); }
 .rail span.done { background: var(--dim); }

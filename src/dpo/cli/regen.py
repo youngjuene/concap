@@ -54,7 +54,7 @@ class RegenUsageError(ValueError):
 def _calibration(arguments: argparse.Namespace) -> Calibration:
     overrides = {
         name: getattr(arguments, name)
-        for name in ("cue_slots", "minimum_points", "latency_ceiling_ms", "language")
+        for name in ("cue_slots", "minimum_points", "latency_ceiling_ms", "languages")
         if getattr(arguments, name, None) is not None
     }
     return Calibration(**overrides)
@@ -343,7 +343,11 @@ def register(subparsers: Any) -> None:
     scaffold.add_argument("--cue-slots", type=int, help="§9.4's single slot count, for both tracks")
     scaffold.add_argument("--minimum-points", type=int, help="§4's floor on the visual selection")
     scaffold.add_argument("--latency-ceiling-ms", type=int, help="§6's ceiling before the fallback track")
-    scaffold.add_argument("--language", help="the study's language, validated per generated slot")
+    scaffold.add_argument(
+        "--languages",
+        nargs="+",
+        help="the language tags the study offers; the first is the one a session opens in",
+    )
     scaffold.set_defaults(handler=_regen_scaffold)
 
     validate = actions.add_parser("validate", help="refuse a document that is not yet authored")

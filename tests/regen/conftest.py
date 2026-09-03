@@ -15,9 +15,15 @@ DURATION_MS = 10000
 
 
 def track(texts: list[str]) -> list[dict[str, Any]]:
+    """A track in both languages the fixture's study offers."""
     span = DURATION_MS // len(texts)
     return [
-        {"index": index, "start_ms": index * span, "end_ms": (index + 1) * span, "text": text}
+        {
+            "index": index,
+            "start_ms": index * span,
+            "end_ms": (index + 1) * span,
+            "text": {"en": text, "ko": f"{text} 소리"},
+        }
         for index, text in enumerate(texts)
     ]
 
@@ -63,7 +69,7 @@ def configuration() -> Configuration:
     return Configuration(
         study_id="street2026",
         corpus_id="amsterdam",
-        calibration=Calibration(cue_slots=CUE_SLOTS, minimum_points=2),
+        calibration=Calibration(cue_slots=CUE_SLOTS, minimum_points=2, languages=("en", "ko")),
     )
 
 

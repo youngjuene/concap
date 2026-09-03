@@ -1,0 +1,21 @@
+{
+  "note": "The Korean caption each c2_video_audio_caption clip carried, TRANSCRIBED BY EYE from the burnt-in text of the delivered stimulus. It exists nowhere as data: no file under the corpus, the mask run or the upstream pipeline holds these strings, so they were read off the video frame at t=5s. Verify against the footage before running a study on them. Lines are separated by \\n, as they appeared.",
+  "provenance": "transcribed-from-video",
+  "source": "data/video/c2_video_audio_caption/*.mp4, frame at 5.0 s",
+  "transcribed": "2026-09-03",
+  "warning": "These are NOT translations of tidy_data.csv's orig_text in every case. amsterdam_012 says 'the sound of a running train' where orig_text and the AudioSet labels are a police siren over traffic; singapore_040 says motorcycle where orig_text says car, wind and bird; amsterdam_057 and bangkok_034 also diverge. Which text is the study's prepared caption is a researcher's decision, not a staging one.",
+  "captions": {
+    "amsterdam_012": "달리는 기차의 소리",
+    "amsterdam_057": "서로 겹치는 여러 사람들의 대화, 자동차 경적 소리, 그리고 근처에서 흘러나오는 음악",
+    "amsterdam_181": "오디오 클립에는 경적 소리를 포함한 도시 거리의 교통 소음이 담겨 있습니다.",
+    "amsterdam_202": "공회전 중인 자동차 엔진 소리, 마이크에 바람이 부는 소리",
+    "bangkok_034": "시끄러운 도시 환경에서 여러 대의 자동차가 지나간다.",
+    "bangkok_209": "도로를 달리는 자동차 소리가 계속 들린다.\n가까이에서 한 여성이 말하고 있고, 배경에는 또 다른 여성의 목소리가 들린다.",
+    "bangkok_316": "사람들이 이야기하고 배경에서 차들이 오가는 가운데 공회전하는 버스 엔진 소리",
+    "bangkok_328": "사람들의 희미한 배경 웅성거림이 깔린 지속적으로 돌아가는 차량 엔진 소리",
+    "singapore_040": "도시의 공공 도로에서 녹음된 이 오디오 클립의 소리 사건에는 오토바이 엔진이 작동하는 소리와\n차량이 지나가는 소리가 포함됩니다.",
+    "singapore_067": "도시의 거리는 심한 교통 체증으로 가득하다.\n차량 경적과 엔진 소리가 끊임없이 들린다.\n또한 대형 차량이 지나가는 소리와 남자의 말소리도 들린다.",
+    "singapore_134": "오디오 클립에 담긴 주요 소리는 지나가는 차량의 엔진 웅웅거림과 멀리서 들리는 사람들의\n희미한 말소리입니다.",
+    "singapore_286": "엔진이 계속 공회전하고, 배경에서 남자가 말한다."
+  }
+}

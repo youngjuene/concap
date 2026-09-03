@@ -10,10 +10,17 @@ from dpo.regen.captions import Cue
 from dpo.regen.config import Calibration, Configuration
 from dpo.regen.regeneration import RegenTemplateWriter, Report, regenerate
 
-SLOTS = tuple(Cue(index=i, start_ms=i * 2500, end_ms=(i + 1) * 2500, text="") for i in range(4))
+SLOTS = tuple(Cue(index=i, start_ms=i * 2500, end_ms=(i + 1) * 2500, text={"en": ""}) for i in range(4))
 FALLBACK = tuple(
-    Cue(index=i, start_ms=i * 2500, end_ms=(i + 1) * 2500, text=f"Default {i}.") for i in range(4)
+    Cue(index=i, start_ms=i * 2500, end_ms=(i + 1) * 2500, text={"en": f"Default {i}."}) for i in range(4)
 )
+
+
+def said(cues: Any, language: str = "en") -> list[str]:
+    """What a track reads as, for the tests that care about the words."""
+    return [cue.say(language) for cue in cues]
+
+
 REPORT = Report(visual_labels=("Building", "Person"), auditory_labels=("Traffic", "Bird"))
 
 
@@ -68,7 +75,7 @@ class TestSuccess:
         result = _run(RegenTemplateWriter())
         assert not result.fallback
         assert len(result.cues) == 4
-        assert all(cue.text for cue in result.cues)
+        assert all(said(result.cues))
 
     def test_generation_writes_text_into_the_fixed_slots(self) -> None:
         result = _run(RegenTemplateWriter())
@@ -89,13 +96,13 @@ class TestSuccess:
             fallback=FALLBACK,
             report=other,
         ).cues
-        assert [cue.text for cue in first] != [cue.text for cue in second]
+        assert said(first) != said(second)
 
     def test_the_slots_do_not_all_say_the_same_thing(self) -> None:
         # A track of four identical sentences is not a rehearsal of a track of
         # four different ones: the band would stop changing, and a pilot
         # participant would read something no real participant sees.
-        texts = [cue.text for cue in _run(RegenTemplateWriter()).cues]
+        texts = said(_run(RegenTemplateWriter()).cues)
         assert len(set(texts)) > 1
 
     def test_every_slot_stays_inside_the_caption_budget(self) -> None:
@@ -112,7 +119,7 @@ class TestSuccess:
             report=wordy,
         )
         assert not result.fallback
-        assert all(len(cue.text) <= 96 for cue in result.cues)
+        assert all(len(text) <= 96 for text in said(result.cues))
 
     def test_an_empty_auditory_report_still_writes_a_track(self) -> None:
         # §5 allows a submit with no selection, so §6 must survive one.
@@ -125,7 +132,7 @@ class TestSuccess:
             report=Report(visual_labels=("Building",), auditory_labels=()),
         )
         assert not result.fallback
-        assert all(cue.text for cue in result.cues)
+        assert all(said(result.cues))
 
 
 class TestFallback:

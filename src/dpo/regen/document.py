@@ -214,9 +214,16 @@ def _validate_track(raw: object, path: str, configuration: Configuration) -> Non
         _integer(cue.get("index"), f"{path}[{index}].index", minimum=0)
         _integer(cue.get("start_ms"), f"{path}[{index}].start_ms", minimum=0)
         _integer(cue.get("end_ms"), f"{path}[{index}].end_ms", minimum=1)
-        _string(cue.get("text"), f"{path}[{index}].text")
+        raw_text = cue.get("text")
+        if isinstance(raw_text, Mapping):
+            if not raw_text:
+                raise _fail(f"{path}[{index}].text", "names no language")
+            for tag, value in raw_text.items():
+                _string(value, f"{path}[{index}].text[{tag}]")
+        else:
+            _string(raw_text, f"{path}[{index}].text")
     try:
-        validate_track(cues_of(entries), configuration.calibration, path=path)
+        validate_track(cues_of(entries, configuration.language), configuration.calibration, path=path)
     except TrackError as exc:
         raise RegenDocumentError(str(exc)) from exc
 
@@ -249,7 +256,7 @@ def _validate_segment(raw: object, path: str, name: str, configuration: Configur
 
     for track in TRACKS:
         _validate_track(segment.get(track), f"{path}.{track}", configuration)
-        last = cues_of(segment[track])[-1]
+        last = cues_of(segment[track], configuration.language)[-1]
         if last.end_ms > duration:
             raise _fail(f"{path}.{track}", f"ends at {last.end_ms}ms, past the segment's {duration}ms")
     return clip_id
@@ -330,10 +337,10 @@ def objects_of(document: Mapping[str, Any], media_dir: Path, name: str) -> dict[
 
 
 def track_of(document: Mapping[str, Any], name: str, which: str) -> tuple[Cue, ...]:
-    """A segment's prepared or fallback track, as cues."""
+    """A segment's prepared or fallback track, as cues in every language it carries."""
     if which not in TRACKS:
         raise _fail("track", f"must be one of {list(TRACKS)}")
-    return cues_of(segment_of(document, name)[which])
+    return cues_of(segment_of(document, name)[which], configuration_of(document).language)
 
 
 def participant_document(document: Mapping[str, Any], name: str) -> dict[str, Any]:

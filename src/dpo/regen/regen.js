@@ -30,6 +30,9 @@ const state = {
   entered: null,
   points: [],
   frame: 0,
+  language: "en",
+  languages: [],
+  languageLocked: false,
   lanes: new Map(),
   selected: [],
   audio: null,
@@ -102,6 +105,49 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flush();
 });
 
+/* The language toggle, top right. Live until the first clip has played and a
+   plain label after that: §8 compares against §3, so a session read half in
+   one language and half in the other has moved something the study measures.
+   The server enforces it; this only stops the participant asking. */
+function drawLanguages() {
+  const host = $("languages");
+  if (state.languages.length < 2) {
+    host.hidden = true;
+    return;
+  }
+  const copy = state.strings.languages;
+  host.hidden = false;
+  host.dataset.locked = state.languageLocked ? "yes" : "no";
+  host.setAttribute("aria-label", copy.label);
+  host.replaceChildren();
+  for (const tag of state.languages) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = copy.names[tag] || tag;
+    button.lang = tag;
+    if (tag === state.language) button.classList.add("at");
+    if (state.languageLocked) {
+      button.disabled = true;
+      button.title = copy.locked;
+    } else {
+      button.onclick = () => choose(tag);
+    }
+    host.append(button);
+  }
+}
+
+async function choose(tag) {
+  if (tag === state.language || state.languageLocked) return;
+  const result = await api("/api/language", { participant: state.participant, language: tag });
+  if (!result || !result.language) return;
+  state.language = result.language;
+  state.languageLocked = Boolean(result.language_locked);
+  drawLanguages();
+  // Re-render where they are, so the captions and the copy on screen change
+  // with the choice rather than at the next step.
+  render(state.step);
+}
+
 function drawRail() {
   const rail = $("rail");
   rail.replaceChildren();
@@ -160,6 +206,8 @@ async function renderViewing(step) {
         started_at: startedAt,
         ended_at: endedAt,
       });
+      // A clip has played; the language is the session's now.
+      state.languageLocked = true;
       if (result) render(result.step);
     };
     try {
@@ -611,6 +659,7 @@ function renderDone() {
 async function render(step) {
   state.step = step;
   drawRail();
+  drawLanguages();
   note("step.entered", { step });
   try {
     if (step === "view_prepared" || step === "view_regenerated") return await renderViewing(step);
@@ -632,6 +681,7 @@ async function boot() {
     state.scale = meta.scale;
     state.minimumPoints = meta.minimum_points;
     state.steps = meta.steps;
+    state.languages = meta.languages || [];
     document.title = state.strings.app_title;
     // The identifier survives a reload; a fresh tab with none enrols anew (§1).
     const stored = window.sessionStorage.getItem("regen.participant");
@@ -642,6 +692,8 @@ async function boot() {
     }).then((response) => response.json());
     if (session.error) return fail(session.error);
     state.participant = session.participant;
+    state.language = session.language || state.languages[0] || "en";
+    state.languageLocked = Boolean(session.language_locked);
     window.sessionStorage.setItem("regen.participant", session.participant);
     await render(session.step);
   } catch (error) {

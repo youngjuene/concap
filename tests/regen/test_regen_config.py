@@ -44,7 +44,7 @@ class TestHash:
 
 class TestRoundTrip:
     def test_an_artifact_reloads_to_the_same_stamp(self) -> None:
-        original = _configuration(cue_slots=5, language="ko")
+        original = _configuration(cue_slots=5, languages=("ko", "en"))
         assert load_configuration(original.artifact()).hash == original.hash
 
     def test_a_foreign_schema_is_refused(self) -> None:
@@ -94,7 +94,9 @@ class TestCalibration:
             {"slot_max_lines": 0},
             {"minimum_points": 0},
             {"latency_ceiling_ms": 0},
-            {"language": "  "},
+            {"languages": ()},
+            {"languages": ("  ",)},
+            {"languages": ("en", "en")},
         ],
     )
     def test_a_calibration_a_study_could_not_run_under_is_refused(self, overrides: dict[str, object]) -> None:

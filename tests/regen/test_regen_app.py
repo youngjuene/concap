@@ -100,6 +100,77 @@ class TestEntry:
         assert client.post("/api/session", json={}).json()["items_provenance"] == "placeholder"
 
 
+class TestLanguage:
+    """§9.3: a study may offer two, and a session reads one of them."""
+
+    def test_a_session_opens_in_the_studys_first_language(self, client: TestClient) -> None:
+        body = client.post("/api/session", json={}).json()
+        assert body["language"] == "en"
+        assert body["languages"] == ["en", "ko"]
+        assert body["language_locked"] is False
+
+    def test_the_other_language_can_be_chosen_before_the_first_clip(self, client: TestClient) -> None:
+        participant = enrol(client)
+        assert client.post("/api/language", json={"participant": participant, "language": "ko"}).json() == {
+            "language": "ko",
+            "language_locked": False,
+        }
+        detail = client.get(f"/api/step/view_prepared?participant={participant}").json()
+        assert all(cue["language"] == "ko" for cue in detail["captions"])
+        assert all(cue["text"].endswith("소리") for cue in detail["captions"])
+
+    def test_a_language_the_study_does_not_offer_is_refused(self, client: TestClient) -> None:
+        participant = enrol(client)
+        response = client.post("/api/language", json={"participant": participant, "language": "fr"})
+        assert response.status_code == 400
+        assert response.json()["asked"] == "fr"
+
+    def test_it_is_fixed_once_a_clip_has_played(self, client: TestClient) -> None:
+        # §8 is compared against §3. A session read half in one language and
+        # half in the other has moved something the study measures.
+        participant = enrol(client)
+        client.post(
+            "/api/viewing",
+            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
+        )
+        response = client.post("/api/language", json={"participant": participant, "language": "ko"})
+        assert response.status_code == 409
+        assert response.json()["language"] == "en"
+        assert client.post("/api/session", json={"participant": participant}).json()["language_locked"]
+
+    def test_the_viewing_row_says_which_language_was_read(self, client: TestClient) -> None:
+        participant = enrol(client)
+        client.post("/api/language", json={"participant": participant, "language": "ko"})
+        client.post(
+            "/api/viewing",
+            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
+        )
+        row = client.get(f"/api/log?participant={participant}").json()["viewings"][0]
+        assert row["language"] == "ko"
+        assert all(cue["language"] == "ko" for cue in row["captions"])
+
+    def test_the_regenerated_track_is_written_in_the_language_on_screen(self, client: TestClient) -> None:
+        participant = enrol(client)
+        client.post("/api/language", json={"participant": participant, "language": "ko"})
+        client.post(
+            "/api/viewing",
+            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
+        )
+        answer(client, participant, "art")
+        client.post("/api/visual", json={"participant": participant, "points": POINTS})
+        client.post("/api/auditory", json={"participant": participant, "selected": ["traffic"], "lanes": {}})
+        body = client.post("/api/regenerate", json={"participant": participant}).json()
+        assert all(cue["language"] == "ko" for cue in body["track"])
+        events = client.get(f"/api/log?participant={participant}").json()["events"]
+        written = next(event for event in events if event["type"] == "regeneration.written")
+        assert written["language"] == "ko"
+        # The template writer works in English, so a Korean session falls back
+        # rather than showing prose in the wrong language — which is the check
+        # doing its job, not a defect.
+        assert written["fallback"] is True
+        assert "not in the language on screen" in written["fallback_reason"]
+
+
 class TestOrder:
     def test_the_whole_session_walks_forward(self, client: TestClient) -> None:
         participant = walk_to_regenerated(client)

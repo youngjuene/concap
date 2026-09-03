@@ -69,8 +69,23 @@ LEVEL = "regen"
 REGEN_PREAMBLE = (
     "You write one line of a sound caption for a ten-second street scene. "
     "The line is shown over the footage while it plays, so it is read in a "
-    "moment and never re-read. One sentence, at most {chars} characters.\n"
+    "moment and never re-read. One sentence, at most {chars} characters. "
+    "Write it in {language}, the language the viewer is reading, and in no "
+    "other.\n"
 )
+# What the preamble calls the language. A tag is what the configuration holds
+# and what validation checks; a model is told the name.
+LANGUAGE_NAMES: Mapping[str, str] = {
+    "en": "English",
+    "ko": "Korean",
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "nl": "Dutch",
+    "th": "Thai",
+}
 REGEN_FRAMING = (
     "A viewer has watched a different segment of this scene and said what they "
     "noticed. They pointed at these things in the frame: {seen}. They picked "
@@ -137,6 +152,7 @@ class Regeneration:
     writers: tuple[str, ...]
     duration_ms: int
     writer_identity: str
+    language: str = "en"
     settings: Mapping[str, Any] = field(default_factory=dict)
     report: Report = field(default_factory=lambda: Report((), ()))
 
@@ -146,7 +162,8 @@ class Regeneration:
             "prompt": "\n\n".join(self.prompts),
             "raw_output": list(self.raw),
             "writers": list(self.writers),
-            "track": [cue.record() for cue in self.cues],
+            "track": [cue.record(self.language) for cue in self.cues],
+            "language": self.language,
             "visual_labels": list(self.report.visual_labels),
             "auditory_labels": list(self.report.auditory_labels),
             "duration_ms": self.duration_ms,
@@ -158,10 +175,15 @@ class Regeneration:
 
 
 class RegenRequestBuilder:
-    """Turns a report and a slot into the request the shared writer takes."""
+    """Turns a report and a slot into the request the shared writer takes.
 
-    def __init__(self, configuration: Configuration) -> None:
+    ``language`` is the one the session is being read in, not the study's
+    first: a bilingual study generates for the participant in front of it.
+    """
+
+    def __init__(self, configuration: Configuration, language: str | None = None) -> None:
         self.configuration = configuration
+        self.language = language or configuration.calibration.language
 
     def instruction(self, request: CaptionRequest) -> str:
         """The exact system text for a request, assembled from the constants.
@@ -172,7 +194,10 @@ class RegenRequestBuilder:
         """
         heard = _listed([spec.prose for spec in request.sources], NOTHING_HEARD)
         return (
-            REGEN_PREAMBLE.format(chars=self.configuration.calibration.slot_max_chars)
+            REGEN_PREAMBLE.format(
+                chars=self.configuration.calibration.slot_max_chars,
+                language=LANGUAGE_NAMES.get(self.language.split("-")[0].lower(), self.language),
+            )
             + REGEN_FRAMING.format(seen=request.scene_prose or NOTHING_SEEN, heard=heard)
             + request.atmosphere_prose
         )
@@ -193,8 +218,16 @@ class RegenRequestBuilder:
             # settings here are the report plus the slot. Two participants who
             # reported the same thing get the same track, which is a property
             # the study wants: the caption is a function of the report.
+            # The language is in the key: the same report in two languages is
+            # two captions, and a cache that could not tell them apart would
+            # serve one participant the other's reading.
             settings_key="|".join(
-                (str(cue.index), ",".join(report.visual_labels), ",".join(report.auditory_labels))
+                (
+                    str(cue.index),
+                    self.language,
+                    ",".join(report.visual_labels),
+                    ",".join(report.auditory_labels),
+                )
             ),
             sources=report.sources(),
             heads=(),
@@ -273,18 +306,21 @@ def regenerate(
     slots: Sequence[Cue],
     fallback: Sequence[Cue],
     report: Report,
+    language: str | None = None,
     media: Path | None = None,
     settings: Mapping[str, Any] | None = None,
 ) -> Regeneration:
     """Write one track for ``slots``, or fall back and say why (§6).
 
     ``slots`` supplies the timings — in practice the segment's own prepared
-    track, whose cues are the fixed slots — and ``fallback`` is the segment's
-    default track, used whole if anything goes wrong. Both have already been
+    track, whose cues are the fixed slots — ``language`` is the one the
+    participant is reading, and ``fallback`` is the segment's default track,
+    used whole if anything goes wrong. Both have already been
     validated against the configuration by the document loader, so the fallback
     is never itself a risk.
     """
-    builder = RegenRequestBuilder(configuration)
+    reading = language or configuration.calibration.language
+    builder = RegenRequestBuilder(configuration, reading)
     ceiling = configuration.calibration.latency_ceiling_ms
     started = time.monotonic()
     prompts: list[str] = []
@@ -319,8 +355,8 @@ def regenerate(
             break
     else:
         try:
-            cues = retimed(slots, raw)
-            validate_generated(cues, configuration.calibration)
+            cues = retimed(slots, raw, reading)
+            validate_generated(cues, configuration.calibration, reading)
         except TrackError as exc:
             reason = f"the generated track failed validation: {exc}"
         else:
@@ -333,6 +369,7 @@ def regenerate(
                 writers=tuple(writers),
                 duration_ms=elapsed_ms(),
                 writer_identity=writer_identity(writer),
+                language=reading,
                 settings=dict(settings or {}),
                 report=report,
             )
@@ -346,6 +383,7 @@ def regenerate(
         writers=tuple(writers),
         duration_ms=elapsed_ms(),
         writer_identity=writer_identity(writer),
+        language=reading,
         settings=dict(settings or {}),
         report=report,
     )

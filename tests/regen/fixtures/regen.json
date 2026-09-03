@@ -19,16 +19,18 @@
       "cue_slots": 4,
       "slot_max_chars": 96,
       "slot_max_lines": 2,
-      "minimum_points": 3,
+      "minimum_points": 1,
       "latency_ceiling_ms": 20000,
-      "language": "en",
       "scale": {
         "points": 7,
         "anchors": [
           "Not at all",
           "Very much"
         ]
-      }
+      },
+      "languages": [
+        "en"
+      ]
     }
   },
   "segments": {
