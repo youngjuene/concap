@@ -29,6 +29,7 @@ from dpo.caption.writer import (
     Written,
     cut_at_sentence,
     names_excluded,
+    written_by,
 )
 
 TRAM = SourceSpec("tram", "TRAM BRAKING", "a tram braking", ("in frame", "once, briefly"))
@@ -280,6 +281,23 @@ class TestProvenance:
         assert len(cut) <= CAPTION_MAX_CHARS and cut.endswith("…")
         assert cut[:-1].strip() == cut[:-1]  # ends on a whole word
         assert cut_at_sentence("Short.", CAPTION_MAX_CHARS) == "Short."
+
+    def test_the_cache_reports_its_inner_writers_attribution_to_written_by(self, tmp_path: Path) -> None:
+        # An app holds the CachedWriter, not the writer inside it. Without an
+        # attributed method on the cache, written_by falls through to the
+        # unattributed branch and every caption an instrument logs comes from
+        # "unknown" — losing the retry path that produced it at the one seam
+        # that exists to keep it.
+        adapter = TestGemmaBudget.Drafts(TestGemmaBudget.LONG, TestGemmaBudget.SHORT)
+        cached = CachedWriter(GemmaWriter(adapter), tmp_path / "captions.json")
+        assert written_by(cached, _request("scene", media_path=tmp_path)).writer == "gemma-tightened"
+
+    def test_the_attribution_survives_the_hit_as_well_as_the_miss(self, tmp_path: Path) -> None:
+        cached = CachedWriter(TemplateWriter(), tmp_path / "captions.json")
+        request = _request("itemized", (TRAM,))
+        assert written_by(cached, request).writer == "template"
+        assert cached.write_attributed_cached(request)[1] is True
+        assert written_by(cached, request).writer == "template"
 
     def test_a_writer_that_does_not_report_is_recorded_as_unknown(self, tmp_path: Path) -> None:
         cached = CachedWriter(CountingWriter(), tmp_path / "captions.json")

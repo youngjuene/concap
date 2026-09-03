@@ -640,8 +640,7 @@ class CachedWriter:
         found = self.entries.get(self.key_for(request))
         return None if found is None else found.caption
 
-    def write_attributed_cached(self, request: CaptionRequest) -> tuple[Written, bool]:
-        """(the caption with its provenance, whether it came from the cache)."""
+    def _attributed(self, request: CaptionRequest) -> tuple[Written, bool]:
         key = self.key_for(request)
         digest = prompt_digest(self.inner, request)
         with self._lock:
@@ -667,9 +666,25 @@ class CachedWriter:
             replace_atomically(self.cache_path, payload)
         return written, False
 
+    def write_attributed_cached(self, request: CaptionRequest) -> tuple[Written, bool]:
+        """(the caption with its provenance, whether it came from the cache)."""
+        return self._attributed(request)
+
+    def write_attributed(self, request: CaptionRequest) -> Written:
+        """The caption with its provenance, for a caller that does not ask about the cache.
+
+        Present so :func:`written_by` reads a cached writer's attribution
+        rather than falling through to ``unknown``: a caller that holds the
+        ``CachedWriter`` — which is what an app builds — would otherwise
+        record every caption as coming from nobody, and the retry path that
+        produced it (``gemma-tightened``, ``template-fallback``) would be lost
+        at exactly the seam that exists to preserve it.
+        """
+        return self._attributed(request)[0]
+
     def write_cached(self, request: CaptionRequest) -> tuple[str, bool]:
         """(caption, whether it came from the cache)."""
-        written, hit = self.write_attributed_cached(request)
+        written, hit = self._attributed(request)
         return written.caption, hit
 
     def write(self, request: CaptionRequest) -> str:
