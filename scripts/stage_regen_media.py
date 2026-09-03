@@ -74,9 +74,12 @@ LOUDNESS_TARGET = -23.0  # LUFS, EBU R128
 # is an object a point can hit.
 MASK_INSIDE = 127
 SEGMENTS = ("A", "B")
-# The conditions whose stimuli carried sound. c3 and c4 have no audio stream at
-# all, so their clips cannot be reported on by ear and are not candidates.
-AUDIO_CONDITIONS = ("c1_video_audio", "c2_video_audio_caption")
+# The condition that showed video, sound and a caption together — the one whose
+# stimulus the regeneration instrument's §2 reproduces. c3 and c4 carry no audio
+# stream at all, and c1 carried sound without a caption, so neither is a clip a
+# participant has ever seen captioned. Widen it with --conditions if a study
+# decides otherwise; the default is the twelve that match §2 as specified.
+STIMULUS_CONDITIONS = ("c2_video_audio_caption",)
 
 
 class StagingError(RuntimeError):
@@ -115,9 +118,11 @@ def read_clips(tidy: Path) -> dict[str, dict[str, str]]:
     return rows
 
 
-def audio_clips(clips: Mapping[str, Mapping[str, str]]) -> list[str]:
-    """The clips a participant could have heard, in id order."""
-    return sorted(clip for clip, row in clips.items() if row["condition"] in AUDIO_CONDITIONS)
+def stimulus_clips(
+    clips: Mapping[str, Mapping[str, str]], conditions: Sequence[str] = STIMULUS_CONDITIONS
+) -> list[str]:
+    """The clips shown under the named conditions, in id order."""
+    return sorted(clip for clip, row in clips.items() if row["condition"] in conditions)
 
 
 def read_ontology(path: Path) -> tuple[dict[str, str], dict[str, set[str]]]:
@@ -406,7 +411,7 @@ def _pool(
     sources: Mapping[str, list[dict[str, Any]]],
     budget: int,
 ) -> None:
-    print(f"{len(sources)} clips carried sound in the earlier study (conditions c1 and c2).")
+    print(f"{len(sources)} clips were shown with video, sound and a caption together.")
     print(f"`chars` is the prepared caption against the {budget}-character slot budget.\n")
     print(f"{'clip':<16}{'sources':<8}{'chars':<7}{'families':<34}caption")
     over = []
@@ -463,6 +468,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tidy", type=Path, default=AVMASK / "data" / "tidy_data.csv")
     parser.add_argument("--palette", type=Path, default=AVMASK / "data" / "palette.json")
     parser.add_argument("--ontology", type=Path, default=AVMASK / "data" / "ontology.json")
+    parser.add_argument(
+        "--conditions",
+        nargs="+",
+        default=list(STIMULUS_CONDITIONS),
+        help="the condition directories to draw candidates from (default: the captioned audio one)",
+    )
     parser.add_argument("--pool", action="store_true", help="list the candidate clips and stop")
     parser.add_argument("--segments", nargs=2, metavar=("A", "B"), help="the two clip ids to stage")
     parser.add_argument("--out", type=Path, help="media directory to stage into")
@@ -484,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         clips = read_clips(arguments.tidy)
         palette = json.loads(arguments.palette.read_text(encoding="utf-8"))["audio"]
         ids, descendants = read_ontology(arguments.ontology)
-        candidates = audio_clips(clips)
+        candidates = stimulus_clips(clips, arguments.conditions)
         sources = {clip: sources_of(clip, clips[clip], palette, ids, descendants) for clip in candidates}
 
         budget = Calibration().slot_max_chars
