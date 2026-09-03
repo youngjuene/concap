@@ -9,6 +9,7 @@ the shared completion-only log-probability implementation.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -112,6 +113,12 @@ class GemmaCaptionAdapter:
         self.adapter_dir = adapter_dir
         self._model: Any = None
         self._processor: Any = None
+        # The instruments serve captions from a threadpool and warm others on a
+        # background thread, so two threads reach the load at once — the kiosk's
+        # start-up probe and the audition sweep do exactly that over a warm
+        # cache. Both would see no model and both would load one: 15 GiB each,
+        # on a card that holds one.
+        self._loading = threading.Lock()
 
     @property
     def track(self) -> str:
@@ -144,15 +151,22 @@ class GemmaCaptionAdapter:
             )
         from dpo.models.gemma4.modeling import load_base_model, load_processor
 
-        self._processor = load_processor(self.config)
-        model = load_base_model(self.config)
-        if self.adapter_dir is not None:
-            from peft import PeftModel
+        with self._loading:
+            # Checked again inside the lock: whoever held it may have finished
+            # the load while this thread waited, and a second one would not fit.
+            if self._model is not None and self._processor is not None:
+                return self._model, self._processor
+            processor = load_processor(self.config)
+            model = load_base_model(self.config)
+            if self.adapter_dir is not None:
+                from peft import PeftModel
 
-            model = PeftModel.from_pretrained(
-                model, self.adapter_dir, adapter_name="default", is_trainable=True
-            )
-        self._model = model
+                model = PeftModel.from_pretrained(
+                    model, self.adapter_dir, adapter_name="default", is_trainable=True
+                )
+            # Published together and last, so no thread can see a processor
+            # with no model and take it for a finished load.
+            self._processor, self._model = processor, model
         return self._model, self._processor
 
     def _messages(self, clip_id: str) -> list[dict[str, Any]]:
