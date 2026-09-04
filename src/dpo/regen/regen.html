@@ -132,7 +132,10 @@
           <p class="lede" id="waiting-stay"></p>
         </div>
         <p class="status" id="waiting-status" role="status" aria-live="polite"></p>
-        <div class="bar" aria-hidden="true"><i></i></div>
+        <!-- One cell per cue in the track. The cell being written carries the
+             motion; the bar has no resolution finer than a cue, which is the
+             finest thing §6 can honestly report. -->
+        <div class="bar" id="waiting-bar" aria-hidden="true"></div>
         <div class="clocks">
           <span class="elapsed" id="waiting-elapsed"></span>
           <span class="ceiling" id="waiting-ceiling"></span>

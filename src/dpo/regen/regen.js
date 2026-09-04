@@ -33,6 +33,7 @@ const state = {
   scale: null,
   minimumPoints: 3,
   ceilingMs: 20000,
+  cueSlots: 4,
   steps: [],
   entered: null,
   points: [],
@@ -1175,15 +1176,59 @@ async function renderWaiting() {
   tick();
   const ticking = window.setInterval(tick, 1000);
 
+  /* One cell per cue in the track, drawn from the slot count the study is
+     calibrated to (§9.4) so the bar does not grow as it goes. The cell being
+     written is the one that moves. */
+  const bar = clear($("waiting-bar"));
+  const cells = [];
+  for (let slot = 0; slot < state.cueSlots; slot += 1) {
+    const cell = document.createElement("i");
+    bar.append(cell);
+    cells.push(cell);
+  }
+
+  let seen = -1;
+  const paintSlots = (done, total) => {
+    if (done === seen) return;
+    seen = done;
+    cells.forEach((cell, index) => {
+      cell.classList.toggle("done", index < done);
+      cell.classList.toggle("at", index === done && done < total);
+    });
+    if (done > 0) $("waiting-status").textContent = fill(copy.status_at, { done, total });
+    note("regeneration.slot", { done, total });
+  };
+  paintSlots(0, state.cueSlots);
+
+  /* Polled rather than pushed. /api/regenerate is one blocking call — it is
+     the model — and it is a sync route, so it runs in the threadpool and this
+     GET is answered while it is still in flight. Best-effort like the event
+     stream: a poll that fails leaves the bar where it was, because a progress
+     display may not be the thing that ends a session. */
+  const poll = async () => {
+    try {
+      const response = await fetch(`/api/regenerate/progress?participant=${state.participant}`);
+      if (!response.ok) return;
+      const at = await response.json();
+      if (at.writing) paintSlots(at.done, at.total);
+    } catch {
+      /* the next poll will do */
+    }
+  };
+  const polling = window.setInterval(poll, 700);
+  poll();
+
   try {
     const result = await api("/api/regenerate", { participant: state.participant });
     if (!result) return;
     note("regeneration.finished", { fallback: result.fallback, cached: result.cached });
+    paintSlots(state.cueSlots, state.cueSlots);
     $("waiting-status").textContent = copy.status_done;
     const next = await api(`/api/state?participant=${state.participant}`);
     if (next) render(next.step);
   } finally {
     window.clearInterval(ticking);
+    window.clearInterval(polling);
   }
 }
 
@@ -1235,6 +1280,7 @@ async function boot() {
     state.scale = meta.scale;
     state.minimumPoints = meta.minimum_points;
     state.ceilingMs = meta.latency_ceiling_ms || state.ceilingMs;
+    state.cueSlots = meta.cue_slots || state.cueSlots;
     state.steps = meta.steps;
     state.languages = meta.languages || [];
     document.title = state.strings.app_title;

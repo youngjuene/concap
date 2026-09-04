@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -542,3 +543,81 @@ class TestSurface:
         participant = enrol(client)
         served = client.get(f"/api/step/auditory?participant={participant}")
         assert "mask" not in json.dumps(served.json())
+
+
+class TestRegenerationProgress:
+    """§6 reports cues written, for the screen waiting on it and the console."""
+
+    def test_it_reads_as_idle_with_the_studys_slot_count_before_anything_runs(
+        self, client: TestClient
+    ) -> None:
+        participant = enrol(client)
+        body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
+        # The count is there even when nothing is running, so the waiting screen
+        # can draw a bar of the right width rather than growing one.
+        assert body == {"writing": False, "done": 0, "total": 4}
+
+    def test_it_reads_as_idle_again_once_the_track_is_written(self, client: TestClient) -> None:
+        participant = walk_to_regenerated(client)
+        body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
+        assert body["writing"] is False
+
+    def test_a_malformed_participant_is_refused_like_its_neighbours(self, client: TestClient) -> None:
+        assert client.get("/api/regenerate/progress").status_code == 400
+
+    def test_it_reports_the_cues_written_while_the_model_is_still_in_the_call(
+        self, document: dict[str, Any], media_dir: Path, tmp_path: Path
+    ) -> None:
+        """The point of the route: answered while /api/regenerate is in flight.
+
+        `/api/regenerate` is one blocking call and a sync route, so it runs in
+        the threadpool and this GET is served beside it. A writer that stops
+        inside its second slot puts the run in a known place — one cue written
+        — and the route has to say so while the second is still decoding.
+        """
+        inside_second = threading.Event()
+        release = threading.Event()
+
+        class Blocks:
+            identity = "blocks"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def write(self, request: Any) -> str:
+                self.calls += 1
+                if self.calls == 2:
+                    inside_second.set()
+                    release.wait(10)
+                return "A car passes."
+
+        app = build_app(document, media_dir, tmp_path / "out", Blocks(), items=load_items())
+        walker, watcher = TestClient(app), TestClient(app)
+        participant = enrol(walker)
+        walker.post(
+            "/api/viewing",
+            json={
+                "participant": participant,
+                "step": "view_prepared",
+                "started_at": "t0",
+                "ended_at": "t1",
+            },
+        )
+        answer(walker, participant, "art")
+        walker.post("/api/visual", json={"participant": participant, "points": POINTS})
+        walker.post("/api/auditory", json={"participant": participant, "selected": ["traffic"], "lanes": {}})
+
+        writing = threading.Thread(
+            target=lambda: walker.post("/api/regenerate", json={"participant": participant})
+        )
+        writing.start()
+        try:
+            assert inside_second.wait(10), "the writer never reached its second slot"
+            body = watcher.get("/api/regenerate/progress", params={"participant": participant}).json()
+        finally:
+            release.set()
+            writing.join(20)
+        assert body == {"writing": True, "done": 1, "total": 4}
+        # And nothing is left in flight for a screen to keep reading.
+        after = watcher.get("/api/regenerate/progress", params={"participant": participant}).json()
+        assert after["writing"] is False

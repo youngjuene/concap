@@ -24,6 +24,15 @@ mid-decode, so the ceiling is enforced at the only points where stopping is
 clean. A run that trips it has still spent one slot's time past the ceiling,
 and the recorded duration says so rather than reporting the ceiling.
 
+*A slot is the finest honest unit of progress.* ``on_slot`` reports completed
+slots and nothing else, because nothing else here is countable. A decode gives
+no usable fraction of itself: ``max_new_tokens`` is a cap rather than a target,
+so a token counter runs to some arbitrary point and jumps, and one slot can be
+two model calls anyway — the shared writer retries a caption that came back too
+long, and the retry is what ``gemma-tightened`` in the record means. Slots are
+also the granularity the ceiling is already reasoned at, so a progress report
+and a timeout can never disagree about where the run had got to.
+
 *What is recorded is the whole thing.* The assembled prompt for every slot, the
 writer's returned string for every slot before this module strips or validates
 it, the final track, both label sets, the duration, the fallback flag, and the
@@ -38,8 +47,9 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 
 from __future__ import annotations
 
+import contextlib
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -315,6 +325,7 @@ def regenerate(
     language: str | None = None,
     media: Path | None = None,
     settings: Mapping[str, Any] | None = None,
+    on_slot: Callable[[int, int], None] | None = None,
 ) -> Regeneration:
     """Write one track for ``slots``, or fall back and say why (§6).
 
@@ -324,6 +335,11 @@ def regenerate(
     used whole if anything goes wrong. Both have already been
     validated against the configuration by the document loader, so the fallback
     is never itself a risk.
+
+    ``on_slot`` is called with the number of slots written and the number
+    there are, once before the first and once after each one lands. It is an
+    observer: it is called inside a try, because nothing a progress display
+    does may decide whether a participant gets a caption track.
     """
     reading = language or configuration.calibration.language
     builder = RegenRequestBuilder(configuration, reading)
@@ -337,7 +353,14 @@ def regenerate(
     def elapsed_ms() -> int:
         return int((time.monotonic() - started) * 1000)
 
-    for cue in slots:
+    def announce(done: int) -> None:
+        if on_slot is None:
+            return
+        with contextlib.suppress(Exception):  # an observer may not decide the run
+            on_slot(done, len(slots))
+
+    announce(0)
+    for position, cue in enumerate(slots):
         request = builder.request(clip_id, cue, len(slots), report, media)
         prompts.append(builder.instruction(request))
         try:
@@ -356,6 +379,9 @@ def regenerate(
             break
         raw.append(written.caption)
         writers.append(written.writer)
+        # After the slot lands and before the ceiling is read, so a run that
+        # trips the ceiling still reports the slot it finished paying for.
+        announce(position + 1)
         if elapsed_ms() > ceiling:
             reason = f"the latency ceiling of {ceiling}ms was exceeded after slot {cue.index}"
             break

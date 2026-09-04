@@ -488,8 +488,30 @@ p.lede {
 
 /* §6 — the wait. A progress indicator that does not claim to know how long. */
 .waiting { max-width: 60ch; padding: 44px 0 0; }
-.waiting .bar { height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; margin: 26px 0 12px; }
-.waiting .bar i { display: block; height: 100%; width: 34%; border-radius: 4px; background: var(--accent); animation: slide 1.4s infinite; }
+/* One cell per cue in the track. §6's bar is indeterminate about *time* — the
+   comment in regen.html says why, and nothing on this page can predict a
+   decode — but a cue that has been written is an event that happened, and a
+   bar with no resolution finer than a cue cannot pretend to know a fraction of
+   one. The cell being written carries the motion, which is what the old
+   single sliding bar was for: proof that the page is alive. */
+.waiting .bar { display: flex; gap: 4px; height: 8px; margin: 26px 0 12px; }
+.waiting .bar i {
+  position: relative;
+  flex: 1;
+  border-radius: 4px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.waiting .bar i.done { background: var(--accent); }
+.waiting .bar i.at::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 4px;
+  background: var(--accent);
+  animation: slide 1.2s infinite;
+}
 .waiting .clocks { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 .waiting .clocks span { font: 12.5px/1.4 var(--mono); }
 .waiting .elapsed { color: var(--ink); }
@@ -510,7 +532,7 @@ p.lede {
    just said that leaving ends the session. The bar becomes a dashed track that
    never claims a position, and the elapsed count carries the proof of life. */
 @media (prefers-reduced-motion: reduce) {
-  .waiting .bar i {
+  .waiting .bar i.at::after {
     animation: none;
     width: 100%;
     background: repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 9px);

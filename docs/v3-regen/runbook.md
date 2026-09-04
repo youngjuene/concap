@@ -138,6 +138,22 @@ CUDA_VISIBLE_DEVICES=1 uv run dpo regen serve … \
 `--writer gemma` is held to the same backend pin as the pipeline and refuses a
 config the contract does not pin, on any machine, before it touches CUDA.
 
+While §6 runs, the console draws a bar over the cues in the track — the same
+report the participant's waiting screen is polling, so the two cannot disagree
+about where the model has got to. It is drawn only when a terminal is watching:
+redirect the console to a file and you get the JSON lines and no control codes.
+
+**Check the first regeneration of a session actually came from the model.**
+`--writer gemma` hands the clip to an audio model that decodes it through
+transformers, and a build without `torchcodec` installed cannot read audio out
+of an `.mp4` or `.webm` — every slot fails, every viewing is a fallback, and
+nothing on the participant's screen says so. It is loud in the log:
+`fallback: true` with a `fallback_reason` naming the container. Install
+`torchcodec>=0.3.0` in that environment, or stage the audio beside the clip in
+a container `soundfile` reads. One pilot run and a look at
+`regeneration.written` settles it before a study spends sessions on template
+captions.
+
 Launch the participant's browser with
 `--autoplay-policy=no-user-gesture-required`; the viewing screens go fullscreen
 on a click, but the clip must start without a second gesture.

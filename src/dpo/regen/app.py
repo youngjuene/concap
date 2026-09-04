@@ -31,7 +31,7 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
@@ -111,8 +111,15 @@ def build_app(
     writer: CaptionWriter,
     *,
     items: ItemSet | None = None,
+    watch: Callable[[str, int, int], None] | None = None,
 ) -> FastAPI:
-    """The app over one validated document."""
+    """The app over one validated document.
+
+    ``watch`` is told ``(participant, slots written, slots in the track)`` as
+    §6 runs, for whatever the operator is looking at — the CLI hands it a
+    terminal bar. It is the same report the waiting screen polls for, so the
+    console and the participant cannot disagree about where the model is.
+    """
     validate_regen_document(document)
     configuration = configuration_of(document)
     item_set = items if items is not None else load_items()
@@ -123,6 +130,11 @@ def build_app(
     log = EventLog(out_dir, configuration.hash)
     roster = Roster(out_dir)
     cached = writer if isinstance(writer, CachedWriter) else CachedWriter(writer, out_dir / CACHE_FILE)
+    # How far §6 has got, per participant, while it is running. In memory and
+    # per process on purpose: this is an observation of a call in flight, not
+    # a measure, and a restart that loses it loses nothing an analysis wanted.
+    # Everything §6 actually records goes into the log with the regeneration.
+    writing: dict[str, dict[str, int]] = {}
 
     def _assignment(participant: str) -> Assignment | JSONResponse:
         sequence = roster.sequence_of(participant)
@@ -187,6 +199,9 @@ def build_app(
             # the participant is told about is a different wait from one they
             # are not.
             "latency_ceiling_ms": configuration.calibration.latency_ceiling_ms,
+            # §9.4's slot count, so §6 can draw one cell per cue before its
+            # first progress report arrives rather than growing a bar.
+            "cue_slots": configuration.cue_slots,
             "steps": list(progress.PARTICIPANT_STEPS),
             "languages": list(configuration.languages),
         }
@@ -527,17 +542,30 @@ def build_app(
         )
         reading = _language(person)
         video = _media(str(segment_of(document, segment)["video"]))
-        result = regenerate(
-            cached,
-            configuration,
-            clip_id=str(segment_of(document, segment)["clip_id"]),
-            slots=_slots(segment),
-            fallback=track_of(document, segment, "fallback_track"),
-            report=report,
-            language=reading,
-            media=video if isinstance(video, Path) else None,
-            settings={"segment": segment, "config_hash": configuration.hash, "language": reading},
-        )
+
+        def _wrote(done: int, total: int, *, person: str = person) -> None:
+            writing[person] = {"done": done, "total": total}
+            if watch is not None:
+                watch(person, done, total)
+
+        try:
+            result = regenerate(
+                cached,
+                configuration,
+                clip_id=str(segment_of(document, segment)["clip_id"]),
+                slots=_slots(segment),
+                fallback=track_of(document, segment, "fallback_track"),
+                report=report,
+                language=reading,
+                media=video if isinstance(video, Path) else None,
+                settings={"segment": segment, "config_hash": configuration.hash, "language": reading},
+                on_slot=_wrote,
+            )
+        finally:
+            # Whether it finished, fell back or raised: nothing is in flight
+            # for this participant now, and a stale count on the waiting screen
+            # would outlive the thing it was counting.
+            writing.pop(person, None)
         # Stored under the document's own shape — text keyed by language — so
         # reading it back needs nothing but the track itself.
         track = [
@@ -554,6 +582,30 @@ def build_app(
             "track": record_of(result.cues, reading),
             "fallback": result.fallback,
             "cached": False,
+        }
+
+    @app.get("/api/regenerate/progress")
+    def regenerate_progress(participant: str | None = None) -> Any:
+        """How far §6 has got. Read by the screen that is waiting on it (§6).
+
+        Slots written out of slots in the track, and nothing else. The waiting
+        screen is deliberately indeterminate about *time* — nothing here can
+        predict the model — but a cue that has been written is an event that
+        happened, and a screen that can say four of them are coming and two
+        have arrived is not predicting anything.
+
+        Best-effort, like the event stream: a participant whose regeneration
+        has not started yet, or has just finished, reads as not writing, and
+        the page falls back to what it already shows.
+        """
+        person = _participant(participant)
+        if isinstance(person, JSONResponse):
+            return person
+        at = writing.get(person)
+        return {
+            "writing": at is not None,
+            "done": at["done"] if at else 0,
+            "total": at["total"] if at else configuration.cue_slots,
         }
 
     @app.post("/api/events")
@@ -657,7 +709,8 @@ def run_regen_app(
     items: ItemSet | None = None,
     host: str = "127.0.0.1",
     port: int = 8779,
+    watch: Callable[[str, int, int], None] | None = None,
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
-    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items)
+    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch)
     uvicorn.run(app, host=host, port=port, log_level="warning")

@@ -152,6 +152,10 @@ STRINGS: dict[str, Any] = {
         # to interrupt every second is a region a second behind — and announcing
         # every tick is not a thing to do to a screen reader anyway.
         "status": "Still writing. This screen moves on by itself when the captions are ready.",
+        # A cue that has been written is an event that happened, so saying how
+        # many have arrived predicts nothing. Four announcements across the
+        # wait is a live region worth having; a per-second one is not.
+        "status_at": "{done} of {total} captions written.",
         "status_done": "The captions are ready. Going on to the next clip.",
         "ahead_heading": "Two steps left after this",
         "ahead_body": "You will watch the clip once more with its new captions, then answer the "

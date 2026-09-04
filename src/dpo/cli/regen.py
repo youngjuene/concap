@@ -13,6 +13,13 @@ deliberate. The prepared caption track is the study's stimulus and no tool can
 write it; a scaffold that passed validation would let an unauthored document —
 one whose captions are empty strings — reach a participant.
 
+``serve`` draws a bar over §6 while the model writes. A regeneration is the
+one thing this process does that takes long enough for an operator to wonder
+whether it has hung, and on the Gemma writer it is a GPU decode per cue with
+nothing on the console until it returns. The bar counts cues, which is what
+§6 counts; it is the same report the participant's waiting screen polls, so the
+console and the screen cannot disagree about where the model has got to.
+
 ``serve`` says which item set it loaded before it binds a port. The default set
 shipped in :mod:`dpo.regen.items` is placeholder wording, and a pilot run on it
 is a legitimate thing to do; a study run on it by accident is not, so the
@@ -25,6 +32,8 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+
+from tqdm import tqdm
 
 from dpo.caption.writer import CacheMismatch, CaptionWriter
 from dpo.cli._shared import _emit
@@ -218,6 +227,38 @@ def _regen_validate(arguments: argparse.Namespace) -> int:
     return 0
 
 
+class _SlotBar:
+    """§6's progress on the operator's console, one bar per regeneration.
+
+    ``regenerate`` reports zero written before it starts, so that is where a
+    bar opens. It closes on the last slot, and defensively when a report
+    arrives for a different participant — a run that fell back part-way never
+    reaches its total, and a bar left open would sit under the next one.
+
+    ``disable=None`` is tqdm's own "only when a human is watching": an operator
+    redirecting the console to a file gets the JSON lines and no control codes.
+    """
+
+    def __init__(self) -> None:
+        self._bar: tqdm[Any] | None = None
+        self._participant: str | None = None
+
+    def __call__(self, participant: str, done: int, total: int) -> None:
+        if self._bar is None or done == 0 or participant != self._participant:
+            self.close()
+            self._participant = participant
+            self._bar = tqdm(total=total, desc=f"§6 {participant}", unit="cue", disable=None, leave=True)
+        self._bar.n = min(done, total)
+        self._bar.refresh()
+        if done >= total:
+            self.close()
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
+
+
 def _gemma_writer(arguments: argparse.Namespace, document: dict[str, Any]) -> CaptionWriter | None:
     """The participant-facing model writer, held to the pipeline's own pin.
 
@@ -318,6 +359,7 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
             items=items,
             host=arguments.host,
             port=int(arguments.port),
+            watch=_SlotBar(),
         )
     except CacheMismatch as exc:
         _emit({"status": "error", "command": "regen serve", "error": str(exc)})

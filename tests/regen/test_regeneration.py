@@ -196,3 +196,84 @@ class TestRecord:
         assert record["fallback"] is True
         assert record["fallback_reason"]
         assert record["raw_output"] == ["   "] * 4
+
+
+class FailsOnThird:
+    """Writes two slots and then gives up, the shape a fallback takes mid-run."""
+
+    identity = "fails-on-third"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def write(self, request: CaptionRequest) -> str:
+        self.calls += 1
+        if self.calls > 2:
+            raise WriterError("the model went away")
+        return "A car passes."
+
+
+class TestSlotProgress:
+    """§6 reports completed slots, because nothing finer than a slot is countable."""
+
+    def test_it_reports_none_written_before_it_starts(self) -> None:
+        seen: list[tuple[int, int]] = []
+        regenerate(
+            RegenTemplateWriter(),
+            _configuration(),
+            clip_id="amsterdam_012",
+            slots=SLOTS,
+            fallback=FALLBACK,
+            report=REPORT,
+            on_slot=lambda done, total: seen.append((done, total)),
+        )
+        # The first report is what lets a waiting screen draw an empty bar of
+        # the right width rather than growing one as the model goes.
+        assert seen[0] == (0, 4)
+        assert seen == [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]
+
+    def test_a_run_that_falls_back_reports_only_the_slots_it_wrote(self) -> None:
+        seen: list[tuple[int, int]] = []
+        result = regenerate(
+            FailsOnThird(),
+            _configuration(),
+            clip_id="amsterdam_012",
+            slots=SLOTS,
+            fallback=FALLBACK,
+            report=REPORT,
+            on_slot=lambda done, total: seen.append((done, total)),
+        )
+        assert result.fallback is True
+        assert seen == [(0, 4), (1, 4), (2, 4)]
+
+    def test_a_run_that_trips_the_ceiling_still_reports_the_slot_it_paid_for(self) -> None:
+        seen: list[tuple[int, int]] = []
+        result = regenerate(
+            Slow(),
+            _configuration(latency_ceiling_ms=1),
+            clip_id="amsterdam_012",
+            slots=SLOTS,
+            fallback=FALLBACK,
+            report=REPORT,
+            on_slot=lambda done, total: seen.append((done, total)),
+        )
+        assert result.fallback is True
+        assert seen == [(0, 4), (1, 4)]
+
+    def test_a_sink_that_raises_does_not_cost_the_participant_a_track(self) -> None:
+        def hostile(done: int, total: int) -> None:
+            raise RuntimeError("the terminal went away")
+
+        result = regenerate(
+            RegenTemplateWriter(),
+            _configuration(),
+            clip_id="amsterdam_012",
+            slots=SLOTS,
+            fallback=FALLBACK,
+            report=REPORT,
+            on_slot=hostile,
+        )
+        # A progress display is an observer. Nothing it does may decide whether
+        # a participant gets a caption track.
+        assert result.fallback is False
+        assert len(result.cues) == 4
