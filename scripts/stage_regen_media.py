@@ -239,16 +239,29 @@ def sources_of(
 # ---- staging ----------------------------------------------------------------
 
 
-def stage_clip(source: Path, target: Path) -> None:
-    """Copy the clip to one loudness, leaving the picture untouched.
+def loudnorm_filter(source: Path, *, downmix: bool = False) -> str:
+    """The corrected ``loudnorm`` filter for one file, measured first.
 
     Two passes: ``loudnorm`` measures, then corrects. One pass would gate on a
     running estimate and land somewhere near the target rather than on it, and
     "near" is the thing §10 is trying to remove.
+
+    ``downmix`` measures what the mono file will actually be rather than what
+    the stereo one is. EBU R128 sums a stereo pair's channels, so the mono
+    average of a corrected clip does not land where the clip did — and by how
+    much depends on how correlated that clip's channels happen to be. Measured
+    across these twelve it ran between −3.2 and −4.5 dB, which turned a pool
+    matched to 1.3 dB into model inputs spread over 2.2. The whole reason this
+    script normalises at all is that a level difference between the two
+    segments sits inside every answer the study collects; a difference between
+    what the participant hears and what §6 listens to is the same fault one
+    step further back.
     """
-    if target.exists():
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # The downmix goes inside the filtergraph, not on the output. `-ac 1` is
+    # applied after `-af`, so measuring and correcting with it set describes
+    # the stereo signal and then quietly halves it afterwards — which is the
+    # bug this argument exists to fix, arrived at a second time.
+    lead = "aformat=channel_layouts=mono," if downmix else ""
     measured = subprocess.run(
         [
             "ffmpeg",
@@ -257,7 +270,7 @@ def stage_clip(source: Path, target: Path) -> None:
             "-i",
             str(source),
             "-af",
-            f"loudnorm=I={LOUDNESS_TARGET}:TP=-1.5:LRA=11:print_format=json",
+            f"{lead}loudnorm=I={LOUDNESS_TARGET}:TP=-1.5:LRA=11:print_format=json",
             "-f",
             "null",
             "-",
@@ -268,12 +281,20 @@ def stage_clip(source: Path, target: Path) -> None:
     if measured.returncode != 0:
         raise StagingError(f"{source}: loudness measurement failed:\n{measured.stderr.strip()[:600]}")
     report = json.loads(measured.stderr[measured.stderr.rindex("{") : measured.stderr.rindex("}") + 1])
-    corrected = (
-        f"loudnorm=I={LOUDNESS_TARGET}:TP=-1.5:LRA=11"
+    return (
+        f"{lead}loudnorm=I={LOUDNESS_TARGET}:TP=-1.5:LRA=11"
         f":measured_I={report['input_i']}:measured_TP={report['input_tp']}"
         f":measured_LRA={report['input_lra']}:measured_thresh={report['input_thresh']}"
         f":offset={report['target_offset']}:linear=true"
     )
+
+
+def stage_clip(source: Path, target: Path) -> None:
+    """Copy the clip to one loudness, leaving the picture untouched."""
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    corrected = loudnorm_filter(source)
     _run(
         [
             "ffmpeg",
@@ -332,16 +353,17 @@ def frame_count(path: Path) -> int:
 
 
 def stage_audio(clip: Path, target: Path) -> None:
-    """The clip's sound as a mono wav, for §6's model to read.
+    """The clip's sound as a mono wav at the target loudness, for §6 to read.
 
-    Taken from the staged clip rather than the source, so it carries the same
-    loudness correction the participant hears; the two viewings are matched on
-    loudness and a model listening to the uncorrected mix would be listening to
-    a different clip from the one being rated.
+    Taken from the staged clip rather than the source, so it is the sound the
+    participant hears and not the uncorrected mix — and corrected again for the
+    downmix, because mono of a matched stereo pool is not itself matched. See
+    :func:`loudnorm_filter`.
     """
     if target.exists():
         return
     target.parent.mkdir(parents=True, exist_ok=True)
+    corrected = loudnorm_filter(clip, downmix=True)
     _run(
         [
             "ffmpeg",
@@ -352,10 +374,10 @@ def stage_audio(clip: Path, target: Path) -> None:
             "-i",
             str(clip),
             "-vn",
-            "-ac",
-            "1",
             "-ar",
             str(AUDIO_RATE),
+            "-af",
+            corrected,
             "-c:a",
             "pcm_s16le",
             str(target),
