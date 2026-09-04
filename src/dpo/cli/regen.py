@@ -50,6 +50,8 @@ from dpo.regen.items import ItemsError, load_items
 # Where ``scaffold`` looks under --media-dir. One directory per segment, named
 # for the segment, so a document's references are readable as paths.
 VIDEO = "clip.mp4"
+# §6 reads the clip's sound from here rather than out of the container.
+AUDIO = "audio.wav"
 FRAMES = "frames"
 MASKS = "masks"
 STEMS = "stems"
@@ -126,6 +128,7 @@ def _segment(
         "segment": segment,
         "clip_id": clip_id,
         "video": str(base / VIDEO),
+        "audio": str(base / AUDIO),
         "duration_ms": duration_ms,
         "frames": strip,
         # Waveform, colour and gain cannot be derived from a file listing:

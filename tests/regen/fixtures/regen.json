@@ -1,5 +1,5 @@
 {
-  "schema": "dpo.caption-regen/v2",
+  "schema": "dpo.caption-regen/v3",
   "session_id": "regen-demo",
   "config": {
     "schema": "dpo.caption-regen-config/v1",
@@ -38,6 +38,7 @@
       "segment": "A",
       "clip_id": "demo_a",
       "video": "A/clip.mp4",
+      "audio": "A/audio.wav",
       "duration_ms": 10000,
       "frames": [
         {
@@ -641,6 +642,7 @@
       "segment": "B",
       "clip_id": "demo_b",
       "video": "B/clip.mp4",
+      "audio": "B/audio.wav",
       "duration_ms": 10000,
       "frames": [
         {

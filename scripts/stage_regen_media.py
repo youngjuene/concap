@@ -4,12 +4,30 @@ The regeneration instrument's §10 asks for six things per segment. This turns
 what the corpus already holds into five of them, from three inputs and nothing
 else:
 
-``--videos``   the uncaptioned 10 s pool (``avmask/data/videos_10s``)
-``--masks``    the Sa2VA run's mask tree (``runs/60fps-windowed/masks``)
-``--tidy``     the response table (``avmask/data/tidy_data.csv``)
+``--videos``   the uncaptioned 10 s pool (``data/corpus/videos``)
+``--tidy``     the response table (``data/corpus/tidy_data.csv``)
+``--masks``    the Sa2VA run's mask tree
+
+The first two live in the project. They were read across the disk from the
+Sa2VA working tree until a staging run depended on a directory nobody had
+copied, so the clips and the table a study is actually run on now sit under
+``data/corpus/`` and the defaults point there. ``/data/`` is gitignored, so
+this costs the repository nothing and gains it a corpus that travels with the
+checkout. The mask tree is the exception and stays external: it is 1.7 GB of
+per-frame PNGs, it belongs to the Sa2VA run rather than to this study, and
+``--masks`` names it. Copy it in too if a machine needs to stage offline.
 
 Four decisions are worth stating, because each one is a place a staging script
 could quietly change what the study measures.
+
+*The model is given a wav, not the clip.* §6 conditions the regenerated
+captions on the segment's sound, and the audio stack a caption model brings
+with it reads wav and little else — an mp4 needs ``torchcodec``, whose
+published wheels all link against a symbol this project's torch does not
+export. A container the model cannot open is not an error worth showing a
+participant; it is four failed slots and a fallback track. So the sound is
+extracted once, here, from the clip *after* loudness correction, and the model
+hears what the participant hears.
 
 *The clip is the uncaptioned source, not a condition deliverable.* The
 ``c2_video_audio_caption`` files carry a burnt-in Korean caption. The
@@ -68,6 +86,12 @@ from dpo.regen.config import Calibration, Configuration
 from dpo.regen.document import REGEN_SCHEMA, slug
 
 AVMASK = Path("/mnt/hdd/research/2026/Sa2VA/avmask")
+# The clips and the response table, in the project. scripts/ sits beside src/,
+# so the root is one hop up whatever the working directory is.
+CORPUS = Path(__file__).resolve().parents[1] / "data" / "corpus"
+# Mono at the rate the caption model's feature extractor wants, so nothing
+# downstream resamples a clip nobody meant to resample.
+AUDIO_RATE = 16000
 # The Korean each c2 clip carried, transcribed by eye from the burnt-in text.
 # It exists nowhere as data — see the file's own note — so it is beside this
 # script rather than read out of the corpus, and it is the one input here a
@@ -92,6 +116,24 @@ STIMULUS_CONDITIONS = ("c2_video_audio_caption",)
 
 class StagingError(RuntimeError):
     """Something the corpus does not hold, named where a researcher can act on it."""
+
+
+def _require(path: Path, what: str, name: str) -> None:
+    """Refuse a missing corpus by name, before anything is encoded.
+
+    The two project-local inputs are gitignored, so a fresh checkout has the
+    code and not the footage. That is the right trade for 286 MB of mp4, but it
+    means the first run on a new machine fails — and it should fail here,
+    saying which directory and where it came from, rather than four minutes in
+    on a clip whose source could not be opened.
+    """
+    if path.exists():
+        return
+    raise StagingError(
+        f"{what} is not at {path}. It is not in the repository — /data/ is gitignored — "
+        f"so copy {name} into {CORPUS} from the Sa2VA working tree "
+        f"({AVMASK / 'data'}), or name another with the flag."
+    )
 
 
 # ---- the sources ------------------------------------------------------------
@@ -289,6 +331,38 @@ def frame_count(path: Path) -> int:
     return int(probe.stdout.strip())
 
 
+def stage_audio(clip: Path, target: Path) -> None:
+    """The clip's sound as a mono wav, for §6's model to read.
+
+    Taken from the staged clip rather than the source, so it carries the same
+    loudness correction the participant hears; the two viewings are matched on
+    loudness and a model listening to the uncorrected mix would be listening to
+    a different clip from the one being rated.
+    """
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(clip),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(AUDIO_RATE),
+            "-c:a",
+            "pcm_s16le",
+            str(target),
+        ]
+    )
+
+
 def stage_frame(source: Path, index: int, target: Path) -> None:
     """One frame of the strip, selected by index so it is exactly the masks' frame."""
     if target.exists():
@@ -400,6 +474,7 @@ def stage_one(clip: str, videos: Path, masks: Path, out: Path) -> dict[str, Any]
         raise StagingError(f"{clip}: no uncaptioned source at {source}")
     home = out / clip
     stage_clip(source, home / "clip.mp4")
+    stage_audio(home / "clip.mp4", home / "audio.wav")
     span = duration_ms(home / "clip.mp4")
     total = frame_count(home / "clip.mp4")
     frames: list[dict[str, Any]] = []
@@ -424,6 +499,7 @@ def stage_one(clip: str, videos: Path, masks: Path, out: Path) -> dict[str, Any]
     return {
         "clip_id": clip,
         "video": f"{clip}/clip.mp4",
+        "audio": f"{clip}/audio.wav",
         "duration_ms": span,
         "frames": frames,
         "not_in_the_frame": missing,
@@ -459,6 +535,7 @@ def build_segment(
         "segment": name,
         "clip_id": clip,
         "video": staged["video"],
+        "audio": staged["audio"],
         "duration_ms": span,
         "frames": list(staged["frames"]),
         "stems": stems,
@@ -592,9 +669,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--videos", type=Path, default=AVMASK / "data" / "videos_10s")
+    # The clips and the table come from the project; the mask tree does not.
+    parser.add_argument("--videos", type=Path, default=CORPUS / "videos")
+    parser.add_argument("--tidy", type=Path, default=CORPUS / "tidy_data.csv")
     parser.add_argument("--masks", type=Path, default=AVMASK / "runs" / "60fps-windowed" / "masks")
-    parser.add_argument("--tidy", type=Path, default=AVMASK / "data" / "tidy_data.csv")
     parser.add_argument("--palette", type=Path, default=AVMASK / "data" / "palette.json")
     parser.add_argument("--ontology", type=Path, default=AVMASK / "data" / "ontology.json")
     parser.add_argument(
@@ -633,6 +711,8 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     try:
+        _require(arguments.tidy, "the response table", "tidy_data.csv")
+        _require(arguments.videos, "the uncaptioned clip pool", "videos/")
         clips = read_clips(arguments.tidy)
         languages = tuple(arguments.languages)
         korean = json.loads(KOREAN.read_text(encoding="utf-8"))["captions"] if "ko" in languages else {}

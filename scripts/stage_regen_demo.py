@@ -5,6 +5,10 @@ so it stages whatever a researcher's document declares.
 
 Per segment under ``<out>/<segment>/``:
 
+``audio.wav``
+    The clip's sound on its own, which is what §6's model is given: a caption
+    model's audio stack reads wav and little else.
+
 ``clip.mp4``
     A ten-second 640x360 clip with sound. The two segments get different
     patterns and different tones, because the study asks a participant to
@@ -184,11 +188,38 @@ def stage_stem(path: Path, seconds: float, hertz: float, waveform: list[float]) 
         handle.writeframes(bytes(samples))
 
 
+def stage_sound(clip: Path, path: Path) -> None:
+    """The clip's own audio as a mono wav, which is what §6's model reads."""
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(clip),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(AUDIO_RATE),
+            "-c:a",
+            "pcm_s16le",
+            str(path),
+        ]
+    )
+
+
 def stage(document: dict[str, Any], out: Path) -> None:
     for index, (name, segment) in enumerate(sorted(document["segments"].items())):
         seconds = segment["duration_ms"] / 1000
         clip = out / segment["video"]
         stage_clip(clip, seconds, PATTERNS[index % len(PATTERNS)], BASE_HZ[index % len(BASE_HZ)])
+        stage_sound(clip, out / segment["audio"])
         for step, frame in enumerate(segment["frames"]):
             stage_still(clip, out / frame["still"], frame["at_ms"] / 1000)
             objects = frame["objects"]

@@ -541,7 +541,12 @@ def build_app(
             auditory_ids=tuple(snapshot.get("auditory_ids") or ()),
         )
         reading = _language(person)
-        video = _media(str(segment_of(document, segment)["video"]))
+        # The clip's sound, staged as a wav beside it. Handing the writer the
+        # mp4 instead put the container in front of the model's audio stack,
+        # which decodes wav and little else without torchcodec — and none of
+        # torchcodec's wheels link against this torch. Every slot failed, and
+        # the participant got a fallback track with nothing on screen to say so.
+        sound = _media(str(segment_of(document, segment)["audio"]))
 
         def _wrote(done: int, total: int, *, person: str = person) -> None:
             writing[person] = {"done": done, "total": total}
@@ -557,7 +562,7 @@ def build_app(
                 fallback=track_of(document, segment, "fallback_track"),
                 report=report,
                 language=reading,
-                media=video if isinstance(video, Path) else None,
+                media=sound if isinstance(sound, Path) else None,
                 settings={"segment": segment, "config_hash": configuration.hash, "language": reading},
                 on_slot=_wrote,
             )

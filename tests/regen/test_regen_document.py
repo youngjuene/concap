@@ -70,6 +70,24 @@ class TestRefusals:
         with pytest.raises(RegenDocumentError, match="inside the media directory"):
             validate_regen_document(document)
 
+    def test_a_segment_without_its_sound_is_refused(self, document: dict[str, Any]) -> None:
+        """§6 reads the clip's audio from a wav beside it, not out of the container.
+
+        A document that declares no audio is one whose every regeneration would
+        fall back, so it is refused on load rather than four slots into a
+        participant's session.
+        """
+        del document["segments"]["A"]["audio"]
+        with pytest.raises(RegenDocumentError, match="segments.A.audio"):
+            validate_regen_document(document)
+
+    def test_the_sound_reference_may_not_escape_the_media_directory_either(
+        self, document: dict[str, Any]
+    ) -> None:
+        document["segments"]["A"]["audio"] = "/etc/passwd"
+        with pytest.raises(RegenDocumentError, match="inside the media directory"):
+            validate_regen_document(document)
+
     def test_a_stem_without_a_colour_in_hex_is_refused(self, document: dict[str, Any]) -> None:
         document["segments"]["A"]["stems"][0]["colour"] = "blue"
         with pytest.raises(RegenDocumentError, match="#rrggbb"):

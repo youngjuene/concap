@@ -29,10 +29,17 @@ what the §5 lane draws is what the lane plays.
 ## This study's own corpus
 
 `scripts/stage_regen_media.py` builds §10's assets out of what the street corpus
-already holds — the Sa2VA run's masks, the uncaptioned 10 s pool, and the
-response table — for the 24 clips that carried sound in the earlier study
-(conditions c1 and c2; c3 and c4 have no audio stream, so nobody could report on
-them by ear).
+already holds — the uncaptioned 10 s pool, the response table and the Sa2VA
+run's masks — for the clips that carried sound in the earlier study (c3 and c4
+have no audio stream, so nobody could report on them by ear).
+
+The first two live in the project, at `data/corpus/videos/` and
+`data/corpus/tidy_data.csv`, and the flags default there. `/data/` is gitignored,
+so a fresh checkout has the code and not the footage: copy them in from the
+Sa2VA working tree (`/mnt/hdd/research/2026/Sa2VA/avmask/data/`) before the
+first staging run. The script says so by name if they are missing, before it
+encodes anything. The mask tree stays outside — 1.7 GB of per-frame PNGs
+belonging to the Sa2VA run rather than to this study — and `--masks` names it.
 
 ```bash
 uv run python scripts/stage_regen_media.py --pool          # the 24 candidates
@@ -143,16 +150,22 @@ report the participant's waiting screen is polling, so the two cannot disagree
 about where the model has got to. It is drawn only when a terminal is watching:
 redirect the console to a file and you get the JSON lines and no control codes.
 
+**The model is given `audio.wav`, not the clip.** transformers decodes an
+`.mp4` or `.webm` only with `torchcodec`, and no published torchcodec works
+against this project's torch: every wheel links `torch_from_blob`, which
+`torch 2.10.0+cu126` renamed to `torch_create_tensor_from_blob`, so it installs
+and then dies at the first decode. Staging writes a mono 16 kHz wav beside each
+clip — after loudness correction, so the model hears what the participant hears
+— and the document names it. A document from before this carries no `audio`
+field and is refused on load rather than falling back four slots into a
+session.
+
 **Check the first regeneration of a session actually came from the model.**
-`--writer gemma` hands the clip to an audio model that decodes it through
-transformers, and a build without `torchcodec` installed cannot read audio out
-of an `.mp4` or `.webm` — every slot fails, every viewing is a fallback, and
-nothing on the participant's screen says so. It is loud in the log:
-`fallback: true` with a `fallback_reason` naming the container. Install
-`torchcodec>=0.3.0` in that environment, or stage the audio beside the clip in
-a container `soundfile` reads. One pilot run and a look at
-`regeneration.written` settles it before a study spends sessions on template
-captions.
+Whatever the cause, a `--writer gemma` run that cannot read its audio is not
+loud on the participant's screen: they get the fallback track and no notice.
+It is loud in the log — `fallback: true` with a `fallback_reason` — so one
+pilot run and a look at `regeneration.written` settles it before a study spends
+sessions on template captions.
 
 Launch the participant's browser with
 `--autoplay-policy=no-user-gesture-required`; the viewing screens go fullscreen

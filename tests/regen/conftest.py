@@ -36,6 +36,7 @@ def segment(name: str, clip_id: str, *, objects: list[tuple[str, str]], stems: l
         "segment": name,
         "clip_id": clip_id,
         "video": f"{name}/clip.mp4",
+        "audio": f"{name}/audio.wav",
         "duration_ms": DURATION_MS,
         "frames": [
             {
@@ -124,6 +125,7 @@ def media_dir(document: dict[str, Any], tmp_path: Path) -> Path:
         (root / name / "stems").mkdir(parents=True)
         (root / name / "frames").mkdir(parents=True)
         (root / name / "clip.mp4").write_bytes(b"\x00")
+        (root / name / "audio.wav").write_bytes(b"\x00")
         for stem in document["segments"][name]["stems"]:
             (root / name / "stems" / f"{stem['id']}.wav").write_bytes(b"\x00")
         for index, frame in enumerate(document["segments"][name]["frames"]):

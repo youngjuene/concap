@@ -43,7 +43,7 @@ from dpo.regen.captions import Cue, TrackError, cues_of, validate_track
 from dpo.regen.config import Configuration, load_configuration
 from dpo.regen.points import MaskObject
 
-REGEN_SCHEMA = "dpo.caption-regen/v2"
+REGEN_SCHEMA = "dpo.caption-regen/v3"
 ID_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
 COLOUR_RE = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 # §5 draws the lanes stacked over one ten-second timeline. Past this the lanes
@@ -234,6 +234,14 @@ def _validate_segment(raw: object, path: str, name: str, configuration: Configur
         raise _fail(f"{path}.segment", f"must be {name!r}, to match the key it is filed under")
     clip_id = _identifier(segment.get("clip_id"), f"{path}.clip_id")
     _relative(segment.get("video"), f"{path}.video")
+    # §6's model reads the clip's sound, and it reads it from here rather than
+    # out of the video: the audio stack a caption model brings with it decodes
+    # wav and not much else, and a container it cannot open is not an error a
+    # participant should meet — it is four failed slots and a fallback track
+    # nobody asked for. Staged from the clip after loudness correction, so the
+    # model hears what the participant hears. Server-side only; it is not in
+    # `participant_document` because no screen plays it.
+    _relative(segment.get("audio"), f"{path}.audio")
     duration = _integer(segment.get("duration_ms"), f"{path}.duration_ms", minimum=1)
 
     frames = _sequence(segment.get("frames"), f"{path}.frames", minimum=MIN_FRAMES, maximum=MAX_FRAMES)
