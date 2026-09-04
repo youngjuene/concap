@@ -181,6 +181,12 @@ def build_app(
                 "anchors": list(configuration.scale.anchors),
             },
             "minimum_points": configuration.calibration.minimum_points,
+            # §6 names its worst case on the waiting screen. An indeterminate
+            # bar is right — nothing on the page can predict the model — but
+            # indeterminate had been implemented as silent, and a bounded wait
+            # the participant is told about is a different wait from one they
+            # are not.
+            "latency_ceiling_ms": configuration.calibration.latency_ceiling_ms,
             "steps": list(progress.PARTICIPANT_STEPS),
             "languages": list(configuration.languages),
         }

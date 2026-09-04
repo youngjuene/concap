@@ -15,40 +15,96 @@
    The viewing screens go to true black, because they are fullscreen video and
    anything else would frame the footage.
 
+   That argument stands. What the interface audit found is that *quiet* had
+   been implemented as *faint*, and the two are not the same thing: a neutral
+   surface can still have unambiguous edges, a legible disabled state and 44px
+   targets. Every value below holds the palette — one ink, one ground, one
+   blue — and spends its budget on contrast and hit area instead.
+
+   Every contrast figure in this file is computed, not estimated. The audit
+   proposed ``#A8ACB0`` for --rule on the strength of a 3.42:1 claim; it is
+   2.21:1 against the old ground and 1.99:1 against this one, so it would have
+   left the finding open. --rule is the darkest grey that clears 3:1 against
+   both the ground and the panels that sit on it.
+
    Faces are named with full fallback stacks and no @import: the session runs
    offline in a lab, and a stylesheet that waited on fonts.google would render
-   the instrument in a fallback face at the moment it matters. Every Korean
-   string that replaces the English placeholders falls through to a Korean face
-   in the same position. */
+   the instrument in a fallback face at the moment it matters. Nothing ships
+   the named files either, so the honest thing is to name the stack that
+   actually resolves rather than one that never will — and, for the Korean arm,
+   to name the Korean face *first*, because per-glyph fallback otherwise hands
+   the choice to the operating system and two lab machines render the same
+   study in two different typefaces. To lock a face instead, drop the woff2
+   beside this file, add it to ``STATIC_FILES`` in app.py, and give it an
+   @font-face here; the stacks below are then the fallback they read as. */
 
 :root {
-  --ground: #FBFBFA;
+  --ground: #EFEFEE;
   --panel: #FFFFFF;
+  /* The alternating row fill on §8, and the fill behind a block's sticky
+     header. Close enough to the panel to read as banding rather than as two
+     kinds of row, far enough to track a 22-row matrix across. */
+  --band: #F7F8F8;
   --ink: #16181A;
-  --dim: #6B7075;
-  --rule: #D8DAD8;
+  /* Paragraph ink. One step off --ink so a heading still leads, and 10.3:1 on
+     the ground — the old --dim for body copy was the other half of "faint". */
+  --body-ink: #33383D;
+  --dim: #5B6167;
+  /* 3.14:1 on --ground, 3.61:1 on --panel. Every border a participant needs
+     to see as an edge: control outlines, lane frames, the untravelled rail. */
+  --rule: #83878C;
+  /* Edges that only group things already legible without them — a panel's
+     outer border where banding carries the structure. Never a control. */
+  --hairline: #DEE0E1;
+  --seam: #EDEEEF;
   --accent: #2F5EA8;
+  --accent-press: #274F8C;
+  --accent-wash: #F4F7FB;
+  /* A disabled primary. Both survey pages and §4 open with theirs disabled and
+     it stays that way for most of the time spent on the screen, so its label —
+     the word saying what finishing the screen will do — is the one label that
+     must survive the state. White on grey was 1.6:1; this is 5.4:1. */
+  --muted-fill: #EDEEEF;
   --stage: #000000;
 
-  --body: "Inter", "Helvetica Neue", Arial, "Noto Sans KR", sans-serif;
-  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, "Noto Sans Mono CJK KR", monospace;
+  --body: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --leading: 1.5;
+  --leading-ui: 1.3;
 
   --motion: 140ms;
   --gap: 8px;
-  --column: 720px;
+  /* §4 is no longer the one screen wider than the column, so this is the width
+     of every step again — except that a 7-point scale and a 28-word item
+     cannot share 720px honestly, which is what widened it. */
+  --column: 880px;
+  /* Nothing the participant repeats may be smaller than this. The §4 mark was
+     22px, and on a supervised laptop with a trackpad that is the size that
+     produces misplaced marks and accidental deletions. */
+  --target: 44px;
+  --target-lg: 52px;
+  --radius-sm: 10px;
+  --radius: 12px;
+  --radius-lg: 14px;
   /* The caption band of a viewing reserves its height so a cue appearing never
-     moves the picture. Two lines at 24 on 32, plus 16 above and below. */
-  --caption-band: 96px;
-  /* §4's strip. The marked frame is the full column width so a mark can be
-     placed precisely; a neighbour is a third of it, which is enough to
-     recognise the moment and not enough to invite a click. */
-  --frame-w: 640px;
-  --frame-side: 200px;
-  /* Long enough to read as one movement rather than a jump, short enough that
-     scrolling the strip does not feel held up. Eased out hard, so the frame
-     arrives rather than drifts. */
-  --strip-motion: 380ms;
-  --strip-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+     moves the picture. Two lines at 24 on 38, plus 16 above and below — 38
+     rather than 32 because Hangul syllable blocks have no x-height to breathe
+     under, and the band must be the same height in both languages or the two
+     viewings stop being the same stimulus. */
+  --caption-band: 112px;
+  --caption-leading: 38px;
+}
+
+/* K1. Per-glyph fallback means Hangul skips past Arial to whatever the OS
+   nominates — Malgun Gothic on Windows, Apple SD Gothic Neo on macOS — so a
+   Korean session is set in a face the stylesheet never named. Naming the
+   Korean faces first, in a fixed order, makes the choice this file's.
+   K2: Latin line-heights are too tight for syllable blocks. */
+:root:lang(ko) {
+  --body: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Inter", sans-serif;
+  --mono: "D2Coding", "Noto Sans Mono CJK KR", "IBM Plex Mono", Menlo, monospace;
+  --leading: 1.7;
+  --leading-ui: 1.5;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -62,35 +118,57 @@ html, body { height: 100%; }
 body {
   background: var(--ground);
   color: var(--ink);
-  font: 16px/1.5 var(--body);
+  font: 16px/var(--leading) var(--body);
   -webkit-font-smoothing: antialiased;
 }
 
 button {
-  font: inherit;
-  color: inherit;
-  background: none;
+  font: 500 15px/1 var(--body);
+  color: var(--ink);
+  background: var(--panel);
   border: 1px solid var(--rule);
-  padding: 10px 18px;
+  border-radius: var(--radius);
+  min-height: var(--target);
+  padding: 0 18px;
   cursor: pointer;
-  transition: background var(--motion), border-color var(--motion);
+  transition: background var(--motion), border-color var(--motion), color var(--motion);
 }
 
-button:hover:not(:disabled) { border-color: var(--ink); }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:active:not(:disabled) { background: var(--accent-wash); }
 
-button:disabled { color: var(--dim); border-color: var(--rule); cursor: not-allowed; }
+/* One focus style, stated once. Every control in the instrument is reachable
+   by keyboard and none of them may rely on the browser's default ring, which
+   is invisible against a blue-bordered control. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+button:disabled {
+  background: var(--muted-fill);
+  color: var(--dim);
+  border-color: var(--rule);
+  cursor: not-allowed;
+}
 
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #FFFFFF;
+  min-height: var(--target-lg);
+  padding: 0 30px;
+  font-size: 16px;
 }
 
-button.primary:disabled { background: var(--rule); border-color: var(--rule); color: var(--panel); }
+button.primary:hover:not(:disabled) { background: var(--accent-press); border-color: var(--accent-press); }
+button.primary:disabled { background: var(--muted-fill); border-color: var(--rule); color: var(--dim); }
 
+/* The step marker above every heading. It names a position in a sequence of
+   six, which is the one thing on these screens that genuinely is a sequence.
+   Hangul takes neither the uppercasing nor the tracking. */
 .eyebrow {
-  font: 12px/1.4 var(--mono);
-  letter-spacing: 0.06em;
+  font: 11px/1.4 var(--mono);
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--dim);
 }
+
+:lang(ko) .eyebrow { text-transform: none; letter-spacing: 0; }

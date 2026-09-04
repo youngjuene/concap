@@ -1,7 +1,8 @@
 /* The participant's side of the six steps.
 
    Three things this file is careful about, all of them requirements rather
-   than preferences. Section numbers cite docs/v3-regen/spec-behavior.md.
+   than preferences. Section numbers cite docs/v3-regen/spec-behavior.md;
+   findings cite the interface audit in updated_UI_design/.
 
    The step comes from the server. Every screen is rendered from what
    /api/step/<step> returns, and every submit re-reads the step the server
@@ -14,9 +15,14 @@
    once on submit (§4) and telling the participant would turn the task into
    hunting for a mask.
 
-   Play and select are separate controls (§5). They are separate buttons in
-   separate grid cells, and neither handler touches the other's state, so a
-   participant cannot select a lane by trying to hear it. */
+   Play and select are separate controls (§5). They sit at opposite ends of the
+   lane and neither handler touches the other's state, so a participant cannot
+   select a lane by trying to hear it.
+
+   And one thing it is careful about now that it was not: every control here is
+   reachable by keyboard and says what it is. §4 gated the rest of the session
+   behind divs driven by pointer events, so a participant who could not use a
+   trackpad could not reach §5 either. */
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,10 +32,12 @@ const state = {
   strings: null,
   scale: null,
   minimumPoints: 3,
+  ceilingMs: 20000,
   steps: [],
   entered: null,
   points: [],
   frame: 0,
+  frames: [],
   language: "en",
   languages: [],
   languageLocked: false,
@@ -37,6 +45,7 @@ const state = {
   selected: [],
   audio: null,
   playing: null,
+  mix: null,
 };
 
 const SCREENS = [
@@ -55,8 +64,80 @@ function show(id) {
   $("shell").hidden = id === "screen-viewing";
 }
 
-function fail(message) {
-  $("error-text").textContent = message || state.strings?.error || "Something went wrong.";
+function clear(node) {
+  node.replaceChildren();
+  return node;
+}
+
+function fill(template, values) {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)),
+    template
+  );
+}
+
+/* Where the rail's marker sits. The wait is not one of §9.1's six steps but a
+   participant standing on it is nearly through the fifth, and telling them so
+   is the cheapest answer there is to §6's drop-off risk. */
+function railAt() {
+  if (state.step === "regenerating") return state.steps.indexOf("view_regenerated");
+  if (state.step === "done") return state.steps.length;
+  return state.steps.indexOf(state.step);
+}
+
+/* The step marker above every heading: which of six this is, then the study's
+   name. The heading itself is the step's own name. */
+function head(prefix, heading) {
+  const at = Math.min(Math.max(railAt(), 0), state.steps.length - 1);
+  $(`${prefix}-eyebrow`).textContent = fill(state.strings.eyebrow, {
+    n: at + 1,
+    total: state.steps.length,
+    study: state.strings.app_title,
+  });
+  if (heading !== undefined) $(`${prefix}-heading`).textContent = heading;
+}
+
+function stepName(index) {
+  return state.strings.steps[index] || "";
+}
+
+function fail(message, cause) {
+  const strings = state.strings?.error;
+  if (!strings) {
+    $("error-text").textContent = message || "Something went wrong.";
+    return show("screen-error");
+  }
+  head("error", strings.heading);
+  $("error-text").textContent = strings.body;
+  $("error-kept").textContent = strings.kept;
+  // The researcher is standing behind the participant, not reading a server
+  // log, so this screen is the whole diagnostic surface. All three of these
+  // were already in memory when fail() threw away the message and printed one
+  // generic sentence instead.
+  const labels = strings.labels;
+  const width = Math.max(...Object.values(labels).map((label) => label.length));
+  const pad = (label) => label.padEnd(width, " ");
+  $("error-diagnosis").textContent = [
+    `${pad(labels.session)}  ${state.participant || "—"}`,
+    `${pad(labels.step)}  ${state.step || "—"}`,
+    `${pad(labels.at)}  ${new Date().toISOString()}`,
+    `${pad(labels.cause)}  ${cause || message || strings.unknown}`,
+  ].join("\n");
+  // progress.py keeps the state, so a dropped packet during /api/survey ends a
+  // session the server would happily have resumed. Re-reading the step the
+  // server reports is safe by construction: it cannot move the session on.
+  const retry = $("error-retry");
+  retry.textContent = state.strings.actions.retry;
+  retry.onclick = async () => {
+    retry.disabled = true;
+    try {
+      const next = await api(`/api/state?participant=${state.participant}`);
+      if (next) await render(next.step);
+    } catch (error) {
+      retry.disabled = false;
+      fail(error.message, error.message);
+    }
+  };
   show("screen-error");
 }
 
@@ -108,7 +189,12 @@ document.addEventListener("visibilitychange", () => {
 /* The language toggle, top right. Live until the first clip has played and a
    plain label after that: §8 compares against §3, so a session read half in
    one language and half in the other has moved something the study measures.
-   The server enforces it; this only stops the participant asking. */
+   The server enforces it; this only stops the participant asking.
+
+   The locked toggle keeps both buttons on screen. Deleting the alternate one
+   made a lock look like a bug, and the reason was set as a title — needing a
+   hover, never appearing on touch, announced inconsistently — so in a
+   supervised session it became a question for the researcher mid-run. */
 function drawLanguages() {
   const host = $("languages");
   if (state.languages.length < 2) {
@@ -117,23 +203,25 @@ function drawLanguages() {
   }
   const copy = state.strings.languages;
   host.hidden = false;
-  host.dataset.locked = state.languageLocked ? "yes" : "no";
   host.setAttribute("aria-label", copy.label);
-  host.replaceChildren();
+  const pair = clear(host.querySelector(".pair"));
   for (const tag of state.languages) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = copy.names[tag] || tag;
     button.lang = tag;
-    if (tag === state.language) button.classList.add("at");
-    if (state.languageLocked) {
-      button.disabled = true;
-      button.title = copy.locked;
-    } else {
-      button.onclick = () => choose(tag);
+    const at = tag === state.language;
+    if (at) {
+      button.classList.add("at");
+      button.setAttribute("aria-current", "true");
     }
-    host.append(button);
+    button.disabled = state.languageLocked;
+    if (!state.languageLocked) button.onclick = () => choose(tag);
+    pair.append(button);
   }
+  const locked = host.querySelector(".locked");
+  locked.textContent = copy.locked;
+  locked.hidden = !state.languageLocked;
 }
 
 async function choose(tag) {
@@ -142,21 +230,39 @@ async function choose(tag) {
   if (!result || !result.language) return;
   state.language = result.language;
   state.languageLocked = Boolean(result.language_locked);
+  // The page's lang drives the Korean font stack and line-heights in
+  // identity.css, so the document has to carry it rather than the strings
+  // alone (K1, K2).
+  document.documentElement.lang = state.language;
   drawLanguages();
   // Re-render where they are, so the captions and the copy on screen change
   // with the choice rather than at the next step.
   render(state.step);
 }
 
+/* §9.1 — the rail. Six named steps, not six empty spans: the names have been
+   in copy.py since the first commit and were used only for their count, so
+   there was no way — visual or otherwise — to learn which step this was. */
 function drawRail() {
-  const rail = $("rail");
-  rail.replaceChildren();
-  const at = state.steps.indexOf(state.step);
+  const list = clear($("rail").querySelector("ol"));
+  const at = railAt();
   state.steps.forEach((_, index) => {
-    const span = document.createElement("span");
-    if (at >= 0 && index < at) span.className = "done";
-    if (index === at) span.className = "at";
-    rail.append(span);
+    const entry = document.createElement("li");
+    if (at >= 0 && index < at) entry.className = "done";
+    if (index === at) {
+      entry.className = "at";
+      entry.setAttribute("aria-current", "step");
+    }
+    const number = document.createElement("span");
+    number.className = "n";
+    number.textContent = String(index + 1).padStart(2, "0");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = stepName(index);
+    const bar = document.createElement("span");
+    bar.className = "bar";
+    entry.append(number, name, bar);
+    list.append(entry);
   });
 }
 
@@ -165,7 +271,8 @@ async function renderViewing(step) {
   const detail = await api(`/api/step/${step}?participant=${state.participant}`);
   if (!detail) return;
   const strings = state.strings.view;
-  $("start-heading").textContent = state.strings.app_title;
+  const index = step === "view_prepared" ? 0 : 4;
+  head("start", stepName(index));
   $("start-headphones").textContent = strings.headphones;
   $("start-ready").textContent = strings.ready;
   const button = $("start-button");
@@ -176,30 +283,110 @@ async function renderViewing(step) {
   button.onclick = async () => {
     button.disabled = true;
     const video = $("video");
+    const stage = $("screen-viewing");
+    const band = $("cue");
+    const cues = detail.captions;
     video.src = `/media/video/${detail.segment}`;
+    band.textContent = "";
+    $("viewing-interrupted").hidden = true;
     show("screen-viewing");
     try {
-      await $("screen-viewing").requestFullscreen();
+      await stage.requestFullscreen();
     } catch {
       /* A browser that refuses fullscreen still plays; the clip is the
          stimulus and losing it to a permissions prompt would be worse. */
     }
-    const cues = detail.captions;
-    const band = $("cue");
-    band.textContent = "";
+
     let shown = -1;
-    const startedAt = new Date().toISOString();
-    video.ontimeupdate = () => {
-      const ms = video.currentTime * 1000;
-      const index = cues.findIndex((cue) => ms >= cue.start_ms && ms < cue.end_ms);
-      if (index === shown) return;
-      shown = index;
-      band.textContent = index === -1 ? "" : cues[index].text;
-      if (index !== -1) note("caption.shown", { step, index, text: cues[index].text });
+    const showCue = (at) => {
+      if (at === shown) return;
+      shown = at;
+      band.textContent = at === -1 ? "" : cues[at].text;
+      if (at !== -1) note("caption.shown", { step, index: at, text: cues[at].text });
     };
+
+    /* The same cues as a real TextTrack (§2·2). It is hidden rather than
+       showing — the band is the caption the study manipulates, and two of them
+       on screen would be two stimuli — but a hidden track still fires
+       cuechange, which takes cue timing off the ~4Hz timeupdate rate that
+       could land a cue up to 250ms after its start_ms and put the same slack
+       into caption.shown. timeupdate stays as the backstop until the track has
+       proved it parsed. */
+    let native = false;
+    const track = $("cues");
+    const vtt = [
+      "WEBVTT",
+      "",
+      ...cues.flatMap((cue, at) => [
+        String(at + 1),
+        `${stamp(cue.start_ms)} --> ${stamp(cue.end_ms)}`,
+        cue.text,
+        "",
+      ]),
+    ].join("\n");
+    if (track.src.startsWith("blob:")) URL.revokeObjectURL(track.src);
+    track.src = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
+    track.track.mode = "hidden";
+    track.onload = () => {
+      const list = track.track.cues;
+      if (!list || !list.length) return;
+      native = true;
+      track.track.oncuechange = () => {
+        const active = track.track.activeCues;
+        if (!active || !active.length) return showCue(-1);
+        showCue(Number(active[0].id) - 1);
+      };
+    };
+
+    video.ontimeupdate = () => {
+      if (native) return;
+      const ms = video.currentTime * 1000;
+      showCue(cues.findIndex((cue) => ms >= cue.start_ms && ms < cue.end_ms));
+    };
+
+    const startedAt = new Date().toISOString();
+    let ending = false;
+    let interruptions = 0;
+
+    /* Fullscreen was requested and never watched. Escape is the browser's own
+       shortcut and the first thing a nervous participant tries; the clip used
+       to keep playing in a 720px column with the band pinned to the viewport,
+       then onended fired and /api/viewing recorded a clean viewing. The log
+       could not tell that session from a correct one. */
+    const onFullscreen = () => {
+      if (document.fullscreenElement || ending || video.ended) return;
+      interruptions += 1;
+      video.pause();
+      $("interrupted-heading").textContent = strings.interrupted_heading;
+      $("interrupted-body").textContent = strings.interrupted_body;
+      const resume = $("interrupted-resume");
+      resume.textContent = state.strings.actions.resume;
+      resume.onclick = async () => {
+        $("viewing-interrupted").hidden = true;
+        try {
+          await stage.requestFullscreen();
+        } catch {
+          /* as above: the clip matters more than the chrome */
+        }
+        video.play().catch(() => {});
+      };
+      $("viewing-interrupted").hidden = false;
+      resume.focus();
+      note("viewing.interrupted", { step, at_ms: Math.round(video.currentTime * 1000), count: interruptions });
+    };
+    document.addEventListener("fullscreenchange", onFullscreen);
+
     video.onended = async () => {
+      ending = true;
+      document.removeEventListener("fullscreenchange", onFullscreen);
+      track.track.oncuechange = null;
       const endedAt = new Date().toISOString();
       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      // Whether the clip was watched as the stimulus it is meant to be. It
+      // rides the event stream rather than the viewing payload so the route's
+      // contract is unchanged, and flushes before the step turns over.
+      note("viewing.integrity", { step, interruptions });
+      await flush();
       const result = await api("/api/viewing", {
         participant: state.participant,
         step,
@@ -213,9 +400,17 @@ async function renderViewing(step) {
     try {
       await video.play();
     } catch (error) {
-      fail(`the clip would not start: ${error.message}`);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+      fail(`the clip would not start: ${error.message}`, `${detail.segment}: ${error.message}`);
     }
   };
+}
+
+function stamp(ms) {
+  const total = Math.max(0, ms) / 1000;
+  const minutes = String(Math.floor(total / 60)).padStart(2, "0");
+  const seconds = String(Math.floor(total % 60)).padStart(2, "0");
+  return `${minutes}:${seconds}.${String(Math.round(ms % 1000)).padStart(3, "0")}`;
 }
 
 /* §3 and §8 — the surveys, built from the blocks the server sends. */
@@ -224,58 +419,115 @@ async function renderSurvey(page) {
   if (!detail) return;
   state.entered = new Date().toISOString();
   const answers = new Map();
-  const container = $("survey-blocks");
-  container.replaceChildren();
-  $("survey-heading").textContent = state.strings.app_title;
-  $("survey-instruction").textContent = state.strings.survey.instruction;
+  const container = clear($("survey-blocks"));
+  const copy = state.strings.survey;
   const total = detail.blocks.reduce((sum, block) => sum + block.items.length, 0);
+  head("survey", stepName(railAt()));
+  $("survey-instruction").textContent =
+    detail.blocks.length > 1
+      ? fill(copy.instruction_all, { blocks: detail.blocks.length, count: total })
+      : fill(copy.instruction, { count: total });
+  document.documentElement.style.setProperty("--points", String(detail.scale.points));
 
+  const rows = new Map();
+  const counters = new Map();
   const submit = $("survey-submit");
+  const first = $("survey-first");
   submit.textContent = state.strings.actions.submit;
+  first.textContent = copy.first;
+
   const update = () => {
     const left = total - answers.size;
     submit.disabled = left > 0;
-    $("survey-remaining").textContent = left ? state.strings.survey.remaining.replace("{count}", left) : "";
+    $("survey-remaining").textContent = left
+      ? fill(copy.remaining, { count: left, total })
+      : fill(copy.complete, { total });
+    // The count is a control now: it says how many are left and goes to the
+    // first of them, instead of leaving the participant to re-scan 22 rows.
+    const open = [...rows.entries()].find(([id]) => !answers.has(id));
+    first.hidden = !open;
+    if (open) first.onclick = () => {
+      open[1].scrollIntoView({ block: "center", behavior: "smooth" });
+      const input = open[1].querySelector("input");
+      if (input) input.focus();
+    };
+    for (const [id, block] of counters) {
+      const done = block.ids.filter((item) => answers.has(item)).length;
+      block.node.textContent = fill(copy.block_done, { done, total: block.ids.length });
+      void id;
+    }
   };
 
   for (const block of detail.blocks) {
     const section = document.createElement("section");
     section.className = "block";
+    // Stated once per block and kept on screen. A block of eight items is
+    // about 900px tall, so items 4 to 8 used to be answered with no visible
+    // scale meaning at all — the numbers 1 to 7 and nothing else.
+    const cap = document.createElement("div");
+    cap.className = "cap";
+    const titles = document.createElement("div");
+    titles.className = "titles";
     const heading = document.createElement("h2");
     heading.textContent = block.title;
+    const done = document.createElement("span");
+    done.className = "of";
+    titles.append(heading, done);
+    counters.set(block.id, { node: done, ids: block.items.map((item) => item.id) });
+
+    /* One grid, shared by the anchors and every scale beneath them. The
+       anchors were a full-width flex row above a 304px left-aligned scale, so
+       "Very much" sat 368px to the right of point 7, above nothing at all. The
+       verbal anchors are what turn seven numbers into an interval scale, and a
+       participant who reads the high one as belonging to the whitespace may
+       anchor differently on §3 than on §8 — the exact comparison the study is
+       built on. §9.3 gives two anchors and only two; they go at the ends and
+       position does the rest. */
     const anchors = document.createElement("div");
     anchors.className = "anchors";
-    for (const anchor of detail.scale.anchors) {
-      const span = document.createElement("span");
-      span.className = "eyebrow";
-      span.textContent = anchor;
-      anchors.append(span);
-    }
-    section.append(heading, anchors);
+    const [low, high] = detail.scale.anchors;
+    const lowSpan = document.createElement("span");
+    lowSpan.className = "low";
+    lowSpan.textContent = low;
+    const highSpan = document.createElement("span");
+    highSpan.className = "high";
+    highSpan.textContent = high;
+    anchors.append(lowSpan, highSpan);
+    cap.append(titles, anchors);
+    section.append(cap);
+
     for (const item of block.items) {
       const row = document.createElement("div");
       row.className = "item";
+      row.id = `row-${item.id}`;
       const text = document.createElement("p");
       text.textContent = item.text;
-      const choices = document.createElement("div");
-      choices.className = "choices";
+      const group = document.createElement("div");
+      group.className = "choices";
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-label", item.text);
       for (let value = 1; value <= detail.scale.points; value += 1) {
         const label = document.createElement("label");
         const input = document.createElement("input");
         input.type = "radio";
         input.name = item.id;
         input.value = String(value);
+        // The scale's meaning is at the ends of the row, so a cell needs to
+        // carry it too or a screen reader hears seven bare numbers.
+        input.setAttribute("aria-label", value === 1 ? `${value} — ${low}` : value === detail.scale.points ? `${value} — ${high}` : String(value));
         input.onchange = () => {
           answers.set(item.id, value);
+          row.classList.add("answered");
           note("survey.answered", { page, item: item.id, value });
           update();
         };
         const badge = document.createElement("span");
         badge.textContent = String(value);
         label.append(input, badge);
-        choices.append(label);
+        group.append(label);
       }
-      row.append(text, choices);
+      row.append(text, group);
+      rows.set(item.id, row);
       section.append(row);
     }
     container.append(section);
@@ -297,105 +549,72 @@ async function renderSurvey(page) {
   };
 }
 
-/* §4 — marks on a strip of moments. Scroll to a frame, click to mark it. The
-   frame in the middle is the one being marked; its neighbours are smaller and
-   softened, so which surface takes a click is never in doubt. Coordinates are
-   normalised to the image, so a resize between marking and submitting does not
-   move what was meant, and each mark carries the frame it belongs to. */
+/* §4 — marks on one moment at a time.
+
+   The picker is text and the picture is a picture. What was there before was a
+   scroller in which the marked frame was full-size and its neighbours were
+   blurred, which asked the blur to say "do not mark here" and "click me to
+   navigate" at once — and put two mechanisms and the participant in contention
+   for one scroll position. Nothing below owns a scroll position.
+
+   Coordinates are still normalised to the image, so a resize between marking
+   and submitting does not move what was meant, and each mark still carries the
+   frame it belongs to: /api/visual and points.py see exactly what they saw. */
 async function renderVisual() {
   const detail = await api(`/api/step/visual?participant=${state.participant}`);
   if (!detail) return;
   state.points = [];
+  state.frames = detail.frames;
   state.minimumPoints = detail.minimum;
-  state.frame = Math.floor(detail.frames.length / 2);
-  const strip = $("strip");
+  state.frame = 0;
   const copy = state.strings.visual;
-  $("visual-heading").textContent = state.strings.app_title;
+  const plate = $("plate");
+  const picker = $("moments");
+  picker.setAttribute("aria-label", copy.moments_label);
+  picker.style.setProperty("--moments", String(detail.frames.length));
   $("visual-clear").textContent = state.strings.actions.clear;
+  $("visual-undo").textContent = state.strings.actions.undo;
   $("visual-next").textContent = state.strings.actions.next;
-  strip.setAttribute("aria-label", copy.strip);
+  $("moment-back").setAttribute("aria-label", copy.back);
+  $("moment-on").setAttribute("aria-label", copy.on);
 
-  const shells = detail.frames.map((frame) => {
-    const shell = document.createElement("div");
-    shell.className = "frame";
-    shell.dataset.index = String(frame.index);
-    const image = document.createElement("img");
-    image.src = `/media/frame/${detail.segment}/${frame.index}`;
-    image.alt = "";
-    image.draggable = false;
-    const when = document.createElement("span");
-    when.className = "moment";
-    when.textContent = copy.moment.replace("{seconds}", (frame.at_ms / 1000).toFixed(1));
-    shell.append(image, when);
-    // A neighbour is a place to go, not a place to mark: clicking one brings
-    // it to the middle instead of dropping a point on a frame the participant
-    // cannot see properly.
-    shell.onclick = (event) => {
-      if (Number(shell.dataset.index) === state.frame) return placeAt(event, shell, image);
-      select(Number(shell.dataset.index));
-    };
-    strip.append(shell);
-    return { shell, image, frame };
+  const image = document.createElement("img");
+  image.alt = "";
+  image.draggable = false;
+  // The crosshair is the keyboard's cursor. It appears when the plate takes
+  // focus from the keyboard and never when a pointer is doing the work.
+  const cross = document.createElement("i");
+  cross.className = "crosshair";
+  cross.hidden = true;
+  let aim = { x: 0.5, y: 0.5 };
+
+  const seconds = (index) => (detail.frames[index].at_ms / 1000).toFixed(1);
+
+  const buttons = detail.frames.map((frame, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const at = document.createElement("span");
+    at.textContent = fill(copy.moment, { seconds: seconds(index) });
+    const tally = document.createElement("span");
+    tally.className = "tally";
+    button.append(at, tally);
+    button.onclick = () => select(index);
+    picker.append(button);
+    return { button, tally, frame };
   });
 
-  // How long the width transition runs, read from the stylesheet so the two
-  // cannot drift apart, and zero when the viewer asks for less motion.
-  const eased = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const motion = eased
-    ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--strip-motion")) || 380
-    : 0;
-  // While this is in the future, the strip is scrolling under its own hand and
-  // scroll events are not the participant's.
-  let settling = 0;
-  let resting = null;
-
-  function middleOf(index) {
-    const target = shells[index].shell;
-    return target.offsetLeft + target.offsetWidth / 2 - strip.clientWidth / 2;
-  }
-
   function select(index) {
-    if (index < 0 || index >= shells.length) return;
+    if (index < 0 || index >= buttons.length) return;
     const changed = index !== state.frame;
     state.frame = index;
-    for (const { shell } of shells) {
-      shell.classList.toggle("at", Number(shell.dataset.index) === index);
-    }
-    // The chosen frame is held in the middle for the whole of its growth, one
-    // frame at a time, rather than being centred once against a width it is
-    // about to leave. That is the difference between the strip arriving
-    // centred and arriving wherever the old widths put it.
-    settling = performance.now() + motion + 60;
-    const hold = () => {
-      strip.scrollLeft = middleOf(index);
-      if (performance.now() < settling) requestAnimationFrame(hold);
-    };
-    requestAnimationFrame(hold);
-    if (changed) note("frame.selected", { frame: index, at_ms: shells[index].frame.at_ms });
+    image.src = `/media/frame/${detail.segment}/${detail.frames[index].index}`;
+    $("visual-heading").textContent = fill(copy.heading, { seconds: seconds(index) });
+    plate.setAttribute("aria-label", fill(copy.plate, { seconds: seconds(index) }));
+    if (changed) note("frame.selected", { frame: index, at_ms: detail.frames[index].at_ms });
     paint();
   }
 
-  // Scrolling is a way of choosing, not just of looking: when the strip comes
-  // to rest, whichever frame is nearest the middle becomes the marked one.
-  strip.onscroll = () => {
-    if (performance.now() < settling) return;
-    window.clearTimeout(resting);
-    resting = window.setTimeout(() => {
-      const middle = strip.scrollLeft + strip.clientWidth / 2;
-      let nearest = state.frame;
-      let closest = Infinity;
-      shells.forEach(({ shell }, index) => {
-        const gap = Math.abs(shell.offsetLeft + shell.offsetWidth / 2 - middle);
-        if (gap < closest) {
-          closest = gap;
-          nearest = index;
-        }
-      });
-      if (nearest !== state.frame) select(nearest);
-    }, 110);
-  };
-
-  const at = (event, image) => {
+  const at = (event) => {
     const box = image.getBoundingClientRect();
     return {
       x: Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
@@ -403,31 +622,63 @@ async function renderVisual() {
     };
   };
 
-  function placeAt(event, shell, image) {
-    if (event.target.classList.contains("point")) return;
-    // Only the picture takes a mark. A frame's box is taller and wider than
-    // its image — the moment label sits under it, and the strip's gutter beside
-    // it — and `at` clamps to [0,1], so a click on the label used to land as a
-    // mark pinned to the image's bottom edge. A mark nobody placed is a
-    // reported perception nobody had.
-    const box = image.getBoundingClientRect();
-    const inside =
-      event.clientX >= box.left &&
-      event.clientX <= box.right &&
-      event.clientY >= box.top &&
-      event.clientY <= box.bottom;
-    if (!inside) return;
-    const point = { frame: state.frame, ...at(event, image) };
+  function place(x, y) {
+    const point = { frame: state.frame, x, y };
     state.points.push(point);
     note("point.placed", { index: state.points.length - 1, ...point });
     paint();
   }
 
-  function paint() {
-    for (const { shell } of shells) {
-      for (const node of [...shell.querySelectorAll(".point")]) node.remove();
+  plate.onclick = (event) => {
+    // Only the picture takes a mark. A click that started on an existing mark
+    // or on its remove control is that mark's business, not a new point.
+    if (event.target !== plate && event.target !== image) return;
+    const box = image.getBoundingClientRect();
+    if (
+      event.clientX < box.left ||
+      event.clientX > box.right ||
+      event.clientY < box.top ||
+      event.clientY > box.bottom
+    ) {
+      return;
     }
-    const here = shells[state.frame].shell;
+    const spot = at(event);
+    place(spot.x, spot.y);
+  };
+
+  /* The keyboard's path through §4. Arrow keys move a crosshair over the
+     picture and Enter places a mark where it stands; the picker is real
+     buttons, so choosing a moment needs nothing extra. */
+  plate.onkeydown = (event) => {
+    const nudge = event.shiftKey ? 0.01 : 0.04;
+    const moves = {
+      ArrowLeft: [-nudge, 0],
+      ArrowRight: [nudge, 0],
+      ArrowUp: [0, -nudge],
+      ArrowDown: [0, nudge],
+    };
+    if (moves[event.key]) {
+      event.preventDefault();
+      cross.hidden = false;
+      aim = {
+        x: Math.min(1, Math.max(0, aim.x + moves[event.key][0])),
+        y: Math.min(1, Math.max(0, aim.y + moves[event.key][1])),
+      };
+      cross.style.left = `${aim.x * 100}%`;
+      cross.style.top = `${aim.y * 100}%`;
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      cross.hidden = false;
+      place(aim.x, aim.y);
+    }
+  };
+
+  function paint() {
+    clear(plate).append(image, cross);
+    cross.style.left = `${aim.x * 100}%`;
+    cross.style.top = `${aim.y * 100}%`;
     state.points.forEach((point, index) => {
       if (point.frame !== state.frame) return;
       const dot = document.createElement("div");
@@ -435,21 +686,60 @@ async function renderVisual() {
       dot.style.left = `${point.x * 100}%`;
       dot.style.top = `${point.y * 100}%`;
       dot.textContent = String(index + 1);
-      dot.onpointerdown = (event) => beginDrag(event, index, dot, shells[state.frame].image);
-      here.append(dot);
+      dot.onpointerdown = (event) => drag(event, index, dot);
+      // Removing a mark is its own control. It used to be a press that
+      // happened not to move, decided on pointerup against a drag, on a 22px
+      // target with no undo — so a one-pixel tremor turned a nudge into a
+      // deletion and the only way to inspect a mark was to risk losing it. A
+      // deleted mark is a reported perception withdrawn.
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "drop";
+      drop.textContent = "✕";
+      drop.setAttribute("aria-label", `${state.strings.actions.undo} ${index + 1}`);
+      // Which shoulder the ✕ sits on: the plate clips, so a mark on the
+      // skyline or against the right edge still has a reachable one.
+      dot.classList.toggle("at-top", point.y < 0.09);
+      dot.classList.toggle("at-right", point.x > 0.94);
+      drop.onpointerdown = (event) => event.stopPropagation();
+      drop.onclick = (event) => {
+        event.stopPropagation();
+        const [removed] = state.points.splice(index, 1);
+        note("point.removed", { index, ...removed });
+        paint();
+      };
+      dot.append(drop);
+      plate.append(dot);
     });
+
+    buttons.forEach(({ tally }, index) => {
+      const here = state.points.filter((point) => point.frame === index).length;
+      tally.textContent = here ? fill(copy.tally, { count: here }) : copy.tally_none;
+      buttons[index].button.classList.toggle("at", index === state.frame);
+      buttons[index].button.setAttribute("aria-pressed", String(index === state.frame));
+    });
+
     const count = state.points.length;
-    $("visual-count").textContent = copy.placed.replace("{count}", count);
+    const moments = new Set(state.points.map((point) => point.frame)).size;
+    $("visual-count").textContent = count
+      ? fill(copy.placed, { count, moments, total: detail.frames.length })
+      : copy.placed_none;
     const short = count < state.minimumPoints;
     $("visual-next").disabled = short;
-    const floor = state.minimumPoints === 1 ? copy.minimum_one : copy.minimum.replace("{minimum}", state.minimumPoints);
-    $("visual-instruction").textContent = short ? `${copy.instruction} ${floor}` : copy.instruction;
+    $("visual-undo").disabled = count === 0;
+    $("visual-clear").disabled = count === 0;
+    // On its own reserved line. Appending the floor to the instruction and
+    // stripping it once met cost the paragraph a sentence — and possibly a
+    // line of height — the instant the first mark landed, shifting the picture
+    // up under the cursor that had just placed it.
+    $("visual-hint").textContent = short
+      ? state.minimumPoints === 1
+        ? copy.minimum_one
+        : fill(copy.minimum, { minimum: state.minimumPoints })
+      : copy.drag;
   }
 
-  function beginDrag(event, index, dot, image) {
-    // A press that never moves is a delete; one that moves is a drag. Deciding
-    // on pointerup rather than on pointerdown means neither gesture has to be
-    // learned, and a shaky hand does not delete a point it meant to nudge.
+  function drag(event, index, dot) {
     event.preventDefault();
     event.stopPropagation();
     dot.setPointerCapture(event.pointerId);
@@ -457,7 +747,7 @@ async function renderVisual() {
     let moved = false;
     const move = (moveEvent) => {
       moved = true;
-      const next = at(moveEvent, image);
+      const next = at(moveEvent);
       state.points[index] = { ...state.points[index], ...next };
       dot.style.left = `${next.x * 100}%`;
       dot.style.top = `${next.y * 100}%`;
@@ -465,17 +755,24 @@ async function renderVisual() {
     const up = () => {
       dot.removeEventListener("pointermove", move);
       dot.classList.remove("dragging");
-      if (moved) {
-        note("point.moved", { index, ...state.points[index] });
-      } else {
-        const [removed] = state.points.splice(index, 1);
-        note("point.removed", { index, ...removed });
-      }
+      if (moved) note("point.moved", { index, ...state.points[index] });
       paint();
     };
     dot.addEventListener("pointermove", move);
     dot.addEventListener("pointerup", up, { once: true });
+    dot.addEventListener("pointercancel", up, { once: true });
   }
+
+  $("moment-back").onclick = () => select(state.frame - 1);
+  $("moment-on").onclick = () => select(state.frame + 1);
+
+  $("visual-undo").onclick = () => {
+    const removed = state.points.pop();
+    if (!removed) return;
+    note("point.removed", { index: state.points.length, ...removed });
+    if (removed.frame !== state.frame) select(removed.frame);
+    else paint();
+  };
 
   $("visual-clear").onclick = () => {
     note("points.cleared", { count: state.points.length });
@@ -490,7 +787,9 @@ async function renderVisual() {
     else paint();
   };
 
-  select(state.frame);
+  head("visual", "");
+  $("visual-instruction").textContent = `${copy.instruction} ${copy.keyboard}`;
+  select(0);
   show("screen-visual");
 }
 
@@ -503,59 +802,174 @@ async function renderAuditory() {
   state.selected = [];
   state.segment = detail.segment;
   const strings = state.strings.auditory;
-  $("auditory-heading").textContent = state.strings.app_title;
+  head("auditory", stepName(railAt()));
   $("auditory-instruction").textContent = strings.instruction;
-  $("auditory-note").textContent = strings.none;
+  $("lanes-legend").textContent = strings.legend;
   $("auditory-submit").textContent = state.strings.actions.submit;
 
   const container = $("lanes");
-  container.replaceChildren();
+  for (const node of [...container.querySelectorAll(".lane")]) node.remove();
   const canvases = new Map();
+  const clocks = new Map();
+  let confirming = false;
+
+  const count = () => {
+    $("auditory-note").textContent = state.selected.length
+      ? fill(strings.chosen, { count: state.selected.length, total: detail.stems.length })
+      : strings.chosen_none;
+  };
+
+  /* The reference mix. §5 asks the participant to compare a stem against a
+     ten-second memory, and there was no way to hear the clip again once it had
+     played. It is the clip's own audio, at the clip's own level: nothing here
+     is a separated source, so nothing here is one of the things being asked
+     about. */
+  const mix = new Audio(`/media/video/${detail.segment}`);
+  state.mix = mix;
+  const mixButton = $("mix-play");
+  const mixProgress = $("mix-progress");
+  const mixClock = $("mix-clock");
+  const duration = detail.duration_ms / 1000;
+  $("mix-title").textContent = strings.mix;
+  const clock = (at) => `${at.toFixed(1)} / ${duration.toFixed(1)}`;
+  mixClock.textContent = clock(0);
+  mixProgress.style.width = "0%";
+  const drawMix = () => {
+    const at = mix.currentTime;
+    mixProgress.style.width = `${Math.min(100, (at / (mix.duration || duration)) * 100)}%`;
+    mixClock.textContent = clock(at);
+    if (!mix.paused) requestAnimationFrame(drawMix);
+  };
+  mixButton.onclick = () => {
+    if (!mix.paused) {
+      mix.pause();
+      mixButton.textContent = "▶";
+      return;
+    }
+    stop();
+    mix.play().then(
+      () => {
+        mixButton.textContent = "◼";
+        note("mix.played", { at_ms: Math.round(mix.currentTime * 1000) });
+        requestAnimationFrame(drawMix);
+      },
+      (error) => note("mix.unplayable", { error: String((error && error.message) || error) })
+    );
+  };
+  mix.onended = () => {
+    mixButton.textContent = "▶";
+    mixProgress.style.width = "100%";
+  };
 
   for (const stem of detail.stems) {
     const lane = document.createElement("div");
     lane.className = "lane";
     lane.dataset.stem = stem.id;
 
+    const play = document.createElement("button");
+    play.type = "button";
+    play.className = "play";
+    play.textContent = "▶";
+    play.setAttribute("aria-label", `${strings.play} ${stem.label}`);
+
     const label = document.createElement("div");
     label.className = "label";
-    label.textContent = stem.label;
+    // identity.css exempts these lanes from its no-meaningful-colour rule
+    // because the colours identify sources — but the colour only ever appeared
+    // inside the waveform, with no legend, so it identified nothing the
+    // participant could name. Against the label it does.
+    const chip = document.createElement("i");
+    chip.className = "chip";
+    chip.style.background = stem.colour;
+    const naming = document.createElement("div");
+    naming.append(document.createTextNode(stem.label));
     // The family, where the source vocabulary has one. A label can be a
     // narrower claim than its neighbour, and the colour already groups by
     // family; naming it makes what the colour is doing legible.
     if (stem.parent) {
       const family = document.createElement("small");
       family.textContent = stem.parent;
-      label.append(family);
+      naming.append(family);
     }
+    label.append(chip, naming);
 
+    const wave = document.createElement("div");
+    wave.className = "wave";
     const canvas = document.createElement("canvas");
-    canvas.width = 600;
-    canvas.height = 48;
+    canvas.tabIndex = 0;
+    canvas.setAttribute("role", "slider");
+    canvas.setAttribute("aria-label", fill(strings.seek, { label: stem.label }));
+    canvas.setAttribute("aria-valuemin", "0");
+    canvas.setAttribute("aria-valuemax", "100");
+    canvas.setAttribute("aria-valuenow", "0");
+    const elapsed = document.createElement("span");
+    elapsed.className = "elapsed";
+    elapsed.textContent = clock(0);
+    wave.append(canvas, elapsed);
     canvases.set(stem.id, canvas);
+    clocks.set(stem.id, elapsed);
 
-    const actions = document.createElement("div");
-    actions.className = "lane-actions";
-    const play = document.createElement("button");
-    play.textContent = strings.play;
-    const select = document.createElement("button");
-    select.textContent = strings.select;
-
-    play.onclick = () => toggle(stem, play, lane);
-    select.onclick = () => {
+    /* Selection is a checkbox. It was five buttons with no aria-pressed, no
+       role and no fieldset, whose label swapped between Select and Selected:
+       a screen reader heard "Select, button" five times and never learned that
+       any of them was on, and a sighted participant had to press a button
+       labelled Selected in order to deselect. The label says what ticking it
+       claims, not what state it is in. */
+    const choose = document.createElement("label");
+    choose.className = "choose";
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    const word = document.createElement("span");
+    word.textContent = strings.noticed;
+    choose.append(tick, word);
+    tick.onchange = () => {
       const index = state.selected.indexOf(stem.id);
-      if (index === -1) state.selected.push(stem.id);
-      else state.selected.splice(index, 1);
-      const on = state.selected.includes(stem.id);
-      lane.classList.toggle("selected", on);
-      select.textContent = on ? strings.selected : strings.select;
-      note("lane.selected", { stem: stem.id, selected: on, order: state.selected.indexOf(stem.id) });
+      if (tick.checked && index === -1) state.selected.push(stem.id);
+      if (!tick.checked && index !== -1) state.selected.splice(index, 1);
+      lane.classList.toggle("selected", tick.checked);
+      confirming = false;
+      count();
+      note("lane.selected", {
+        stem: stem.id,
+        selected: tick.checked,
+        order: state.selected.indexOf(stem.id),
+      });
     };
 
-    actions.append(play, select);
-    lane.append(label, canvas, actions);
+    play.onclick = () => toggle(stem, play, lane, 0);
+    // The envelope already shows where the events are; §5 asks the participant
+    // to compare a stem against a ten-second memory, and not letting them go
+    // back to the third second was the largest avoidable cost on this screen.
+    canvas.onclick = (event) => {
+      const box = canvas.getBoundingClientRect();
+      toggle(stem, play, lane, Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)), true);
+    };
+    canvas.onkeydown = (event) => {
+      const nudge = { ArrowLeft: -0.05, ArrowRight: 0.05, Home: -1, End: 1 }[event.key];
+      if (nudge === undefined) return;
+      event.preventDefault();
+      const now = Number(canvas.getAttribute("aria-valuenow")) / 100;
+      const to = nudge === -1 ? 0 : nudge === 1 ? 0.98 : Math.min(1, Math.max(0, now + nudge));
+      toggle(stem, play, lane, to, true);
+    };
+
+    lane.append(play, label, wave, choose);
     container.append(lane);
+    size(canvas);
     drawWave(canvas, stem, 0);
+  }
+
+  /* The backing store was fixed at 600×48 while the CSS was width: 100%, so
+     600 pixels were squeezed into about 400 and then doubled again by a retina
+     display, and bars drawn on fractional boundaries blurred. */
+  function size(canvas) {
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
+    const height = Math.max(1, Math.round(48 * ratio));
+    if (canvas.width === width && canvas.height === height) return false;
+    canvas.width = width;
+    canvas.height = height;
+    return true;
   }
 
   function drawWave(canvas, stem, progress) {
@@ -570,17 +984,31 @@ async function renderAuditory() {
     });
     if (progress > 0) {
       context.fillStyle = "rgba(22, 24, 26, 0.85)";
-      context.fillRect(progress * width, 0, 2, height);
+      context.fillRect(progress * width, 0, Math.max(2, 2 * (window.devicePixelRatio || 1)), height);
     }
+    canvas.setAttribute("aria-valuenow", String(Math.round(progress * 100)));
   }
+
+  const relayout = () => {
+    for (const stem of detail.stems) {
+      const canvas = canvases.get(stem.id);
+      if (size(canvas)) {
+        const playing = state.playing && state.playing.stem.id === stem.id ? state.playing.element : null;
+        drawWave(canvas, stem, playing && playing.duration ? playing.currentTime / playing.duration : 0);
+      }
+    }
+  };
+  window.addEventListener("resize", relayout);
+  requestAnimationFrame(relayout);
 
   function stop() {
     if (!state.playing) return;
     const { stem, element, since, button, opening } = state.playing;
     state.playing = null;
     element.pause();
-    button.textContent = strings.play;
+    button.textContent = "▶";
     drawWave(canvases.get(stem.id), stem, 0);
+    clocks.get(stem.id).textContent = clock(0);
     // A lane stopped before it ever made a sound contributes no listening
     // time and no stop worth recording: nothing was heard.
     if (opening) return;
@@ -589,12 +1017,26 @@ async function renderAuditory() {
     note("lane.stopped", { stem: stem.id, ...counts });
   }
 
-  function toggle(stem, button, lane) {
-    if (state.playing && state.playing.stem.id === stem.id) return stop();
+  function toggle(stem, button, lane, from, always) {
+    if (state.playing && state.playing.stem.id === stem.id) {
+      // A click on the waveform of the lane already playing is a seek, not a
+      // stop: the two controls stay distinct in both directions.
+      if (always) {
+        const element = state.playing.element;
+        element.currentTime = from * (element.duration || 0);
+        note("lane.sought", { stem: stem.id, to: from });
+        return;
+      }
+      return stop();
+    }
     // §5: starting another lane stops the previous one. Enforced here rather
     // than by pausing on the element's own play event, so the listening time
     // of the lane being interrupted is closed before the next one opens.
     stop();
+    if (!mix.paused) {
+      mix.pause();
+      mixButton.textContent = "▶";
+    }
     const element = new Audio(`/media/stem/${state.segment}/${stem.id}`);
     // Levels are normalised against the original mix by the gain measured when
     // the stems were cut (§5). WebAudio, not element.volume, because a gain
@@ -604,8 +1046,18 @@ async function renderAuditory() {
     const gain = state.audio.createGain();
     gain.gain.value = stem.gain;
     source.connect(gain).connect(state.audio.destination);
-    element.ontimeupdate = () => {
-      if (element.duration) drawWave(canvases.get(stem.id), stem, element.currentTime / element.duration);
+    // The playhead was redrawn from ontimeupdate, so it advanced in visible
+    // ~250ms steps over an envelope the participant is reading for onsets.
+    const follow = () => {
+      if (!state.playing || state.playing.element !== element) return;
+      if (element.duration) {
+        drawWave(canvases.get(stem.id), stem, element.currentTime / element.duration);
+        clocks.get(stem.id).textContent = clock(element.currentTime);
+      }
+      requestAnimationFrame(follow);
+    };
+    element.onloadedmetadata = () => {
+      if (from > 0) element.currentTime = from * element.duration;
     };
     element.onended = () => {
       if (state.playing && state.playing.element === element) stop();
@@ -615,7 +1067,7 @@ async function renderAuditory() {
     // stopped the other and both were heard at once — which §5 forbids and
     // which a sequential click is too slow to reach.
     state.playing = { stem, element, since: Date.now(), button, opening: true };
-    button.textContent = strings.stop;
+    button.textContent = "◼";
     element.play().then(
       () => {
         if (!state.playing || state.playing.element !== element) {
@@ -630,7 +1082,8 @@ async function renderAuditory() {
         state.playing.since = Date.now();
         const counts = state.lanes.get(stem.id);
         counts.plays += 1;
-        note("lane.played", { stem: stem.id, plays: counts.plays });
+        note("lane.played", { stem: stem.id, plays: counts.plays, from });
+        requestAnimationFrame(follow);
       },
       (error) => {
         // Pausing a play() that has not settled rejects it, so stopping a lane
@@ -647,16 +1100,35 @@ async function renderAuditory() {
         // heard the source in the clip — and the log carries the failure so
         // the researcher sees it without the participant losing the session.
         lane.classList.add("unplayable");
-        button.textContent = strings.unavailable;
+        button.textContent = "—";
+        button.setAttribute("aria-label", `${strings.unavailable}: ${stem.label}`);
         button.disabled = true;
+        clocks.get(stem.id).textContent = strings.unavailable;
         note("lane.unplayable", { stem: stem.id, error: String((error && error.message) || error) });
       }
     );
   }
 
-  $("auditory-submit").onclick = async () => {
+  count();
+
+  const submit = $("auditory-submit");
+  submit.disabled = false;
+  submit.onclick = async () => {
+    /* §5 could be finished in one press, on a screen whose result conditions
+       the captions the participant then rates in §7 and §8 — so an empty §5
+       does not thin one measure, it moves the stimulus for two more. Noticing
+       none of them is still a valid answer and is still allowed; it takes a
+       second press and says so. */
+    if (!state.selected.length && !confirming) {
+      confirming = true;
+      $("auditory-note").textContent = strings.confirm_none;
+      note("auditory.empty_confirm_asked", {});
+      return;
+    }
     stop();
-    $("auditory-submit").disabled = true;
+    if (!mix.paused) mix.pause();
+    window.removeEventListener("resize", relayout);
+    submit.disabled = true;
     const lanes = Object.fromEntries(state.lanes);
     const result = await api("/api/auditory", {
       participant: state.participant,
@@ -664,7 +1136,7 @@ async function renderAuditory() {
       lanes,
     });
     if (result) render(result.step);
-    else $("auditory-submit").disabled = false;
+    else submit.disabled = false;
   };
 
   show("screen-auditory");
@@ -673,19 +1145,59 @@ async function renderAuditory() {
 /* §6 — the wait. One POST, which is idempotent server-side, so a reload here
    returns the track already written rather than starting a second one. */
 async function renderWaiting() {
-  $("waiting-heading").textContent = state.strings.waiting.heading;
-  $("waiting-stay").textContent = state.strings.waiting.stay;
+  const copy = state.strings.waiting;
+  head("waiting", copy.heading);
+  $("waiting-eyebrow").textContent = copy.eyebrow;
+  $("waiting-explains").textContent = copy.explains;
+  $("waiting-stay").textContent = copy.stay;
+  $("waiting-ahead-heading").textContent = copy.ahead_heading;
+  $("waiting-ahead-body").textContent = copy.ahead_body;
+  $("waiting-ceiling").textContent = fill(copy.ceiling, {
+    seconds: Math.round(state.ceilingMs / 1000),
+  });
   show("screen-waiting");
-  const result = await api("/api/regenerate", { participant: state.participant });
-  if (!result) return;
-  note("regeneration.finished", { fallback: result.fallback, cached: result.cached });
-  const next = await api(`/api/state?participant=${state.participant}`);
-  if (next) render(next.step);
+
+  /* The comment defending the indeterminate bar is right — nothing on this
+     page can predict the model — but indeterminate had been implemented as
+     silent. A number that moves is the proof that the page is alive, which is
+     the question a waiting participant is actually asking; the sentence above
+     it is what a screen reader gets, since role="progressbar" with no
+     aria-valuenow announced once and then went quiet, and nothing said
+     anything at all when the step finished. The bar's own reduced-motion
+     treatment is the stylesheet's business, not this file's. */
+  const startedAt = Date.now();
+  $("waiting-status").textContent = copy.status;
+  const tick = () => {
+    $("waiting-elapsed").textContent = fill(copy.elapsed, {
+      seconds: Math.floor((Date.now() - startedAt) / 1000),
+    });
+  };
+  tick();
+  const ticking = window.setInterval(tick, 1000);
+
+  try {
+    const result = await api("/api/regenerate", { participant: state.participant });
+    if (!result) return;
+    note("regeneration.finished", { fallback: result.fallback, cached: result.cached });
+    $("waiting-status").textContent = copy.status_done;
+    const next = await api(`/api/state?participant=${state.participant}`);
+    if (next) render(next.step);
+  } finally {
+    window.clearInterval(ticking);
+  }
 }
 
 function renderDone() {
-  $("done-heading").textContent = state.strings.done.heading;
-  $("done-body").textContent = state.strings.done.body;
+  const copy = state.strings.done;
+  head("done", copy.heading);
+  $("done-body").textContent = copy.body;
+  // After a screen that warned them leaving would end the session, the
+  // participant's last impression was an assurance that never came.
+  $("done-receipt").textContent = fill(copy.receipt, {
+    participant: state.participant,
+    at: new Date().toISOString().replace("T", " ").slice(0, 19),
+  });
+  $("done-for").textContent = copy.for_researcher;
   const button = $("done-download");
   button.textContent = state.strings.actions.download;
   // Navigate rather than open a tab: the server sends the log as an
@@ -710,9 +1222,9 @@ async function render(step) {
     if (step === "auditory") return await renderAuditory();
     if (step === "regenerating") return await renderWaiting();
     if (step === "done") return renderDone();
-    fail(`unknown step ${step}`);
+    fail(`unknown step ${step}`, `unknown step ${step}`);
   } catch (error) {
-    fail(error.message);
+    fail(error.message, error.message);
   }
 }
 
@@ -722,9 +1234,11 @@ async function boot() {
     state.strings = meta.strings;
     state.scale = meta.scale;
     state.minimumPoints = meta.minimum_points;
+    state.ceilingMs = meta.latency_ceiling_ms || state.ceilingMs;
     state.steps = meta.steps;
     state.languages = meta.languages || [];
     document.title = state.strings.app_title;
+    document.documentElement.style.setProperty("--points", String(meta.scale.points));
     // The identifier survives a reload; a fresh tab with none enrols anew (§1).
     const stored = window.sessionStorage.getItem("regen.participant");
     const session = await fetch("/api/session", {
@@ -732,14 +1246,15 @@ async function boot() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(stored ? { participant: stored } : {}),
     }).then((response) => response.json());
-    if (session.error) return fail(session.error);
+    if (session.error) return fail(session.error, session.error);
     state.participant = session.participant;
     state.language = session.language || state.languages[0] || "en";
     state.languageLocked = Boolean(session.language_locked);
+    document.documentElement.lang = state.language;
     window.sessionStorage.setItem("regen.participant", session.participant);
     await render(session.step);
   } catch (error) {
-    fail(error.message);
+    fail(error.message, error.message);
   }
 }
 

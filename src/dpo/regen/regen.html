@@ -13,89 +13,187 @@
          Section numbers cite docs/v3-regen/spec-behavior.md. -->
     <main class="shell" id="shell">
       <!-- Progress, not navigation: the rail says where the participant is and
-           has nothing to click, because there is nowhere to go but forward. -->
-      <!-- The rail says where the participant is; the toggle beside it says
-           which language they are reading. The toggle stops being one once a
-           clip has played: both viewings are read in one language (§9.3). -->
+           has nothing to click, because there is nowhere to go but forward. It
+           is a list of the six names rather than six empty spans, so the step
+           can be read as well as seen — aria-current marks the one in progress.
+           The toggle beside it says which language they are reading. It stops
+           being a control once a clip has played, and stays on screen saying
+           so: both viewings are read in one language (§9.3). -->
       <div class="topline">
-        <nav class="rail" id="rail" aria-label="Progress"></nav>
-        <div class="languages" id="languages" hidden></div>
+        <nav class="rail" id="rail" aria-label="Progress"><ol></ol></nav>
+        <div class="languages" id="languages" hidden>
+          <div class="pair"></div>
+          <span class="locked" hidden></span>
+        </div>
       </div>
+
+      <!-- Every step opens with the same block: which step this is, what it is
+           called, and what it wants. The step name is the heading, because it
+           is the part that changes; the study's name is the constant and rides
+           in the eyebrow with the number. -->
 
       <!-- §2, §7 — the start screen. The headphone line is here rather than on
            a preamble page because it is the last thing read before audio. -->
       <section id="screen-start" hidden>
-        <h1 id="start-heading"></h1>
-        <p class="lede" id="start-headphones"></p>
-        <p class="lede" id="start-ready"></p>
+        <div class="head">
+          <span class="eyebrow" id="start-eyebrow"></span>
+          <h1 id="start-heading"></h1>
+          <p class="lede" id="start-headphones"></p>
+          <p class="lede" id="start-ready"></p>
+        </div>
         <div class="actions"><button class="primary" id="start-button"></button></div>
       </section>
 
       <!-- §3, §8 — the surveys. Both are built from the same code against the
            blocks the server sends, so the two ART renderings cannot differ. -->
       <section id="screen-survey" hidden>
-        <h1 id="survey-heading"></h1>
-        <p class="lede" id="survey-instruction"></p>
+        <div class="head">
+          <span class="eyebrow" id="survey-eyebrow"></span>
+          <h1 id="survey-heading"></h1>
+          <p class="lede" id="survey-instruction"></p>
+        </div>
         <div id="survey-blocks"></div>
-        <div class="actions">
+        <!-- Travels with the participant rather than waiting at the end of 22
+             rows, and the count is a control: it goes to the row it counts. -->
+        <div class="submitbar">
           <button class="primary" id="survey-submit" disabled></button>
-          <span class="note" id="survey-remaining"></span>
+          <button id="survey-first" hidden></button>
+          <span class="spacer"></span>
+          <span class="note" id="survey-remaining" role="status" aria-live="polite"></span>
         </div>
       </section>
 
-      <!-- §4 — the still. Points are placed on the image itself; the count and
-           the floor are the only feedback, and no point ever says what it hit. -->
+      <!-- §4 — the still. One moment at a time: the picker is text and the
+           picture is a picture, so which surface takes a mark is never in
+           doubt. Points are placed on the image itself; the count and the
+           floor are the only feedback, and no point ever says what it hit. -->
       <section id="screen-visual" hidden>
-        <h1 id="visual-heading"></h1>
-        <p class="lede" id="visual-instruction"></p>
-        <!-- The strip is the control and the canvas at once: the frame in the
-             middle is the one being marked, its neighbours are there to be
-             scrolled to. Marks live on the frame they were placed on. -->
-        <div class="strip" id="strip" role="group"></div>
+        <div class="head">
+          <span class="eyebrow" id="visual-eyebrow"></span>
+          <h1 id="visual-heading"></h1>
+          <p class="lede" id="visual-instruction"></p>
+          <!-- Reserved, so meeting the floor does not shorten the paragraph
+               and shift the picture up under the cursor. -->
+          <p class="lede" id="visual-hint"></p>
+        </div>
+        <div class="plate" id="plate" tabindex="0" role="application"></div>
+        <div class="moments">
+          <button class="step" id="moment-back" type="button">&#8592;</button>
+          <div class="pick" id="moments" role="group"></div>
+          <button class="step" id="moment-on" type="button">&#8594;</button>
+        </div>
         <div class="actions">
           <button class="primary" id="visual-next" disabled></button>
-          <button id="visual-clear"></button>
-          <span class="note" id="visual-count"></span>
+          <button id="visual-undo" type="button"></button>
+          <button id="visual-clear" type="button"></button>
+          <span class="spacer"></span>
+          <span class="note" id="visual-count" role="status" aria-live="polite"></span>
         </div>
       </section>
 
-      <!-- §5 — the lanes. Play and Select are separate buttons in separate
-           cells, so neither hit area can overlap the other. -->
+      <!-- §5 — the lanes. Play and select are separate controls in separate
+           cells at opposite ends of the row, so neither hit area can reach the
+           other. Selection is a checkbox, because it is a checkbox. -->
       <section id="screen-auditory" hidden>
-        <h1 id="auditory-heading"></h1>
-        <p class="lede" id="auditory-instruction"></p>
-        <div class="lanes" id="lanes"></div>
+        <div class="head">
+          <span class="eyebrow" id="auditory-eyebrow"></span>
+          <h1 id="auditory-heading"></h1>
+          <p class="lede" id="auditory-instruction"></p>
+        </div>
+        <!-- Every judgment on this screen was stem-against-memory: there was
+             no way to hear the clip again once it had played. -->
+        <div class="mix">
+          <button class="play primary" id="mix-play" type="button">&#9654;</button>
+          <div class="body">
+            <div class="title" id="mix-title"></div>
+            <div class="track"><i id="mix-progress"></i></div>
+          </div>
+          <span class="clock" id="mix-clock"></span>
+        </div>
+        <fieldset class="lanes" id="lanes">
+          <legend class="eyebrow" id="lanes-legend"></legend>
+        </fieldset>
         <div class="actions">
           <button class="primary" id="auditory-submit"></button>
-          <span class="note" id="auditory-note"></span>
+          <span class="spacer"></span>
+          <span class="note" id="auditory-note" role="status" aria-live="polite"></span>
         </div>
       </section>
 
       <!-- §6 — the wait. Indeterminate on purpose: the ceiling bounds it, but
-           nothing here can predict the model, so the bar does not pretend to. -->
+           nothing here can predict the model, so the bar does not pretend to.
+           Indeterminate is not the same as silent, though, so the elapsed
+           count, the ceiling and what remains of the session are all named. -->
       <section class="waiting" id="screen-waiting" hidden>
-        <h1 id="waiting-heading"></h1>
-        <p class="lede" id="waiting-stay"></p>
-        <div class="bar" role="progressbar" aria-label="Writing captions"><i></i></div>
+        <div class="head">
+          <span class="eyebrow" id="waiting-eyebrow"></span>
+          <h1 id="waiting-heading"></h1>
+          <p class="lede" id="waiting-explains"></p>
+          <p class="lede" id="waiting-stay"></p>
+        </div>
+        <p class="status" id="waiting-status" role="status" aria-live="polite"></p>
+        <div class="bar" aria-hidden="true"><i></i></div>
+        <div class="clocks">
+          <span class="elapsed" id="waiting-elapsed"></span>
+          <span class="ceiling" id="waiting-ceiling"></span>
+        </div>
+        <div class="ahead">
+          <h2 id="waiting-ahead-heading"></h2>
+          <p id="waiting-ahead-body"></p>
+        </div>
       </section>
 
       <section id="screen-done" hidden>
-        <h1 id="done-heading"></h1>
-        <p class="lede" id="done-body"></p>
-        <div class="actions"><button id="done-download"></button></div>
+        <div class="head">
+          <span class="eyebrow" id="done-eyebrow"></span>
+          <h1 id="done-heading"></h1>
+          <p class="lede" id="done-body"></p>
+        </div>
+        <p class="receipt" id="done-receipt"></p>
+        <!-- The log is the researcher's tool, not the participant's next step,
+             and until it was ruled off it was the only button on the screen. -->
+        <div class="researcher">
+          <span class="eyebrow" id="done-for"></span>
+          <button id="done-download" type="button"></button>
+        </div>
       </section>
 
       <section id="screen-error" hidden>
-        <h1>—</h1>
-        <p class="lede" id="error-text"></p>
+        <div class="head">
+          <span class="eyebrow" id="error-eyebrow"></span>
+          <h1 id="error-heading"></h1>
+          <p class="lede" id="error-text"></p>
+          <p class="lede" id="error-kept"></p>
+        </div>
+        <pre class="diagnosis" id="error-diagnosis"></pre>
+        <div class="actions">
+          <button id="error-retry" type="button"></button>
+        </div>
       </section>
     </main>
 
     <!-- Outside the shell: it takes the whole viewport and must not inherit the
-         column's padding. Hidden until a start button puts it in fullscreen. -->
+         column's padding. Hidden until a start button puts it in fullscreen.
+
+         The track carries the same cues as the band. It is hidden rather than
+         showing — the band is the caption the study manipulates and two of them
+         on screen would be two stimuli — but a hidden track still fires
+         cuechange, which is what takes cue timing off the ~4Hz timeupdate rate,
+         and it makes the cue list a real TextTrack rather than a string the
+         page happened to draw. -->
     <section class="viewing" id="screen-viewing" hidden>
-      <video id="video" playsinline preload="auto"></video>
-      <div class="band"><p id="cue"></p></div>
+      <video id="video" playsinline preload="auto">
+        <track id="cues" kind="captions" label="Sound captions" />
+      </video>
+      <div class="scrim"></div>
+      <div class="band"><p id="cue" aria-live="polite"></p></div>
+      <div class="interrupted" id="viewing-interrupted" hidden>
+        <div>
+          <h2 id="interrupted-heading"></h2>
+          <p id="interrupted-body"></p>
+          <button class="primary" id="interrupted-resume" type="button"></button>
+        </div>
+      </div>
     </section>
 
     <script src="/regen.js"></script>

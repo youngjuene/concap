@@ -4,44 +4,97 @@
    whole viewport, go black, and carry nothing but the video and the caption
    band. Everything else sits in one centred column at --column, because a
    survey page and a still that need to be compared across two viewings must be
-   the same width in both.
+   the same width in both — and, since §4 stopped needing a scroller wider than
+   the page, that is now true of all six rather than five.
 
-   Section numbers cite docs/v3-regen/spec-behavior.md. */
+   Section numbers cite docs/v3-regen/spec-behavior.md; findings cite the
+   interface audit in updated_UI_design/. */
 
 .shell {
   max-width: var(--column);
   margin: 0 auto;
-  padding: 32px 24px 64px;
+  padding: 34px 24px 96px;
 }
 
-/* The progress rail and the language toggle share the top line: the rail
-   takes what is left after the toggle, which is as wide as its own words. */
-.topline { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
-.topline .rail { flex: 1; margin-bottom: 0; }
+/* §9.1 — the progress rail and the language toggle share the top line. */
+.topline {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  margin-bottom: 38px;
+}
 
-.languages { display: flex; gap: 4px; align-items: center; flex: 0 0 auto; }
-.languages button {
-  padding: 4px 9px;
+/* Progress, not navigation: nothing here is clickable, because there is
+   nowhere to go but forward. That was never a reason to withhold the words.
+   copy.py has held the six names since the first commit and drawRail() used
+   them only for their count, so a participant could not learn which step they
+   were on — and neither could a screen reader, which found a navigation
+   landmark called Progress with six empty spans inside it. */
+.rail { flex: 1; }
+.rail ol { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; list-style: none; }
+.rail .n { display: block; font: 10.5px/1.4 var(--mono); color: var(--rule); margin-bottom: 5px; }
+.rail .name {
+  display: block;
+  min-height: 34px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: var(--leading-ui);
+  color: var(--rule);
+}
+.rail .bar { display: block; height: 3px; border-radius: 2px; background: var(--hairline); }
+.rail .done .n, .rail .done .name { color: var(--dim); }
+.rail .done .bar { background: var(--dim); }
+.rail .at .n { color: var(--accent); }
+.rail .at .name { color: var(--ink); font-weight: 600; }
+.rail .at .bar { background: var(--accent); }
+
+/* The toggle says which language the participant is reading. It stops being a
+   control once a clip has played — both viewings are read in one language
+   (§9.3) — but it does not stop being visible: a control that disappears reads
+   as a bug, and in a supervised session that becomes a question for the
+   researcher mid-run. The reason is printed rather than left in a title. */
+.languages { flex: 0 0 auto; position: relative; }
+.languages .pair { display: flex; gap: 6px; }
+.languages button { min-height: var(--target); padding: 0 20px; font-size: 13px; }
+.languages button.at { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+/* Locked, and still saying which one is in force. The generic disabled fill is
+   darker than the panel, so a locked pair styled with it alone pointed at the
+   wrong language: the greyer chip read as the chosen one. The language being
+   read keeps the accent; the one that is no longer on offer recedes. */
+.languages button.at:disabled {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent-press);
+}
+.languages .locked {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  white-space: nowrap;
   font: 11px/1.4 var(--mono);
-  border: 1px solid var(--rule);
-  background: var(--panel);
   color: var(--dim);
-  cursor: pointer;
 }
-.languages button.at { border-color: var(--accent); color: var(--accent); }
-.languages[data-locked="yes"] button { cursor: default; }
-.languages[data-locked="yes"] button:not(.at) { display: none; }
 
-.rail { display: flex; gap: 4px; margin-bottom: 32px; }
-.rail span { flex: 1; height: 2px; background: var(--rule); }
-.rail span.done { background: var(--dim); }
-.rail span.at { background: var(--accent); }
+/* The heading block. Five screens used to share one h1 reading "Sound
+   captions", with the thing the screen actually wanted from the participant
+   set below it in grey at one step down in weight — the constant loud, the
+   variable quiet. The step name is the heading now, and the study's name moves
+   into the eyebrow beside the step number, where a constant belongs. */
+.head { margin-bottom: 26px; }
+.head .eyebrow { display: block; margin-bottom: 9px; }
+h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+p.lede {
+  max-width: 62ch;
+  margin-top: 12px;
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--body-ink);
+  text-wrap: pretty;
+}
 
-h1 { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
-p.lede { color: var(--dim); margin-bottom: 24px; }
-
-.actions { display: flex; gap: var(--gap); align-items: center; margin-top: 28px; }
-.actions .note { color: var(--dim); font-size: 14px; }
+.actions { display: flex; gap: 12px; align-items: center; margin-top: 26px; flex-wrap: wrap; }
+.actions .spacer { flex: 1; }
+.actions .note { color: var(--body-ink); font: 12.5px/1.45 var(--mono); }
 
 /* §2, §7 — the viewing. Fullscreen, no controls, nothing but the footage. */
 .viewing {
@@ -61,7 +114,26 @@ p.lede { color: var(--dim); margin-bottom: 24px; }
 
 /* The band overlays the footage rather than displacing it: the clip is the
    stimulus and must be the same size in both viewings, whatever the caption
-   does. Reserved height, so a cue arriving never moves anything. */
+   does. Reserved height, so a cue arriving never moves anything.
+
+   The scrim is the fix for the one legibility problem in this instrument that
+   is a measurement problem rather than a usability one. A text-shadow buys
+   about a pixel of edge, and caption_credible_* cannot tell an unread caption
+   from a wrong one — over pale sky or wet paving the white text simply was not
+   there. The band already reserved its height whether or not a cue was
+   showing, so filling that reserved height with a constant gradient costs
+   nothing the original reasoning had not already paid for, and it is identical
+   across both viewings by construction rather than by care. */
+.viewing .scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--caption-band) + 12vh);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.58) 52%, rgba(0, 0, 0, 0) 100%);
+  pointer-events: none;
+}
+
 .viewing .band {
   position: absolute;
   left: 0;
@@ -71,130 +143,199 @@ p.lede { color: var(--dim); margin-bottom: 24px; }
   display: grid;
   place-items: center;
   padding: 16px 8vw;
-  pointer-events: none;
 }
 
 .viewing .band p {
-  font: 500 24px/32px var(--body);
+  font: 500 24px/var(--caption-leading) var(--body);
   color: #FFFFFF;
   text-align: center;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   white-space: pre-line;
+  text-wrap: pretty;
 }
 
-/* §4 — the strip of moments, and the marks on them.
-
-   One horizontal scroller. The frame in the middle is the one being marked, at
-   full size and full clarity; its neighbours are smaller, dimmer and softened,
-   which is the whole of the affordance: the sharp one takes marks, the blurred
-   ones take you to them. Scroll snapping puts a frame in the middle rather
-   than half of two. */
-/* §4 is the one screen wider than the column: the strip needs the marked frame
-   at a size a mark can be placed precisely on, and a neighbour either side of
-   it. Centred on the shell's centre, which is the viewport's. */
-#screen-visual {
-  width: min(1120px, calc(100vw - 32px));
-  margin-left: 50%;
-  transform: translateX(-50%);
+/* A clip interrupted by the browser's own Escape. Fullscreen was requested and
+   never watched, so the video went on playing in a 720px column and the
+   viewing recorded clean; the log could not tell that session from a correct
+   one. It is stamped on the record now, and the participant is stopped rather
+   than carried on through a stimulus that is no longer the stimulus. */
+.viewing .interrupted {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.86);
+  padding: 24px;
 }
+.viewing .interrupted div { max-width: 46ch; text-align: center; color: #FFFFFF; }
+.viewing .interrupted h2 { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
+.viewing .interrupted p { font-size: 16px; line-height: 1.6; margin-bottom: 22px; color: #D8DAD8; }
 
-.strip {
+/* §4 — one moment at a time.
+
+   This screen was a horizontal scroller: the marked frame full width and sharp,
+   its neighbours a third of that, blurred and dimmed. The idea was that the
+   strip is the control and the canvas at once. What it produced was two
+   mechanisms owning one scroll position — a rest timer that chose the nearest
+   frame, and a hold loop that wrote scrollLeft on every frame for the length of
+   a width animation — with the participant as the third. A flick did nothing
+   for 110ms, then the strip moved on its own for half a second and discarded
+   anything scrolled during it.
+
+   The blur was also doing two contradictory jobs: saying "not this one" and
+   inviting a click. So the picker is text and the picture is a picture, which
+   are two things nobody confuses, and no scroll position needs owning at all.
+   Marks stay per-frame and normalised exactly as before — §4's record and
+   points.py's matching are untouched. */
+.plate {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  /* No scroll snapping: the frames change width as the selection moves, and a
-     snap point that shifts under the scroll is what makes a strip feel like it
-     is fighting you. The page centres the chosen frame itself instead. */
-  padding: 8px calc(50% - var(--frame-w) / 2) 16px;
-  scrollbar-width: thin;
-}
-
-.frame {
-  position: relative;
-  flex: 0 0 auto;
-  width: var(--frame-side);
-  scroll-snap-align: center;
-  line-height: 0;
-  user-select: none;
-  cursor: pointer;
-  opacity: 0.45;
-  filter: blur(3px);
-  /* One eased motion, and the page holds the chosen frame in the middle for
-     its whole length — see renderVisual. A width that animates without the
-     scroll following it is what threw the frame off centre. */
-  transition:
-    width var(--strip-motion) var(--strip-ease),
-    opacity var(--strip-motion) var(--strip-ease),
-    filter var(--strip-motion) var(--strip-ease);
-}
-
-.frame.at {
-  width: var(--frame-w);
-  opacity: 1;
-  filter: none;
+  width: 100%;
+  /* The frame sets the height once it loads; this only stops the box from
+     collapsing to nothing in the moment before it does. */
+  min-height: 240px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-lg);
+  background: var(--band);
+  overflow: hidden;
   cursor: crosshair;
+  touch-action: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .frame { transition: none; }
-  .strip { scroll-behavior: auto; }
-}
+.plate img { width: 100%; display: block; }
 
-/* Below the kiosk width the neighbours stop fitting beside the marked frame;
-   the strip still scrolls to them, one at a time. */
-@media (max-width: 900px) {
-  :root { --frame-w: min(640px, calc(100vw - 64px)); --frame-side: 120px; }
-}
-
-.frame img { width: 100%; display: block; border: 1px solid var(--rule); }
-.frame.at img { border-color: var(--accent); }
-
-.frame .moment {
-  display: block;
-  margin-top: 6px;
-  font: 10px/1.4 var(--mono);
-  color: var(--dim);
-  text-align: center;
-}
-.frame.at .moment { color: var(--ink); }
-
+/* A mark. 34px rather than 22px, and its removal is an explicit control rather
+   than a press that happened not to move: the old gesture decided delete
+   against drag on pointerup, so a one-pixel tremor turned one into the other,
+   and the only way to inspect a mark was to risk deleting it — with no undo. */
 .point {
   position: absolute;
-  width: 22px;
-  height: 22px;
-  margin: -11px 0 0 -11px;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
   border-radius: 50%;
   border: 2px solid #FFFFFF;
   background: var(--accent);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.42);
   cursor: grab;
   display: grid;
   place-items: center;
-  font: 11px/1 var(--mono);
+  font: 500 13px/1 var(--mono);
   color: #FFFFFF;
   touch-action: none;
 }
 
 .point.dragging { cursor: grabbing; }
+.point:focus-visible { outline: 2px solid #FFFFFF; outline-offset: 3px; }
+
+/* On the mark's top-right shoulder, anchored rather than nudged: an absolute
+   box with no offsets falls at its static position, which for a centred grid
+   item is the middle of the dot, and a margin from there moves with the font.
+   The plate clips, so a mark against the top or right edge would lose its ✕
+   entirely — those two flip to the side that has room. */
+.point .drop {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin: -14px 0 0 -10px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #FFFFFF;
+  background: var(--ink);
+  color: #FFFFFF;
+  font: 11px/1 var(--body);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.point.at-top .drop { top: 100%; margin-top: -10px; }
+.point.at-right .drop { left: 0; margin-left: -14px; }
+.point .drop:hover { background: #000000; border-color: #FFFFFF; }
+
+/* The keyboard's mark. Arrow keys move it, Enter places one where it stands:
+   §4 gated the rest of the session and had no keyboard path at all, so a
+   participant who could not use a trackpad could not reach §5 either. */
+.crosshair {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  border: 2px dashed #FFFFFF;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5), inset 0 0 0 2px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.moments { display: flex; align-items: center; gap: 5px; margin-top: 16px; }
+.moments .step { flex: 0 0 var(--target); padding: 0; }
+.moments .pick { flex: 1; display: grid; grid-template-columns: repeat(var(--moments, 5), 1fr); gap: 5px; }
+.moments .pick button {
+  min-height: var(--target);
+  padding: 0 6px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  font: 500 12px/1.2 var(--mono);
+}
+/* Marks are per-frame and the count was reported across all of them, so "5
+   marked" could mean five on one moment or one on each of five and the only
+   way to find out was to visit every frame. Each moment carries its own. */
+.moments .pick button .tally { font: 10.5px/1.2 var(--mono); opacity: 0.82; }
+.moments .pick button.at {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+}
 
 /* §5 — the lanes. Playback and selection are separate controls with separate
-   hit areas, which the spec requires and the grid enforces: the play button
-   and the select button are siblings, never nested, never overlapping. */
-.lanes { display: flex; flex-direction: column; gap: 12px; }
+   hit areas, which the spec requires and the grid enforces: they sit at
+   opposite ends of the row and are never nested.
+
+   Selection is a checkbox now. It is a multi-choice set, and it was five
+   buttons with no aria-pressed and no fieldset whose label swapped between
+   Select and Selected — so a screen reader heard "Select, button" five times
+   and never learned that any of them was on, and a sighted participant had to
+   press a button labelled Selected in order to deselect. One real control
+   fixes the semantics, the label and the state together. */
+.mix {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  margin-bottom: 24px;
+}
+.mix .play { flex: 0 0 auto; width: 56px; height: 56px; min-height: 0; padding: 0; border-radius: var(--radius); font-size: 17px; }
+.mix .body { flex: 1; min-width: 0; }
+.mix .title { font: 600 14.5px/1.35 var(--body); margin-bottom: 8px; }
+.mix .clock { flex: 0 0 auto; font: 12.5px/1.4 var(--mono); color: var(--body-ink); }
+
+.track { height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; }
+.track i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+
+/* A fieldset, because the five lanes are one multi-choice set and a screen
+   reader needs to be told so once rather than five times. Its default border,
+   and the min-width: min-content that would let one long label widen the whole
+   column, are both reset here. */
+.lanes { display: flex; flex-direction: column; gap: 8px; border: 0; min-width: 0; }
+.lanes legend { margin-bottom: 10px; }
 
 .lane {
   display: grid;
-  /* The actions track sizes to its own content: the two controls change width
-     with their labels (Play/Stop, Select/Selected, No sound), and a fixed
-     track that fits one pair overflows on another — which put the buttons on
-     top of the waveform. */
-  grid-template-columns: 96px 1fr auto;
+  /* The label track sizes to its own content. A fixed 96px fitted "Road
+     traffic" and turned 멀리서 들리는 목소리 into three lines, which pushed the
+     row taller than its waveform and misaligned it against its neighbours —
+     the same lesson the actions track had already learned once. */
+  grid-template-columns: auto minmax(150px, max-content) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 8px;
+  gap: 14px;
+  padding: 10px 14px;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
   background: var(--panel);
 }
 
@@ -203,47 +344,208 @@ p.lede { color: var(--dim); margin-bottom: 24px; }
    source the participant may have heard, and §5 still takes the selection. */
 .lane.unplayable canvas { opacity: 0.35; }
 .lane.unplayable .label { color: var(--dim); }
-.lane .label { font: 13px/1.3 var(--body); }
-.lane .label small { display: block; margin-top: 2px; font: 10px/1.3 var(--mono); color: var(--dim); }
-/* min-width: 0 or the canvas's own 600px attribute becomes the track's
+
+.lane .play { width: var(--target); height: var(--target); min-height: 0; padding: 0; font-size: 14px; }
+.lane .label { font: 13px/var(--leading-ui) var(--body); display: flex; align-items: baseline; gap: 9px; }
+/* identity.css exempts these lanes from its no-meaningful-colour rule because
+   the colours identify sources. The colour only ever appeared inside the
+   waveform, with no legend, so it identified nothing the participant could
+   name; against the label it does. */
+.lane .chip {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(22, 24, 26, 0.28);
+  align-self: center;
+}
+.lane .label small { display: block; margin-top: 3px; font: 10px/var(--leading-ui) var(--mono); color: var(--dim); }
+
+.lane .wave { position: relative; min-width: 0; }
+/* min-width: 0 above, or the canvas's own backing width becomes the track's
    minimum and the lane grows past the column it was given. */
-.lane canvas { width: 100%; min-width: 0; height: 48px; display: block; }
-.lane .lane-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.lane button { padding: 6px 10px; font-size: 13px; }
+.lane canvas { width: 100%; height: 48px; display: block; cursor: pointer; border-radius: 4px; }
+.lane canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lane .elapsed { display: block; margin-top: 3px; font: 10px/1.3 var(--mono); color: var(--dim); text-align: right; }
 
-/* §3, §8 — the survey. One scale, stated once at the top of each block. */
-.block { margin-bottom: 32px; }
-.block h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-.block .anchors { display: flex; justify-content: space-between; margin-bottom: 12px; }
+.lane .choose {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target);
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: 13px/1.3 var(--body);
+  white-space: nowrap;
+}
+.lane .choose input { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
+.lane .choose:hover { background: var(--accent-wash); }
 
-.item { padding: 12px 0; border-top: 1px solid var(--rule); }
-.item p { margin-bottom: 8px; }
-.item .choices { display: flex; gap: 4px; flex-wrap: wrap; }
-.item .choices label { position: relative; }
-.item .choices input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+/* §3, §8 — the survey. One scale, stated once per block and kept on screen.
 
-.item .choices span {
+   The anchors used to be a full-width flex row above a 304px left-aligned
+   scale, so "Very much" sat 368px to the right of point 7, above nothing. The
+   verbal anchors are what turn seven numbers into an interval scale; a
+   participant who reads the high anchor as belonging to the whitespace may
+   anchor differently on §3 than on §8, which is the exact comparison the study
+   is built on. One grid, shared by the anchor row and every scale beneath it. */
+.block {
+  margin-bottom: 30px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.block .cap {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 332px;
+  gap: 24px;
+  align-items: end;
+  padding: 13px 22px;
+  background: var(--band);
+  border-bottom: 1px solid var(--rule);
+}
+.block .cap h2 { font-size: 14px; font-weight: 600; }
+.block .cap .of { font: 11px/1.3 var(--mono); color: var(--dim); }
+.block .cap .titles { display: flex; align-items: baseline; gap: 11px; flex-wrap: wrap; }
+
+/* K3: the anchors were .eyebrow — mono, uppercased, tracked out. Uppercasing
+   does nothing to Hangul, so the texture that told an anchor from a label in
+   English simply was not there in Korean, and 0.06em on syllable blocks pushes
+   the words apart. These are the six most important words on the page; they
+   get a real style and let position do the work. */
+.anchors { display: grid; grid-template-columns: repeat(var(--points, 7), 1fr); gap: 4px; align-items: end; }
+.anchors span { font: 11px/1.4 var(--body); color: var(--body-ink); white-space: nowrap; }
+/* Each anchor sits in the cell it names — the first point and the last — and
+   is allowed to overrun into the empty cells beside it. Pinning them by index
+   rather than by span keeps the pairing true if the calibration ever moves off
+   a seven-point scale. */
+.anchors .low { grid-column: 1; text-align: left; }
+.anchors .high { grid-column: -2; text-align: right; }
+
+/* 22 rows whose separators were a 1.28:1 hairline read as one undifferentiated
+   field of text and boxes, and the failure mode of an unbanded matrix is
+   answering item 6 on item 5's row — silent, and invisible in the log. */
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 332px;
+  gap: 24px;
+  align-items: center;
+  padding: 13px 22px;
+  border-bottom: 1px solid var(--seam);
+  box-shadow: inset 3px 0 0 var(--hairline);
+  scroll-margin-top: 78px;
+}
+.item:nth-child(even) { background: var(--band); }
+.item.answered { box-shadow: inset 3px 0 0 var(--accent); }
+.item p { font-size: 15.5px; line-height: 1.5; text-wrap: pretty; }
+
+.choices { display: grid; grid-template-columns: repeat(var(--points, 7), 1fr); gap: 4px; }
+.choices label { position: relative; display: block; }
+.choices input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+
+.choices span {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  height: var(--target);
   border: 1px solid var(--rule);
-  font: 14px/1 var(--mono);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font: 13px/1 var(--mono);
+  color: var(--body-ink);
+  transition: background var(--motion), border-color var(--motion);
 }
 
-.item .choices input:checked + span { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
-.item .choices input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choices label:hover span { border-color: var(--accent); }
+.choices input:checked + span { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+.choices input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The count used to sit at the bottom of a 22-row scroll beside a submit
+   button that was disabled and illegible, and it said how many were left
+   without saying which — so finding the one skipped row meant re-scanning a
+   field with invisible separators. It travels with the participant now, and
+   the count has a control that goes to the first unanswered row. */
+.submitbar {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: 0 3px 14px rgba(22, 24, 26, 0.1);
+}
+.submitbar .spacer { flex: 1; }
+.submitbar .note { font: 12.5px/1.4 var(--mono); color: var(--body-ink); }
 
 /* §6 — the wait. A progress indicator that does not claim to know how long. */
-.waiting { text-align: center; padding: 96px 0; }
-.waiting .bar { height: 3px; background: var(--rule); overflow: hidden; margin: 24px auto 0; max-width: 320px; }
-.waiting .bar i { display: block; height: 100%; width: 40%; background: var(--accent); animation: slide 1.4s infinite; }
+.waiting { max-width: 60ch; padding: 44px 0 0; }
+.waiting .bar { height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; margin: 26px 0 12px; }
+.waiting .bar i { display: block; height: 100%; width: 34%; border-radius: 4px; background: var(--accent); animation: slide 1.4s infinite; }
+.waiting .clocks { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.waiting .clocks span { font: 12.5px/1.4 var(--mono); }
+.waiting .elapsed { color: var(--ink); }
+.waiting .ceiling { color: var(--dim); }
+.waiting .ahead { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--hairline); }
+.waiting .ahead h2 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.waiting .ahead p { font-size: 15px; line-height: 1.6; color: var(--body-ink); }
+.waiting .status { font: 500 14px/1.5 var(--body); color: var(--ink); margin-bottom: 12px; }
 
 @keyframes slide {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(250%); }
+  from { transform: translateX(-110%); }
+  to { transform: translateX(260%); }
 }
 
+/* A full bar is the universal shape of complete. Honouring the media query was
+   right; filling the track to do it told every participant with reduced motion
+   that a step still running had finished — on the one screen whose copy has
+   just said that leaving ends the session. The bar becomes a dashed track that
+   never claims a position, and the elapsed count carries the proof of life. */
 @media (prefers-reduced-motion: reduce) {
-  .waiting .bar i { animation: none; width: 100%; }
+  .waiting .bar i {
+    animation: none;
+    width: 100%;
+    background: repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 9px);
+  }
+}
+
+/* END — done, and the error screen. */
+.receipt { margin-top: 10px; font: 12.5px/1.5 var(--mono); color: var(--dim); }
+
+/* The last screen's only action belongs to the researcher, and it was offered
+   to a participant who had just been told to close the window. */
+.researcher { margin-top: 30px; padding-top: 20px; border-top: 1px dashed var(--rule); }
+.researcher .eyebrow { display: block; margin-bottom: 10px; }
+
+/* The error screen was an em dash and one generic sentence, while fail() was
+   called with a real message from six places. In a supervised session this is
+   the whole diagnostic surface: the researcher is standing behind the
+   participant, not reading a server log. */
+.diagnosis {
+  max-width: 52ch;
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font: 12.5px/1.85 var(--mono);
+  color: var(--body-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) {
+  .block .cap, .item { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .block .cap { align-items: start; }
+  .lane { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .lane .wave { grid-column: 1 / -1; }
+  .rail ol { grid-template-columns: repeat(3, 1fr); gap: 8px 5px; }
 }
