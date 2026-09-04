@@ -2,7 +2,7 @@
 
    Three things this file is careful about, all of them requirements rather
    than preferences. Section numbers cite docs/v3-regen/spec-behavior.md;
-   findings cite the interface audit in updated_UI_design/.
+   findings cite docs/v3-regen/interface-audit.md.
 
    The step comes from the server. Every screen is rendered from what
    /api/step/<step> returns, and every submit re-reads the step the server

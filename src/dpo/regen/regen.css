@@ -8,7 +8,7 @@
    the page, that is now true of all six rather than five.
 
    Section numbers cite docs/v3-regen/spec-behavior.md; findings cite the
-   interface audit in updated_UI_design/. */
+   interface audit, docs/v3-regen/interface-audit.md. */
 
 .shell {
   max-width: var(--column);

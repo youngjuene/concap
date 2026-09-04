@@ -38,7 +38,7 @@ which costs a participant who means it one keystroke and stops the one who is
 scanning for the way forward.
 
 Section numbers cite ``docs/v3-regen/spec-behavior.md``; findings cite the
-interface audit in ``updated_UI_design/``.
+interface audit in ``docs/v3-regen/interface-audit.md``.
 """
 
 from __future__ import annotations
