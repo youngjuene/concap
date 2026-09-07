@@ -425,7 +425,7 @@ def build_app(
         if step in SURVEY_PAGES:
             return {
                 "step": step,
-                "blocks": [block.record() for block in item_set.page_blocks(step)],
+                "blocks": [block.record(_language(person)) for block in item_set.page_blocks(step)],
                 "scale": {
                     "points": configuration.scale.points,
                     "anchors": list(configuration.scale.anchors),

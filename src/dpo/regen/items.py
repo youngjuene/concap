@@ -59,12 +59,30 @@ class ItemsError(ValueError):
 
 @dataclass(frozen=True)
 class Item:
+    """One item, in every language the study has wording for.
+
+    ``text`` is a mapping rather than a string because a Korean participant
+    reading English items is answering a second instrument — reading fluency
+    joins the construct — and because the wording of both is what the digest
+    identifies. An items file may still give a bare string; the loader reads
+    it as English, so a study that has not been translated is unchanged.
+    """
+
     id: str
-    text: str
+    text: Mapping[str, str]
     reverse: bool = False
 
-    def record(self) -> dict[str, Any]:
-        return {"id": self.id, "text": self.text, "reverse": self.reverse}
+    def wording(self, language: str) -> str:
+        """The item as this participant reads it, English where it is missing.
+
+        Per item, not per file: an items set part-way through translation
+        should show the translated items in their own language and the rest in
+        English, rather than reverting all of them over one gap.
+        """
+        return self.text.get(language) or self.text["en"]
+
+    def record(self, language: str = "en") -> dict[str, Any]:
+        return {"id": self.id, "text": self.wording(language), "reverse": self.reverse}
 
 
 @dataclass(frozen=True)
@@ -72,11 +90,18 @@ class Block:
     """One named group of items, asked together under one heading."""
 
     id: str
-    title: str
+    title: Mapping[str, str]
     items: tuple[Item, ...]
 
-    def record(self) -> dict[str, Any]:
-        return {"id": self.id, "title": self.title, "items": [item.record() for item in self.items]}
+    def heading(self, language: str) -> str:
+        return self.title.get(language) or self.title["en"]
+
+    def record(self, language: str = "en") -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.heading(language),
+            "items": [item.record(language) for item in self.items],
+        }
 
 
 @dataclass(frozen=True)
@@ -102,7 +127,25 @@ class ItemSet:
         payload = json.dumps(
             {
                 "provenance": self.provenance,
-                "blocks": {k: v.record() for k, v in sorted(self.blocks.items())},
+                "blocks": {
+                    key: {
+                        "id": block.id,
+                        # Every language, not the one being read: the digest
+                        # says which wording was asked, and a Korean edit is a
+                        # change to the wording even for the English arm's
+                        # comparability with a later run.
+                        "title": dict(sorted(block.title.items())),
+                        "items": [
+                            {
+                                "id": item.id,
+                                "text": dict(sorted(item.text.items())),
+                                "reverse": item.reverse,
+                            }
+                            for item in block.items
+                        ],
+                    }
+                    for key, block in sorted(self.blocks.items())
+                },
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -137,6 +180,27 @@ def _identifier(value: object, path: str) -> str:
     if not ID_RE.fullmatch(text):
         raise ItemsError(f"{path}: must match [a-z0-9_]+")
     return text
+
+
+def _wording(value: object, path: str) -> Mapping[str, str]:
+    """One piece of participant-facing text, in one language or several.
+
+    A bare string is read as English, so an items file written before the
+    study had a second language is still valid and still means what it said.
+    An object is language tag to wording, and English is required: it is the
+    fallback every other language falls back to, and a set with no English is
+    a set that cannot be served to a participant whose language is missing.
+    """
+    if isinstance(value, str):
+        return {"en": _string(value, path)}
+    if not isinstance(value, Mapping):
+        raise ItemsError(f"{path}: must be text, or an object of language to text")
+    if not value:
+        raise ItemsError(f"{path}: must not be empty")
+    wording = {str(tag): _string(text, f"{path}.{tag}") for tag, text in value.items()}
+    if "en" not in wording:
+        raise ItemsError(f"{path}: needs an 'en' wording, which every other language falls back to")
+    return wording
 
 
 def parse_items(raw: Mapping[str, Any]) -> ItemSet:
@@ -178,10 +242,10 @@ def parse_items(raw: Mapping[str, Any]) -> ItemSet:
             if not isinstance(reverse, bool):
                 raise ItemsError(f"{item_path}.reverse: must be true or false")
             items.append(
-                Item(id=item_id, text=_string(item_raw.get("text"), f"{item_path}.text"), reverse=reverse)
+                Item(id=item_id, text=_wording(item_raw.get("text"), f"{item_path}.text"), reverse=reverse)
             )
         blocks[block_id] = Block(
-            id=block_id, title=_string(entry.get("title"), f"{path}.title"), items=tuple(items)
+            id=block_id, title=_wording(entry.get("title"), f"{path}.title"), items=tuple(items)
         )
     missing = sorted({name for names in PAGE_BLOCKS.values() for name in names} - set(blocks))
     if missing:
