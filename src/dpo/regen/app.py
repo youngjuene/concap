@@ -702,16 +702,31 @@ def build_app(
         has not started yet, or has just finished, reads as not writing, and
         the page falls back to what it already shows.
 
+        It also names the clip the next viewing will play. §6 is the one wait
+        in the session that is already a wait — the participant is watching an
+        indeterminate bar while the model writes — and the second clip is 5–7
+        MB that would otherwise be fetched afterwards, from a standing start,
+        behind *Preparing the clip…*. Fetching it here costs the participant
+        nothing they are not already spending. This is the same fact
+        ``/api/step/view_regenerated`` returns a moment later, so nothing is
+        disclosed earlier than the assignment already decides — and the media
+        routes were never gated in the first place. Omitted rather than an
+        error where no assignment exists yet, because a progress display may
+        not be the thing that ends a session.
         """
         person = _participant(participant)
         if isinstance(person, JSONResponse):
             return person
         at = writing.get(person)
-        return {
+        report: dict[str, Any] = {
             "writing": at is not None,
             "done": at["done"] if at else 0,
             "total": at["total"] if at else configuration.cue_slots,
         }
+        assignment = _assignment(person)
+        if not isinstance(assignment, JSONResponse):
+            report["next_segment"] = assignment.regenerated_segment
+        return report
 
     @app.post("/api/events")
     def events(payload: Mapping[str, Any]) -> Any:

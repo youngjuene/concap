@@ -262,6 +262,18 @@ does not restart on its own, and `make open` starts it.
   dimensions, so §4's marks land where they were put, and the audio is
   copied rather than re-encoded, so §5's mix is the sound §3 played.
   `--media-dir` may be read-only: the copies are then skipped with a warning.
+- **The second clip is fetched during §6's wait.** The two viewings play
+  different segments, so the second is 5–7 MB the participant would otherwise
+  wait for again, from a standing start, behind *Preparing the clip…*. §6 is
+  the one wait the session already has — the model is writing and the bar is
+  indeterminate — so the clip is fetched behind it. `/api/regenerate/progress`,
+  which the waiting screen already polls, now also names the segment coming
+  next; the page fetches it once and the viewing takes what was warmed rather
+  than asking again. Nothing about the stimulus changes: it is the same
+  whole-file-before-Start that §3 does, only started earlier, and a fetch that
+  has not finished when the screen opens is awaited rather than restarted. If
+  it failed, the viewing falls back to fetching it itself, exactly as before.
+  In the log it is a `viewing.prefetch` for `view_regenerated` timed inside §6.
 - **The strip is fetched when §4 opens**, all five moments at once, so moving
   between them costs nothing. Media carries a day's `Cache-Control` and an
   entity tag, and a return to a moment already seen is a 304 with no body.

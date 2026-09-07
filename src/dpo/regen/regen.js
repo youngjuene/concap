@@ -47,6 +47,10 @@ const state = {
   audio: null,
   playing: null,
   mix: null,
+  // The second viewing's clip, fetched during §6's wait. A promise rather than
+  // a blob: the viewing may open before the fetch has finished, and awaiting
+  // the one in flight is right where starting a second one would not be.
+  warming: null,
 };
 
 const SCREENS = [
@@ -318,7 +322,11 @@ async function renderViewing(step) {
   button.textContent = strings.preparing;
   button.disabled = true;
   show("screen-start");
-  const clip = await prefetchClip(`/media/video/${detail.segment}`, step);
+  // Warmed during §6 if this is the viewing that follows it, and claimed here
+  // so a second viewing can never be handed a URL the first one revoked.
+  const warmed = state.warming && state.warming.segment === detail.segment ? state.warming : null;
+  state.warming = null;
+  const clip = warmed ? await warmed.clip : await prefetchClip(`/media/video/${detail.segment}`, step);
   button.textContent = state.strings.actions.start;
   button.disabled = false;
 
@@ -1297,11 +1305,24 @@ async function renderWaiting() {
      GET is answered while it is still in flight. Best-effort like the event
      stream: a poll that fails leaves the bar where it was, because a progress
      display may not be the thing that ends a session. */
+  /* §6 is the one wait the session already has, and the clip that follows it
+     is 5–7 MB the participant would otherwise wait for a second time, from a
+     standing start, on the next screen. So it is fetched here, behind a bar
+     they are already watching. Nothing about the viewing changes: it is the
+     same whole-file-then-play that §3 does, only started earlier, and if this
+     has not finished by the time the screen opens the viewing awaits it rather
+     than asking again. Once only — the poll runs every 700 ms. */
+  const warm = (segment) => {
+    if (state.warming || !segment) return;
+    state.warming = { segment, clip: prefetchClip(`/media/video/${segment}`, "view_regenerated") };
+  };
+
   const poll = async () => {
     try {
       const response = await fetch(`/api/regenerate/progress?participant=${state.participant}`);
       if (!response.ok) return;
       const at = await response.json();
+      warm(at.next_segment);
       if (at.writing) paintSlots(at.done, at.total);
     } catch {
       /* the next poll will do */

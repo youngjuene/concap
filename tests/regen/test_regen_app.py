@@ -555,7 +555,14 @@ class TestRegenerationProgress:
         body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
         # The count is there even when nothing is running, so the waiting screen
         # can draw a bar of the right width rather than growing one.
-        assert body == {"writing": False, "done": 0, "total": 4}
+        prepared = client.get(f"/api/step/view_prepared?participant={participant}").json()["segment"]
+        assert body == {
+            "writing": False,
+            "done": 0,
+            "total": 4,
+            # The clip §6's wait is used to fetch: the other segment.
+            "next_segment": "B" if prepared == "A" else "A",
+        }
 
     def test_it_reads_as_idle_again_once_the_track_is_written(self, client: TestClient) -> None:
         participant = walk_to_regenerated(client)
@@ -564,6 +571,34 @@ class TestRegenerationProgress:
 
     def test_a_malformed_participant_is_refused_like_its_neighbours(self, client: TestClient) -> None:
         assert client.get("/api/regenerate/progress").status_code == 400
+
+    def test_it_names_the_clip_the_next_viewing_will_play(self, client: TestClient) -> None:
+        """§6's wait is what pays for the second clip's five to seven megabytes.
+
+        The page cannot ask ``/api/step/view_regenerated`` yet — that step is
+        gated and the answer would be a 409 — so the route the waiting screen
+        is already polling carries it. It is the same fact that step returns a
+        moment later, never a different one.
+        """
+        participant = walk_to_regenerated(client)
+        waiting = client.get("/api/regenerate/progress", params={"participant": participant}).json()
+        viewing = client.get(f"/api/step/view_regenerated?participant={participant}").json()
+        assert waiting["next_segment"] == viewing["segment"]
+
+    def test_it_is_the_segment_the_first_viewing_did_not_use(self, client: TestClient) -> None:
+        participant = enrol(client)
+        prepared = client.get(f"/api/step/view_prepared?participant={participant}").json()["segment"]
+        body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
+        assert body["next_segment"] != prepared
+
+    def test_an_unenrolled_participant_still_reads_as_idle(self, client: TestClient) -> None:
+        # Best-effort, as the route has always been: no assignment yet is a
+        # missing field, not a 404. A progress display may not be the thing
+        # that ends a session.
+        body = client.get("/api/regenerate/progress", params={"participant": "pfffffff"})
+        assert body.status_code == 200
+        assert "next_segment" not in body.json()
+        assert body.json()["writing"] is False
 
     def test_it_reports_the_cues_written_while_the_model_is_still_in_the_call(
         self, document: dict[str, Any], media_dir: Path, tmp_path: Path
@@ -617,7 +652,11 @@ class TestRegenerationProgress:
         finally:
             release.set()
             writing.join(20)
-        assert body == {"writing": True, "done": 1, "total": 4}
+        assert {key: body[key] for key in ("writing", "done", "total")} == {
+            "writing": True,
+            "done": 1,
+            "total": 4,
+        }
         # And nothing is left in flight for a screen to keep reading.
         after = watcher.get("/api/regenerate/progress", params={"participant": participant}).json()
         assert after["writing"] is False
