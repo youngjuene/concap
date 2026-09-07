@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+# The public edge of `dpo regen`, as one command. From the repo root the
+# same three things are `make open`, `make close`, `make status`.
+#
+#   edge open [flags]   instrument serving (launched in tmux if it is not),
+#                       Tailscale node up, Funnel on, public link printed.
+#                       The first time it stops for a sign-in or a one-time
+#                       approval and prints the link to click; run it again
+#                       afterwards. Flags go to the instrument when it has
+#                       to start, e.g. --items data/live/items.json
+#   edge close [--gpu]  Funnel off: the public link stops answering within
+#                       seconds. --gpu also ends the instrument, freeing the
+#                       GPU; without it, reopening is instant.
+#   edge status         what is up, what is down, and why
+#   edge code           mint a new access code: links with the old one stop
+#                       enrolling at once, no restart; prints the new link
+#   edge serve [flags]  launch the instrument alone (open does this for you)
+#
+# How it fits together: https://concap.<tailnet>.ts.net -> Tailscale's public
+# Funnel ingress -> encrypted to the node in the container here, which ends
+# the TLS connection and proxies to the instrument on 127.0.0.1:8779. No
+# login for participants: the switch is the access control, plus an access
+# code in the link so a leaked or stale link enrols nobody. The instrument
+# runs with --public: the log download stays on this machine and requests
+# are rate-limited by address. Nothing on this machine listens publicly and
+# nothing of the website's is involved.
+set -euo pipefail
+
+EDGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$EDGE_DIR/.." && pwd)"
+
+BIND=127.0.0.1                    # the instrument stays on loopback; Funnel reaches it from the host namespace
+PORT=8779                         # the instrument's port, one past the console's 8778
+NODE=concap                       # the node name, so the link is concap.<tailnet>.ts.net
+CONTAINER=concap-edge-tailscale-1 # the Tailscale node, from docker-compose.yml here
+TMUX_SESSION=regen                # where the instrument runs
+CODE_FILE="$REPO_DIR/data/live/access-code"   # the study link's ?code=; read by the instrument on every enrolment
+
+# ---- helpers ---------------------------------------------------------------
+
+ts() { docker exec "$CONTAINER" tailscale "$@"; }
+container_state() { docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo absent; }
+
+# PID of whatever listens on the instrument's address, or nothing.
+instrument_pid() {
+  ss -ltnp 2>/dev/null | awk -v a="$BIND:$PORT" '$4 == a' | grep -o 'pid=[0-9]*' | head -n1 | cut -d= -f2 || true
+}
+
+# One field of `tailscale status --json`, or nothing.
+node_field() {
+  ts status --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+key = sys.argv[1]
+if key == "state":
+    print(d.get("BackendState", ""))
+elif key == "dns":
+    print(((d.get("Self") or {}).get("DNSName") or "").rstrip("."))
+elif key == "authurl":
+    print(d.get("AuthURL") or "")
+elif key == "login":
+    me = (d.get("Self") or {}).get("UserID")
+    print(((d.get("User") or {}).get(str(me)) or {}).get("LoginName", ""))
+' "$1" 2>/dev/null || true
+}
+
+# "on" when any Funnel is allowed in the node's serve config, else "off".
+funnel_state() {
+  ts funnel status --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("off"); sys.exit(0)
+allow = d.get("AllowFunnel") or {}
+print("on" if any(allow.values()) else "off")
+' 2>/dev/null || echo off
+}
+
+# The Funnel ingress address for the name. Tailscale's authoritative servers
+# are asked first, because a resolver that was asked before the record
+# existed remembers "no such name" for minutes. Each is given one short try
+# and the next is asked if it does not answer: a single query that times out
+# used to read here as "not published", which is the false alarm this row
+# exists to prevent. Public resolvers come last and can only add an answer,
+# never withhold one, since an empty reply moves on to the next server.
+funnel_ip() {
+  local name="$1" server ip
+  for server in $(dig +short NS ts.net 2>/dev/null) 8.8.8.8 1.1.1.1; do
+    ip=$(dig +short +time=3 +tries=1 "@$server" "$name" A 2>/dev/null | head -n1)
+    [ -n "$ip" ] && { echo "$ip"; return 0; }
+  done
+  return 1
+}
+
+# HTTP status the public link gives, fetched over the internet from here,
+# pinned to the authoritative address when one is published.
+probe_public() {
+  local dns="$1" ip; ip=$(funnel_ip "$dns")
+  if [ -n "$ip" ]; then
+    curl -s -m 20 --resolve "$dns:443:$ip" "https://$dns/api/strings" -o /dev/null -w '%{http_code}' 2>/dev/null || true
+  else
+    curl -s -m 20 "https://$dns/api/strings" -o /dev/null -w '%{http_code}' 2>/dev/null || true
+  fi
+}
+
+# How many of three tries a public resolver answers. One query is a coin
+# flip while a record is propagating: a big resolver is many machines, and
+# the ones that were asked before Funnel published still hold the miss.
+resolver_hits() {
+  local dns="$1" server="$2" hits=0 i
+  for i in 1 2 3; do
+    [ -n "$(dig +short +time=3 +tries=1 "$dns" "@$server" 2>/dev/null | head -n1)" ] && hits=$((hits + 1))
+  done
+  echo "$hits"
+}
+
+# What the world's resolvers say, for the status screen.
+dns_row() {
+  local dns="$1" auth google cf
+  auth=$(funnel_ip "$dns") || auth=""
+  if [ -z "$auth" ]; then
+    echo "no answer for $dns anywhere yet (Tailscale says up to ten minutes after Funnel goes on)"
+    return
+  fi
+  google=$(resolver_hits "$dns" 8.8.8.8)
+  cf=$(resolver_hits "$dns" 1.1.1.1)
+  if [ "$google" = 3 ] && [ "$cf" = 3 ]; then
+    echo "resolving everywhere ($auth)"
+  else
+    echo "published ($auth), but not everywhere yet: google answered $google of 3, cloudflare $cf of 3." \
+      "A participant who lands on a resolver that still holds the miss sees \"site can't be reached\";" \
+      "reloading in a minute finds a different one"
+  fi
+}
+
+# The access code: three short words, minted here, kept in a file only this
+# user can read, and read by the instrument itself on every enrolment.
+mint_code() {
+  local code
+  if [ -r /usr/share/dict/american-english ]; then
+    code=$(grep -E '^[a-z]{4,6}$' /usr/share/dict/american-english | shuf -n3 --random-source=/dev/urandom | paste -sd- -)
+  else
+    code=$(openssl rand -hex 4)
+  fi
+  mkdir -p "$(dirname "$CODE_FILE")"
+  ( umask 077; printf '%s\n' "$code" > "$CODE_FILE" )
+}
+ensure_code() { [ -s "$CODE_FILE" ] || mint_code; }
+access_code() { tr -d '[:space:]' < "$CODE_FILE"; }
+study_link() { echo "https://$(node_field dns)/?code=$(access_code)"; }
+
+# Any login.tailscale.com link in a piece of CLI output.
+link_in() { grep -o 'https://login\.tailscale\.com/[A-Za-z0-9/?=&_.-]*' <<<"$1" | head -n1 || true; }
+
+# ---- serve -----------------------------------------------------------------
+
+cmd_serve() {
+  cd "$REPO_DIR"
+  local pid; pid=$(instrument_pid)
+  if [ -n "$pid" ]; then
+    echo "instrument already serving on $BIND:$PORT (pid $pid); its terminal: tmux attach -t $TMUX_SESSION"
+    return 0
+  fi
+  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    echo "tmux session '$TMUX_SESSION' exists but nothing listens on $BIND:$PORT." >&2
+    echo "Attach and read what it says, then close it: tmux attach -t $TMUX_SESSION" >&2
+    return 1
+  fi
+  : "${REGEN_GPU:=1}"
+  : "${REGEN_SESSION:=data/live/regen.json}"
+  : "${REGEN_MEDIA:=data/live/regen-media}"
+  : "${REGEN_OUT:=data/live/regen-responses}"
+  : "${REGEN_WRITER:=gemma}"
+  : "${REGEN_BACKEND:=configs/gemma4/e4b-audio.toml}"
+  : "${REGEN_CONTRACT:=configs/study/street-audio.toml}"
+  local cmd="CUDA_VISIBLE_DEVICES=$REGEN_GPU uv run dpo regen serve"
+  cmd+=" --session $REGEN_SESSION --media-dir $REGEN_MEDIA --out $REGEN_OUT"
+  cmd+=" --writer $REGEN_WRITER --backend-config $REGEN_BACKEND --contract $REGEN_CONTRACT"
+  cmd+=" --host $BIND --port $PORT"
+  ensure_code
+  cmd+=" --public --access-code-file $CODE_FILE"
+  local extra; for extra in "$@"; do cmd+=" $(printf '%q' "$extra")"; done
+  tmux new-session -d -s "$TMUX_SESSION" -c "$REPO_DIR" \
+    "bash -c \"$cmd 2>&1; echo; echo '[server exited - press a key]'; read -n1\""
+  echo "instrument launched in tmux session '$TMUX_SESSION'; waiting for it to serve"
+  local i pane
+  for i in $(seq 1 240); do
+    sleep 1
+    pane=$(tmux capture-pane -pt "$TMUX_SESSION" -S -40 2>/dev/null || true)
+    if grep -q '"status": "serving"' <<<"$pane"; then
+      echo "instrument serving on http://$BIND:$PORT/ after ${i}s (the kiosk browser here uses that URL)"
+      return 0
+    fi
+    if grep -qE 'Traceback|"status": "invalid"|Error' <<<"$pane"; then
+      echo "the instrument did not start; its last lines:" >&2
+      grep -v '^$' <<<"$pane" | tail -n 15 >&2
+      return 1
+    fi
+  done
+  echo "still not serving after four minutes; look at it: tmux attach -t $TMUX_SESSION" >&2
+  return 1
+}
+
+# ---- open ------------------------------------------------------------------
+
+cmd_open() {
+  cmd_serve "$@"
+  cd "$EDGE_DIR"
+  docker compose up -d
+  local i
+  for i in $(seq 1 30); do ts status --json >/dev/null 2>&1 && break; sleep 1; done
+
+  local state; state=$(node_field state)
+  if [ "$state" != "Running" ]; then
+    # Ask the daemon to sign in, detached so it keeps waiting after we stop
+    # polling; the link it is given stays valid until it is used. A pending
+    # link from an earlier run is reused rather than replaced.
+    local url; url=$(node_field authurl)
+    if [ -z "$url" ]; then
+      docker exec -d "$CONTAINER" tailscale up --hostname "$NODE" --accept-dns=false --accept-routes=false
+      for i in $(seq 1 30); do url=$(node_field authurl); [ -n "$url" ] && break; sleep 1; done
+    fi
+    echo
+    echo "This machine is not signed in to Tailscale yet. Open this link, sign in"
+    echo "(Google works; a new account is free), and approve the machine 'concap':"
+    echo
+    echo "    ${url:-(no link yet; run make open again in a few seconds)}"
+    echo
+    local wait="${EDGE_SIGNIN_WAIT:-900}" waited=0
+    echo "Waiting up to ${wait}s for the sign-in to finish (Ctrl-C is safe; make open again later)"
+    while [ "$waited" -lt "$wait" ]; do
+      sleep 5; waited=$((waited + 5))
+      [ "$(node_field state)" = Running ] && break
+      [ $((waited % 60)) -eq 0 ] && echo "  still waiting (${waited}s)"
+    done
+    if [ "$(node_field state)" != Running ]; then
+      echo "not signed in yet; the link above stays valid. Run make open again when done."
+      return 0
+    fi
+    echo "signed in as $(node_field login), node name $(node_field dns)"
+  fi
+
+  # Keep the node's name what the link is documented as. Tailscale appends
+  # -1 when the name is taken in the account (a stale machine, usually);
+  # once that is deleted in the admin console, the next open reclaims it.
+  local dns; dns=$(node_field dns)
+  case "$dns" in "$NODE".*) ;; *)
+    ts set --hostname "$NODE" >/dev/null 2>&1 || true
+    sleep 3;;
+  esac
+
+  # `tailscale funnel` blocks while a one-time approval is missing, printing
+  # the link to click and waiting for the click. So its output is streamed
+  # rather than captured, and it is given the same patience as the sign-in.
+  # The serve config is keyed by the node's current name, so it is rebuilt
+  # from scratch each time rather than accumulating entries for old names.
+  ts funnel reset >/dev/null 2>&1 || true
+  local tmp; tmp=$(mktemp)
+  echo "Turning Funnel on (if Tailscale needs a one-time approval it prints the link here and waits up to ${EDGE_SIGNIN_WAIT:-900}s)"
+  if ! timeout "${EDGE_SIGNIN_WAIT:-900}" docker exec "$CONTAINER" tailscale funnel --bg "$PORT" 2>&1 | tee "$tmp"; then
+    local link; link=$(link_in "$(cat "$tmp")"); rm -f "$tmp"
+    echo
+    if [ -n "$link" ]; then echo "Not approved yet. Open the link above, approve, then run: make open"
+    else echo "Funnel could not be turned on; read the message above, then run: make open"; fi
+    return 0
+  fi
+  rm -f "$tmp"
+
+  dns=$(node_field dns)
+  echo "Funnel on. Checking the public link over the internet."
+  echo "The first time on a new name this takes a while: the name has to reach public DNS"
+  echo "(Tailscale says up to ten minutes) and a certificate has to be issued. Waiting up to 12 minutes."
+  local code=000 waited=0
+  while [ "$waited" -lt 720 ]; do
+    if [ -n "$(funnel_ip "$dns")" ]; then
+      code=$(probe_public "$dns")
+      [ "$code" = 200 ] && break
+    fi
+    sleep 10; waited=$((waited + 10))
+    [ $((waited % 60)) -eq 0 ] && echo "  still waiting (${waited}s; last answer ${code})"
+  done
+  if [ "$code" = 200 ]; then
+    ensure_code
+    echo "OPEN - anyone with the link is a participant"
+    echo "share this: $(study_link)"
+  else
+    echo "Funnel is on but the public link has not answered yet (last: $code). It is published;" >&2
+    echo "give DNS a few more minutes, then: make status" >&2
+    return 1
+  fi
+}
+
+# ---- close -----------------------------------------------------------------
+
+cmd_close() {
+  cd "$EDGE_DIR"
+  if [ "$(container_state)" = running ] && [ "$(node_field state)" = Running ]; then
+    ts funnel reset >/dev/null 2>&1 || true
+    sleep 2
+    if [ "$(funnel_state)" = off ]; then echo "CLOSED - Funnel is off; the public link no longer answers"
+    else echo "Funnel still reports on; run make status" >&2; return 1; fi
+  elif [ "$(container_state)" = running ]; then
+    echo "CLOSED - the Tailscale node is not signed in, so nothing is published"
+  else
+    echo "CLOSED - the Tailscale node is not running, so nothing is published"
+  fi
+  if [ "${1:-}" = "--gpu" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    tmux send-keys -t "$TMUX_SESSION" C-c
+    local _; for _ in $(seq 1 20); do sleep 1; [ -z "$(instrument_pid)" ] && break; done
+    tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+    echo "instrument stopped; GPU freed"
+  fi
+}
+
+# ---- code ------------------------------------------------------------------
+
+cmd_code() {
+  mint_code
+  echo "new access code minted; links carrying the old one enrol nobody from now on"
+  if [ "$(container_state)" = running ] && [ "$(node_field state)" = Running ] && [ "$(funnel_state)" = on ]; then
+    echo "share this: $(study_link)"
+  else
+    echo "the door is closed; make open prints the new link"
+  fi
+}
+
+# ---- status ----------------------------------------------------------------
+
+cmd_status() {
+  cd "$EDGE_DIR"
+  local row; row() { printf '%-12s %s\n' "$1" "$2"; }
+  echo "concap edge, $(date '+%F %T')"
+
+  local pid inst; pid=$(instrument_pid)
+  if [ -n "$pid" ]; then inst="listening on $BIND:$PORT (pid $pid)"; else inst="NOT listening on $BIND:$PORT"; fi
+  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then inst+="; tmux session '$TMUX_SESSION' present"
+  else inst+="; no tmux session '$TMUX_SESSION'"; fi
+  row Instrument "$inst"
+
+  local cstate; cstate=$(container_state)
+  row Container "$cstate"
+  if [ "$cstate" != running ]; then
+    row Verdict "CLOSED - the Tailscale node is not running (make open starts it)"
+    return 0
+  fi
+
+  local state login dns; state=$(node_field state); login=$(node_field login); dns=$(node_field dns)
+  case "$state" in
+    Running) row Node "signed in as ${login:-?}, name ${dns:-?}";;
+    *) row Node "not signed in (state ${state:-unknown}); make open prints the sign-in link"
+       row Verdict "CLOSED - nothing is published until the node is signed in"
+       return 0;;
+  esac
+
+  local fstate; fstate=$(funnel_state)
+  row Funnel "$fstate"
+  if [ "$fstate" = on ]; then
+    row DNS "$(dns_row "$dns")"
+    local code; code=$(probe_public "$dns")
+    row Probe "https://$dns/api/strings -> $code (over the internet, from here)"
+    case "$code" in
+      200) ensure_code; row Verdict "OPEN - anyone with the link is a participant"; row Link "$(study_link)";;
+      502|503|504) row Verdict "OPEN at Tailscale, but the instrument is not answering on $BIND:$PORT - make open";;
+      000) row Verdict "Funnel is on but the link does not answer - the record is not published yet, or Tailscale's side; try again in a minute";;
+      *) row Verdict "unexpected status $code from the public link";;
+    esac
+  else
+    row Verdict "CLOSED - Funnel is off; make open publishes https://$dns/"
+  fi
+}
+
+# ---- dispatch --------------------------------------------------------------
+
+usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+case "${1:-}" in
+  open|close|status|code|serve) fn="cmd_$1"; shift; "$fn" "$@";;
+  -h|--help|help|"") usage;;
+  *) echo "edge: unknown command '$1'" >&2; usage >&2; exit 2;;
+esac

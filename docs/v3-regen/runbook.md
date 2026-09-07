@@ -145,6 +145,10 @@ CUDA_VISIBLE_DEVICES=1 uv run dpo regen serve … \
 `--writer gemma` is held to the same backend pin as the pipeline and refuses a
 config the contract does not pin, on any machine, before it touches CUDA.
 
+It binds to loopback and should stay there: the instrument has no login of
+its own, and the way off campus reaches it, "Running it for someone off
+campus" below, reaches loopback.
+
 While §6 runs, the console draws a bar over the cues in the track — the same
 report the participant's waiting screen is polling, so the two cannot disagree
 about where the model has got to. It is drawn only when a terminal is watching:
@@ -170,6 +174,78 @@ sessions on template captions.
 Launch the participant's browser with
 `--autoplay-policy=no-user-gesture-required`; the viewing screens go fullscreen
 on a click, but the clip must start without a second gesture.
+
+## Running it for someone off campus
+
+The instrument has no login and no TLS. Anyone who reaches it can enrol,
+which spends a sequence number that §1's alternation is balanced on, and can
+fetch any participant's log. So it is never bound to a public address, and
+it stays on loopback. Off campus it is published by **Tailscale Funnel**:
+`https://concap.<tailnet>.ts.net` goes to Tailscale's public ingress, from
+there encrypted to a Tailscale node running in a container on this machine,
+which ends the TLS connection and proxies to `127.0.0.1:8779`. The access
+control is a switch: `make open` publishes, `make close` withdraws, and
+nothing is handed to the person running sessions except the link. Everything
+for it is in `deploy/`, whose `README.md` is the operator's card.
+
+**What the instrument itself adds when published** (`--public`,
+`--access-code-file`; `src/dpo/regen/gate.py`). A kiosk has no login because
+the researcher is in the room; a tunnel has no room, so three things stand
+in: a new enrolment must carry the access code the link holds (`?code=…`),
+read from `data/live/access-code` on every enrolment, so `make code` closes
+every earlier link at once and restarts nothing, while an enrolled
+participant resumes without it; the log download on the done screen is
+offered and served only on this machine, since a guessable identifier would
+otherwise export any session to anyone; and requests are rate-limited by
+address, with a tighter limit on enrolment, the one request that spends a
+sequence number §1's alternation is balanced on. None of it is on for a
+kiosk run.
+
+**Why this and not the website's proxy.** The lab website's Traefik on this
+machine was the first design; it worked and its fault isolation was tested,
+but a new name under `kaist.ac.kr` is a request to KAIST IT, and the
+alternative of reusing `www.tx.kaist.ac.kr` puts a study on the lab site's
+name. Funnel needs no name, no port, no certificate work and no contact with
+anyone: the node's ts.net name resolves publicly, Tailscale fetches its
+Let's Encrypt certificate, and this machine opens nothing inbound. The
+container runs with no privileges (userspace networking), and only the one
+served port is public; the website's proxy, certificate store and network are
+not involved at all.
+
+**What it costs.** A Tailscale account, free, signed in once from the link
+`make open` prints. Funnel's bandwidth is capped at a figure Tailscale does
+not publish, and the feature is labelled beta. The cap changes how long
+*Preparing the clip…* takes before Start, not what plays: the page fetches
+the whole clip first and plays it from memory (below).
+
+**After a reboot.** The node's container restarts on its own and keeps its
+identity in a volume; whether Funnel is on is remembered too. The instrument
+does not restart on its own, and `make open` starts it.
+
+**While it is open.**
+
+- Anyone with the current link can enrol, run a session and spend one
+  regeneration on the GPU. Open it for the session block and close it after,
+  and `make code` if a link has gone somewhere it should not have. A stray
+  enrolment is identifiable in `roster.json` as an entry with no
+  `viewings-<p>.jsonl` against it; exclude it and read the sequence numbers
+  around it as they stand.
+- Start reads *Preparing the clip…* until the whole clip (5–7 MB) is in the
+  browser; it then plays from memory. This is what keeps an off-campus
+  viewing the same stimulus as an on-campus one: once started, nothing about
+  the connection can halt it. If the clip could not be fetched whole, the page
+  streams it instead and says so — `viewing.prefetch` with
+  `prefetched: false` in `events-<p>.jsonl` — and every viewing ends with a
+  `viewing.integrity` event carrying `stalls` (halts on an empty buffer)
+  beside `interruptions` (fullscreen lost). A viewing with either non-zero
+  was not the stimulus; separate it in the analysis.
+- The click on Start is the gesture browsers require before a clip with
+  sound may play, so no browser setting is expected off campus. A browser
+  that refuses anyway shows *the clip would not start* rather than playing
+  silently; the kiosk's `--autoplay-policy` flag is the remedy there.
+- One tab, as ever. The log download on the last screen lands in the
+  participant's browser; the copy that matters is under `--out` on this
+  machine.
 
 ## What lands on disk
 
