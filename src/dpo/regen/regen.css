@@ -32,14 +32,17 @@
    landmark called Progress with six empty spans inside it. */
 .rail { flex: 1; }
 .rail ol { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; list-style: none; }
-.rail .n { display: block; font: 10.5px/1.4 var(--mono); color: var(--rule); margin-bottom: 5px; }
+.rail .n { display: block; font: 10.5px/1.4 var(--mono); color: var(--ahead); margin-bottom: 5px; }
 .rail .name {
   display: block;
   min-height: 34px;
   margin-bottom: 8px;
   font-size: 13px;
   line-height: var(--leading-ui);
-  color: var(--rule);
+  /* The steps still ahead. Faint on purpose, but this is the participant's
+     only "where am I" indicator, so it is the faintest text that still
+     clears 4.5:1 rather than the border grey it used to borrow. */
+  color: var(--ahead);
 }
 .rail .bar { display: block; height: 3px; border-radius: 2px; background: var(--hairline); }
 .rail .done .n, .rail .done .name { color: var(--dim); }

@@ -53,6 +53,13 @@
   /* 3.14:1 on --ground, 3.61:1 on --panel. Every border a participant needs
      to see as an edge: control outlines, lane frames, the untravelled rail. */
   --rule: #83878C;
+  /* 4.61:1 on --ground, 5.30:1 on --panel. The faintest *text* the interface
+     uses. --rule was standing in for this in the rail, which is the trap the
+     token above is named against: 3.14:1 clears the 3:1 an edge needs and
+     fails the 4.5:1 a word needs, so a border colour reads as a safe grey and
+     is not one. Still a step lighter than --dim, so the rail keeps saying
+     which steps are behind the participant and which are ahead. */
+  --ahead: #676C71;
   /* Edges that only group things already legible without them — a panel's
      outer border where banding carries the structure. Never a control. */
   --hairline: #DEE0E1;
