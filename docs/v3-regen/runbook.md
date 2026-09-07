@@ -246,6 +246,27 @@ does not restart on its own, and `make open` starts it.
 - One tab, as ever. The log download on the last screen lands in the
   participant's browser; the copy that matters is under `--out` on this
   machine.
+- **§4 and §5 are served web copies, not the staged files.** The staged
+  stills are full-resolution PNGs because the masks were cut from those
+  pixels, and the clip is one container because §3 plays it; neither is what
+  a browser should download. So a WebP of each still at its own size, and
+  the clip's audio track copied into a container of its own, are made once
+  and served instead — §4's strip falls from 6.4 MB to 0.5 MB and §5's
+  reference mix from 6.2 MB to 0.24 MB. Nothing is re-staged: the files under
+  `--media-dir` are untouched, and the copies sit beside them in `.derived/`,
+  keyed by what they were made from, so a re-staged clip is never answered
+  for by the old picture. They are made at startup — `dpo regen serve` prints
+  *web copies ready: 10 stills, 2 soundtracks* — and a count of *served
+  whole* means a derivative could not be made and the source is going out
+  instead, which costs bandwidth and nothing else. The still keeps its
+  dimensions, so §4's marks land where they were put, and the audio is
+  copied rather than re-encoded, so §5's mix is the sound §3 played.
+  `--media-dir` may be read-only: the copies are then skipped with a warning.
+- **The strip is fetched when §4 opens**, all five moments at once, so moving
+  between them costs nothing. Media carries a day's `Cache-Control` and an
+  entity tag, and a return to a moment already seen is a 304 with no body.
+  The page's own files revalidate instead, so a fix to the instrument reaches
+  the next reload rather than the reload after that.
 
 ## What lands on disk
 

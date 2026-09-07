@@ -667,6 +667,22 @@ async function renderVisual() {
 
   const seconds = (index) => (detail.frames[index].at_ms / 1000).toFixed(1);
 
+  /* Every moment is fetched when §4 opens, not when it is first chosen. The
+     strip is five pictures and the screen's whole job is comparing one against
+     another, so fetching on the click charged a wait to every first visit —
+     and charged it again on the way back, because the stills were served with
+     no cache headers and revalidation returned the whole file. They are held
+     in a list so the browser keeps them for the life of the screen. The one on
+     screen is asked for first; the other four are explicitly the lower
+     priority, so the picture being marked on is never behind the ones that are
+     not. */
+  const strip = detail.frames.map((frame, index) => {
+    const picture = new Image();
+    picture.fetchPriority = index === 0 ? "high" : "low";
+    picture.src = `/media/frame/${detail.segment}/${frame.index}`;
+    return picture;
+  });
+
   const buttons = detail.frames.map((frame, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -684,7 +700,7 @@ async function renderVisual() {
     if (index < 0 || index >= buttons.length) return;
     const changed = index !== state.frame;
     state.frame = index;
-    image.src = `/media/frame/${detail.segment}/${detail.frames[index].index}`;
+    image.src = strip[index].src;
     $("visual-heading").textContent = fill(copy.heading, { seconds: seconds(index) });
     plate.setAttribute("aria-label", fill(copy.plate, { seconds: seconds(index) }));
     if (changed) note("frame.selected", { frame: index, at_ms: detail.frames[index].at_ms });
@@ -901,7 +917,7 @@ async function renderAuditory() {
      played. It is the clip's own audio, at the clip's own level: nothing here
      is a separated source, so nothing here is one of the things being asked
      about. */
-  const mix = new Audio(`/media/video/${detail.segment}`);
+  const mix = new Audio(`/media/audio/${detail.segment}`);
   state.mix = mix;
   const mixButton = $("mix-play");
   const mixProgress = $("mix-progress");

@@ -31,8 +31,10 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from email.utils import formatdate, parsedate_to_datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -46,6 +48,7 @@ from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
 from dpo.regen.copy import STRINGS
+from dpo.regen.derive import Derivatives
 from dpo.regen.document import (
     configuration_of,
     frames_of,
@@ -69,6 +72,20 @@ STATIC_FILES = {
     "regen.js": "text/javascript; charset=utf-8",
 }
 CACHE_FILE = "captions.json"
+# What a browser may keep, and for how long.
+#
+# The media of a running study does not change under the participant looking at
+# it, and §4 is a screen they move back and forth across: five moments, each a
+# picture, revisited as they decide where the marks go. Re-fetching one on every
+# return is the difference between a strip that responds and a strip that waits,
+# so the media carries a day and an entity tag. `private` because a participant's
+# clip is nobody else's to hold; there is no shared cache on the published path
+# anyway, and this says so rather than relying on it.
+MEDIA_CACHE = "private, max-age=86400"
+# The page's own code is the opposite case: a fix has to reach the next reload,
+# not the reload after the cache expires. `no-cache` is not "do not store" — it
+# stores and revalidates, so an unchanged file costs a 304 and no body.
+SHELL_CACHE = "no-cache"
 # The step a viewing belongs to, and the index it is filed under (§9.5).
 VIEWS = {
     progress.VIEW_PREPARED: (0, PREPARED),
@@ -90,6 +107,38 @@ def _package_file(name: str) -> str:
 
 def _error(status: int, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse({"error": message, **extra}, status_code=status)
+
+
+def _tag(material: str) -> str:
+    """An entity tag over whatever identifies a body."""
+    return f'"{hashlib.md5(material.encode(), usedforsecurity=False).hexdigest()}"'
+
+
+def _unchanged(request: Request, etag: str, modified: float | None = None) -> bool:
+    """Whether the browser already holds this exact body.
+
+    ``FileResponse`` sends an entity tag but reads none: a conditional request
+    for a still that has not changed came back as the whole PNG again, which is
+    the same as having no cache at all. This is the half that was missing.
+    ``If-None-Match`` wins over ``If-Modified-Since`` where both are sent (RFC
+    9110 §13.1.3), and a weak tag matches its strong twin because the
+    comparison a conditional GET calls for is the weak one.
+    """
+    matches = request.headers.get("if-none-match")
+    if matches is not None:
+        held = {candidate.strip() for candidate in matches.split(",")}
+        weak = etag[2:] if etag.startswith("W/") else etag
+        return "*" in held or any((tag[2:] if tag.startswith("W/") else tag) == weak for tag in held)
+    since = request.headers.get("if-modified-since")
+    if since is not None and modified is not None:
+        try:
+            asked = parsedate_to_datetime(since)
+        except (TypeError, ValueError):
+            return False
+        # HTTP dates have a second's resolution, so a file written within the
+        # same second as the one held would compare as newer forever.
+        return asked is not None and int(modified) <= int(asked.timestamp())
+    return False
 
 
 def _played(lane: object) -> bool:
@@ -114,6 +163,7 @@ def build_app(
     items: ItemSet | None = None,
     watch: Callable[[str, int, int], None] | None = None,
     gate: Gate | None = None,
+    derive: bool = True,
 ) -> FastAPI:
     """The app over one validated document.
 
@@ -126,6 +176,11 @@ def build_app(
     (:mod:`dpo.regen.gate`): an access code on enrolment, the log download
     kept to this machine, a rate limit by address. None of it is on by
     default, so a kiosk run is unchanged.
+
+    ``derive`` is whether the browser is served the web-sized copies of
+    :mod:`dpo.regen.derive` rather than the archival files themselves. On by
+    default because the published link is the case that needs it; off restores
+    the byte-for-byte staging to every response.
     """
     validate_regen_document(document)
     configuration = configuration_of(document)
@@ -150,6 +205,7 @@ def build_app(
     media_dir = Path(media_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    derivatives = Derivatives(media_dir, enabled=derive)
     log = EventLog(out_dir, configuration.hash)
     roster = Roster(out_dir)
     cached = writer if isinstance(writer, CachedWriter) else CachedWriter(writer, out_dir / CACHE_FILE)
@@ -645,6 +701,7 @@ def build_app(
         Best-effort, like the event stream: a participant whose regeneration
         has not started yet, or has just finished, reads as not writing, and
         the page falls back to what it already shows.
+
         """
         person = _participant(participant)
         if isinstance(person, JSONResponse):
@@ -704,13 +761,57 @@ def build_app(
             headers={"Content-Disposition": f'attachment; filename="regen-log-{person}.json"'},
         )
 
+    def _serve(request: Request, path: Path, media_type: str | None = None) -> Response:
+        """A media file, with the two headers that decide whether it is fetched twice."""
+        try:
+            stat = path.stat()
+        except OSError:
+            return _error(404, f"{path.name} is no longer readable")
+        etag = _tag(f"{stat.st_mtime_ns}-{stat.st_size}")
+        headers = {
+            "cache-control": MEDIA_CACHE,
+            "etag": etag,
+            "last-modified": formatdate(stat.st_mtime, usegmt=True),
+        }
+        if _unchanged(request, etag, stat.st_mtime):
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, media_type=media_type, headers=headers)
+
     @app.get("/media/video/{segment}")
-    def video(segment: str) -> Any:
-        return _file_response(segment, "video")
+    def video(request: Request, segment: str) -> Any:
+        return _file_response(request, segment, "video")
+
+    @app.get("/media/audio/{segment}")
+    def audio(request: Request, segment: str) -> Any:
+        """§5's reference mix: the clip's own sound, without the clip's picture.
+
+        The mix used to be the mp4, played through an ``Audio`` element that
+        downloaded all of it — six megabytes fetched a second time, on a screen
+        that shows no video, for the quarter of a megabyte of sound inside. The
+        audio track is copied out rather than re-encoded, so this is the same
+        bitstream the participant heard in §3 at the same level, which is what
+        §5 requires of it. Where the copy cannot be made the clip is served
+        whole, exactly as before.
+        """
+        try:
+            entry = segment_of(document, segment)
+        except ValueError as exc:
+            return _error(404, str(exc))
+        resolved = _media(str(entry["video"]))
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        path, media_type = derivatives.sound(resolved)
+        return _serve(request, path, media_type)
 
     @app.get("/media/frame/{segment}/{index}")
-    def frame(segment: str, index: int) -> Any:
-        """One frame of §4's strip. The masks for it never leave the server."""
+    def frame(request: Request, segment: str, index: int) -> Any:
+        """One frame of §4's strip. The masks for it never leave the server.
+
+        What leaves is a WebP of the staged still at its own size — the picture
+        the page draws, not the archival PNG it was cut from. §4's coordinates
+        are normalised to the delivered image and the matching reads the
+        originals here, so the record is the same either way.
+        """
         try:
             strip = frames_of(document, segment)
         except ValueError as exc:
@@ -718,10 +819,13 @@ def build_app(
         if not 0 <= index < len(strip):
             return _error(404, f"segment {segment} has no frame {index}")
         resolved = _media(str(strip[index]["still"]))
-        return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        path, media_type = derivatives.still(resolved)
+        return _serve(request, path, media_type)
 
     @app.get("/media/stem/{segment}/{stem_id}")
-    def stem(segment: str, stem_id: str) -> Any:
+    def stem(request: Request, segment: str, stem_id: str) -> Any:
         try:
             entry = segment_of(document, segment)
         except ValueError as exc:
@@ -729,25 +833,53 @@ def build_app(
         for candidate in entry["stems"]:
             if candidate["id"] == stem_id:
                 resolved = _media(str(candidate["audio"]))
-                return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
+                return resolved if isinstance(resolved, JSONResponse) else _serve(request, resolved)
         return _error(404, f"segment {segment} has no stem {stem_id!r}")
 
-    def _file_response(segment: str, key: str) -> Any:
+    def _file_response(request: Request, segment: str, key: str) -> Any:
         try:
             entry = segment_of(document, segment)
         except ValueError as exc:
             return _error(404, str(exc))
         resolved = _media(str(entry[key]))
-        return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
+        return resolved if isinstance(resolved, JSONResponse) else _serve(request, resolved)
 
     @app.get("/{filename}")
-    def static_file(filename: str) -> Response:
+    def static_file(request: Request, filename: str) -> Response:
         media_type = STATIC_FILES.get(filename)
         if media_type is None:
             return _error(404, f"no file {filename!r}")
-        return Response(_package_file(filename), media_type=media_type)
+        body = _package_file(filename)
+        etag = _tag(body)
+        headers = {"cache-control": SHELL_CACHE, "etag": etag}
+        if _unchanged(request, etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type=media_type, headers=headers)
 
     return app
+
+
+def warm_derivatives(document: Mapping[str, Any], media_dir: Path) -> tuple[int, int, int]:
+    """Make every web-sized copy the document will ask for, before anyone asks.
+
+    Encoding on first request would put the cost on a participant — the first
+    one through §4 would wait out five WebP encodes that nobody after them
+    waits for. Doing it at startup costs the operator a second and makes the
+    instrument's behaviour the same for the first session as for the tenth.
+    """
+    derivatives = Derivatives(Path(media_dir))
+    stills: list[Path] = []
+    sounds: list[Path] = []
+    for name in document["segments"]:
+        entry = segment_of(document, name)
+        clip = Path(media_dir) / str(entry["video"])
+        if clip.is_file():
+            sounds.append(clip)
+        for moment in frames_of(document, name):
+            still = Path(media_dir) / str(moment["still"])
+            if still.is_file():
+                stills.append(still)
+    return derivatives.warm(stills, sounds)
 
 
 def run_regen_app(
@@ -764,4 +896,7 @@ def run_regen_app(
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
     app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate)
+    stills, sounds, whole = warm_derivatives(document, Path(media_dir))
+    print(f"web copies ready: {stills} stills, {sounds} soundtracks", end="")
+    print(f"; {whole} served whole" if whole else "", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="warning")
