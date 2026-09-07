@@ -267,6 +267,28 @@ function drawRail() {
   });
 }
 
+/* The clip is the stimulus, and a clip that arrives over the network while it
+   plays is a different stimulus on a slow link than on a fast one: the browser
+   starts on a partial buffer and halts when it runs dry, and onended fires
+   the same either way. So the whole file is fetched before Start is enabled
+   and played from memory, which makes playback independent of the connection
+   the participant happens to be on. A fetch that fails falls back to
+   streaming rather than stranding the participant, and says so in the log. */
+async function prefetchClip(source, step) {
+  const began = performance.now();
+  try {
+    const response = await fetch(source);
+    if (!response.ok) throw new Error(`${response.status}`);
+    const blob = await response.blob();
+    const ms = Math.round(performance.now() - began);
+    note("viewing.prefetch", { step, prefetched: true, bytes: blob.size, ms });
+    return { url: URL.createObjectURL(blob), prefetched: true, bytes: blob.size };
+  } catch (error) {
+    note("viewing.prefetch", { step, prefetched: false, error: error.message });
+    return { url: source, prefetched: false, bytes: null };
+  }
+}
+
 /* §2 and §7 — the viewing. One start button, then fullscreen and no controls. */
 async function renderViewing(step) {
   const detail = await api(`/api/step/${step}?participant=${state.participant}`);
@@ -277,9 +299,16 @@ async function renderViewing(step) {
   $("start-headphones").textContent = strings.headphones;
   $("start-ready").textContent = strings.ready;
   const button = $("start-button");
+  // Start is enabled only once the clip is local. The button says so rather
+  // than sitting dead: on campus the wait is unnoticeable, off campus it can
+  // be seconds, and a participant who reads the instruction line meanwhile
+  // is doing what the screen is for.
+  button.textContent = strings.preparing;
+  button.disabled = true;
+  show("screen-start");
+  const clip = await prefetchClip(`/media/video/${detail.segment}`, step);
   button.textContent = state.strings.actions.start;
   button.disabled = false;
-  show("screen-start");
 
   button.onclick = async () => {
     button.disabled = true;
@@ -287,7 +316,7 @@ async function renderViewing(step) {
     const stage = $("screen-viewing");
     const band = $("cue");
     const cues = detail.captions;
-    video.src = `/media/video/${detail.segment}`;
+    video.src = clip.url;
     band.textContent = "";
     $("viewing-interrupted").hidden = true;
     show("screen-viewing");
@@ -349,6 +378,33 @@ async function renderViewing(step) {
     let ending = false;
     let interruptions = 0;
 
+    /* A halt for want of data is the other way a viewing stops being the
+       stimulus, and it leaves no trace of its own: the clip resumes, onended
+       fires, the timestamps are a little further apart. `waiting` is the
+       browser saying playback has stopped on an empty buffer; `stalled` that
+       the fetch behind a streamed source has gone quiet. Neither counts
+       before the first frame, which is loading rather than stalling, nor
+       while the clip is paused for an interruption, nor across a seek —
+       the instrument never seeks, but a seek fires `waiting` too, and a
+       count that means "halted mid-play" should not be movable by one. */
+    let stalls = 0;
+    let playing = false;
+    video.onplaying = () => {
+      playing = true;
+    };
+    const onStall = (event) => {
+      if (!playing || ending || video.ended || video.paused || video.seeking) return;
+      if (event.type === "waiting") stalls += 1;
+      note("viewing.stall", {
+        step,
+        kind: event.type,
+        at_ms: Math.round(video.currentTime * 1000),
+        count: stalls,
+      });
+    };
+    video.onwaiting = onStall;
+    video.onstalled = onStall;
+
     /* Fullscreen was requested and never watched. Escape is the browser's own
        shortcut and the first thing a nervous participant tries; the clip used
        to keep playing in a 720px column with the band pinned to the viewport,
@@ -381,12 +437,19 @@ async function renderViewing(step) {
       ending = true;
       document.removeEventListener("fullscreenchange", onFullscreen);
       track.track.oncuechange = null;
+      video.onplaying = video.onwaiting = video.onstalled = null;
       const endedAt = new Date().toISOString();
       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
       // Whether the clip was watched as the stimulus it is meant to be. It
       // rides the event stream rather than the viewing payload so the route's
       // contract is unchanged, and flushes before the step turns over.
-      note("viewing.integrity", { step, interruptions });
+      note("viewing.integrity", {
+        step,
+        interruptions,
+        stalls,
+        prefetched: clip.prefetched,
+        bytes: clip.bytes,
+      });
       await flush();
       const result = await api("/api/viewing", {
         participant: state.participant,
@@ -396,6 +459,7 @@ async function renderViewing(step) {
       });
       // A clip has played; the language is the session's now.
       state.languageLocked = true;
+      if (clip.prefetched) URL.revokeObjectURL(clip.url);
       if (result) render(result.step);
     };
     try {

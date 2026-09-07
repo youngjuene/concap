@@ -75,6 +75,10 @@ STRINGS: dict[str, Any] = {
         "headphones": "Put your headphones on and set the volume where you would normally listen. "
         "The clip plays once, in fullscreen, and cannot be paused or replayed.",
         "ready": "Press Start when you are ready.",
+        # On the button while the clip is being fetched whole, before it can
+        # be started: the wait is real off campus and a dead button is not an
+        # explanation.
+        "preparing": "Preparing the clip…",
         # Escape is the browser's own shortcut and the first thing a nervous
         # participant tries. The clip used to keep playing in the column with
         # the band pinned to the viewport, and the viewing recorded clean.
