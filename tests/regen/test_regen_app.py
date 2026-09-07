@@ -490,6 +490,32 @@ class TestSurface:
         assert len(body["scale"]["anchors"]) == 2
         assert len(body["steps"]) == 6
 
+    def test_the_chrome_is_served_in_every_language_the_study_offers(self, client: TestClient) -> None:
+        """All of them at once, so a switch redraws rather than re-fetches.
+
+        §9.3 lets the participant change language until the first clip plays.
+        Sending only the language they are currently reading would put a round
+        trip between the press and the redraw, and would stop boot asking for
+        the copy and the enrolment together — the copy would have to wait to
+        learn which language the enrolment assigned.
+        """
+        body = client.get("/api/strings").json()
+        assert set(body["strings"]) == {"en", "ko"}, "the fixture's study offers both"
+        assert body["strings"]["en"]["app_title"] == "Sound captions"
+        assert body["strings"]["ko"]["app_title"] != body["strings"]["en"]["app_title"]
+        assert body["strings"]["ko"]["steps"][2] != body["strings"]["en"]["steps"][2]
+
+    def test_a_study_in_one_language_is_served_one_tree(
+        self, document: dict[str, Any], media_dir: Path, tmp_path: Path
+    ) -> None:
+        english = dict(document)
+        english["config"] = {
+            **document["config"],
+            "calibration": {**document["config"]["calibration"], "languages": ["en"]},
+        }
+        client = TestClient(build_app(english, media_dir, tmp_path / "out", RegenTemplateWriter()))
+        assert set(client.get("/api/strings").json()["strings"]) == {"en"}
+
     def test_media_is_served_by_segment(self, client: TestClient) -> None:
         assert client.get("/media/frame/A/0").status_code == 200
         assert client.get("/media/frame/A/4").status_code == 200

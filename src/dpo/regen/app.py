@@ -47,7 +47,7 @@ from dpo.caption.writer import CachedWriter, CaptionWriter
 from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
-from dpo.regen.copy import STRINGS
+from dpo.regen.copy import strings_for
 from dpo.regen.derive import Derivatives
 from dpo.regen.document import (
     configuration_of,
@@ -265,8 +265,18 @@ def build_app(
 
     @app.get("/api/strings")
     def strings() -> Any:
+        """The chrome, in every language this study offers.
+
+        All of them at once, keyed by tag, rather than the one the participant
+        is currently reading. The page switches language without a round trip
+        — §9.3 lets them switch until the first clip plays, and a fetch between
+        the press and the redraw is a stutter on a control whose whole job is
+        to be reversible — and boot still asks for the copy and the enrolment
+        together, which it could not do if the copy depended on the enrolment's
+        answer. Two languages of chrome is a few kilobytes.
+        """
         return {
-            "strings": STRINGS,
+            "strings": {tag: strings_for(tag) for tag in configuration.languages},
             "scale": {
                 "points": configuration.scale.points,
                 "anchors": list(configuration.scale.anchors),

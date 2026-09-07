@@ -30,6 +30,10 @@ const state = {
   participant: null,
   step: null,
   strings: null,
+  // Every language's chrome, keyed by tag, and `strings` is the one being
+  // read. Both are held because §9.3 lets the participant switch until the
+  // first clip plays, and a switch should redraw rather than re-fetch.
+  chrome: null,
   scale: null,
   minimumPoints: 3,
   ceilingMs: 20000,
@@ -246,6 +250,7 @@ async function choose(tag) {
   const result = await api("/api/language", { participant: state.participant, language: tag });
   if (!result || !result.language) return;
   state.language = result.language;
+  state.strings = state.chrome[state.language] || state.chrome.en;
   state.languageLocked = Boolean(result.language_locked);
   // The page's lang drives the Korean font stack and line-heights in
   // identity.css, so the document has to carry it rather than the strings
@@ -1412,7 +1417,13 @@ async function boot() {
       // already reads, and is reported there rather than in the console.
       .catch((error) => ({ error: error.message }));
     const meta = await fetch("/api/strings").then((response) => response.json());
-    state.strings = meta.strings;
+    state.chrome = meta.strings;
+    // English until the enrolment says which language this session reads. The
+    // screens reachable before that answer — the closed screen for a stale
+    // link, the error screen for an enrolment that failed — are read by
+    // someone who has no language on record, and both are drawn from
+    // `state.strings`.
+    state.strings = state.chrome.en || Object.values(state.chrome)[0];
     state.scale = meta.scale;
     state.minimumPoints = meta.minimum_points;
     state.ceilingMs = meta.latency_ceiling_ms || state.ceilingMs;
@@ -1430,6 +1441,7 @@ async function boot() {
     state.participant = session.participant;
     state.download = session.download !== false;
     state.language = session.language || state.languages[0] || "en";
+    state.strings = state.chrome[state.language] || state.chrome.en;
     state.languageLocked = Boolean(session.language_locked);
     document.documentElement.lang = state.language;
     window.sessionStorage.setItem("regen.participant", session.participant);
