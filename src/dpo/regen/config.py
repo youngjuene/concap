@@ -54,6 +54,26 @@ from typing import Any
 CONFIG_SCHEMA = "dpo.caption-regen-config/v1"
 HASH_LENGTH = 12
 
+# §5's vocabulary: AudioSet's top-level classes, in AudioSet's own order,
+# restricted to the five that occur in this corpus. Fixed rather than drawn
+# from the clip, which is the point of the redesign — a participant shown only
+# the families a clip contains can report a true positive and nothing else, so
+# the screen could not tell "heard it" from "had the chance to say so". Asked
+# about all five, they can claim a family that is not there, and a false alarm
+# is a measure rather than an impossibility.
+#
+# `prose` is what §6 puts in a caption, and is deliberately not the display
+# label: "the sound of sounds of things" is not a sentence. The label is what
+# the participant reads and what the log records; the prose is what the writer
+# is handed.
+SOUND_FAMILIES: Mapping[str, str] = {
+    "human": "people",
+    "animal": "animals",
+    "things": "vehicles and machinery",
+    "music": "music",
+    "natural": "wind and water",
+}
+
 # Declared, hashed, never dispatched on. Each line states what some module in
 # this package does, so a study's stamp changes when the method changes.
 # Changing a formula without changing the declaration beside it leaves two
@@ -66,7 +86,14 @@ METHOD_CONSTANTS: Mapping[str, Any] = {
     "art_block": "one definition, referenced by both survey pages",
     "point_matching": "once, on the submitted coordinates; smallest containing mask wins",
     "unclassified": "points outside every mask are kept with their coordinates",
-    "regeneration_inputs": "matched visual labels excluding unclassified, plus selected source labels",
+    "regeneration_inputs": "matched visual labels excluding unclassified, plus the sound "
+    "families reported heard",
+    # §5 stopped being a selection among the sources a clip happens to carry
+    # and became a fixed judgment on all five families, so what the screen
+    # measures — and what §6 is conditioned on — is a different thing. Named
+    # here because it is hashed: a session run before this constant changed is
+    # not comparable with one run after, and the config hash is what says so.
+    "auditory_report": "heard / did not hear, on each of five fixed sound families",
 }
 
 
