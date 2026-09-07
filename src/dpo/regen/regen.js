@@ -1370,6 +1370,26 @@ async function render(step) {
 
 async function boot() {
   try {
+    /* The copy and the enrolment are asked for at once. Neither needs anything
+       from the other — the enrolment carries the identifier and the code from
+       the URL, the copy is the same for everyone — and asking in turn spent two
+       round trips on the landing screen where one does. On the published link
+       a round trip is not free, and this is the one place the participant is
+       looking at nothing at all. */
+    const stored = window.sessionStorage.getItem("regen.participant");
+    const code = new URLSearchParams(window.location.search).get("code");
+    const enrolment = stored ? { participant: stored } : {};
+    if (code) enrolment.code = code;
+    const asked = fetch("/api/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(enrolment),
+    })
+      .then((response) => response.json())
+      // A request in flight before anything awaits it would otherwise reject
+      // into nobody's hands. The failure becomes the shape the screen below
+      // already reads, and is reported there rather than in the console.
+      .catch((error) => ({ error: error.message }));
     const meta = await fetch("/api/strings").then((response) => response.json());
     state.strings = meta.strings;
     state.scale = meta.scale;
@@ -1381,17 +1401,9 @@ async function boot() {
     document.title = state.strings.app_title;
     document.documentElement.style.setProperty("--points", String(meta.scale.points));
     // The identifier survives a reload; a fresh tab with none enrols anew (§1).
-    const stored = window.sessionStorage.getItem("regen.participant");
-    // The study link may carry an access code; a published instrument
-    // refuses new enrolments without it. It rides only the enrolment.
-    const code = new URLSearchParams(window.location.search).get("code");
-    const enrolment = stored ? { participant: stored } : {};
-    if (code) enrolment.code = code;
-    const session = await fetch("/api/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(enrolment),
-    }).then((response) => response.json());
+    // The study link may carry an access code; a published instrument refuses
+    // new enrolments without it. It rides only the enrolment, sent above.
+    const session = await asked;
     if (session.closed) return closed();
     if (session.error) return fail(session.error, session.error);
     state.participant = session.participant;
