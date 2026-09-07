@@ -144,6 +144,13 @@ class TestWhatTheBrowserGets:
         assert participant_document(document, "A")["stems"][0]["parent"] == "Sounds of things"
 
     def test_a_lane_without_a_family_still_serves(self, document: dict[str, Any]) -> None:
+        # Stated on the stem rather than taken from the fixture's default: the
+        # fixture names a family for every stem now, because §5 records which
+        # families a clip carries and a parentless one would leave that
+        # untested. The property here is the other one — that a document which
+        # omits it is still servable.
+        document["segments"]["A"]["stems"][0].pop("parent", None)
+        validate_regen_document(document)
         assert participant_document(document, "A")["stems"][0]["parent"] is None
 
     def test_a_family_that_is_not_words_is_refused(self, document: dict[str, Any]) -> None:

@@ -47,13 +47,13 @@ from dpo.caption.writer import CachedWriter, CaptionWriter
 from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
+from dpo.regen.config import SOUND_FAMILIES
 from dpo.regen.copy import strings_for
 from dpo.regen.derive import Derivatives
 from dpo.regen.document import (
     configuration_of,
     frames_of,
     objects_of,
-    participant_document,
     segment_of,
     track_of,
     validate_regen_document,
@@ -409,7 +409,19 @@ def build_app(
             }
         if step == progress.AUDITORY:
             segment = assignment.prepared_segment
-            return {"step": step, **participant_document(document, segment)}
+            # The five families, in one fixed order, rather than the sources
+            # this clip happens to carry: §5 asks the same question of every
+            # participant about every family, so a family that is not in the
+            # clip is answerable and a false alarm is a measure. The labels are
+            # not sent — they are chrome, the page already holds both languages
+            # of them, and sending them here would be a second copy to drift.
+            entry = segment_of(document, segment)
+            return {
+                "step": step,
+                "segment": segment,
+                "duration_ms": entry["duration_ms"],
+                "families": list(SOUND_FAMILIES),
+            }
         if step in SURVEY_PAGES:
             return {
                 "step": step,
@@ -570,7 +582,14 @@ def build_app(
 
     @app.post("/api/auditory")
     def auditory(payload: Mapping[str, Any]) -> Any:
-        """§5: the selected sources, and what the participant played to choose them."""
+        """§5: heard or did not hear, on each of the five fixed sound families.
+
+        Every family is required. A blank is not "did not hear" — it is a
+        participant who did not answer — and the two have to stay distinct or
+        §6 is conditioned on the difference between a denial and a shrug. The
+        page cannot submit until all five are answered; this refuses the
+        request that gets past it anyway.
+        """
         person = _participant(payload.get("participant"))
         if isinstance(person, JSONResponse):
             return person
@@ -581,28 +600,32 @@ def build_app(
         if isinstance(assignment, JSONResponse):
             return assignment
         segment = assignment.prepared_segment
-        stems = {str(stem["id"]): str(stem["label"]) for stem in segment_of(document, segment)["stems"]}
-        selected = payload.get("selected")
-        if not isinstance(selected, Sequence) or isinstance(selected, str):
-            return _error(400, "selected must be a list of source ids in selection order")
-        unknown = [source for source in selected if source not in stems]
+        raw = payload.get("heard")
+        if not isinstance(raw, Mapping):
+            return _error(400, "heard must be an object of sound family to true or false")
+        unknown = sorted(key for key in raw if key not in SOUND_FAMILIES)
         if unknown:
-            return _error(400, "selected names sources this segment does not have", unknown=unknown)
-        raw_lanes = payload.get("lanes")
-        if raw_lanes is not None and not isinstance(raw_lanes, Mapping):
-            return _error(400, "lanes must be an object of source id to that lane's statistics")
-        lanes = dict(raw_lanes or {})
-        malformed = sorted(key for key, value in lanes.items() if not isinstance(value, Mapping))
+            return _error(400, "heard names families the study does not ask about", unknown=unknown)
+        malformed = sorted(key for key, value in raw.items() if not isinstance(value, bool))
         if malformed:
-            return _error(400, "each lane carries its own playback statistics", invalid=malformed)
-        # §5 logs "whether a selection was made without playback" — computed
-        # here rather than trusted from the page, from the same lane statistics
-        # the page reports, so the flag and the counts cannot disagree.
-        unheard = [source for source in selected if not _played(lanes.get(source))]
+            return _error(400, "each family is answered true or false", invalid=malformed)
+        missing = [family for family in SOUND_FAMILIES if family not in raw]
+        if missing:
+            return _error(400, "every sound family has to be answered", missing=missing)
+        # The order is the study's, not the page's: a report is a set of
+        # judgments made at once, and there is no selection order to preserve
+        # now that the screen is not a sequence of choices.
+        heard = [family for family in SOUND_FAMILIES if raw[family]]
+        # What §6 is conditioned on is the family's prose form, not the label
+        # the participant happened to read: the display label is chrome and
+        # changes with the interface language, and two participants reporting
+        # the same families must hand the writer the same input whichever
+        # language they read the screen in. It is also the form that makes a
+        # sentence — "sounds of things" is a taxonomy node, not a caption.
         snapshot = {
             **gated,
-            "auditory_labels": [stems[source] for source in selected],
-            "auditory_ids": list(selected),
+            "auditory_labels": [SOUND_FAMILIES[family] for family in heard],
+            "auditory_ids": list(heard),
         }
         log.append(
             person,
@@ -610,15 +633,22 @@ def build_app(
                 {
                     "type": "auditory.submitted",
                     "segment": segment,
-                    "selected": list(selected),
-                    "labels": [stems[source] for source in selected],
-                    "lanes": lanes,
-                    "selected_without_playback": unheard,
+                    "heard": heard,
+                    "not_heard": [family for family in SOUND_FAMILIES if not raw[family]],
+                    # What the clip actually carries, so a false alarm is
+                    # readable in the log without joining to the document.
+                    "present": sorted(
+                        {
+                            str(stem["parent"])
+                            for stem in segment_of(document, segment)["stems"]
+                            if stem.get("parent")
+                        }
+                    ),
                 }
             ],
             progress.advance(snapshot, progress.AUDITORY),
         )
-        return {"step": progress.current(log.snapshot(person)), "selected_without_playback": unheard}
+        return {"step": progress.current(log.snapshot(person)), "heard": heard}
 
     @app.post("/api/regenerate")
     def regenerate_track(payload: Mapping[str, Any]) -> Any:

@@ -46,10 +46,9 @@ const state = {
   language: "en",
   languages: [],
   languageLocked: false,
-  lanes: new Map(),
-  selected: [],
-  audio: null,
-  playing: null,
+  // The reference mix on §5. The lane state that used to sit beside it —
+  // per-lane playback counts, the WebAudio context that normalised stem gain,
+  // which lane was playing — went with the lanes themselves.
   mix: null,
   // The second viewing's clip, fetched during §6's wait. A promise rather than
   // a blob: the viewing may open before the fetch has finished, and awaiting
@@ -899,37 +898,46 @@ async function renderVisual() {
   show("screen-visual");
 }
 
-/* §5 — the lanes. One stem at a time, levels from the document's gain, and a
-   playhead drawn over the envelope while it plays. */
+/* §5 — heard or did not hear, on each of five fixed sound families.
+
+   It used to be a selection among the sources a clip happened to carry, with a
+   waveform lane and a playback control for each. Two things were wrong with
+   that. A participant could only ever report a source that was there, so the
+   screen could not tell "I heard it" from "I was given the chance to say so",
+   and a family nobody put in the clip was unreportable rather than a false
+   alarm. And the lanes needed separated stem audio, which does not exist for
+   this corpus — every lane read "No sound".
+
+   Five families, asked of everyone, every time. Both answers are explicit:
+   a blank is a participant who did not answer, which is not the same as one
+   who did not hear, and §6 must not be conditioned on the difference between
+   a denial and a shrug. */
 async function renderAuditory() {
   const detail = await api(`/api/step/auditory?participant=${state.participant}`);
   if (!detail) return;
-  state.lanes = new Map(detail.stems.map((stem) => [stem.id, { plays: 0, listened_ms: 0 }]));
-  state.selected = [];
   state.segment = detail.segment;
   const strings = state.strings.auditory;
+  const answers = new Map();
   head("auditory", stepName(railAt()));
   $("auditory-instruction").textContent = strings.instruction;
   $("lanes-legend").textContent = strings.legend;
-  $("auditory-submit").textContent = state.strings.actions.submit;
+  const submit = $("auditory-submit");
+  submit.textContent = state.strings.actions.submit;
 
   const container = $("lanes");
-  for (const node of [...container.querySelectorAll(".lane")]) node.remove();
-  const canvases = new Map();
-  const clocks = new Map();
-  let confirming = false;
+  for (const node of [...container.querySelectorAll(".family")]) node.remove();
 
   const count = () => {
-    $("auditory-note").textContent = state.selected.length
-      ? fill(strings.chosen, { count: state.selected.length, total: detail.stems.length })
-      : strings.chosen_none;
+    const done = answers.size;
+    $("auditory-note").textContent = done
+      ? fill(strings.answered, { count: done, total: detail.families.length })
+      : strings.answered_none;
+    submit.disabled = done < detail.families.length;
   };
 
-  /* The reference mix. §5 asks the participant to compare a stem against a
-     ten-second memory, and there was no way to hear the clip again once it had
-     played. It is the clip's own audio, at the clip's own level: nothing here
-     is a separated source, so nothing here is one of the things being asked
-     about. */
+  /* The reference mix: the clip's own audio at its own level. Nothing here is
+     a separated source, so nothing here is one of the things being asked
+     about — it is the ten-second memory the judgments are made against. */
   const mix = new Audio(`/media/audio/${detail.segment}`);
   state.mix = mix;
   const mixButton = $("mix-play");
@@ -941,9 +949,8 @@ async function renderAuditory() {
   mixClock.textContent = clock(0);
   mixProgress.style.width = "0%";
   const drawMix = () => {
-    const at = mix.currentTime;
-    mixProgress.style.width = `${Math.min(100, (at / (mix.duration || duration)) * 100)}%`;
-    mixClock.textContent = clock(at);
+    mixProgress.style.width = `${Math.min(100, (mix.currentTime / (mix.duration || duration)) * 100)}%`;
+    mixClock.textContent = clock(mix.currentTime);
     if (!mix.paused) requestAnimationFrame(drawMix);
   };
   mixButton.onclick = () => {
@@ -952,7 +959,6 @@ async function renderAuditory() {
       mixButton.textContent = "▶";
       return;
     }
-    stop();
     mix.play().then(
       () => {
         mixButton.textContent = "◼";
@@ -967,282 +973,53 @@ async function renderAuditory() {
     mixProgress.style.width = "100%";
   };
 
-  for (const stem of detail.stems) {
-    const lane = document.createElement("div");
-    lane.className = "lane";
-    lane.dataset.stem = stem.id;
-
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "play";
-    play.textContent = "▶";
-    play.setAttribute("aria-label", `${strings.play} ${stem.label}`);
+  for (const family of detail.families) {
+    const row = document.createElement("div");
+    row.className = "family";
 
     const label = document.createElement("div");
     label.className = "label";
-    // identity.css exempts these lanes from its no-meaningful-colour rule
-    // because the colours identify sources — but the colour only ever appeared
-    // inside the waveform, with no legend, so it identified nothing the
-    // participant could name. Against the label it does.
-    const chip = document.createElement("i");
-    chip.className = "chip";
-    chip.style.background = stem.colour;
-    const naming = document.createElement("div");
-    naming.append(document.createTextNode(stem.label));
-    // The family, where the source vocabulary has one. A label can be a
-    // narrower claim than its neighbour, and the colour already groups by
-    // family; naming it makes what the colour is doing legible.
-    if (stem.parent) {
-      const family = document.createElement("small");
-      family.textContent = stem.parent;
-      naming.append(family);
+    const name = document.createElement("span");
+    name.textContent = strings.families[family] || family;
+    const hint = document.createElement("small");
+    hint.textContent = strings.examples[family] || "";
+    label.append(name, hint);
+
+    /* Radios rather than a checkbox: a checkbox has one explicit state and
+       one that means both "no" and "not yet", and this screen has to keep
+       those apart. Grouped by family so the two answers are one question. */
+    const choice = document.createElement("div");
+    choice.className = "choice";
+    for (const [value, text] of [[true, strings.heard], [false, strings.not_heard]]) {
+      const option = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `family-${family}`;
+      input.onchange = () => {
+        answers.set(family, value);
+        note("family.answered", { family, heard: value });
+        count();
+      };
+      const caption = document.createElement("span");
+      caption.textContent = text;
+      option.append(input, caption);
+      choice.append(option);
     }
-    label.append(chip, naming);
 
-    const wave = document.createElement("div");
-    wave.className = "wave";
-    const canvas = document.createElement("canvas");
-    canvas.tabIndex = 0;
-    canvas.setAttribute("role", "slider");
-    canvas.setAttribute("aria-label", fill(strings.seek, { label: stem.label }));
-    canvas.setAttribute("aria-valuemin", "0");
-    canvas.setAttribute("aria-valuemax", "100");
-    canvas.setAttribute("aria-valuenow", "0");
-    const elapsed = document.createElement("span");
-    elapsed.className = "elapsed";
-    elapsed.textContent = clock(0);
-    wave.append(canvas, elapsed);
-    canvases.set(stem.id, canvas);
-    clocks.set(stem.id, elapsed);
-
-    /* Selection is a checkbox. It was five buttons with no aria-pressed, no
-       role and no fieldset, whose label swapped between Select and Selected:
-       a screen reader heard "Select, button" five times and never learned that
-       any of them was on, and a sighted participant had to press a button
-       labelled Selected in order to deselect. The label says what ticking it
-       claims, not what state it is in. */
-    const choose = document.createElement("label");
-    choose.className = "choose";
-    const tick = document.createElement("input");
-    tick.type = "checkbox";
-    const word = document.createElement("span");
-    word.textContent = strings.noticed;
-    choose.append(tick, word);
-    tick.onchange = () => {
-      const index = state.selected.indexOf(stem.id);
-      if (tick.checked && index === -1) state.selected.push(stem.id);
-      if (!tick.checked && index !== -1) state.selected.splice(index, 1);
-      lane.classList.toggle("selected", tick.checked);
-      confirming = false;
-      count();
-      note("lane.selected", {
-        stem: stem.id,
-        selected: tick.checked,
-        order: state.selected.indexOf(stem.id),
-      });
-    };
-
-    play.onclick = () => toggle(stem, play, lane, 0);
-    // The envelope already shows where the events are; §5 asks the participant
-    // to compare a stem against a ten-second memory, and not letting them go
-    // back to the third second was the largest avoidable cost on this screen.
-    canvas.onclick = (event) => {
-      const box = canvas.getBoundingClientRect();
-      toggle(stem, play, lane, Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)), true);
-    };
-    canvas.onkeydown = (event) => {
-      const nudge = { ArrowLeft: -0.05, ArrowRight: 0.05, Home: -1, End: 1 }[event.key];
-      if (nudge === undefined) return;
-      event.preventDefault();
-      const now = Number(canvas.getAttribute("aria-valuenow")) / 100;
-      const to = nudge === -1 ? 0 : nudge === 1 ? 0.98 : Math.min(1, Math.max(0, now + nudge));
-      toggle(stem, play, lane, to, true);
-    };
-
-    lane.append(play, label, wave, choose);
-    container.append(lane);
-    size(canvas);
-    drawWave(canvas, stem, 0);
-  }
-
-  /* The backing store was fixed at 600×48 while the CSS was width: 100%, so
-     600 pixels were squeezed into about 400 and then doubled again by a retina
-     display, and bars drawn on fractional boundaries blurred. */
-  function size(canvas) {
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
-    const height = Math.max(1, Math.round(48 * ratio));
-    if (canvas.width === width && canvas.height === height) return false;
-    canvas.width = width;
-    canvas.height = height;
-    return true;
-  }
-
-  function drawWave(canvas, stem, progress) {
-    const context = canvas.getContext("2d");
-    const { width, height } = canvas;
-    context.clearRect(0, 0, width, height);
-    context.fillStyle = stem.colour;
-    const step = width / stem.waveform.length;
-    stem.waveform.forEach((sample, index) => {
-      const bar = Math.max(1, sample * height);
-      context.fillRect(index * step, (height - bar) / 2, Math.max(1, step - 1), bar);
-    });
-    if (progress > 0) {
-      context.fillStyle = "rgba(22, 24, 26, 0.85)";
-      context.fillRect(progress * width, 0, Math.max(2, 2 * (window.devicePixelRatio || 1)), height);
-    }
-    canvas.setAttribute("aria-valuenow", String(Math.round(progress * 100)));
-  }
-
-  const relayout = () => {
-    for (const stem of detail.stems) {
-      const canvas = canvases.get(stem.id);
-      if (size(canvas)) {
-        const playing = state.playing && state.playing.stem.id === stem.id ? state.playing.element : null;
-        drawWave(canvas, stem, playing && playing.duration ? playing.currentTime / playing.duration : 0);
-      }
-    }
-  };
-  window.addEventListener("resize", relayout);
-  requestAnimationFrame(relayout);
-
-  function stop() {
-    if (!state.playing) return;
-    const { stem, element, since, button, opening } = state.playing;
-    state.playing = null;
-    element.pause();
-    button.textContent = "▶";
-    drawWave(canvases.get(stem.id), stem, 0);
-    clocks.get(stem.id).textContent = clock(0);
-    // A lane stopped before it ever made a sound contributes no listening
-    // time and no stop worth recording: nothing was heard.
-    if (opening) return;
-    const counts = state.lanes.get(stem.id);
-    counts.listened_ms += Date.now() - since;
-    note("lane.stopped", { stem: stem.id, ...counts });
-  }
-
-  function toggle(stem, button, lane, from, always) {
-    if (state.playing && state.playing.stem.id === stem.id) {
-      // A click on the waveform of the lane already playing is a seek, not a
-      // stop: the two controls stay distinct in both directions.
-      if (always) {
-        const element = state.playing.element;
-        element.currentTime = from * (element.duration || 0);
-        note("lane.sought", { stem: stem.id, to: from });
-        return;
-      }
-      return stop();
-    }
-    // §5: starting another lane stops the previous one. Enforced here rather
-    // than by pausing on the element's own play event, so the listening time
-    // of the lane being interrupted is closed before the next one opens.
-    stop();
-    if (!mix.paused) {
-      mix.pause();
-      mixButton.textContent = "▶";
-    }
-    const element = new Audio(`/media/stem/${state.segment}/${stem.id}`);
-    // Levels are normalised against the original mix by the gain measured when
-    // the stems were cut (§5). WebAudio, not element.volume, because a gain
-    // above 1 is a legitimate normalisation and volume clamps at 1.
-    if (!state.audio) state.audio = new (window.AudioContext || window.webkitAudioContext)();
-    const source = state.audio.createMediaElementSource(element);
-    const gain = state.audio.createGain();
-    gain.gain.value = stem.gain;
-    source.connect(gain).connect(state.audio.destination);
-    // The playhead was redrawn from ontimeupdate, so it advanced in visible
-    // ~250ms steps over an envelope the participant is reading for onsets.
-    const follow = () => {
-      if (!state.playing || state.playing.element !== element) return;
-      if (element.duration) {
-        drawWave(canvases.get(stem.id), stem, element.currentTime / element.duration);
-        clocks.get(stem.id).textContent = clock(element.currentTime);
-      }
-      requestAnimationFrame(follow);
-    };
-    element.onloadedmetadata = () => {
-      if (from > 0) element.currentTime = from * element.duration;
-    };
-    element.onended = () => {
-      if (state.playing && state.playing.element === element) stop();
-    };
-    // The lane is claimed here, synchronously, and not when play() settles.
-    // Two presses in one task both used to find no lane playing, so neither
-    // stopped the other and both were heard at once — which §5 forbids and
-    // which a sequential click is too slow to reach.
-    state.playing = { stem, element, since: Date.now(), button, opening: true };
-    button.textContent = "◼";
-    element.play().then(
-      () => {
-        if (!state.playing || state.playing.element !== element) {
-          // Stopped, or overtaken by another lane, while this one was opening.
-          element.pause();
-          return;
-        }
-        // The play count is what §5 reports a selection against, so it moves
-        // when sound actually starts rather than when the control was pressed,
-        // and the clock starts here for the same reason.
-        state.playing.opening = false;
-        state.playing.since = Date.now();
-        const counts = state.lanes.get(stem.id);
-        counts.plays += 1;
-        note("lane.played", { stem: stem.id, plays: counts.plays, from });
-        requestAnimationFrame(follow);
-      },
-      (error) => {
-        // Pausing a play() that has not settled rejects it, so stopping a lane
-        // while it opens arrives here as an AbortError. That is this code's
-        // own doing and says nothing about the lane: if it is no longer the
-        // one playing, the rejection is ours and the lane stays usable.
-        if (!state.playing || state.playing.element !== element) return;
-        state.playing = null;
-        // A lane that will not play is this lane's problem and not the
-        // session's. Ending the run here would lose §6, §7 and §8 to one
-        // missing or undecodable file, and the participant has already given
-        // two of the study's measures by this point. The lane says it has no
-        // sound, its selection control is untouched — they may well have
-        // heard the source in the clip — and the log carries the failure so
-        // the researcher sees it without the participant losing the session.
-        lane.classList.add("unplayable");
-        button.textContent = "—";
-        button.setAttribute("aria-label", `${strings.unavailable}: ${stem.label}`);
-        button.disabled = true;
-        clocks.get(stem.id).textContent = strings.unavailable;
-        note("lane.unplayable", { stem: stem.id, error: String((error && error.message) || error) });
-      }
-    );
+    row.append(label, choice);
+    container.append(row);
   }
 
   count();
 
-  const submit = $("auditory-submit");
-  submit.disabled = false;
   submit.onclick = async () => {
-    /* §5 could be finished in one press, on a screen whose result conditions
-       the captions the participant then rates in §7 and §8 — so an empty §5
-       does not thin one measure, it moves the stimulus for two more. Noticing
-       none of them is still a valid answer and is still allowed; it takes a
-       second press and says so. */
-    if (!state.selected.length && !confirming) {
-      confirming = true;
-      $("auditory-note").textContent = strings.confirm_none;
-      note("auditory.empty_confirm_asked", {});
-      return;
-    }
-    stop();
-    if (!mix.paused) mix.pause();
-    window.removeEventListener("resize", relayout);
     submit.disabled = true;
-    const lanes = Object.fromEntries(state.lanes);
-    const result = await api("/api/auditory", {
-      participant: state.participant,
-      selected: state.selected,
-      lanes,
-    });
+    const heard = {};
+    for (const family of detail.families) heard[family] = answers.get(family) === true;
+    await flush();
+    const result = await api("/api/auditory", { participant: state.participant, heard });
     if (result) render(result.step);
-    else submit.disabled = false;
+    else count();
   };
 
   show("screen-auditory");

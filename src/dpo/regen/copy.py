@@ -129,34 +129,39 @@ STRINGS: dict[str, Any] = {
         "on": "Next moment",
         "plate": "The frame at {seconds} seconds. Click to place a mark.",
     },
+    # §5 is a fixed judgment on five families now, not a selection among the
+    # sources a clip happens to carry. The labels are AudioSet's own top-level
+    # names because that is the vocabulary the study reports in; each carries
+    # examples underneath, because "Sounds of things" is a taxonomy label and
+    # a participant should not have to guess what counts.
     "auditory": {
-        # Asked as "play, then tick what you noticed", the screen invites a
-        # recognition judgment about the stem the participant has just heard in
-        # isolation rather than a report of the clip — and that report is what
-        # §6 conditions on. The referent is stated instead, and playing is
-        # offered rather than sequenced ahead of the answer.
-        "instruction": "These are the separated sounds of the clip you just watched. Tick the ones "
-        "you remember noticing while the clip played — not the ones you can hear now. You can "
-        "play any of them.",
-        "legend": "The separated sounds",
+        "instruction": "For each kind of sound, say whether you heard it while the clip was "
+        "playing. Answer all five — including the ones you did not hear.",
+        "legend": "The five kinds of sound",
+        "families": {
+            "human": "Human sounds",
+            "animal": "Animal",
+            "things": "Sounds of things",
+            "music": "Music",
+            "natural": "Natural sounds",
+        },
+        "examples": {
+            "human": "talking, footsteps, laughter",
+            "animal": "birds, dogs, insects",
+            "things": "vehicles, machinery, doors",
+            "music": "any music, played or live",
+            "natural": "wind, water, rain",
+        },
+        "heard": "Heard",
+        "not_heard": "Didn't hear",
         # There was no way to hear the clip again on this screen, so every
-        # judgment was a stem against a ten-second memory.
+        # judgment was against a ten-second memory. It is the clip's own audio
+        # at the clip's own level: nothing here is a separated source.
         "mix": "The clip as you heard it",
         "play": "Play",
         "stop": "Stop",
-        # A lane whose audio will not play. §5 keeps the selection control
-        # live — the participant may have heard the source in the clip even
-        # though this screen cannot replay it — so the word is about the
-        # button, not about the source.
-        "unavailable": "No sound",
-        # The selection control is a checkbox, so its label is what ticking it
-        # would claim rather than what state it is in. "Selected" on a button
-        # you press to deselect reads as already done rather than reversible.
-        "noticed": "Noticed",
-        "chosen": "{count} of {total} ticked",
-        "chosen_none": "Nothing ticked yet",
-        "confirm_none": "Nothing ticked. If you noticed none of these, press Submit again.",
-        "seek": "Waveform for {label}. Click or use the arrow keys to hear from a point.",
+        "answered": "{count} of {total} answered",
+        "answered_none": "Nothing answered yet",
     },
     "waiting": {
         "eyebrow": "One moment — nothing to do",
@@ -295,25 +300,30 @@ KOREAN: dict[str, Any] = {
         "plate": "{seconds}초의 화면입니다. 클릭하여 표시하십시오.",
     },
     "auditory": {
-        # "재생해 보신 뒤" made playing a precondition rather than an offer, which
-        # the English does not, and would strand a participant whose lanes will
-        # not play. "소리들" is the plural that marks the whole tree as
-        # translated. The referent is stated as the English's now is.
-        "instruction": "방금 보신 영상에서 분리해 낸 소리입니다. 지금 들리는 소리가 아니라, "
-        "영상을 보는 동안 알아차린 소리를 골라 주십시오. 각 소리는 재생해 보실 수 있습니다.",
-        "legend": "분리된 소리들",
+        "instruction": "각 소리의 종류에 대해, 영상이 재생되는 동안 그 소리를 들었는지 답해 "
+        "주십시오. 듣지 못한 것까지 다섯 가지 모두 답해 주십시오.",
+        "legend": "다섯 가지 소리의 종류",
+        "families": {
+            "human": "사람 소리",
+            "animal": "동물 소리",
+            "things": "사물 소리",
+            "music": "음악",
+            "natural": "자연 소리",
+        },
+        "examples": {
+            "human": "말소리, 발소리, 웃음소리",
+            "animal": "새, 개, 곤충",
+            "things": "차량, 기계, 문",
+            "music": "재생된 음악이든 라이브든",
+            "natural": "바람, 물, 비",
+        },
+        "heard": "들었음",
+        "not_heard": "못 들었음",
         "mix": "들으셨던 그대로의 영상 소리",
         "play": "재생",
         "stop": "정지",
-        "unavailable": "소리 없음",
-        # 알아차림 is the standard Korean for *mindfulness*, which is not a word
-        # to put on a checkbox in a study about attention restoration: it asks
-        # about a state rather than about whether a sound was heard.
-        "noticed": "들었음",
-        "chosen": "{total}개 중 {count}개 선택",
-        "chosen_none": "아직 선택하지 않으셨습니다",
-        "confirm_none": "선택된 항목이 없습니다. 어느 것도 알아차리지 못하셨다면 제출을 한 번 더 누르십시오.",
-        "seek": "{label}의 파형입니다. 클릭하시거나 방향키로 원하는 지점부터 들으실 수 있습니다.",
+        "answered": "{total}가지 중 {count}가지 답변",
+        "answered_none": "아직 답하지 않으셨습니다",
     },
     "waiting": {
         "eyebrow": "잠시만 기다려 주십시오 — 하실 일은 없습니다",

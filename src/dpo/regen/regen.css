@@ -354,63 +354,55 @@ p.lede {
 .lanes { display: flex; flex-direction: column; gap: 8px; border: 0; min-width: 0; }
 .lanes legend { margin-bottom: 10px; }
 
-.lane {
+/* One family, one question, two answers. The waveform lanes this replaces
+   carried a canvas, a playhead and a playback control per source; a fixed
+   judgment on five families needs a name, an example and a pair of radios,
+   so the row is a two-column grid rather than the five-track one it was. */
+.family {
   display: grid;
-  /* The label track sizes to its own content. A fixed 96px fitted "Road
-     traffic" and turned 멀리서 들리는 목소리 into three lines, which pushed the
-     row taller than its waveform and misaligned it against its neighbours —
-     the same lesson the actions track had already learned once. */
-  grid-template-columns: auto minmax(150px, max-content) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   padding: 10px 14px;
   border: 1px solid var(--rule);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--panel);
 }
-
-.lane.selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-/* A lane whose stem would not play. Dimmed, not removed: it is still a
-   source the participant may have heard, and §5 still takes the selection. */
-.lane.unplayable canvas { opacity: 0.35; }
-.lane.unplayable .label { color: var(--dim); }
-
-.lane .play { width: var(--target); height: var(--target); min-height: 0; padding: 0; font-size: 14px; }
-.lane .label { font: 13px/var(--leading-ui) var(--body); display: flex; align-items: baseline; gap: 9px; }
-/* identity.css exempts these lanes from its no-meaningful-colour rule because
-   the colours identify sources. The colour only ever appeared inside the
-   waveform, with no legend, so it identified nothing the participant could
-   name; against the label it does. */
-.lane .chip {
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  border: 1px solid rgba(22, 24, 26, 0.28);
-  align-self: center;
+.family .label { font: 15px/var(--leading-ui) var(--body); min-width: 0; }
+/* The examples are the answer to "Sounds of things" being a taxonomy node
+   rather than a phrase a participant can act on. */
+.family .label small {
+  display: block;
+  margin-top: 3px;
+  font: 12px/var(--leading-ui) var(--body);
+  color: var(--dim);
 }
-.lane .label small { display: block; margin-top: 3px; font: 10px/var(--leading-ui) var(--mono); color: var(--dim); }
-
-.lane .wave { position: relative; min-width: 0; }
-/* min-width: 0 above, or the canvas's own backing width becomes the track's
-   minimum and the lane grows past the column it was given. */
-.lane canvas { width: 100%; height: 48px; display: block; cursor: pointer; border-radius: 4px; }
-.lane canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.lane .elapsed { display: block; margin-top: 3px; font: 10px/1.3 var(--mono); color: var(--dim); text-align: right; }
-
-.lane .choose {
+.family .choice { display: flex; gap: 6px; flex: 0 0 auto; }
+.family .choice label {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: var(--target);
-  padding: 0 4px 0 10px;
+  padding: 0 14px 0 10px;
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   cursor: pointer;
   font: 13px/1.3 var(--body);
   white-space: nowrap;
+  background: var(--ground);
 }
-.lane .choose input { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
-.lane .choose:hover { background: var(--accent-wash); }
+.family .choice label:hover { background: var(--accent-wash); border-color: var(--accent); }
+.family .choice input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+/* The answered row is marked on the row, not only inside the control: five
+   rows of two radios is a lot of small marks to scan for what is still blank,
+   and the count in the action bar says how many rather than which. */
+.family:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.family .choice label:has(input:checked) { background: var(--accent-wash); border-color: var(--accent); }
+
+@media (max-width: 620px) {
+  .family { grid-template-columns: minmax(0, 1fr); }
+  .family .choice { justify-content: flex-start; }
+}
 
 /* §3, §8 — the survey. One scale, stated once per block and kept on screen.
 
