@@ -58,7 +58,13 @@ STRINGS: dict[str, Any] = {
         "names": {"en": "English", "ko": "한국어"},
         "locked": "Fixed for this session",
     },
-    "steps": ["Watch", "Questions", "What you saw", "What you heard", "Watch again", "Survey"],
+    # "Watch again" said the second viewing was the first clip repeated. It is
+    # the *other* segment (§1: `Assignment.regenerated_segment`), so the rail,
+    # the heading it feeds and §6's "what happens next" all promised a
+    # re-watch the participant never gets. A participant framed to expect the
+    # same street can rate the second clip's ART items as a re-rating of the
+    # first, which is the one contrast the study rests on.
+    "steps": ["Watch", "Questions", "What you saw", "What you heard", "Second clip", "Survey"],
     "actions": {
         "start": "Start",
         "next": "Next",
@@ -91,7 +97,14 @@ STRINGS: dict[str, Any] = {
         # moment as much as a thing, and the heading is where they will look
         # for which one they are on.
         "heading": "What you saw at {seconds} seconds",
-        "instruction": "Click the things that make this scene what it is, then go on to the next moment.",
+        # "the things that make this scene what it is" reads two ways — the
+        # objects that identify the place, or the qualities that give it its
+        # feel — and the two produce different marks and so different captions.
+        # The matching settles it: points are matched against object masks
+        # (Building, Person, Road), so the question is about things, and the
+        # sentence now says so.
+        "instruction": "Click the things in this picture that make this place what it is — the "
+        "objects and features you would name if you were describing it to someone.",
         "keyboard": "Or use the arrow keys to move the crosshair and Enter to place a mark.",
         "drag": "A mark can be dragged. The ✕ beside it removes it.",
         # The floor is a configuration value (§9.4's sibling in the same
@@ -117,8 +130,14 @@ STRINGS: dict[str, Any] = {
         "plate": "The frame at {seconds} seconds. Click to place a mark.",
     },
     "auditory": {
-        "instruction": "These are the separated sounds of the clip you just watched. Play any of "
-        "them, then tick the ones you noticed while watching.",
+        # Asked as "play, then tick what you noticed", the screen invites a
+        # recognition judgment about the stem the participant has just heard in
+        # isolation rather than a report of the clip — and that report is what
+        # §6 conditions on. The referent is stated instead, and playing is
+        # offered rather than sequenced ahead of the answer.
+        "instruction": "These are the separated sounds of the clip you just watched. Tick the ones "
+        "you remember noticing while the clip played — not the ones you can hear now. You can "
+        "play any of them.",
         "legend": "The separated sounds",
         # There was no way to hear the clip again on this screen, so every
         # judgment was a stem against a ten-second memory.
@@ -162,7 +181,7 @@ STRINGS: dict[str, Any] = {
         "status_at": "{done} of {total} captions written.",
         "status_done": "The captions are ready. Going on to the next clip.",
         "ahead_heading": "Two steps left after this",
-        "ahead_body": "You will watch the clip once more with its new captions, then answer the "
+        "ahead_body": "You will watch a second clip with these new captions, then answer the "
         "last set of questions.",
     },
     "survey": {
@@ -231,7 +250,10 @@ KOREAN: dict[str, Any] = {
         "names": {"en": "English", "ko": "한국어"},
         "locked": "이 세션에서는 변경할 수 없습니다",
     },
-    "steps": ["시청", "질문", "본 것", "들은 것", "다시 시청", "설문"],
+    # "다시 시청" was worse than its English original: 시청 and 다시 볼 수 없습니다
+    # collide on the same screen, so the heading told the participant to watch
+    # again four lines above the line saying they cannot.
+    "steps": ["시청", "질문", "본 것", "들은 것", "두 번째 영상", "설문"],
     "actions": {
         "start": "시작",
         "next": "다음",
@@ -253,11 +275,15 @@ KOREAN: dict[str, Any] = {
     },
     "visual": {
         "heading": "{seconds}초에 보신 것",
-        "instruction": "이 장면을 이 장면답게 만드는 것들을 클릭하신 다음, 다음 순간으로 넘어가십시오.",
+        # "이 장면을 이 장면답게" was a word-for-word calque that repeats 장면
+        # twice in six syllables, and "클릭하신 다음, 다음 순간으로" stuttered.
+        # Both sat in the sentence that has to be understood on first read.
+        "instruction": "이곳을 이런 곳으로 만드는 것들을 클릭해 주십시오. 이 장소를 설명한다면 "
+        "이름을 댈 사물이나 특징을 고르시면 됩니다. 이어서 다음 순간으로 넘어가십시오.",
         "keyboard": "또는 방향키로 십자선을 옮기고 Enter로 표시하실 수 있습니다.",
         "drag": "표시는 끌어서 옮길 수 있습니다. 옆의 ✕를 누르면 지워집니다.",
-        "minimum": "계속하시려면 최소 {minimum}개를 표시해 주십시오.",
-        "minimum_one": "계속하시려면 최소 한 개를 표시해 주십시오.",
+        "minimum": "계속하시려면 적어도 {minimum}곳은 표시해 주십시오.",
+        "minimum_one": "계속하시려면 적어도 한 곳은 표시해 주십시오.",
         "placed": "{count}개 표시 · {total}개 순간 중 {moments}개",
         "placed_none": "아직 표시가 없습니다",
         "moment": "{seconds}초",
@@ -269,14 +295,21 @@ KOREAN: dict[str, Any] = {
         "plate": "{seconds}초의 화면입니다. 클릭하여 표시하십시오.",
     },
     "auditory": {
-        "instruction": "방금 보신 영상에서 분리한 소리들입니다. 원하시는 것을 재생해 보신 뒤, "
-        "시청 중에 알아차리신 소리를 선택해 주십시오.",
+        # "재생해 보신 뒤" made playing a precondition rather than an offer, which
+        # the English does not, and would strand a participant whose lanes will
+        # not play. "소리들" is the plural that marks the whole tree as
+        # translated. The referent is stated as the English's now is.
+        "instruction": "방금 보신 영상에서 분리해 낸 소리입니다. 지금 들리는 소리가 아니라, "
+        "영상을 보는 동안 알아차린 소리를 골라 주십시오. 각 소리는 재생해 보실 수 있습니다.",
         "legend": "분리된 소리들",
         "mix": "들으셨던 그대로의 영상 소리",
         "play": "재생",
         "stop": "정지",
         "unavailable": "소리 없음",
-        "noticed": "알아차림",
+        # 알아차림 is the standard Korean for *mindfulness*, which is not a word
+        # to put on a checkbox in a study about attention restoration: it asks
+        # about a state rather than about whether a sound was heard.
+        "noticed": "들었음",
         "chosen": "{total}개 중 {count}개 선택",
         "chosen_none": "아직 선택하지 않으셨습니다",
         "confirm_none": "선택된 항목이 없습니다. 어느 것도 알아차리지 못하셨다면 제출을 한 번 더 누르십시오.",
@@ -294,7 +327,7 @@ KOREAN: dict[str, Any] = {
         "status_at": "자막 {total}개 중 {done}개를 작성했습니다.",
         "status_done": "자막이 준비되었습니다. 다음 영상으로 넘어갑니다.",
         "ahead_heading": "이후 두 단계가 남았습니다",
-        "ahead_body": "새 자막과 함께 영상을 한 번 더 시청하신 뒤, 마지막 질문에 답해 주시면 됩니다.",
+        "ahead_body": "새 자막이 붙은 두 번째 영상을 보신 뒤, 마지막 설문에 답해 주시면 됩니다.",
     },
     "survey": {
         "instruction": "방금 보신 장면에 관한 질문 {count}개입니다. 모두 답해 주십시오.",
