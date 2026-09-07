@@ -54,16 +54,43 @@
    as a bug, and in a supervised session that becomes a question for the
    researcher mid-run. The reason is printed rather than left in a title. */
 .languages { flex: 0 0 auto; position: relative; }
-.languages .pair { display: flex; gap: 6px; }
-.languages button { min-height: var(--target); padding: 0 20px; font-size: 13px; }
-.languages button.at { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+/* One pill holding two segments, rather than two separate buttons with a gap.
+   The pair is a single choice with exactly two answers and no third state, and
+   a segmented control is the shape that says so — two bordered rectangles side
+   by side read as two independent things to press, which is what a gap makes
+   them look like. The track carries the border and the rounding; the segments
+   carry neither until one of them is the answer. */
+.languages .pair {
+  display: flex;
+  gap: 0;
+  padding: 3px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.languages button {
+  min-height: calc(var(--target) - 8px);
+  padding: 0 16px;
+  font-size: 13px;
+  border: 0;
+  background: none;
+  border-radius: 999px;
+  color: var(--dim);
+}
+/* The hover on the base button moves a border this control does not have, so
+   it is restated as the thing that is actually visible here. */
+.languages button:hover:not(:disabled):not(.at) { background: var(--accent-wash); color: var(--ink); }
+.languages button.at { background: var(--accent); color: #FFFFFF; }
 /* Locked, and still saying which one is in force. The generic disabled fill is
    darker than the panel, so a locked pair styled with it alone pointed at the
    wrong language: the greyer chip read as the chosen one. The language being
-   read keeps the accent; the one that is no longer on offer recedes. */
+   read keeps the accent; the one that is no longer on offer recedes. The track
+   greys instead, which is what carries "no longer a control" now that the
+   segments have no border of their own. */
+.languages button:disabled { background: none; color: var(--dim); cursor: not-allowed; }
+.languages .pair:has(button:disabled) { background: var(--muted-fill); border-color: var(--rule); }
 .languages button.at:disabled {
   background: var(--accent-wash);
-  border-color: var(--accent);
   color: var(--accent-press);
 }
 .languages .locked {
