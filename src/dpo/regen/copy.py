@@ -183,6 +183,14 @@ STRINGS: dict[str, Any] = {
         "receipt": "Session {participant} · {at} · saved",
         "for_researcher": "For the researcher",
     },
+    # A published instrument refuses new enrolments without the current access
+    # code. Whoever lands here was not invited, or was invited to an earlier
+    # opening; either way there is nothing for them to do but ask.
+    "closed": {
+        "heading": "This study is not open right now",
+        "body": "The link you used is not active. If you were invited, ask the researcher "
+        "for the current link.",
+    },
     # fail() is called with a real message from six places and then fell back to
     # one generic sentence, so what the researcher standing behind the
     # participant got told was "something went wrong" whatever had happened.

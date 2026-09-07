@@ -45,6 +45,7 @@ from dpo.regen.document import (
     load_regen_document,
     slug,
 )
+from dpo.regen.gate import Gate
 from dpo.regen.items import ItemsError, load_items
 
 # Where ``scaffold`` looks under --media-dir. One directory per segment, named
@@ -317,9 +318,21 @@ def _gemma_writer(arguments: argparse.Namespace, document: dict[str, Any]) -> Ca
     return GemmaWriter(adapter, instruction=builder.instruction, fallback=RegenTemplateWriter())
 
 
+def _regen_gate(arguments: argparse.Namespace) -> Gate | None:
+    """What stands in front of the instrument, from the flags; None for a kiosk."""
+    code_file = Path(arguments.access_code_file) if arguments.access_code_file else None
+    if arguments.public:
+        return Gate.public(code_file)
+    if code_file is not None:
+        return Gate(code_file=code_file)
+    return None
+
+
 def _regen_serve(arguments: argparse.Namespace) -> int:
     from dpo.regen.app import run_regen_app
     from dpo.regen.regeneration import RegenTemplateWriter
+
+    gate = _regen_gate(arguments)
 
     try:
         document = load_regen_document(Path(arguments.session))
@@ -351,6 +364,7 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
             "items_digest": items.digest,
             "writer": arguments.writer,
             "url": f"http://{arguments.host}:{int(arguments.port)}/",
+            **(gate.record() if gate is not None else {}),
         }
     )
     try:
@@ -363,6 +377,7 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
             host=arguments.host,
             port=int(arguments.port),
             watch=_SlotBar(),
+            gate=gate,
         )
     except CacheMismatch as exc:
         _emit({"status": "error", "command": "regen serve", "error": str(exc)})
@@ -411,4 +426,16 @@ def register(subparsers: Any) -> None:
     serve.add_argument("--checkpoint", help="LoRA checkpoint directory")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8779, help="one past the console's 8778")
+    serve.add_argument(
+        "--public",
+        action="store_true",
+        help="the instrument is reachable from the internet: keep the log download on this "
+        "machine and rate-limit by address",
+    )
+    serve.add_argument(
+        "--access-code-file",
+        help="a new enrolment must carry the code in this file (?code=… in the study link); "
+        "the file is read on every enrolment, so changing it closes the study to new "
+        "participants at once",
+    )
     serve.set_defaults(handler=_regen_serve)

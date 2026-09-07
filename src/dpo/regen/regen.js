@@ -56,6 +56,7 @@ const SCREENS = [
   "screen-auditory",
   "screen-waiting",
   "screen-done",
+  "screen-closed",
   "screen-error",
   "screen-viewing",
 ];
@@ -100,6 +101,17 @@ function head(prefix, heading) {
 
 function stepName(index) {
   return state.strings.steps[index] || "";
+}
+
+/* The study is not taking new participants: no code in the link, a stale
+   one, or the operator has closed it. Not an error, so not the error screen:
+   nothing has gone wrong and there is no researcher in the room to tell. */
+function closed() {
+  const copy = state.strings.closed;
+  $("closed-eyebrow").textContent = state.strings.app_title;
+  $("closed-heading").textContent = copy.heading;
+  $("closed-body").textContent = copy.body;
+  show("screen-closed");
 }
 
 function fail(message, cause) {
@@ -1307,6 +1319,9 @@ function renderDone() {
     at: new Date().toISOString().replace("T", " ").slice(0, 19),
   });
   $("done-for").textContent = copy.for_researcher;
+  // Off the study machine the server keeps the log to itself, and a button
+  // that led to that refusal would replace this screen with an error body.
+  $("done-for").parentElement.hidden = !state.download;
   const button = $("done-download");
   button.textContent = state.strings.actions.download;
   // Navigate rather than open a tab: the server sends the log as an
@@ -1351,13 +1366,20 @@ async function boot() {
     document.documentElement.style.setProperty("--points", String(meta.scale.points));
     // The identifier survives a reload; a fresh tab with none enrols anew (§1).
     const stored = window.sessionStorage.getItem("regen.participant");
+    // The study link may carry an access code; a published instrument
+    // refuses new enrolments without it. It rides only the enrolment.
+    const code = new URLSearchParams(window.location.search).get("code");
+    const enrolment = stored ? { participant: stored } : {};
+    if (code) enrolment.code = code;
     const session = await fetch("/api/session", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(stored ? { participant: stored } : {}),
+      body: JSON.stringify(enrolment),
     }).then((response) => response.json());
+    if (session.closed) return closed();
     if (session.error) return fail(session.error, session.error);
     state.participant = session.participant;
+    state.download = session.download !== false;
     state.language = session.language || state.languages[0] || "en";
     state.languageLocked = Boolean(session.language_locked);
     document.documentElement.lang = state.language;

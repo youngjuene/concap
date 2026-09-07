@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from dpo.caption.writer import CachedWriter, CaptionWriter
@@ -56,6 +56,7 @@ from dpo.regen.document import (
     validate_regen_document,
 )
 from dpo.regen.enrolment import Roster
+from dpo.regen.gate import Buckets, Gate, client_address, is_local
 from dpo.regen.items import ItemsError, ItemSet, load_items
 from dpo.regen.log import EventLog, RegenLogError, validate_participant, view_id
 from dpo.regen.points import PointError, match_points, matched_labels, parse_points, summary_of
@@ -112,6 +113,7 @@ def build_app(
     *,
     items: ItemSet | None = None,
     watch: Callable[[str, int, int], None] | None = None,
+    gate: Gate | None = None,
 ) -> FastAPI:
     """The app over one validated document.
 
@@ -119,11 +121,32 @@ def build_app(
     §6 runs, for whatever the operator is looking at — the CLI hands it a
     terminal bar. It is the same report the waiting screen polls for, so the
     console and the participant cannot disagree about where the model is.
+
+    ``gate`` is what stands in front of the instrument when it is published
+    (:mod:`dpo.regen.gate`): an access code on enrolment, the log download
+    kept to this machine, a rate limit by address. None of it is on by
+    default, so a kiosk run is unchanged.
     """
     validate_regen_document(document)
     configuration = configuration_of(document)
     item_set = items if items is not None else load_items()
     app = FastAPI(title="dpo caption regen", docs_url=None, redoc_url=None, openapi_url=None)
+    gate = gate or Gate()
+    requests = Buckets(gate.requests_per_second, gate.burst) if gate.requests_per_second else None
+    enrolments = (
+        Buckets(gate.enrolments_per_minute / 60.0, max(1, round(gate.enrolments_per_minute)))
+        if gate.enrolments_per_minute
+        else None
+    )
+
+    if requests is not None:
+
+        @app.middleware("http")
+        async def rate_limit(request: Request, call_next: Callable[..., Any]) -> Any:
+            if not requests.allow(client_address(request)):
+                return _error(429, "too many requests from this address; slow down")
+            return await call_next(request)
+
     media_dir = Path(media_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -207,11 +230,27 @@ def build_app(
         }
 
     @app.post("/api/session")
-    def session(payload: Mapping[str, Any] | None = None) -> Any:
+    def session(request: Request, payload: Mapping[str, Any] | None = None) -> Any:
         """§1: issue an identifier and fix the assignment, once, at Page 1 load."""
         asked = (payload or {}).get("participant")
         if asked is not None and not isinstance(asked, str):
             return _error(400, "participant must be a string if it is given")
+        # A reload resumes without a code; only a new enrolment is gated,
+        # because that is the request that spends a sequence number.
+        try:
+            resuming = asked is not None and roster.sequence_of(asked) is not None
+        except RegenLogError as exc:
+            return _error(400, str(exc))
+        if not resuming:
+            if gate.requires_code:
+                expected = gate.code()
+                given = (payload or {}).get("code")
+                if expected is None:
+                    return _error(503, "the study is not open right now", closed=True)
+                if not isinstance(given, str) or given != expected:
+                    return _error(403, "this link is not active", closed=True)
+            if enrolments is not None and not enrolments.allow(client_address(request)):
+                return _error(429, "too many new sessions from this address; try again in a minute")
         try:
             participant, assignment = roster.enrol(asked)
         except (RegenLogError, ValueError) as exc:
@@ -231,6 +270,10 @@ def build_app(
             "language": _language(participant),
             "languages": list(configuration.languages),
             "language_locked": _started_viewing(participant),
+            # Whether the done screen may offer the log. Off the study machine
+            # the route below refuses, and a button that leads to a refusal
+            # would replace the kiosk's last screen with an error body.
+            "download": not gate.log_local_only or is_local(request),
         }
 
     @app.post("/api/language")
@@ -646,7 +689,9 @@ def build_app(
         return {"step": progress.current(snapshot), "participant": person}
 
     @app.get("/api/log")
-    def download(participant: str | None = None) -> Any:
+    def download(request: Request, participant: str | None = None) -> Any:
+        if gate.log_local_only and not is_local(request):
+            return _error(403, "the session log is downloaded on the study machine, not from here")
         person = _participant(participant)
         if isinstance(person, JSONResponse):
             return person
@@ -715,7 +760,8 @@ def run_regen_app(
     host: str = "127.0.0.1",
     port: int = 8779,
     watch: Callable[[str, int, int], None] | None = None,
+    gate: Gate | None = None,
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
-    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch)
+    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate)
     uvicorn.run(app, host=host, port=port, log_level="warning")
