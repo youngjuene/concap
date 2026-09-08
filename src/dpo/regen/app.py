@@ -47,7 +47,7 @@ from dpo.caption.writer import CachedWriter, CaptionWriter
 from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
-from dpo.regen.config import SOUND_FAMILIES
+from dpo.regen.config import FAMILY_OF_PARENT, SOUND_FAMILIES
 from dpo.regen.copy import strings_for
 from dpo.regen.derive import Derivatives
 from dpo.regen.document import (
@@ -635,13 +635,28 @@ def build_app(
                     "segment": segment,
                     "heard": heard,
                     "not_heard": [family for family in SOUND_FAMILIES if not raw[family]],
-                    # What the clip actually carries, so a false alarm is
-                    # readable in the log without joining to the document.
+                    # What the clip actually carries, in the same vocabulary
+                    # as the two fields above, so a false alarm is readable in
+                    # the log without joining to the document — which is the
+                    # whole reason this field is here, and which it could not
+                    # do while it held the document's AudioSet names against
+                    # §5's family keys.
                     "present": sorted(
                         {
-                            str(stem["parent"])
+                            FAMILY_OF_PARENT[parent]
                             for stem in segment_of(document, segment)["stems"]
-                            if stem.get("parent")
+                            if (parent := stem.get("parent")) in FAMILY_OF_PARENT
+                        }
+                    ),
+                    # A family the clip carries that §5 does not ask about is
+                    # not a false alarm the participant could have made, and
+                    # dropping it silently would leave the log looking as
+                    # though the clip held nothing else.
+                    "present_unasked": sorted(
+                        {
+                            str(parent)
+                            for stem in segment_of(document, segment)["stems"]
+                            if (parent := stem.get("parent")) and parent not in FAMILY_OF_PARENT
                         }
                     ),
                 }

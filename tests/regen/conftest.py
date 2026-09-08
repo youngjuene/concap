@@ -31,10 +31,18 @@ def track(texts: list[str]) -> list[dict[str, Any]]:
 FRAMES = (1000, 3000, 5000, 7000, 9000)
 
 
-# The AudioSet family each fixture stem belongs to. §5 records which families
-# a clip actually carries beside what the participant reported, so a stem
-# without a parent leaves that half of the row empty and untested.
-FAMILY_OF = {"traffic": "things", "bird": "animal", "siren": "things", "footsteps": "human"}
+# The AudioSet family each fixture stem belongs to, written the way a staged
+# document writes it — the ontology's own class name, not §5's family key.
+# This fixture used to hold the keys, which the staging script never emits, and
+# that is exactly why the log could ship `heard: ["things"]` beside
+# `present: ["Sounds of things"]` with a passing suite: the test was asserting
+# against a document shape that cannot occur.
+FAMILY_OF = {
+    "traffic": "Sounds of things",
+    "bird": "Animal",
+    "siren": "Sounds of things",
+    "footsteps": "Human sounds",
+}
 
 
 def segment(name: str, clip_id: str, *, objects: list[tuple[str, str]], stems: list[str]) -> dict[str, Any]:
@@ -59,7 +67,7 @@ def segment(name: str, clip_id: str, *, objects: list[tuple[str, str]], stems: l
             {
                 "id": stem,
                 "label": stem.replace("_", " ").title(),
-                "parent": FAMILY_OF.get(stem, "things"),
+                "parent": FAMILY_OF.get(stem, "Sounds of things"),
                 "audio": f"{name}/stems/{stem}.wav",
                 "colour": "#3F83D1",
                 "gain": 1.0,

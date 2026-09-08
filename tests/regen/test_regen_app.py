@@ -441,6 +441,39 @@ class TestAuditory:
         assert set(submitted["not_heard"]) == set(SOUND_FAMILIES) - {"music", "things"}
         assert submitted["present"], "what the clip actually carries is recorded beside the answer"
 
+    def test_what_the_clip_carried_is_written_in_the_answers_vocabulary(self, client: TestClient) -> None:
+        """The three fields have to be comparable, which is the point of the row.
+
+        The document stores AudioSet's own class names in ``stem.parent``; §5
+        answers in family keys. Written straight through, the row read
+        ``heard: ["things"]`` beside ``present: ["Sounds of things"]`` — two
+        lists with nothing in common, in a row whose purpose is comparing them.
+        """
+        participant = self._at_auditory(client)
+        hear(client, participant, heard=("music",))
+        events = client.get(f"/api/log?participant={participant}").json()["events"]
+        submitted = [row for row in events if row["type"] == "auditory.submitted"][-1]
+        assert set(submitted["present"]) <= set(SOUND_FAMILIES), submitted["present"]
+        assert "things" in submitted["present"], "the fixture's traffic stem is a sound of things"
+        # And the comparison the row exists for: claimed but not there.
+        false_alarm = set(submitted["heard"]) - set(submitted["present"])
+        assert false_alarm == {"music"}
+
+    def test_a_family_the_study_does_not_ask_about_is_kept_not_dropped(
+        self, document: dict[str, Any], media_dir: Path, tmp_path: Path
+    ) -> None:
+        # AudioSet has top-level classes §5 has no row for. One in a clip is
+        # not a false alarm the participant could have made, and dropping it
+        # silently would leave the log looking as though the clip held nothing.
+        document["segments"]["A"]["stems"][0]["parent"] = "Source-ambiguous sounds"
+        client = TestClient(build_app(document, media_dir, tmp_path / "out", RegenTemplateWriter()))
+        participant = self._at_auditory(client)
+        hear(client, participant, heard=())
+        events = client.get(f"/api/log?participant={participant}").json()["events"]
+        submitted = [row for row in events if row["type"] == "auditory.submitted"][-1]
+        assert submitted["present_unasked"] == ["Source-ambiguous sounds"]
+        assert "Source-ambiguous sounds" not in submitted["present"]
+
     def test_what_reaches_the_regeneration_does_not_depend_on_the_language_read(
         self, client: TestClient
     ) -> None:

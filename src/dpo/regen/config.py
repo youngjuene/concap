@@ -78,6 +78,21 @@ SOUND_FAMILIES: Mapping[str, str] = {
 # this package does, so a study's stamp changes when the method changes.
 # Changing a formula without changing the declaration beside it leaves two
 # studies sharing one stamp, which is the failure the stamp exists to prevent.
+# The AudioSet class name a staged document stores in `stem.parent`, mapped to
+# the family key §5 answers in. The two vocabularies exist because the document
+# records the ontology's own words and §5 records its own ids, and for a while
+# the log wrote one field in each: `heard: ["things"]` beside
+# `present: ["Sounds of things"]`, two lists with no value in common, in a row
+# whose whole purpose was letting the two be compared. Mapped here, at the one
+# boundary they meet, rather than by whoever reads the log later.
+FAMILY_OF_PARENT: Mapping[str, str] = {
+    "Human sounds": "human",
+    "Animal": "animal",
+    "Sounds of things": "things",
+    "Music": "music",
+    "Natural sounds": "natural",
+}
+
 METHOD_CONSTANTS: Mapping[str, Any] = {
     "assignment": "prepared on segment A when the sequence number is even, on B when it is odd",
     "assignment_from": "participant sequence number alone; no stored table",
