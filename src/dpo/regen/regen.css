@@ -319,34 +319,6 @@ p.lede {
   color: #FFFFFF;
 }
 
-/* §5 — the lanes. Playback and selection are separate controls with separate
-   hit areas, which the spec requires and the grid enforces: they sit at
-   opposite ends of the row and are never nested.
-
-   Selection is a checkbox now. It is a multi-choice set, and it was five
-   buttons with no aria-pressed and no fieldset whose label swapped between
-   Select and Selected — so a screen reader heard "Select, button" five times
-   and never learned that any of them was on, and a sighted participant had to
-   press a button labelled Selected in order to deselect. One real control
-   fixes the semantics, the label and the state together. */
-.mix {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 16px 18px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  margin-bottom: 24px;
-}
-.mix .play { flex: 0 0 auto; width: 56px; height: 56px; min-height: 0; padding: 0; border-radius: var(--radius); font-size: 17px; }
-.mix .body { flex: 1; min-width: 0; }
-.mix .title { font: 600 14.5px/1.35 var(--body); margin-bottom: 8px; }
-.mix .clock { flex: 0 0 auto; font: 12.5px/1.4 var(--mono); color: var(--body-ink); }
-
-.track { height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; }
-.track i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
-
 /* A fieldset, because the five lanes are one multi-choice set and a screen
    reader needs to be told so once rather than five times. Its default border,
    and the min-width: min-content that would let one long label widen the whole

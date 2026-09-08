@@ -81,6 +81,14 @@ STRINGS: dict[str, Any] = {
         "headphones": "Put your headphones on and set the volume where you would normally listen. "
         "The clip plays once, in fullscreen, and cannot be paused or replayed.",
         "ready": "Press Start when you are ready.",
+        # Shown on the second viewing only. Renaming the step to "Second clip"
+        # fixed the label; this fixes the meaning. The screen was otherwise
+        # word for word the first viewing's, so a participant who had read
+        # "watch again" had nothing to correct them — and one who believes
+        # they are re-watching the same street will attribute any change in
+        # how it feels to the captions, which is the inference the study is
+        # trying to make independently.
+        "different": "This is a different scene from the first one.",
         # On the button while the clip is being fetched whole, before it can
         # be started: the wait is real off campus and a dead button is not an
         # explanation.
@@ -141,9 +149,15 @@ STRINGS: dict[str, Any] = {
         # the clip's audio, so without the sentence the question reads as
         # being about what is audible on this page rather than about the
         # viewing. There is a test for it now, which is what was missing.
+        # Answered from memory, and the page says so, because there is now
+        # nothing on it to listen to. The reference mix was removed: the whole
+        # reason all five families are asked of everyone is that a false alarm
+        # becomes measurable, and a false alarm only exists against a memory.
+        # With the clip replayable the screen was a listening test with a
+        # ceiling, and it contradicted §2's own "cannot be paused or replayed".
         "instruction": "For each kind of sound, say whether you heard it while the clip was "
-        "playing — not whether you can hear it now. Answer all five, including the ones you "
-        "did not hear.",
+        "playing. Answer from memory — there is nothing to listen to on this page. Answer all "
+        "five, including the ones you did not hear.",
         "legend": "The five kinds of sound",
         "families": {
             "human": "Human sounds",
@@ -161,12 +175,6 @@ STRINGS: dict[str, Any] = {
         },
         "heard": "Heard",
         "not_heard": "Didn't hear",
-        # There was no way to hear the clip again on this screen, so every
-        # judgment was against a ten-second memory. It is the clip's own audio
-        # at the clip's own level: nothing here is a separated source.
-        "mix": "The clip as you heard it",
-        "play": "Play",
-        "stop": "Stop",
         "answered": "{count} of {total} answered",
         "answered_none": "Nothing answered yet",
     },
@@ -280,6 +288,7 @@ KOREAN: dict[str, Any] = {
         "headphones": "헤드폰을 착용하시고 평소 듣는 음량으로 맞춰 주십시오. "
         "영상은 전체 화면에서 한 번만 재생되며, 일시정지하거나 다시 볼 수 없습니다.",
         "ready": "준비되면 시작을 누르십시오.",
+        "different": "이번에는 첫 번째와 다른 장면입니다.",
         "preparing": "영상을 준비하는 중…",
         "interrupted_heading": "영상이 전체 화면에서 벗어났습니다",
         "interrupted_body": "재생이 일시정지되었습니다. 이어보기를 눌러 나머지를 전체 화면으로 "
@@ -313,9 +322,10 @@ KOREAN: dict[str, Any] = {
         "plate": "{seconds}초의 화면입니다. 클릭하여 표시하십시오.",
     },
     "auditory": {
-        "instruction": "아래 다섯 가지 소리 각각에 대해, 지금 들리는지가 아니라 영상이 "
-        "재생되는 동안 들었는지를 답해 주십시오. 듣지 못한 것까지 모두 답해 주십시오.",
-        "legend": "다섯 가지 소리의 종류",
+        "instruction": "아래 다섯 가지 소리 각각에 대해, 영상이 재생되는 동안 들었는지를 답해 "
+        "주십시오. 이 화면에서는 다시 들어 볼 수 없으니 기억에 따라 답해 주십시오. 듣지 못한 "
+        "것까지 모두 답해 주십시오.",
+        "legend": "다섯 가지 소리",
         "families": {
             "human": "사람 소리",
             "animal": "동물 소리",
@@ -332,9 +342,6 @@ KOREAN: dict[str, Any] = {
         },
         "heard": "들었음",
         "not_heard": "못 들었음",
-        "mix": "들으셨던 그대로의 영상 소리",
-        "play": "재생",
-        "stop": "정지",
         "answered": "{total}가지 중 {count}가지 답변",
         "answered_none": "아직 답하지 않으셨습니다",
     },

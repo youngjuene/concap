@@ -46,10 +46,6 @@ const state = {
   language: "en",
   languages: [],
   languageLocked: false,
-  // The reference mix on §5. The lane state that used to sit beside it —
-  // per-lane playback counts, the WebAudio context that normalised stem gain,
-  // which lane was playing — went with the lanes themselves.
-  mix: null,
   // The second viewing's clip, fetched during §6's wait. A promise rather than
   // a blob: the viewing may open before the fetch has finished, and awaiting
   // the one in flight is right where starting a second one would not be.
@@ -316,6 +312,11 @@ async function renderViewing(step) {
   const strings = state.strings.view;
   const index = step === "view_prepared" ? 0 : 4;
   head("start", stepName(index));
+  // The second viewing plays the *other* segment (§1). This screen was
+  // otherwise identical to the first viewing's, so nothing on it said so.
+  const different = $("start-different");
+  different.hidden = step !== "view_regenerated";
+  different.textContent = different.hidden ? "" : strings.different;
   $("start-headphones").textContent = strings.headphones;
   $("start-ready").textContent = strings.ready;
   const button = $("start-button");
@@ -933,44 +934,6 @@ async function renderAuditory() {
       ? fill(strings.answered, { count: done, total: detail.families.length })
       : strings.answered_none;
     submit.disabled = done < detail.families.length;
-  };
-
-  /* The reference mix: the clip's own audio at its own level. Nothing here is
-     a separated source, so nothing here is one of the things being asked
-     about — it is the ten-second memory the judgments are made against. */
-  const mix = new Audio(`/media/audio/${detail.segment}`);
-  state.mix = mix;
-  const mixButton = $("mix-play");
-  const mixProgress = $("mix-progress");
-  const mixClock = $("mix-clock");
-  const duration = detail.duration_ms / 1000;
-  $("mix-title").textContent = strings.mix;
-  const clock = (at) => `${at.toFixed(1)} / ${duration.toFixed(1)}`;
-  mixClock.textContent = clock(0);
-  mixProgress.style.width = "0%";
-  const drawMix = () => {
-    mixProgress.style.width = `${Math.min(100, (mix.currentTime / (mix.duration || duration)) * 100)}%`;
-    mixClock.textContent = clock(mix.currentTime);
-    if (!mix.paused) requestAnimationFrame(drawMix);
-  };
-  mixButton.onclick = () => {
-    if (!mix.paused) {
-      mix.pause();
-      mixButton.textContent = "▶";
-      return;
-    }
-    mix.play().then(
-      () => {
-        mixButton.textContent = "◼";
-        note("mix.played", { at_ms: Math.round(mix.currentTime * 1000) });
-        requestAnimationFrame(drawMix);
-      },
-      (error) => note("mix.unplayable", { error: String((error && error.message) || error) })
-    );
-  };
-  mix.onended = () => {
-    mixButton.textContent = "▶";
-    mixProgress.style.width = "100%";
   };
 
   for (const family of detail.families) {

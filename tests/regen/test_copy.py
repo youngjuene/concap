@@ -143,15 +143,29 @@ class TestTheTwoLoadBearingInstructions:
     not catch either, because nothing asserted them.
     """
 
-    def test_the_sound_question_is_about_the_viewing_not_this_page(self) -> None:
-        """§5 still carries the clip's audio, so the contrast has to be stated.
+    def test_the_sound_question_is_answered_from_memory(self) -> None:
+        """§5 asks what was heard during the viewing, and says so.
 
-        Without it the question reads as being about what is audible on this
-        page. It was written for exactly that reason and then overwritten
-        wholesale when §5 was redesigned around the five families.
+        The sentence has had two forms. While the screen carried the clip's
+        audio it drew a contrast — "not whether you can hear it now" — because
+        without it the question read as being about what was audible on the
+        page; that sentence was written once and then lost wholesale when §5
+        was redesigned. The player has since been removed, because a false
+        alarm only exists against a memory and a replayable clip made the
+        screen a listening test. So the instruction now states the positive
+        instead. What is asserted either way is that the screen tells the
+        participant which listening it is asking about.
         """
-        assert "not whether you can hear it now" in STRINGS["auditory"]["instruction"]
-        assert "지금 들리는지가 아니라" in KOREAN["auditory"]["instruction"]
+        assert "from memory" in STRINGS["auditory"]["instruction"]
+        assert "기억에 따라" in KOREAN["auditory"]["instruction"]
+
+    def test_the_sound_screen_offers_nothing_to_listen_to(self) -> None:
+        # The player's copy went with the player. A stray "Play" here would
+        # mean the control had come back without the instruction noticing.
+        for tree in (STRINGS, KOREAN):
+            assert "mix" not in tree["auditory"]
+            assert "play" not in tree["auditory"]
+            assert "stop" not in tree["auditory"]
 
     def test_neither_language_tells_the_participant_to_move_on(self) -> None:
         """The moment picker is the navigation and speaks for itself.

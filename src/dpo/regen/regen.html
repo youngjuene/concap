@@ -38,6 +38,9 @@
         <div class="head">
           <span class="eyebrow" id="start-eyebrow"></span>
           <h1 id="start-heading"></h1>
+          <!-- Only the second viewing fills this: it is a different clip, and
+               the screen was otherwise word for word the first one. -->
+          <p class="lede" id="start-different" hidden></p>
           <p class="lede" id="start-headphones"></p>
           <p class="lede" id="start-ready"></p>
         </div>
@@ -99,16 +102,6 @@
           <span class="eyebrow" id="auditory-eyebrow"></span>
           <h1 id="auditory-heading"></h1>
           <p class="lede" id="auditory-instruction"></p>
-        </div>
-        <!-- Every judgment on this screen was stem-against-memory: there was
-             no way to hear the clip again once it had played. -->
-        <div class="mix">
-          <button class="play primary" id="mix-play" type="button">&#9654;</button>
-          <div class="body">
-            <div class="title" id="mix-title"></div>
-            <div class="track"><i id="mix-progress"></i></div>
-          </div>
-          <span class="clock" id="mix-clock"></span>
         </div>
         <fieldset class="lanes" id="lanes">
           <legend class="eyebrow" id="lanes-legend"></legend>
