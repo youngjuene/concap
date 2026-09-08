@@ -1,0 +1,11 @@
+{
+  "score": 93,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": ["The new watching layout adds a compact control panel alongside the established black video stage"],
+  "suggestions": [],
+  "reasoning": "Calibration, watching and final survey share the existing neutral palette, blue controls, font stacks and readable panels. Mobile has no horizontal overflow, the video remains available while scrolling controls, and reload no longer leaves an error banner.",
+  "reference": "/tmp/4-04-what-you-heard.png",
+  "screenshots": ["/tmp/regen-study-qa/calibration.png", "/tmp/regen-study-qa/watching.png", "/tmp/regen-study-qa/watching-mobile.png", "/tmp/regen-study-qa/final-survey.png"],
+  "note": "Direct visual review; no OMX state mutation or independent approval."
+}

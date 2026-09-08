@@ -49,6 +49,21 @@ uv run dpo canary run --workspace artifacts/canary --contract configs/study/cana
 uv run dpo artifact verify --workspace artifacts/canary --all
 ```
 
+## Caption regeneration interfaces
+
+Two participant protocols are available and have separate entry points:
+
+- `dpo regen serve` runs the existing A/B calibration/check-up instrument.
+  `make open` and `deploy/edge` continue to publish this legacy service.
+- `python -m dpo.regen.study_api` runs the new multi-clip calibration followed
+  by three five-minute interactive videos and one final experience survey.
+  See the [two-stage run guide](src/dpo/regen/STUDY.md) for preparation and launch.
+  Its three real viewing videos still need preparation; without a model backend,
+  it uses explicitly recorded authored fallback captions for rehearsal.
+
+The default `pytest` and `make test` commands collect both protocols' tests.
+Starting the new app does not replace or repoint the existing public service.
+
 ## The current study, end to end
 
 The live study is `configs/study/street-audio.toml` — Gemma 4 E4B on the

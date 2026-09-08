@@ -184,6 +184,13 @@ class Regeneration:
         }
 
 
+@dataclass(frozen=True)
+class RegenCaptionRequest(CaptionRequest):
+    """Carry the participant language to the actual writer, not only the log."""
+
+    language: str = "en"
+
+
 class RegenRequestBuilder:
     """Turns a report and a slot into the request the shared writer takes.
 
@@ -203,10 +210,11 @@ class RegenRequestBuilder:
         it safe to record one prompt per slot and call it the prompt.
         """
         heard = _listed([spec.prose for spec in request.sources], NOTHING_HEARD)
+        language = request.language if isinstance(request, RegenCaptionRequest) else self.language
         return (
             REGEN_PREAMBLE.format(
                 chars=self.configuration.calibration.slot_max_chars,
-                language=LANGUAGE_NAMES.get(self.language.split("-")[0].lower(), self.language),
+                language=LANGUAGE_NAMES.get(language.split("-")[0].lower(), language),
             )
             + REGEN_FRAMING.format(seen=request.scene_prose or NOTHING_SEEN, heard=heard)
             + request.atmosphere_prose
@@ -225,7 +233,8 @@ class RegenRequestBuilder:
         slot = REGEN_SLOT.format(
             position=cue.index + 1, total=total, start=cue.start_ms / 1000, end=cue.end_ms / 1000
         )
-        return CaptionRequest(
+        return RegenCaptionRequest(
+            language=self.language,
             clip_id=clip_id,
             shot_id=f"cue{cue.index}",
             task=TASK,

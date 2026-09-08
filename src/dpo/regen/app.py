@@ -32,9 +32,11 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 from __future__ import annotations
 
 import hashlib
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from email.utils import formatdate, parsedate_to_datetime
+from functools import wraps
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -201,6 +203,25 @@ def build_app(
     # a measure, and a restart that loses it loses nothing an analysis wanted.
     # Everything §6 actually records goes into the log with the regeneration.
     writing: dict[str, dict[str, int]] = {}
+    session_locks: dict[str, Any] = {}
+    session_locks_guard = threading.Lock()
+
+    def session_write(endpoint: Callable[..., Any]) -> Callable[..., Any]:
+        """Keep legacy read/check/write transitions whole within the supported process."""
+
+        @wraps(endpoint)
+        def locked(*args: Any, **kwargs: Any) -> Any:
+            payload = kwargs.get("payload") or {}
+            identifier = payload.get("participant", "") if isinstance(payload, Mapping) else ""
+            # Invalid input stays on one bounded lock and is rejected by the endpoint.
+            if not isinstance(identifier, str) or len(identifier) > 64:
+                identifier = ""
+            with session_locks_guard:
+                lock = session_locks.setdefault(identifier, threading.RLock())
+            with lock:
+                return endpoint(*args, **kwargs)
+
+        return locked
 
     def _assignment(participant: str) -> Assignment | JSONResponse:
         sequence = roster.sequence_of(participant)
@@ -283,6 +304,7 @@ def build_app(
         }
 
     @app.post("/api/session")
+    @session_write
     def session(request: Request, payload: Mapping[str, Any] | None = None) -> Any:
         """§1: issue an identifier and fix the assignment, once, at Page 1 load."""
         asked = (payload or {}).get("participant")
@@ -330,6 +352,7 @@ def build_app(
         }
 
     @app.post("/api/language")
+    @session_write
     def language(payload: Mapping[str, Any]) -> Any:
         """Which of the study's languages this participant reads (§9.3).
 
@@ -432,6 +455,7 @@ def build_app(
         return cues_of(stored, configuration.language)
 
     @app.post("/api/viewing")
+    @session_write
     def viewing(payload: Mapping[str, Any]) -> Any:
         """§2 and §7: the viewing row, written when playback ends (§9.5)."""
         person = _participant(payload.get("participant"))
@@ -477,6 +501,7 @@ def build_app(
         return {"view_id": key, "step": progress.current(log.snapshot(person))}
 
     @app.post("/api/survey")
+    @session_write
     def survey(payload: Mapping[str, Any]) -> Any:
         """§3 and §8: per-item responses, joined to a viewing by key (§9.5)."""
         person = _participant(payload.get("participant"))
@@ -526,6 +551,7 @@ def build_app(
         return {"view_id": key, "step": progress.current(log.snapshot(person))}
 
     @app.post("/api/visual")
+    @session_write
     def visual(payload: Mapping[str, Any]) -> Any:
         """§4: match the submitted points once, and keep what matched nothing."""
         person = _participant(payload.get("participant"))
@@ -568,6 +594,7 @@ def build_app(
         return {"step": progress.current(log.snapshot(person)), **summary}
 
     @app.post("/api/auditory")
+    @session_write
     def auditory(payload: Mapping[str, Any]) -> Any:
         """§5: heard or did not hear, on each of the five fixed sound families.
 
@@ -653,6 +680,7 @@ def build_app(
         return {"step": progress.current(log.snapshot(person)), "heard": heard}
 
     @app.post("/api/regenerate")
+    @session_write
     def regenerate_track(payload: Mapping[str, Any]) -> Any:
         """§6: write the second viewing's track, once per participant."""
         person = _participant(payload.get("participant"))
@@ -771,6 +799,7 @@ def build_app(
         return report
 
     @app.post("/api/events")
+    @session_write
     def events(payload: Mapping[str, Any]) -> Any:
         """The stream the page keeps: points moved, lanes played, steps entered."""
         person = _participant(payload.get("participant"))
