@@ -226,6 +226,15 @@ class Configuration:
             "study_id": self.study_id,
             "corpus_id": self.corpus_id,
             "method_constants": dict(METHOD_CONSTANTS),
+            # §5's vocabulary is hashed because it is a study input, not a
+            # presentation detail. The prose beside each family is handed
+            # straight to §6's writer, so editing "wind and water" — or adding
+            # a sixth family — changes the stimulus a participant is shown.
+            # `method_constants` declares only the *shape* of §5's question;
+            # without this, two studies asking about different families would
+            # share one stamp, which is the failure the stamp exists to
+            # prevent.
+            "sound_families": dict(SOUND_FAMILIES),
             "calibration": asdict(self.calibration),
         }
 
@@ -275,6 +284,11 @@ def load_configuration(raw: Mapping[str, Any]) -> Configuration:
         raise ConfigError(
             "the artifact's method constants are not this build's; "
             "results computed here could not carry its hash honestly"
+        )
+    if raw.get("sound_families") != dict(SOUND_FAMILIES):
+        raise ConfigError(
+            "the artifact's sound families are not this build's; §5 would ask a "
+            "different question and §6 would be given different words for it"
         )
     calibration = dict(raw.get("calibration") or {})
     if "languages" in calibration:

@@ -276,6 +276,55 @@ does not restart on its own, and `make open` starts it.
   The page's own files revalidate instead, so a fix to the instrument reaches
   the next reload rather than the reload after that.
 
+## When the instrument refuses a document it served yesterday
+
+> `config: the artifact's method constants are not this build's` — or the same
+> sentence about its sound families.
+
+Not a corruption. The document carries a copy of the configuration it was
+staged under, and the build refuses to serve one whose method surface is not
+its own, because results computed here would otherwise be stamped with a hash
+that no longer describes how they were computed. It is the guard working.
+
+It fires whenever a released change touches `METHOD_CONSTANTS` or
+`SOUND_FAMILIES`, and it fires for **every** staged document, not just the
+live one — `data/regen-demo/` and anything on another machine need the same
+treatment. There is no command for it. Re-pin by rebuilding the config block
+from the document's own calibration:
+
+```python
+import json
+from pathlib import Path
+from dpo.regen.config import Calibration, Configuration, Scale
+
+p = Path("data/live/regen.json")
+doc = json.loads(p.read_text(encoding="utf-8"))
+old = doc["config"]
+calibration = dict(old["calibration"])
+scale = calibration.pop("scale")
+fresh = Configuration(
+    study_id=old["study_id"],
+    corpus_id=old["corpus_id"],
+    calibration=Calibration(
+        **calibration,
+        # Carried across explicitly: the anchors are hashed copy (§9.3), and a
+        # study that chose its own would have them silently replaced by the
+        # build's defaults.
+        scale=Scale(points=scale["points"], anchors=tuple(scale["anchors"])),
+    ),
+).artifact()
+assert json.loads(json.dumps(fresh))["calibration"] == old["calibration"]
+doc["config"] = json.loads(json.dumps(fresh))
+p.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+```
+
+Then `uv run dpo regen validate --session data/live/regen.json`, which prints
+the new hash. **Sessions logged under the old hash are not comparable with
+sessions logged under the new one** — that is what the change of hash means,
+and the hash on every row is what tells them apart. Re-staging instead of
+re-pinning also works, but blanks `fallback_track` and costs you the mask
+tree.
+
 ## What lands on disk
 
 Under `--out`, per participant:
