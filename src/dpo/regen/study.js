@@ -1,16 +1,24 @@
 /* Shared-theme two-stage study. Requests serialize; exposure IDs survive retries. */
 "use strict";
 const content = document.getElementById("content");
+let copy = {};
+const studyBase = new URL(".", window.location.href);
+const studyURL = path => new URL(path.replace(/^\//, ""), studyBase).pathname;
+const t = (text, values = {}) => {
+  let result = (state?.language === "ko" ? copy[text] : null) || String(text);
+  for (const [key, value] of Object.entries(values)) result = result.replaceAll(`{${key}}`, String(value));
+  return result;
+};
 let state, chain = Promise.resolve(), cleanup = () => {};
 const el = (tag, text, className) => {
   const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = t(text);
   if (className) node.className = className;
   return node;
 };
 const notice = (text = "") => {
   const node = document.getElementById("notice");
-  node.textContent = text; node.hidden = !text;
+  node.textContent = t(text); node.hidden = !text;
 };
 function storageKey(kind) { return `caption-study:${state.session_id}:${kind}`; }
 function saved(kind, fallback) {
@@ -18,7 +26,7 @@ function saved(kind, fallback) {
 }
 function save(kind, value) { localStorage.setItem(storageKey(kind), JSON.stringify(value)); }
 async function request(path, payload) {
-  const response = await fetch(path, payload === undefined ? {} : {
+  const response = await fetch(studyURL(path), payload === undefined ? {} : {
     method: "POST", headers: {"content-type": "application/json", "x-study-request": "1"},
     body: JSON.stringify(payload),
   });
@@ -94,11 +102,11 @@ function form(items, submitAction, title, description) {
     field.append(el("legend", item.text));
     if (item.type === "text") {
       const input = el("textarea"); input.maxLength = 2000; input.value = values[item.id] || "";
-      input.setAttribute("aria-label", `${item.text} (optional)`);
+      input.setAttribute("aria-label", t("{question} (optional)", {question: t(item.text)}));
       input.oninput = () => { values[item.id] = input.value; changed(); };
       field.append(el("p", "Optional"), input);
     } else {
-      if (item.type === "rating") field.append(el("p", `${item.low || "Strongly disagree"} (1) → ${item.high || "Strongly agree"} (5)`));
+      if (item.type === "rating") field.append(el("p", `${t(item.low || "Strongly disagree")} (1) → ${t(item.high || "Strongly agree")} (5)`));
       const choices = item.type === "rating" ? [1, 2, 3, 4, 5, ...(item.na ? ["na"] : [])] : item.options;
       const group = el("div", undefined, item.type === "rating" ? "ratings" : "");
       for (const value of choices) {
@@ -122,7 +130,7 @@ function form(items, submitAction, title, description) {
 }
 function player(source) {
   const wrapper = el("div", undefined, "study-player");
-  const video = el("video"); video.controls = true; video.playsInline = true; video.preload = "metadata"; video.src = source;
+  const video = el("video"); video.controls = true; video.playsInline = true; video.preload = "metadata"; video.src = studyURL(source);
   video.setAttribute("controlslist", "nofullscreen noremoteplayback"); video.disablePictureInPicture = true;
   video.onerror = () => notice("This video could not be played. Reload to retry, or contact the researcher if the problem continues.");
   wrapper.append(video);
@@ -162,16 +170,16 @@ function observation() {
   const persist = () => { save(key, values); clearTimeout(timer); timer = setTimeout(() => send("draft", values).catch(() => {}), 800); };
   const card = el("div", undefined, "study-card");
   const frame = el("div", undefined, "visual-frame");
-  const image = el("img"); image.alt = "Calibration frame. Mark objects you noticed.";
+  const image = el("img"); image.alt = t("Calibration frame. Mark objects you noticed.");
   frame.append(image); card.append(frame);
   const count = el("p");
   const draw = () => {
-    image.src = state.clip.frames[index].url;
+    image.src = studyURL(state.clip.frames[index].url);
     frame.querySelectorAll(".visual-point").forEach(n => n.remove());
     for (const point of values.points.filter(p => p.frame === index)) {
       const dot = el("span", undefined, "visual-point"); dot.style.left = `${point.x * 100}%`; dot.style.top = `${point.y * 100}%`; frame.append(dot);
     }
-    count.textContent = `${values.points.length} point${values.points.length === 1 ? "" : "s"} marked`;
+    count.textContent = t("{count} points marked", {count: values.points.length});
   };
   const add = (x, y) => { if (values.points.length >= 100) return; values.points.push({frame: index, x, y}); persist(); draw(); };
   frame.onclick = event => { const rect = image.getBoundingClientRect(); add(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))); };
@@ -203,7 +211,7 @@ function observation() {
 }
 function watching() {
   const videoInfo = state.video, resumePosition = state.position_ms;
-  heading(videoInfo.title, `Video ${state.video_index + 1} of 3 · Adjust the captions as you watch.`);
+  heading(videoInfo.title, t("Video {number} of 3 · Adjust the captions as you watch.", {number: state.video_index + 1}));
   const layout = el("div", undefined, "watch-layout"), {wrapper, video} = player(videoInfo.url);
   const caption = el("div", "", "study-caption"); wrapper.append(caption);
   const panel = el("aside", undefined, "study-card study-controls");
@@ -217,9 +225,9 @@ function watching() {
   const status = el("p", "Your calibrated settings are ready."); status.setAttribute("role", "status");
   const updateControls = () => {
     dot.style.left = `${desired.context * 100}%`; dot.style.top = `${(1 - desired.texture) * 100}%`;
-    for (const key of ["texture", "context"]) { ranges[key].value = Math.round(desired[key] * 100); labels[key].textContent = `${key === "texture" ? "Acoustic detail" : "Source and scene detail"}: ${Math.round(desired[key] * 100)}%`; }
+    for (const key of ["texture", "context"]) { ranges[key].value = Math.round(desired[key] * 100); labels[key].textContent = `${t(key === "texture" ? "Acoustic detail" : "Source and scene detail")}: ${Math.round(desired[key] * 100)}%`; }
   };
-  const commit = () => { clearTimeout(controlTimer); status.textContent = "Applying your settings…"; send("settings", {video_id: videoInfo.id, ...desired}).catch(() => {}); };
+  const commit = () => { clearTimeout(controlTimer); status.textContent = t("Applying your settings…"); send("settings", {video_id: videoInfo.id, ...desired}).catch(() => {}); };
   for (const key of ["texture", "context"]) {
     const label = el("label"), text = el("span"), input = el("input"); input.type = "range"; input.min = 0; input.max = 100; input.step = 1;
     ranges[key] = input; labels[key] = text; label.append(text, input); panel.append(label);
@@ -262,7 +270,7 @@ function watching() {
         const job = jobs.find(j => j.cue === index && j.result && j.revision === state.settings_revision);
         applied = job?.result && !job.result.fallback ? {...job.result, job_id: job.id, revision: job.revision, axes: {...state.axes}} : {text: cue.fallback, fallback: true, reason: "not_ready_at_boundary"};
         caption.textContent = applied.text;
-        status.textContent = applied.fallback ? "Showing the available caption for this moment." : `Applied: acoustic ${Math.round(state.axes.texture * 100)}%, source/scene ${Math.round(state.axes.context * 100)}%.`;
+        status.textContent = applied.fallback ? t("Showing the available caption for this moment.") : t("Applied: acoustic {texture}%, source/scene {context}%.", {texture: Math.round(state.axes.texture * 100), context: Math.round(state.axes.context * 100)});
       } else caption.textContent = "";
     }
     if (!exposure && applied && !video.paused && !video.seeking && !document.hidden) {
@@ -307,18 +315,26 @@ function watching() {
       if (alive && result.epoch === state.epoch && result.revision === state.settings_revision) jobs = result.jobs;
       if (!video.paused) await tick();
       await flush();
-    } catch (error) { if (alive) notice(`Connection interrupted. Your progress will retry. ${error.message}`); }
+    } catch (error) { if (alive) notice(t("Connection interrupted. Your progress will retry.")); }
     finally { polling = false; }
   }, 1000);
   cleanup = () => { alive = false; clearInterval(timer); clearTimeout(controlTimer); document.removeEventListener("visibilitychange", visibility); finishExposure(); video.onpause = null; video.pause(); };
 }
 function render() {
   cleanup(); cleanup = () => {}; content.replaceChildren();
+  document.documentElement.lang = state.language;
+  document.title = t("Sound captions — your viewing experience");
+  document.querySelector(".study-top .eyebrow").textContent = t("SOUND CAPTIONS");
+  document.querySelector(".study-rail").setAttribute("aria-label", t("Study progress"));
+  content.setAttribute("aria-label", t("Current study step"));
+  document.getElementById("rail-calibration").textContent = t("01 · Calibration");
+  document.getElementById("rail-viewing").textContent = t("02 · Viewing experience");
+  document.querySelector(".study-footer").textContent = t("Sound, attention, and the way you see a scene.");
   document.querySelector(".study-shell").classList.toggle("is-watching", state.stage === "watch");
   const calibration = ["preferences", "clip", "observe"].includes(state.stage);
   document.getElementById("rail-calibration").setAttribute("aria-current", calibration ? "step" : "false");
   document.getElementById("rail-viewing").setAttribute("aria-current", calibration ? "false" : "step");
-  document.getElementById("progress").textContent = calibration ? `Calibration · ${Math.min(state.clip_index + 1, state.calibration_count)} of ${state.calibration_count} clips` : state.stage === "done" ? "Study complete" : `Viewing experience · ${state.completed_videos} of 3 complete`;
+  document.getElementById("progress").textContent = calibration ? t("Calibration · {number} of {count} clips", {number: Math.min(state.clip_index + 1, state.calibration_count), count: state.calibration_count}) : state.stage === "done" ? t("Study complete") : t("Viewing experience · {count} of 3 complete", {count: state.completed_videos});
   if (state.stage === "preferences") return form(state.items, "preferences", "Make the captions yours", "First, tell us how much detail you prefer. Then watch a few short clips and tell us what you notice.");
   if (state.stage === "clip") return calibrationClip();
   if (state.stage === "observe") return observation();
@@ -328,14 +344,14 @@ function render() {
     heading("Your calibration is saved", "Next, watch three five-minute videos with captions shaped by your responses. You can adjust the level of detail while watching.");
     actions(button("Start viewing experience", () => send("start-viewing", {}, true), true));
   } else if (state.stage === "break") {
-    heading("Take a moment", `You have finished ${state.completed_videos} of 3 videos. Your chosen detail settings will carry into the next video.`);
+    heading("Take a moment", t("You have finished {count} of 3 videos. Your chosen detail settings will carry into the next video.", {count: state.completed_videos}));
     actions(button("Continue to the next video", () => send("continue", {}, true), true));
   } else {
     heading("Thank you for taking part", "Your calibration, viewing experience and final responses have been saved. You can close this page.");
   }
 }
 async function boot(code) {
-  try { state = await request("/api/study/session", code ? {code} : {}); render(); }
+  try { copy = await request("/api/study/strings"); state = await request("/api/study/session", code ? {code} : {}); render(); }
   catch (error) {
     content.replaceChildren(); heading("Join the study", error.message);
     const label = el("label", "Access code "), input = el("input"); input.type = "password"; input.autocomplete = "off"; label.append(input); content.append(label);

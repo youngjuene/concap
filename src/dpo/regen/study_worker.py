@@ -8,6 +8,7 @@ import signal
 import threading
 import time
 import wave
+from collections.abc import Callable
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,10 @@ def worker(pipe: Connection, settings: dict[str, Any]) -> None:
                             media_resolver=str,
                             adapter_dir=settings.get("checkpoint"),
                         )
+                    if spec.get("kind") == "stimulus":
+                        raw = adapter.generate_stimulus(spec["messages"], **spec["decoding"])
+                        pipe.send({"raw": raw})
+                        continue
                     from dpo.models.gemma4.prompt import stimulus_messages
 
                     if not Path(spec["excerpt"]).is_file():
@@ -77,27 +82,31 @@ def worker(pipe: Connection, settings: dict[str, Any]) -> None:
                 else:
                     result = {"text": spec["fallback"], "fallback": True, "reason": "model_not_configured"}
             except Exception as exc:  # noqa: BLE001 — the job records failures and has an authored fallback
-                result = {"text": spec["fallback"], "fallback": True, "reason": str(exc), **attempt}
+                result = {"text": spec.get("fallback", ""), "fallback": True, "reason": str(exc), **attempt}
             result["duration_ms"] = round((time.monotonic() - started) * 1000)
             pipe.send(result)
     except (EOFError, BrokenPipeError):
         return
 
 
-class Supervisor:
-    def __init__(self, store: StudyStore, settings: dict[str, Any], timeout: float = 30) -> None:
-        self.store, self.settings, self.timeout = store, settings, timeout
-        self.stopped = threading.Event()
-        self.thread = threading.Thread(target=self.run, daemon=True)
+class InferenceProcess:
+    """Serialize both phases through one model, including queue and decode deadlines."""
+
+    def __init__(self, settings: dict[str, Any], *, target: Callable[..., None] | None = None) -> None:
+        self.settings, self.target = settings, target or worker
+        self.lock = threading.Lock()
         self.process: Any = None
         self.pipe: Any = None
+        self.closed = False
 
-    def start(self) -> None:
-        self.store.recover()
-        self.thread.start()
-
-    def reset(self) -> None:
+    def _reset(self, *, graceful: bool = False) -> None:
         if self.process is not None:
+            if graceful and self.process.is_alive():
+                try:
+                    self.pipe.send(None)
+                    self.process.join(2)
+                except (BrokenPipeError, EOFError, OSError):
+                    pass
             if self.process.is_alive():
                 self.process.terminate()
             self.process.join(2)
@@ -108,9 +117,75 @@ class Supervisor:
             self.pipe.close()
         self.process = self.pipe = None
 
+    def infer(
+        self, spec: dict[str, Any], timeout: float, stopped: threading.Event | None = None
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        if not self.lock.acquire(timeout=timeout):
+            raise TimeoutError("inference_queue_deadline")
+        try:
+            if self.closed:
+                raise RuntimeError("Inference process is closed")
+            if self.process is None:
+                context = mp.get_context("spawn")
+                self.pipe, child = context.Pipe()
+                self.process = context.Process(target=self.target, args=(child, self.settings), daemon=True)
+                self.process.start()
+                child.close()
+            self.pipe.send(spec)
+            while not self.pipe.poll(0.1):
+                if (stopped is not None and stopped.is_set()) or time.monotonic() >= deadline:
+                    raise TimeoutError("inference_deadline")
+            return dict(self.pipe.recv())
+        except (TimeoutError, EOFError, BrokenPipeError, OSError):
+            self._reset()
+            raise
+        finally:
+            self.lock.release()
+
+    def close(self) -> None:
+        with self.lock:
+            self.closed = True
+            self._reset(graceful=True)
+
+
+class SharedAdapter:
+    """The existing GemmaWriter API backed by the viewing worker's model."""
+
+    def __init__(self, engine: InferenceProcess, adapter: Any, timeout: float = 30) -> None:
+        self.engine, self.timeout = engine, timeout
+        self.config, self.adapter_dir = adapter.config, adapter.adapter_dir
+
+    def generate_stimulus(self, messages: list[dict[str, Any]], **decoding: Any) -> str:
+        result = self.engine.infer(
+            {"kind": "stimulus", "messages": messages, "decoding": decoding}, self.timeout
+        )
+        if result.get("fallback"):
+            raise RuntimeError(result["reason"])
+        return str(result["raw"])
+
+
+class Supervisor:
+    def __init__(
+        self,
+        store: StudyStore,
+        settings: dict[str, Any],
+        timeout: float = 30,
+        engine: InferenceProcess | None = None,
+    ) -> None:
+        self.store, self.timeout = store, timeout
+        self.engine = engine or InferenceProcess(settings)
+        self.owns_engine = engine is None
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def start(self) -> None:
+        self.store.recover()
+        self.thread.start()
+
     def stop(self) -> None:
         self.stopped.set()
-        self.thread.join(3)
+        self.thread.join(self.timeout + 5)
 
     def run(self) -> None:
         previous = None
@@ -125,23 +200,10 @@ class Supervisor:
 
                 spec = json.loads(job["spec"])
                 try:
-                    if self.process is None:
-                        context = mp.get_context("spawn")
-                        self.pipe, child = context.Pipe()
-                        self.process = context.Process(
-                            target=worker, args=(child, self.settings), daemon=True
-                        )
-                        self.process.start()
-                        child.close()
-                    self.pipe.send(spec)
-                    deadline = time.monotonic() + self.timeout
-                    while not self.pipe.poll(0.1):
-                        if self.stopped.is_set() or time.monotonic() >= deadline:
-                            raise TimeoutError("inference_deadline")
-                    result = self.pipe.recv()
+                    result = self.engine.infer(spec, self.timeout, self.stopped)
                 except (TimeoutError, EOFError, BrokenPipeError, OSError) as exc:
-                    self.reset()
                     result = {"text": spec["fallback"], "fallback": True, "reason": str(exc)}
                 self.store.finish(job, result)
         finally:
-            self.reset()
+            if self.owns_engine:
+                self.engine.close()

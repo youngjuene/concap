@@ -35,7 +35,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from dpo.caption.writer import CacheMismatch, CaptionWriter
+from dpo.caption.writer import CacheMismatch, CaptionWriter, StimulusAdapter
 from dpo.cli._shared import _emit
 from dpo.regen.config import Calibration, ConfigError, Configuration
 from dpo.regen.document import (
@@ -263,7 +263,9 @@ class _SlotBar:
             self._bar = None
 
 
-def _gemma_writer(arguments: argparse.Namespace, document: dict[str, Any]) -> CaptionWriter | None:
+def _gemma_writer(
+    arguments: argparse.Namespace, document: dict[str, Any], engine: Any = None
+) -> CaptionWriter | None:
     """The participant-facing model writer, held to the pipeline's own pin.
 
     Assembled the same way ``dpo console serve`` assembles it, with this
@@ -314,8 +316,15 @@ def _gemma_writer(arguments: argparse.Namespace, document: dict[str, Any]) -> Ca
         )
     except CheckpointSafetyError as exc:
         raise RegenUsageError(str(exc)) from exc
+    shared: StimulusAdapter
+    if engine is not None:
+        from dpo.regen.study_worker import SharedAdapter
+
+        shared = SharedAdapter(engine, adapter)
+    else:
+        shared = adapter
     builder = RegenRequestBuilder(configuration_of(document))
-    return GemmaWriter(adapter, instruction=builder.instruction, fallback=RegenTemplateWriter())
+    return GemmaWriter(shared, instruction=builder.instruction, fallback=RegenTemplateWriter())
 
 
 def _regen_gate(arguments: argparse.Namespace) -> Gate | None:
@@ -330,16 +339,59 @@ def _regen_gate(arguments: argparse.Namespace) -> Gate | None:
 
 def _regen_serve(arguments: argparse.Namespace) -> int:
     from dpo.regen.app import run_regen_app
+    from dpo.regen.continuation import ViewingConfig
     from dpo.regen.regeneration import RegenTemplateWriter
 
     gate = _regen_gate(arguments)
+    viewing = None
+    engine = None
+    supplied = [arguments.viewing_manifest, arguments.viewing_media, arguments.viewing_out]
+    if any(supplied) and not all(supplied):
+        _emit(
+            {
+                "status": "error",
+                "command": "regen serve",
+                "error": "Supply --viewing-manifest, --viewing-media and --viewing-out together",
+            }
+        )
+        return 2
+    if arguments.viewing_manifest:
+        if arguments.writer == "gemma" and not arguments.backend_config:
+            _emit(
+                {
+                    "status": "error",
+                    "command": "regen serve",
+                    "error": "--writer gemma requires --backend-config",
+                }
+            )
+            return 2
+        model = (
+            {
+                "backend_config": str(Path(arguments.backend_config).resolve()),
+                "contract": str(Path(arguments.contract).resolve()),
+                "checkpoint": str(Path(arguments.checkpoint).resolve()) if arguments.checkpoint else None,
+            }
+            if arguments.writer == "gemma"
+            else {}
+        )
+        if model:
+            from dpo.regen.study_worker import InferenceProcess
+
+            engine = InferenceProcess(model)
+        viewing = ViewingConfig(
+            Path(arguments.viewing_manifest).resolve(),
+            Path(arguments.viewing_media).resolve(),
+            Path(arguments.viewing_out).resolve(),
+            model,
+            engine=engine,
+        )
 
     try:
         document = load_regen_document(Path(arguments.session))
         items = load_items(Path(arguments.items) if arguments.items else None)
         writer: CaptionWriter | None
         if arguments.writer == "gemma":
-            writer = _gemma_writer(arguments, document)
+            writer = _gemma_writer(arguments, document, engine)
             if writer is None:
                 return 3
         else:
@@ -378,6 +430,7 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
             port=int(arguments.port),
             watch=_SlotBar(),
             gate=gate,
+            viewing=viewing,
         )
     except CacheMismatch as exc:
         _emit({"status": "error", "command": "regen serve", "error": str(exc)})
@@ -419,6 +472,9 @@ def register(subparsers: Any) -> None:
     serve.add_argument("--session", required=True)
     serve.add_argument("--media-dir", required=True)
     serve.add_argument("--out", required=True)
+    serve.add_argument("--viewing-manifest", help="continue after page 6 into this two-axis viewing study")
+    serve.add_argument("--viewing-media", help="media root for the long-video study manifest")
+    serve.add_argument("--viewing-out", help="separate output directory for the viewing study")
     serve.add_argument("--items", help="items JSON; default: the placeholder set in dpo.regen")
     serve.add_argument("--writer", choices=("template", "gemma"), default="template")
     serve.add_argument("--backend-config", help="Gemma 4 backend config; required by --writer gemma")

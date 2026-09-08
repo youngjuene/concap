@@ -81,6 +81,11 @@ function fill(template, values) {
   );
 }
 
+function syncChrome() {
+  document.title = state.strings.app_title;
+  $("rail").setAttribute("aria-label", state.strings.rail.label);
+}
+
 /* Where the rail's marker sits. The wait is not one of §9.1's six steps but a
    participant standing on it is nearly through the fifth, and telling them so
    is the cheapest answer there is to §6's drop-off risk. */
@@ -144,6 +149,7 @@ function fail(message, cause) {
   // server reports is safe by construction: it cannot move the session on.
   const retry = $("error-retry");
   retry.textContent = state.strings.actions.retry;
+  retry.disabled = false;
   retry.onclick = async () => {
     retry.disabled = true;
     try {
@@ -166,7 +172,9 @@ async function api(path, payload) {
   if (!response.ok) {
     // The server is the authority on the step; a 409 carries the real one.
     if (response.status === 409 && body.step) return render(body.step);
-    throw new Error(body.error || `${path} failed with ${response.status}`);
+    throw Object.assign(new Error(body.error || `${path} failed with ${response.status}`), {
+      status: response.status,
+    });
   }
   return body;
 }
@@ -251,6 +259,7 @@ async function choose(tag) {
   // identity.css, so the document has to carry it rather than the strings
   // alone (K1, K2).
   document.documentElement.lang = state.language;
+  syncChrome();
   drawLanguages();
   // Re-render where they are, so the captions and the copy on screen change
   // with the choice rather than at the next step.
@@ -627,15 +636,21 @@ async function renderSurvey(page) {
 
   submit.onclick = async () => {
     submit.disabled = true;
-    const result = await api("/api/survey", {
-      participant: state.participant,
-      page,
-      responses: Object.fromEntries(answers),
-      entered_at: state.entered,
-      submitted_at: new Date().toISOString(),
-    });
-    if (result) render(result.step);
-    else submit.disabled = false;
+    try {
+      const result = await api("/api/survey", {
+        participant: state.participant,
+        page,
+        responses: Object.fromEntries(answers),
+        entered_at: state.entered,
+        submitted_at: new Date().toISOString(),
+      });
+      if (result) render(result.step);
+      else submit.disabled = false;
+    } catch (error) {
+      submit.disabled = false;
+      if (error.status) return fail(error.message, error.message);
+      $("survey-remaining").textContent = state.strings.network.retry;
+    }
   };
 }
 
@@ -888,9 +903,15 @@ async function renderVisual() {
 
   $("visual-next").onclick = async () => {
     $("visual-next").disabled = true;
-    const result = await api("/api/visual", { participant: state.participant, points: state.points });
-    if (result) render(result.step);
-    else paint();
+    try {
+      const result = await api("/api/visual", { participant: state.participant, points: state.points });
+      if (result) render(result.step);
+      else paint();
+    } catch (error) {
+      $("visual-next").disabled = state.points.length < state.minimumPoints;
+      if (error.status) return fail(error.message, error.message);
+      $("visual-count").textContent = state.strings.network.retry;
+    }
   };
 
   head("visual", "");
@@ -992,10 +1013,16 @@ async function renderAuditory() {
     submit.disabled = true;
     const heard = {};
     for (const family of detail.families) heard[family] = answers.get(family) === true;
-    await flush();
-    const result = await api("/api/auditory", { participant: state.participant, heard });
-    if (result) render(result.step);
-    else count();
+    try {
+      await flush();
+      const result = await api("/api/auditory", { participant: state.participant, heard });
+      if (result) render(result.step);
+      else count();
+    } catch (error) {
+      submit.disabled = answers.size < detail.families.length;
+      if (error.status) return fail(error.message, error.message);
+      $("auditory-note").textContent = state.strings.network.retry;
+    }
   };
 
   show("screen-auditory");
@@ -1127,10 +1154,39 @@ function renderDone() {
     window.location.href = `/api/log?participant=${encodeURIComponent(state.participant)}`;
   };
   show("screen-done");
+  if (state.viewingEnabled) {
+    const continuation = state.strings.continuation;
+    head("done", continuation.heading);
+    $("done-body").textContent = continuation.body;
+    const next = $("done-continue"), status = $("done-continuation-status");
+    next.hidden = false; status.hidden = false;
+    next.textContent = continuation.next;
+    if (!state.viewingToken) {
+      next.hidden = true; status.textContent = continuation.recovery;
+      return;
+    }
+    const proceed = async () => {
+      next.disabled = true; status.textContent = continuation.opening;
+      try {
+        const response = await fetch("/api/continuation", {
+          method: "POST", headers: {"content-type": "application/json", "x-study-request": "1"},
+          body: JSON.stringify({participant: state.participant, token: state.viewingToken}),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        window.location.assign(result.url);
+      } catch {
+        status.textContent = continuation.retry; next.disabled = false;
+      }
+    };
+    next.onclick = proceed;
+    proceed();
+  }
 }
 
 async function render(step) {
   state.step = step;
+  syncChrome();
   drawRail();
   drawLanguages();
   note("step.entered", { step });
@@ -1155,9 +1211,11 @@ async function boot() {
        round trips on the landing screen where one does. On the published link
        a round trip is not free, and this is the one place the participant is
        looking at nothing at all. */
-    const stored = window.sessionStorage.getItem("regen.participant");
+    const recovery = new URLSearchParams(window.location.hash.slice(1));
+    const recoveredParticipant = recovery.get("participant"), recoveredToken = recovery.get("viewing_token");
+    const stored = recoveredParticipant && recoveredToken ? recoveredParticipant : window.sessionStorage.getItem("regen.participant");
     const code = new URLSearchParams(window.location.search).get("code");
-    const enrolment = stored ? { participant: stored } : {};
+    const enrolment = stored ? { participant: stored, viewing_token: recoveredToken || window.sessionStorage.getItem("regen.viewing-token") } : {};
     if (code) enrolment.code = code;
     const asked = fetch("/api/session", {
       method: "POST",
@@ -1183,7 +1241,7 @@ async function boot() {
     state.cueSlots = meta.cue_slots || state.cueSlots;
     state.steps = meta.steps;
     state.languages = meta.languages || [];
-    document.title = state.strings.app_title;
+    syncChrome();
     document.documentElement.style.setProperty("--points", String(meta.scale.points));
     // The identifier survives a reload; a fresh tab with none enrols anew (§1).
     // The study link may carry an access code; a published instrument refuses
@@ -1192,12 +1250,17 @@ async function boot() {
     if (session.closed) return closed();
     if (session.error) return fail(session.error, session.error);
     state.participant = session.participant;
+    state.viewingEnabled = Boolean(session.viewing_enabled);
+    state.viewingToken = session.viewing_token || (stored ? window.sessionStorage.getItem("regen.viewing-token") : null);
+    if (session.viewing_token) window.sessionStorage.setItem("regen.viewing-token", session.viewing_token);
     state.download = session.download !== false;
     state.language = session.language || state.languages[0] || "en";
     state.strings = state.chrome[state.language] || state.chrome.en;
     state.languageLocked = Boolean(session.language_locked);
     document.documentElement.lang = state.language;
+    syncChrome();
     window.sessionStorage.setItem("regen.participant", session.participant);
+    if (recoveredParticipant && recoveredToken) history.replaceState(null, "", window.location.pathname + window.location.search);
     await render(session.step);
   } catch (error) {
     fail(error.message, error.message);

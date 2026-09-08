@@ -50,6 +50,7 @@ from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
 from dpo.regen.config import FAMILY_OF_PARENT, SOUND_FAMILIES
+from dpo.regen.continuation import Continuation, ViewingConfig
 from dpo.regen.copy import strings_for
 from dpo.regen.derive import Derivatives
 from dpo.regen.document import (
@@ -153,6 +154,7 @@ def build_app(
     watch: Callable[[str, int, int], None] | None = None,
     gate: Gate | None = None,
     derive: bool = True,
+    viewing: ViewingConfig | None = None,
 ) -> FastAPI:
     """The app over one validated document.
 
@@ -197,6 +199,8 @@ def build_app(
     derivatives = Derivatives(media_dir, enabled=derive)
     log = EventLog(out_dir, configuration.hash)
     roster = Roster(out_dir)
+    continuation = Continuation(viewing, document, log) if viewing else None
+    app.state.continuation = continuation
     cached = writer if isinstance(writer, CachedWriter) else CachedWriter(writer, out_dir / CACHE_FILE)
     # How far §6 has got, per participant, while it is running. In memory and
     # per process on purpose: this is an observation of a call in flight, not
@@ -335,7 +339,7 @@ def build_app(
             snapshot = {"schema": "dpo.caption-regen-snapshot/v1", "step": progress.VIEW_PREPARED}
             log.write_snapshot(participant, snapshot)
             log.append(participant, [{"type": "session.enrolled", **assignment.record()}], snapshot)
-        return {
+        result = {
             "participant": participant,
             "assignment": assignment.record(),
             "step": progress.current(snapshot),
@@ -350,6 +354,64 @@ def build_app(
             # would replace the kiosk's last screen with an error body.
             "download": not gate.log_local_only or is_local(request),
         }
+        if continuation is not None:
+            result["viewing_enabled"] = True
+            token = continuation.enrol(
+                participant,
+                _language(participant),
+                (payload or {}).get("viewing_token"),
+                issue=not resuming or is_local(request),
+            )
+            if token:
+                result["viewing_token"] = token
+        return result
+
+    @app.post("/api/continuation/recover")
+    @session_write
+    def recover_viewing(request: Request, payload: Mapping[str, Any]) -> Any:
+        """Researcher-only recovery for tabs enrolled before the upgrade."""
+        if not is_local(request) or request.headers.get("x-study-request") != "1":
+            return _error(403, "Recovery is available only on the study machine.")
+        if continuation is None:
+            return _error(404, "No viewing experience is configured.")
+        person = _participant(payload.get("participant"))
+        if isinstance(person, JSONResponse):
+            return person
+        if roster.sequence_of(person) is None:
+            return _error(404, "No such calibration participant.")
+        token = continuation.enrol(person, _language(person), None, issue=True)
+        response = JSONResponse({"url": f"/#participant={person}&viewing_token={token}"})
+        response.headers["cache-control"] = "no-store"
+        return response
+
+    @app.post("/api/continuation")
+    @session_write
+    def continue_viewing(request: Request, payload: Mapping[str, Any]) -> Any:
+        if continuation is None:
+            return _error(404, "No viewing experience is configured.")
+        if request.headers.get("x-study-request") != "1":
+            return _error(403, "Same-origin study request required")
+        person = _participant(payload.get("participant"))
+        if isinstance(person, JSONResponse):
+            return person
+        try:
+            linked = continuation.handoff(person, payload.get("token"), _language(person))
+        except PermissionError as exc:
+            return _error(403, str(exc))
+        except ValueError as exc:
+            return _error(409, str(exc))
+        response = JSONResponse({"url": linked["url"]})
+        response.set_cookie(
+            continuation.app.state.cookie_name,
+            linked["token"],
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            path=linked["url"],
+            max_age=60 * 60 * 24 * 30,
+        )
+        response.headers["cache-control"] = "no-store"
+        return response
 
     @app.post("/api/language")
     @session_write
@@ -456,13 +518,13 @@ def build_app(
 
     @app.post("/api/viewing")
     @session_write
-    def viewing(payload: Mapping[str, Any]) -> Any:
+    def record_viewing(payload: Mapping[str, Any]) -> Any:
         """§2 and §7: the viewing row, written when playback ends (§9.5)."""
         person = _participant(payload.get("participant"))
         if isinstance(person, JSONResponse):
             return person
         step = payload.get("step")
-        if step not in VIEWS:
+        if not isinstance(step, str) or step not in VIEWS:
             return _error(400, f"step must be one of {sorted(VIEWS)}")
         gated = _gate(person, str(step))
         if isinstance(gated, JSONResponse):
@@ -508,7 +570,7 @@ def build_app(
         if isinstance(person, JSONResponse):
             return person
         page_name = payload.get("page")
-        if page_name not in SURVEY_PAGES:
+        if not isinstance(page_name, str) or page_name not in SURVEY_PAGES:
             return _error(400, f"page must be one of {sorted(SURVEY_PAGES)}")
         gated = _gate(person, str(page_name))
         if isinstance(gated, JSONResponse):
@@ -576,7 +638,11 @@ def build_app(
         except PointError as exc:
             return _error(500, str(exc))
         summary = summary_of(matches)
-        snapshot = {**gated, "visual_labels": list(matched_labels(matches))}
+        snapshot = {
+            **gated,
+            "visual_labels": list(matched_labels(matches)),
+            "visual_points": [m.record() for m in matches],
+        }
         log.append(
             person,
             [
@@ -815,6 +881,17 @@ def build_app(
         batch = payload.get("events")
         if not isinstance(batch, Sequence) or isinstance(batch, str):
             return _error(400, "events must be a list")
+        reserved = {
+            "session.enrolled",
+            "language.chosen",
+            "viewing.ended",
+            "survey.submitted",
+            "visual.submitted",
+            "auditory.submitted",
+            "regeneration.written",
+        }
+        if any(isinstance(event, Mapping) and event.get("type") in reserved for event in batch):
+            return _error(400, "This event type is reserved for server records")
         try:
             # The snapshot is the server's; a page cannot move its own step by
             # posting one, so only the events are taken from the payload.
@@ -920,6 +997,8 @@ def build_app(
             return Response(status_code=304, headers=headers)
         return Response(body, media_type=media_type, headers=headers)
 
+    if continuation is not None:
+        continuation.mount(app)
     return app
 
 
@@ -952,9 +1031,12 @@ def run_regen_app(
     port: int = 8779,
     watch: Callable[[str, int, int], None] | None = None,
     gate: Gate | None = None,
+    viewing: ViewingConfig | None = None,
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
-    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate)
+    app = build_app(
+        document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate, viewing=viewing
+    )
     stills, whole = warm_derivatives(document, Path(media_dir))
     print(f"web copies ready: {stills} stills", end="")
     print(f"; {whole} served whole" if whole else "", flush=True)

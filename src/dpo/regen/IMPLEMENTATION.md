@@ -33,7 +33,7 @@ time while cues/exposures use absolute video time. No prepared media is invented
 The implementation shares identity tokens and caption/point/model primitives. It
 does not introduce a frontend framework, queue service, new package dependency or
 second state authority. Exposure records are not copied into every session snapshot.
-Legacy A/B operation remains separate rather than changing old session meaning.
+Legacy A/B operation stays available; the optional page-six continuation is described below.
 
 ## Verification evidence
 
@@ -69,7 +69,32 @@ need preparation. Gemma integration uses the existing adapter but real-model lat
 grounding, independent-axis behavior and caption quality were not measured here.
 The no-backend mode is an explicitly recorded authored-fallback rehearsal.
 
-Questionnaire/UI text is English and draft; caption language can be English or
-Korean. Questionnaire validation/translation remains a study preparation task.
+Questionnaire wording and EN/KO translations are draft and require study review.
 This is a single-process application with one supervised model worker; a file lock
 enforces output-directory ownership. Existing deployment services were not replaced.
+
+
+## Page-six continuation follow-up — 2026-09-08
+
+`dpo regen serve --viewing-manifest … --viewing-media … --viewing-out …` now mounts
+the long-video study and automatically hands over after page 6. The frozen profile
+carries actual validated calibration observations and retains both legacy survey
+records. Neutral axes are explicit because the legacy questionnaires do not ask
+for detail preferences. No new calibration is collected at the handoff.
+
+Integration adds participant-scoped capability/cookies, idempotent profile import,
+EN/KO continuation UI, a local researcher recovery route for old tabs, authoritative
+snapshot points, and one shared inference process for calibration and viewing.
+Independent review identified the duplicate-GPU-model, old-tab recovery and
+telemetry provenance issues; all were fixed and the fixes re-reviewed.
+
+Follow-up verification: 412 regen tests pass; Ruff, strict mypy (26 source files),
+JavaScript syntax and diff checks pass. Native Mac Chrome verified page-six
+submission, automatic handoff, the two-axis player, pointer/keyboard controls,
+fullscreen with controls, and persisted settings after reload. The UI run used
+three explicitly synthetic five-minute fixtures and isolated output directories;
+it does not qualify the actual 15-minute research experience. A real Gemma smoke
+on the existing calibration audio served a calibration-style prompt and viewing
+prompt from the same GPU worker, with non-fallback output for both. Actual long
+videos, grounded cues, independent-axis quality and latency still require testing
+on the final stimuli. See `STUDY.md` for deployment and old-session recovery.

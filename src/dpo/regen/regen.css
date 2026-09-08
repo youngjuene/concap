@@ -19,6 +19,7 @@
 /* §9.1 — the progress rail and the language toggle share the top line. */
 .topline {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 24px;
   margin-bottom: 38px;
@@ -231,6 +232,7 @@ p.lede {
 }
 
 .plate img { width: 100%; display: block; }
+.plate:has(img) { min-height: 0; }
 
 /* A mark. 34px rather than 22px, and its removal is an explicit control rather
    than a press that happened not to move: the old gesture decided delete
@@ -317,6 +319,13 @@ p.lede {
   background: var(--accent);
   border-color: var(--accent);
   color: #FFFFFF;
+}
+
+@media (max-width: 420px) {
+  .moments { flex-wrap: wrap; }
+  .moments .pick { order: 1; flex: 0 0 100%; }
+  .moments .step { order: 2; }
+  #moment-on { margin-left: auto; }
 }
 
 /* A fieldset, because the five lanes are one multi-choice set and a screen
@@ -563,5 +572,6 @@ p.lede {
   .block .cap { align-items: start; }
   .lane { grid-template-columns: auto minmax(0, 1fr) auto; }
   .lane .wave { grid-column: 1 / -1; }
+  .rail { flex-basis: 100%; }
   .rail ol { grid-template-columns: repeat(3, 1fr); gap: 8px 5px; }
 }

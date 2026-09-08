@@ -60,6 +60,8 @@ STRINGS: dict[str, Any] = {
         "names": {"en": "English", "ko": "한국어"},
         "locked": "Fixed for this session",
     },
+    "rail": {"label": "Progress"},
+    "network": {"retry": "Could not save. Check the connection, then press the button again."},
     # "Watch again" said the second viewing was the first clip repeated. It is
     # the *other* segment (§1: `Assignment.regenerated_segment`), so the rail,
     # the heading it feeds and §6's "what happens next" all promised a
@@ -216,6 +218,17 @@ STRINGS: dict[str, Any] = {
         # many were left without saying which.
         "first": "Go to the first unanswered",
     },
+    "continuation": {
+        "recovery": (
+            "Your responses are saved. Ask the researcher to reopen this session for the viewing phase."
+        ),
+        "heading": "Your calibration is saved",
+        "body": "Next, watch the longer videos and adjust the captions using two detail controls.",
+        "opening": "Opening your viewing experience…",
+        "next": "Continue to the videos",
+        "retry": "Could not open the viewing experience. Your answers are saved. "
+        "Press Continue to try again.",
+    },
     "done": {
         "heading": "That is everything",
         "body": "Thank you. Your answers are recorded — you can close this window.",
@@ -272,6 +285,8 @@ KOREAN: dict[str, Any] = {
         "names": {"en": "English", "ko": "한국어"},
         "locked": "이 세션에서는 변경할 수 없습니다",
     },
+    "rail": {"label": "진행 상황"},
+    "network": {"retry": "저장하지 못했습니다. 연결을 확인한 뒤 버튼을 다시 눌러 주십시오."},
     # "다시 시청" was worse than its English original: 시청 and 다시 볼 수 없습니다
     # collide on the same screen, so the heading told the participant to watch
     # again four lines above the line saying they cannot.
@@ -368,6 +383,16 @@ KOREAN: dict[str, Any] = {
         "complete": "{total}개 모두 답변 완료",
         "block_done": "{total}개 중 {done}개",
         "first": "답하지 않은 첫 질문으로",
+    },
+    "continuation": {
+        "recovery": (
+            "응답이 저장되었습니다. 시청 단계로 이어갈 수 있도록 연구 담당자에게 세션 연결을 요청해 주세요."
+        ),
+        "heading": "사전 응답이 저장되었습니다",
+        "body": "이제 긴 영상을 보며 두 가지 조절 기능으로 자막의 자세한 정도를 바꿔 보십시오.",
+        "opening": "영상 시청 화면을 열고 있습니다…",
+        "next": "영상 시청으로 계속",
+        "retry": "시청 화면을 열지 못했습니다. 응답은 저장되었습니다. 계속 버튼을 눌러 다시 시도해 주십시오.",
     },
     "done": {
         "heading": "모두 끝났습니다",

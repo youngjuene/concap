@@ -24,6 +24,8 @@ class StudyStore:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS calibration_links(
+                    source TEXT PRIMARY KEY, token TEXT UNIQUE NOT NULL);
                 CREATE TABLE IF NOT EXISTS receipts(
                     session TEXT, key TEXT, request TEXT, response TEXT, PRIMARY KEY(session,key));
                 CREATE TABLE IF NOT EXISTS events(
@@ -53,9 +55,9 @@ class StudyStore:
         finally:
             db.close()
 
-    def create(self, calibration_hash: str, language: str) -> str:
-        token = secrets.token_urlsafe(32)
-        state = {
+    @staticmethod
+    def _initial_state(calibration_hash: str, language: str) -> dict[str, Any]:
+        return {
             "revision": 0,
             "session_id": secrets.token_hex(12),
             "stage": "preferences",
@@ -73,9 +75,28 @@ class StudyStore:
             "completions": [],
             "draft": {},
         }
+
+    def create(self, calibration_hash: str, language: str) -> str:
+        token = secrets.token_urlsafe(32)
+        state = self._initial_state(calibration_hash, language)
         with self.connection() as db:
             db.execute("INSERT INTO sessions VALUES(?,?)", (token, json.dumps(state)))
         return token
+
+    def link(self, source: str, calibration_hash: str, language: str, *, create: bool) -> str | None:
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT token FROM calibration_links WHERE source=?", (source,)).fetchone()
+            if row is not None:
+                return str(row[0])
+            if not create:
+                return None
+            token = secrets.token_urlsafe(32)
+            state = self._initial_state(calibration_hash, language)
+            state["stage"] = "awaiting-calibration"
+            db.execute("INSERT INTO sessions VALUES(?,?)", (token, json.dumps(state)))
+            db.execute("INSERT INTO calibration_links VALUES(?,?)", (source, token))
+            return token
 
     def state(self, token: str) -> dict[str, Any]:
         with self.connection() as db:

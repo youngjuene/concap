@@ -30,7 +30,7 @@ from dpo.regen.study_schema import (
     number,
 )
 from dpo.regen.study_store import Conflict, StudyStore
-from dpo.regen.study_worker import Supervisor
+from dpo.regen.study_worker import InferenceProcess, Supervisor
 
 
 def require(state: dict[str, Any], stage: str) -> None:
@@ -76,6 +76,9 @@ def build_study_app(
     model: dict[str, Any] | None = None,
     access_code: str | None = None,
     inference_timeout: float = 30,
+    *,
+    linked_only: bool = False,
+    engine: InferenceProcess | None = None,
 ) -> FastAPI:
     manifest = load_manifest(manifest_path, media_dir)
     calibration_hash = digest(
@@ -102,7 +105,7 @@ def build_study_app(
             for path in sorted(checkpoint.rglob("*"))
             if path.is_file()
         }
-    supervisor = Supervisor(store, model, inference_timeout)
+    supervisor = Supervisor(store, model, inference_timeout, engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -125,6 +128,7 @@ def build_study_app(
         openapi_url=None,
     )
     app.state.store = store
+    app.state.calibration_hash = calibration_hash
     app.state.cookie_name = cookie_name
 
     @app.middleware("http")
@@ -148,6 +152,8 @@ def build_study_app(
     def person(request: Request) -> tuple[str, dict[str, Any]]:
         token = request.cookies.get(cookie_name, "")
         state = store.state(token)
+        if linked_only and request.path_params.get("continuation_id") != state["session_id"]:
+            raise PermissionError("Continue from your calibration survey.")
         if state["calibration_hash"] != calibration_hash:
             raise Conflict("The calibration configuration changed; contact the researcher")
         return token, state
@@ -210,12 +216,18 @@ def build_study_app(
     def page() -> str:
         return files("dpo.regen").joinpath("study.html").read_text()
 
+    @app.get("/api/study/strings")
+    def strings() -> dict[str, str]:
+        return dict(json.loads(files("dpo.regen").joinpath("study-ko.json").read_text()))
+
     @app.post("/api/study/session")
     def session(request: Request, payload: dict[str, Any]) -> Response:
         token = request.cookies.get(cookie_name)
         if token:
             _, state = person(request)
         else:
+            if linked_only:
+                raise PermissionError("Continue from your calibration survey.")
             if access_code and payload.get("code") != access_code:
                 return JSONResponse(
                     {"error": "Enter the study access code", "code_required": True}, status_code=403
@@ -230,6 +242,7 @@ def build_study_app(
             samesite="strict",
             secure=request.url.scheme == "https",
             max_age=60 * 60 * 24 * 30,
+            path=(request.scope.get("root_path", "") + "/") if linked_only else "/",
         )
         return response
 
@@ -369,6 +382,8 @@ def build_study_app(
                     != calibration_hash
                 ):
                     raise Conflict("Calibration changed while preparing viewing media")
+                if state["language"] not in prepared.get("languages", [prepared["language"]]):
+                    raise ValueError("Viewing captions are not prepared in your language yet.")
                 state["viewing"] = prepared["viewing_videos"]
                 state["viewing_hash"] = digest(state["viewing"])
                 state["stage"] = "watch"

@@ -176,6 +176,9 @@ def _load_manifest(path: Path, root: Path) -> dict[str, Any]:
         raise ValueError(f"Expected {SCHEMA}")
     if raw.get("language", "en") not in ("en", "ko"):
         raise ValueError("Supported caption languages are en and ko")
+    languages = raw.get("languages", [raw.get("language", "en")])
+    if not isinstance(languages, list) or not languages or set(languages) - {"en", "ko"}:
+        raise ValueError("Study languages must be en and/or ko")
     clips, videos = raw.get("calibration_clips"), raw.get("viewing_videos")
     if not isinstance(clips, list) or len(clips) < 2:
         raise ValueError("Calibration requires multiple clips")
@@ -229,11 +232,12 @@ def _load_manifest(path: Path, root: Path) -> dict[str, Any]:
             if not isinstance(cue.get("evidence"), str) or len(cue["evidence"]) > 4000:
                 raise ValueError("Each cue needs bounded, authored audiovisual evidence")
             fallback = cue.get("fallback", {})
-            text = fallback.get(raw.get("language", "en"), "")
-            if not isinstance(text, str) or not text.strip() or len(text) > 160:
-                raise ValueError("Each cue needs a fallback caption in the study language")
-            if not in_language(text, raw.get("language", "en")):
-                raise ValueError("Fallback caption is not in the study language")
+            for language in languages:
+                text = fallback.get(language, "")
+                if not isinstance(text, str) or not text.strip() or len(text) > 160:
+                    raise ValueError("Each cue needs a fallback caption in the study language")
+                if not in_language(text, language):
+                    raise ValueError("Fallback caption is not in the study language")
         if end != video["duration_ms"]:
             raise ValueError("Cues must cover the entire viewing video")
     ready_hashes = [video["media_hashes"]["video"] for video in videos if video["status"] == "ready"]
@@ -264,7 +268,8 @@ def compile_profile(
         "version": 1,
         "language": language,
         "sample_count": len(observations),
-        "defaults": {key: (preferences[key] - 1) / 4 for key in ("texture", "context")},
+        "defaults": {key: (preferences.get(key, 3) - 1) / 4 for key in ("texture", "context")},
+        "preference_source": "explicit" if preferences else "not_collected",
         "visual_observations": dict(selected),
         "heard_observations": dict(heard),
         "opportunities": dict(opportunities),
@@ -278,9 +283,16 @@ def compile_profile(
         "Describe only supported audible events in the current excerpt. "
         "Visual evidence may identify audible sources, never make a silent object audible. "
         "Never copy events from calibration into a new video. "
-        f"The viewer's initial preferences were acoustic detail {preferences['texture']}/5 and "
-        f"source/scene detail {preferences['context']}/5; current control levels override those defaults. "
-        "When equally relevant current sources compete for space, consider the viewer's previously "
+        + (
+            f"The viewer's initial preferences were acoustic detail {preferences['texture']}/5 and "
+            f"source/scene detail {preferences['context']}/5; "
+            "current control levels override those defaults. "
+            if preferences
+            else "No explicit detail preferences were collected. "
+            "Both controls start at a neutral midpoint; "
+            "do not infer detail preferences from the calibration questionnaires. "
+        )
+        + "When equally relevant current sources compete for space, consider the viewer's previously "
         f"noticed categories: {json.dumps(dict(heard), sort_keys=True)}. "
         f"Previously marked visual categories: {json.dumps(dict(selected), sort_keys=True)}. "
         "These are limited observations, not exclusions or claims about current media. "
