@@ -208,6 +208,7 @@ def build_app(
 
     def session_write(endpoint: Callable[..., Any]) -> Callable[..., Any]:
         """Keep legacy read/check/write transitions whole within the supported process."""
+
         @wraps(endpoint)
         def locked(*args: Any, **kwargs: Any) -> Any:
             payload = kwargs.get("payload") or {}
@@ -219,6 +220,7 @@ def build_app(
                 lock = session_locks.setdefault(identifier, threading.RLock())
             with lock:
                 return endpoint(*args, **kwargs)
+
         return locked
 
     def _assignment(participant: str) -> Assignment | JSONResponse:

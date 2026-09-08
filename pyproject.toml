@@ -56,7 +56,7 @@ packages = ["src/dpo"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["tests"]
+testpaths = ["tests", "src/dpo/regen/tests"]
 markers = ["live: requires model downloads and a CUDA GPU"]
 
 [tool.ruff]

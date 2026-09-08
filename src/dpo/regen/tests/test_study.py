@@ -446,9 +446,7 @@ def test_worker_timeout_is_bounded_and_recorded(session: Any, monkeypatch: Any) 
     try:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            jobs = store.captions(
-                s.token, store.state(s.token)
-            )
+            jobs = store.captions(s.token, store.state(s.token))
             if any(j["result"] for j in jobs):
                 break
             time.sleep(0.05)

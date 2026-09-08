@@ -37,6 +37,13 @@ Legacy A/B operation remains separate rather than changing old session meaning.
 
 ## Verification evidence
 
+- Mainline integration: default repository suite passed with 1,154 tests and
+  three opt-in live-model tests skipped. All 157 configured source files passed
+  strict mypy; Ruff lint and formatting passed for 238 files; the lockfile check passed.
+- Cold/warm offline canary produced the same artifact, the warm run used its cache
+  with zero provider calls, and all 84 generated artifacts passed verification.
+- Root pytest discovery now includes the new study tests. The root README identifies
+  both application entry points and keeps the public legacy deployment distinct.
 - Branch-separation verification: all 389 regen tests passed after moving the
   language regression into its independently cherry-pickable fix commit.
 - Combined regression run: 388 passed (372 legacy + then-current 16 new tests).
