@@ -42,7 +42,7 @@
           "id": "art_extent_1",
           "text": {
             "en": "This scene hangs together as one place.",
-            "ko": "이 장면은 하나의 장소로 어우러진다."
+            "ko": "이 장면은 여러 곳이 아니라 하나의 장소처럼 느껴진다."
           }
         },
         {
@@ -93,7 +93,7 @@
           "id": "caption_credible_3",
           "text": {
             "en": "The captions named sounds I could not hear.",
-            "ko": "자막은 내가 들을 수 없던 소리의 이름을 댔다."
+            "ko": "자막은 내가 듣지 못한 소리의 이름을 붙였다."
           },
           "reverse": true
         },
