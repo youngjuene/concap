@@ -939,13 +939,26 @@ async function renderAuditory() {
   for (const family of detail.families) {
     const row = document.createElement("div");
     row.className = "family";
+    /* Each row is its own question, and has to say so. The two radios are
+       named "Heard" and "Didn't hear" and nothing else, so without this a
+       screen reader reads ten controls with five identical pairs of labels and
+       never says which family any of them is about — the same defect the lanes
+       this replaced were explicitly fixed for. The group carries the family
+       name, and the examples ride along as its description. */
+    row.setAttribute("role", "radiogroup");
+    row.setAttribute("aria-labelledby", `family-${family}-name`);
 
     const label = document.createElement("div");
     label.className = "label";
     const name = document.createElement("span");
+    name.id = `family-${family}-name`;
     name.textContent = strings.families[family] || family;
     const hint = document.createElement("small");
     hint.textContent = strings.examples[family] || "";
+    if (hint.textContent) {
+      hint.id = `family-${family}-examples`;
+      row.setAttribute("aria-describedby", hint.id);
+    }
     label.append(name, hint);
 
     /* Radios rather than a checkbox: a checkbox has one explicit state and
