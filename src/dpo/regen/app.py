@@ -31,31 +31,35 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from email.utils import formatdate, parsedate_to_datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from dpo.caption.writer import CachedWriter, CaptionWriter
 from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
-from dpo.regen.copy import STRINGS
+from dpo.regen.config import FAMILY_OF_PARENT, SOUND_FAMILIES
+from dpo.regen.copy import strings_for
+from dpo.regen.derive import Derivatives
 from dpo.regen.document import (
     configuration_of,
     frames_of,
     objects_of,
-    participant_document,
     segment_of,
     track_of,
     validate_regen_document,
 )
 from dpo.regen.enrolment import Roster
+from dpo.regen.gate import Buckets, Gate, client_address, is_local
 from dpo.regen.items import ItemsError, ItemSet, load_items
 from dpo.regen.log import EventLog, RegenLogError, validate_participant, view_id
 from dpo.regen.points import PointError, match_points, matched_labels, parse_points, summary_of
@@ -68,6 +72,20 @@ STATIC_FILES = {
     "regen.js": "text/javascript; charset=utf-8",
 }
 CACHE_FILE = "captions.json"
+# What a browser may keep, and for how long.
+#
+# The media of a running study does not change under the participant looking at
+# it, and §4 is a screen they move back and forth across: five moments, each a
+# picture, revisited as they decide where the marks go. Re-fetching one on every
+# return is the difference between a strip that responds and a strip that waits,
+# so the media carries a day and an entity tag. `private` because a participant's
+# clip is nobody else's to hold; there is no shared cache on the published path
+# anyway, and this says so rather than relying on it.
+MEDIA_CACHE = "private, max-age=86400"
+# The page's own code is the opposite case: a fix has to reach the next reload,
+# not the reload after the cache expires. `no-cache` is not "do not store" — it
+# stores and revalidates, so an unchanged file costs a 304 and no body.
+SHELL_CACHE = "no-cache"
 # The step a viewing belongs to, and the index it is filed under (§9.5).
 VIEWS = {
     progress.VIEW_PREPARED: (0, PREPARED),
@@ -91,17 +109,36 @@ def _error(status: int, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse({"error": message, **extra}, status_code=status)
 
 
-def _played(lane: object) -> bool:
-    """Whether §5's lane statistics report this lane as having been played.
+def _tag(material: str) -> str:
+    """An entity tag over whatever identifies a body."""
+    return f'"{hashlib.md5(material.encode(), usedforsecurity=False).hexdigest()}"'
 
-    Total over anything the page could send, and false for a lane it did not
-    report or reported without a count: "no count" is not evidence that a
-    playback happened, and the flag this feeds says a selection was made
-    without one. The shape is refused separately, so a malformed batch is a
-    400 rather than a lane silently reading as unplayed.
+
+def _unchanged(request: Request, etag: str, modified: float | None = None) -> bool:
+    """Whether the browser already holds this exact body.
+
+    ``FileResponse`` sends an entity tag but reads none: a conditional request
+    for a still that has not changed came back as the whole PNG again, which is
+    the same as having no cache at all. This is the half that was missing.
+    ``If-None-Match`` wins over ``If-Modified-Since`` where both are sent (RFC
+    9110 §13.1.3), and a weak tag matches its strong twin because the
+    comparison a conditional GET calls for is the weak one.
     """
-    plays = lane.get("plays") if isinstance(lane, Mapping) else None
-    return isinstance(plays, int) and not isinstance(plays, bool) and plays > 0
+    matches = request.headers.get("if-none-match")
+    if matches is not None:
+        held = {candidate.strip() for candidate in matches.split(",")}
+        weak = etag[2:] if etag.startswith("W/") else etag
+        return "*" in held or any((tag[2:] if tag.startswith("W/") else tag) == weak for tag in held)
+    since = request.headers.get("if-modified-since")
+    if since is not None and modified is not None:
+        try:
+            asked = parsedate_to_datetime(since)
+        except (TypeError, ValueError):
+            return False
+        # HTTP dates have a second's resolution, so a file written within the
+        # same second as the one held would compare as newer forever.
+        return asked is not None and int(modified) <= int(asked.timestamp())
+    return False
 
 
 def build_app(
@@ -112,6 +149,8 @@ def build_app(
     *,
     items: ItemSet | None = None,
     watch: Callable[[str, int, int], None] | None = None,
+    gate: Gate | None = None,
+    derive: bool = True,
 ) -> FastAPI:
     """The app over one validated document.
 
@@ -119,14 +158,41 @@ def build_app(
     §6 runs, for whatever the operator is looking at — the CLI hands it a
     terminal bar. It is the same report the waiting screen polls for, so the
     console and the participant cannot disagree about where the model is.
+
+    ``gate`` is what stands in front of the instrument when it is published
+    (:mod:`dpo.regen.gate`): an access code on enrolment, the log download
+    kept to this machine, a rate limit by address. None of it is on by
+    default, so a kiosk run is unchanged.
+
+    ``derive`` is whether the browser is served the web-sized copies of
+    :mod:`dpo.regen.derive` rather than the archival files themselves. On by
+    default because the published link is the case that needs it; off restores
+    the byte-for-byte staging to every response.
     """
     validate_regen_document(document)
     configuration = configuration_of(document)
     item_set = items if items is not None else load_items()
     app = FastAPI(title="dpo caption regen", docs_url=None, redoc_url=None, openapi_url=None)
+    gate = gate or Gate()
+    requests = Buckets(gate.requests_per_second, gate.burst) if gate.requests_per_second else None
+    enrolments = (
+        Buckets(gate.enrolments_per_minute / 60.0, max(1, round(gate.enrolments_per_minute)))
+        if gate.enrolments_per_minute
+        else None
+    )
+
+    if requests is not None:
+
+        @app.middleware("http")
+        async def rate_limit(request: Request, call_next: Callable[..., Any]) -> Any:
+            if not requests.allow(client_address(request)):
+                return _error(429, "too many requests from this address; slow down")
+            return await call_next(request)
+
     media_dir = Path(media_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    derivatives = Derivatives(media_dir, enabled=derive)
     log = EventLog(out_dir, configuration.hash)
     roster = Roster(out_dir)
     cached = writer if isinstance(writer, CachedWriter) else CachedWriter(writer, out_dir / CACHE_FILE)
@@ -186,8 +252,18 @@ def build_app(
 
     @app.get("/api/strings")
     def strings() -> Any:
+        """The chrome, in every language this study offers.
+
+        All of them at once, keyed by tag, rather than the one the participant
+        is currently reading. The page switches language without a round trip
+        — §9.3 lets them switch until the first clip plays, and a fetch between
+        the press and the redraw is a stutter on a control whose whole job is
+        to be reversible — and boot still asks for the copy and the enrolment
+        together, which it could not do if the copy depended on the enrolment's
+        answer. Two languages of chrome is a few kilobytes.
+        """
         return {
-            "strings": STRINGS,
+            "strings": {tag: strings_for(tag) for tag in configuration.languages},
             "scale": {
                 "points": configuration.scale.points,
                 "anchors": list(configuration.scale.anchors),
@@ -207,11 +283,27 @@ def build_app(
         }
 
     @app.post("/api/session")
-    def session(payload: Mapping[str, Any] | None = None) -> Any:
+    def session(request: Request, payload: Mapping[str, Any] | None = None) -> Any:
         """§1: issue an identifier and fix the assignment, once, at Page 1 load."""
         asked = (payload or {}).get("participant")
         if asked is not None and not isinstance(asked, str):
             return _error(400, "participant must be a string if it is given")
+        # A reload resumes without a code; only a new enrolment is gated,
+        # because that is the request that spends a sequence number.
+        try:
+            resuming = asked is not None and roster.sequence_of(asked) is not None
+        except RegenLogError as exc:
+            return _error(400, str(exc))
+        if not resuming:
+            if gate.requires_code:
+                expected = gate.code()
+                given = (payload or {}).get("code")
+                if expected is None:
+                    return _error(503, "the study is not open right now", closed=True)
+                if not isinstance(given, str) or given != expected:
+                    return _error(403, "this link is not active", closed=True)
+            if enrolments is not None and not enrolments.allow(client_address(request)):
+                return _error(429, "too many new sessions from this address; try again in a minute")
         try:
             participant, assignment = roster.enrol(asked)
         except (RegenLogError, ValueError) as exc:
@@ -231,6 +323,10 @@ def build_app(
             "language": _language(participant),
             "languages": list(configuration.languages),
             "language_locked": _started_viewing(participant),
+            # Whether the done screen may offer the log. Off the study machine
+            # the route below refuses, and a button that leads to a refusal
+            # would replace the kiosk's last screen with an error body.
+            "download": not gate.log_local_only or is_local(request),
         }
 
     @app.post("/api/language")
@@ -300,11 +396,23 @@ def build_app(
             }
         if step == progress.AUDITORY:
             segment = assignment.prepared_segment
-            return {"step": step, **participant_document(document, segment)}
+            # The five families, in one fixed order, rather than the sources
+            # this clip happens to carry: §5 asks the same question of every
+            # participant about every family, so a family that is not in the
+            # clip is answerable and a false alarm is a measure. The labels are
+            # not sent — they are chrome, the page already holds both languages
+            # of them, and sending them here would be a second copy to drift.
+            entry = segment_of(document, segment)
+            return {
+                "step": step,
+                "segment": segment,
+                "duration_ms": entry["duration_ms"],
+                "families": list(SOUND_FAMILIES),
+            }
         if step in SURVEY_PAGES:
             return {
                 "step": step,
-                "blocks": [block.record() for block in item_set.page_blocks(step)],
+                "blocks": [block.record(_language(person)) for block in item_set.page_blocks(step)],
                 "scale": {
                     "points": configuration.scale.points,
                     "anchors": list(configuration.scale.anchors),
@@ -461,7 +569,14 @@ def build_app(
 
     @app.post("/api/auditory")
     def auditory(payload: Mapping[str, Any]) -> Any:
-        """§5: the selected sources, and what the participant played to choose them."""
+        """§5: heard or did not hear, on each of the five fixed sound families.
+
+        Every family is required. A blank is not "did not hear" — it is a
+        participant who did not answer — and the two have to stay distinct or
+        §6 is conditioned on the difference between a denial and a shrug. The
+        page cannot submit until all five are answered; this refuses the
+        request that gets past it anyway.
+        """
         person = _participant(payload.get("participant"))
         if isinstance(person, JSONResponse):
             return person
@@ -472,28 +587,32 @@ def build_app(
         if isinstance(assignment, JSONResponse):
             return assignment
         segment = assignment.prepared_segment
-        stems = {str(stem["id"]): str(stem["label"]) for stem in segment_of(document, segment)["stems"]}
-        selected = payload.get("selected")
-        if not isinstance(selected, Sequence) or isinstance(selected, str):
-            return _error(400, "selected must be a list of source ids in selection order")
-        unknown = [source for source in selected if source not in stems]
+        raw = payload.get("heard")
+        if not isinstance(raw, Mapping):
+            return _error(400, "heard must be an object of sound family to true or false")
+        unknown = sorted(key for key in raw if key not in SOUND_FAMILIES)
         if unknown:
-            return _error(400, "selected names sources this segment does not have", unknown=unknown)
-        raw_lanes = payload.get("lanes")
-        if raw_lanes is not None and not isinstance(raw_lanes, Mapping):
-            return _error(400, "lanes must be an object of source id to that lane's statistics")
-        lanes = dict(raw_lanes or {})
-        malformed = sorted(key for key, value in lanes.items() if not isinstance(value, Mapping))
+            return _error(400, "heard names families the study does not ask about", unknown=unknown)
+        malformed = sorted(key for key, value in raw.items() if not isinstance(value, bool))
         if malformed:
-            return _error(400, "each lane carries its own playback statistics", invalid=malformed)
-        # §5 logs "whether a selection was made without playback" — computed
-        # here rather than trusted from the page, from the same lane statistics
-        # the page reports, so the flag and the counts cannot disagree.
-        unheard = [source for source in selected if not _played(lanes.get(source))]
+            return _error(400, "each family is answered true or false", invalid=malformed)
+        missing = [family for family in SOUND_FAMILIES if family not in raw]
+        if missing:
+            return _error(400, "every sound family has to be answered", missing=missing)
+        # The order is the study's, not the page's: a report is a set of
+        # judgments made at once, and there is no selection order to preserve
+        # now that the screen is not a sequence of choices.
+        heard = [family for family in SOUND_FAMILIES if raw[family]]
+        # What §6 is conditioned on is the family's prose form, not the label
+        # the participant happened to read: the display label is chrome and
+        # changes with the interface language, and two participants reporting
+        # the same families must hand the writer the same input whichever
+        # language they read the screen in. It is also the form that makes a
+        # sentence — "sounds of things" is a taxonomy node, not a caption.
         snapshot = {
             **gated,
-            "auditory_labels": [stems[source] for source in selected],
-            "auditory_ids": list(selected),
+            "auditory_labels": [SOUND_FAMILIES[family] for family in heard],
+            "auditory_ids": list(heard),
         }
         log.append(
             person,
@@ -501,15 +620,37 @@ def build_app(
                 {
                     "type": "auditory.submitted",
                     "segment": segment,
-                    "selected": list(selected),
-                    "labels": [stems[source] for source in selected],
-                    "lanes": lanes,
-                    "selected_without_playback": unheard,
+                    "heard": heard,
+                    "not_heard": [family for family in SOUND_FAMILIES if not raw[family]],
+                    # What the clip actually carries, in the same vocabulary
+                    # as the two fields above, so a false alarm is readable in
+                    # the log without joining to the document — which is the
+                    # whole reason this field is here, and which it could not
+                    # do while it held the document's AudioSet names against
+                    # §5's family keys.
+                    "present": sorted(
+                        {
+                            FAMILY_OF_PARENT[parent]
+                            for stem in segment_of(document, segment)["stems"]
+                            if (parent := stem.get("parent")) in FAMILY_OF_PARENT
+                        }
+                    ),
+                    # A family the clip carries that §5 does not ask about is
+                    # not a false alarm the participant could have made, and
+                    # dropping it silently would leave the log looking as
+                    # though the clip held nothing else.
+                    "present_unasked": sorted(
+                        {
+                            str(parent)
+                            for stem in segment_of(document, segment)["stems"]
+                            if (parent := stem.get("parent")) and parent not in FAMILY_OF_PARENT
+                        }
+                    ),
                 }
             ],
             progress.advance(snapshot, progress.AUDITORY),
         )
-        return {"step": progress.current(log.snapshot(person)), "selected_without_playback": unheard}
+        return {"step": progress.current(log.snapshot(person)), "heard": heard}
 
     @app.post("/api/regenerate")
     def regenerate_track(payload: Mapping[str, Any]) -> Any:
@@ -602,16 +743,32 @@ def build_app(
         Best-effort, like the event stream: a participant whose regeneration
         has not started yet, or has just finished, reads as not writing, and
         the page falls back to what it already shows.
+
+        It also names the clip the next viewing will play. §6 is the one wait
+        in the session that is already a wait — the participant is watching an
+        indeterminate bar while the model writes — and the second clip is 5–7
+        MB that would otherwise be fetched afterwards, from a standing start,
+        behind *Preparing the clip…*. Fetching it here costs the participant
+        nothing they are not already spending. This is the same fact
+        ``/api/step/view_regenerated`` returns a moment later, so nothing is
+        disclosed earlier than the assignment already decides — and the media
+        routes were never gated in the first place. Omitted rather than an
+        error where no assignment exists yet, because a progress display may
+        not be the thing that ends a session.
         """
         person = _participant(participant)
         if isinstance(person, JSONResponse):
             return person
         at = writing.get(person)
-        return {
+        report: dict[str, Any] = {
             "writing": at is not None,
             "done": at["done"] if at else 0,
             "total": at["total"] if at else configuration.cue_slots,
         }
+        assignment = _assignment(person)
+        if not isinstance(assignment, JSONResponse):
+            report["next_segment"] = assignment.regenerated_segment
+        return report
 
     @app.post("/api/events")
     def events(payload: Mapping[str, Any]) -> Any:
@@ -646,7 +803,9 @@ def build_app(
         return {"step": progress.current(snapshot), "participant": person}
 
     @app.get("/api/log")
-    def download(participant: str | None = None) -> Any:
+    def download(request: Request, participant: str | None = None) -> Any:
+        if gate.log_local_only and not is_local(request):
+            return _error(403, "the session log is downloaded on the study machine, not from here")
         person = _participant(participant)
         if isinstance(person, JSONResponse):
             return person
@@ -659,13 +818,35 @@ def build_app(
             headers={"Content-Disposition": f'attachment; filename="regen-log-{person}.json"'},
         )
 
+    def _serve(request: Request, path: Path, media_type: str | None = None) -> Response:
+        """A media file, with the two headers that decide whether it is fetched twice."""
+        try:
+            stat = path.stat()
+        except OSError:
+            return _error(404, f"{path.name} is no longer readable")
+        etag = _tag(f"{stat.st_mtime_ns}-{stat.st_size}")
+        headers = {
+            "cache-control": MEDIA_CACHE,
+            "etag": etag,
+            "last-modified": formatdate(stat.st_mtime, usegmt=True),
+        }
+        if _unchanged(request, etag, stat.st_mtime):
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, media_type=media_type, headers=headers)
+
     @app.get("/media/video/{segment}")
-    def video(segment: str) -> Any:
-        return _file_response(segment, "video")
+    def video(request: Request, segment: str) -> Any:
+        return _file_response(request, segment, "video")
 
     @app.get("/media/frame/{segment}/{index}")
-    def frame(segment: str, index: int) -> Any:
-        """One frame of §4's strip. The masks for it never leave the server."""
+    def frame(request: Request, segment: str, index: int) -> Any:
+        """One frame of §4's strip. The masks for it never leave the server.
+
+        What leaves is a WebP of the staged still at its own size — the picture
+        the page draws, not the archival PNG it was cut from. §4's coordinates
+        are normalised to the delivered image and the matching reads the
+        originals here, so the record is the same either way.
+        """
         try:
             strip = frames_of(document, segment)
         except ValueError as exc:
@@ -673,10 +854,13 @@ def build_app(
         if not 0 <= index < len(strip):
             return _error(404, f"segment {segment} has no frame {index}")
         resolved = _media(str(strip[index]["still"]))
-        return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        path, media_type = derivatives.still(resolved)
+        return _serve(request, path, media_type)
 
     @app.get("/media/stem/{segment}/{stem_id}")
-    def stem(segment: str, stem_id: str) -> Any:
+    def stem(request: Request, segment: str, stem_id: str) -> Any:
         try:
             entry = segment_of(document, segment)
         except ValueError as exc:
@@ -684,25 +868,48 @@ def build_app(
         for candidate in entry["stems"]:
             if candidate["id"] == stem_id:
                 resolved = _media(str(candidate["audio"]))
-                return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
+                return resolved if isinstance(resolved, JSONResponse) else _serve(request, resolved)
         return _error(404, f"segment {segment} has no stem {stem_id!r}")
 
-    def _file_response(segment: str, key: str) -> Any:
+    def _file_response(request: Request, segment: str, key: str) -> Any:
         try:
             entry = segment_of(document, segment)
         except ValueError as exc:
             return _error(404, str(exc))
         resolved = _media(str(entry[key]))
-        return resolved if isinstance(resolved, JSONResponse) else FileResponse(resolved)
+        return resolved if isinstance(resolved, JSONResponse) else _serve(request, resolved)
 
     @app.get("/{filename}")
-    def static_file(filename: str) -> Response:
+    def static_file(request: Request, filename: str) -> Response:
         media_type = STATIC_FILES.get(filename)
         if media_type is None:
             return _error(404, f"no file {filename!r}")
-        return Response(_package_file(filename), media_type=media_type)
+        body = _package_file(filename)
+        etag = _tag(body)
+        headers = {"cache-control": SHELL_CACHE, "etag": etag}
+        if _unchanged(request, etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type=media_type, headers=headers)
 
     return app
+
+
+def warm_derivatives(document: Mapping[str, Any], media_dir: Path) -> tuple[int, int]:
+    """Make every web-sized copy the document will ask for, before anyone asks.
+
+    Encoding on first request would put the cost on a participant — the first
+    one through §4 would wait out five WebP encodes that nobody after them
+    waits for. Doing it at startup costs the operator a second and makes the
+    instrument's behaviour the same for the first session as for the tenth.
+    """
+    derivatives = Derivatives(Path(media_dir))
+    stills = [
+        still
+        for name in document["segments"]
+        for moment in frames_of(document, name)
+        if (still := Path(media_dir) / str(moment["still"])).is_file()
+    ]
+    return derivatives.warm(stills)
 
 
 def run_regen_app(
@@ -715,7 +922,11 @@ def run_regen_app(
     host: str = "127.0.0.1",
     port: int = 8779,
     watch: Callable[[str, int, int], None] | None = None,
+    gate: Gate | None = None,
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
-    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch)
+    app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate)
+    stills, whole = warm_derivatives(document, Path(media_dir))
+    print(f"web copies ready: {stills} stills", end="")
+    print(f"; {whole} served whole" if whole else "", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="warning")

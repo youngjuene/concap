@@ -66,26 +66,45 @@ proportion of unclassified points.
 
 ## §5 Page 2c — auditory environmental perception
 
-**Display.** Separated source waveform lanes over a ten-second timeline,
-colour-coded and labelled, each with its own playback control.
+**Display.** The five AudioSet top-level sound families this corpus uses —
+human sounds, animal, sounds of things, music, natural sounds — in that fixed
+order, each named with examples beneath it and offering two answers, *heard*
+and *did not hear*. The same five for every participant and every clip,
+whatever the clip contains. Above them, the clip's own audio with a single
+playback control: the judgments are made against a ten-second memory, and
+this is the only way to hear it again.
 
-**Behaviour.** Playing a lane plays that stem alone, one lane at a time —
-starting another stops the previous. The playhead is shown on the waveform
-during playback. Stem levels are normalised against the original mix.
-Selection is a control separate from playback, and their hit areas must not
-overlap. Several lanes may be selected, and selected lanes are highlighted.
-Submit goes to the regeneration waiting screen.
+**Behaviour.** Every family must be answered before submit is enabled. The
+two answers are separate controls rather than one checkbox, because a blank
+is a participant who has not answered and is not the same as one who did not
+hear. Submit goes to the regeneration waiting screen.
 
-**Logging.** Selected source identifiers with their selection order, per-lane
-playback count and total listening time, and whether a selection was made
-without the lane ever having been played.
+**Logging.** The families reported heard and the families reported not heard,
+and — so a false alarm is readable without joining to the document — which
+families the clip actually carries.
+
+**Why fixed rather than per-clip.** Until 2026-09-07 this page showed one
+waveform lane per separated source the clip carried, and asked which the
+participant noticed. A participant could then only ever report a source that
+was there: the page could not distinguish "I heard it" from "I was given the
+chance to say so", and a family nobody had put in the clip could not be
+claimed at all. Asking all five of everyone makes a false alarm a measure
+rather than an impossibility. It also removes a dependency the study could
+not meet — the lanes needed separated stem audio, which does not exist for
+this corpus, so every lane read "no sound".
+
+This changed what §5 measures and therefore what §6 is conditioned on, so it
+changed `method_constants` and with them the configuration hash. **Sessions
+run before this change are not comparable with sessions run after it**, and
+the hash on every logged row is what says which side of the change a session
+falls on.
 
 ## §6 Regeneration stage
 
 Runs immediately on the §5 submit.
 
 **Inputs.** The matched object labels from §4 with the unclassified points
-excluded, the selected source labels from §5, and the video and audio of the
+excluded, the sound families reported heard in §5, and the video and audio of the
 remaining segment.
 
 **Behaviour.** Text is generated for the fixed cue slots only — the timings are

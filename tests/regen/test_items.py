@@ -98,3 +98,55 @@ class TestFromDisk:
         path.write_text("{", encoding="utf-8")
         with pytest.raises(ItemsError, match="not JSON"):
             load_items(path)
+
+
+class TestWording:
+    """An item is text in every language the study has wording for."""
+
+    def test_a_bare_string_is_read_as_english(self) -> None:
+        # Items files written before the study had a second language are still
+        # valid and still mean what they said.
+        items = parse_items(_document())
+        block = items.page_blocks("art")[0]
+        assert block.record("en")["items"][0]["text"] == block.record("ko")["items"][0]["text"]
+
+    def test_the_shipped_set_is_asked_in_both_languages(self) -> None:
+        block = load_items().page_blocks("art")[0]
+        assert block.record("ko")["title"] != block.record("en")["title"]
+        assert block.record("ko")["items"][0]["text"] != block.record("en")["items"][0]["text"]
+
+    def test_a_language_with_no_wording_falls_back_to_english(self) -> None:
+        block = load_items().page_blocks("art")[0]
+        assert block.record("fr") == block.record("en")
+
+    def test_wording_without_english_is_refused(self) -> None:
+        # English is what every other language falls back to, so a set without
+        # it cannot be served to a participant whose language is missing.
+        document = _document()
+        document["blocks"][0]["items"][0]["text"] = {"ko": "질문"}
+        with pytest.raises(ItemsError, match="en"):
+            parse_items(document)
+
+    def test_wording_that_is_neither_text_nor_a_mapping_is_refused(self) -> None:
+        document = _document()
+        document["blocks"][0]["items"][0]["text"] = 7
+        with pytest.raises(ItemsError, match="text"):
+            parse_items(document)
+
+    def test_the_digest_covers_every_language(self) -> None:
+        """The digest says which wording was asked, so a Korean edit moves it.
+
+        Responses are comparable only across participants who answered the
+        same items; an edit to the Korean is an edit to the instrument even
+        for the arm that never reads it, and the seam has to be visible.
+        """
+        document = _document()
+        before = parse_items(document).digest
+        document["blocks"][0]["items"][0]["text"] = {"en": "Original.", "ko": "\ubc88\uc5ed."}
+        assert parse_items(document).digest != before
+
+    def test_the_digest_does_not_change_with_the_reader(self) -> None:
+        items = load_items()
+        digest = items.digest
+        items.page_blocks("art")[0].record("ko")
+        assert items.digest == digest

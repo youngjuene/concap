@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dpo.regen.app import build_app
+from dpo.regen.config import SOUND_FAMILIES
 from dpo.regen.items import load_items
 from dpo.regen.regeneration import RegenTemplateWriter
 
@@ -26,6 +27,17 @@ def client(document: dict[str, Any], media_dir: Path, tmp_path: Path) -> TestCli
 def enrol(client: TestClient) -> str:
     body = client.post("/api/session", json={}).json()
     return str(body["participant"])
+
+
+def hear(client: TestClient, participant: str, heard: tuple[str, ...] = ("things",)) -> Any:
+    """Answer §5: every family, with `heard` the ones reported as heard."""
+    return client.post(
+        "/api/auditory",
+        json={
+            "participant": participant,
+            "heard": {family: family in heard for family in SOUND_FAMILIES},
+        },
+    )
 
 
 def submit(client: TestClient, participant: str, page: str) -> Any:
@@ -72,7 +84,7 @@ def walk_to_regenerated(client: TestClient) -> str:
     )
     answer(client, participant, "art")
     client.post("/api/visual", json={"participant": participant, "points": POINTS})
-    client.post("/api/auditory", json={"participant": participant, "selected": ["traffic"], "lanes": {}})
+    hear(client, participant)
     client.post("/api/regenerate", json={"participant": participant})
     return participant
 
@@ -159,7 +171,7 @@ class TestLanguage:
         )
         answer(client, participant, "art")
         client.post("/api/visual", json={"participant": participant, "points": POINTS})
-        client.post("/api/auditory", json={"participant": participant, "selected": ["traffic"], "lanes": {}})
+        hear(client, participant)
         body = client.post("/api/regenerate", json={"participant": participant}).json()
         assert all(cue["language"] == "ko" for cue in body["track"])
         events = client.get(f"/api/log?participant={participant}").json()["events"]
@@ -351,44 +363,16 @@ class TestVisual:
 
 
 class TestAuditory:
-    def test_a_selection_the_segment_does_not_have_is_refused(self, client: TestClient) -> None:
-        participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
-        answer(client, participant, "art")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
-        response = client.post(
-            "/api/auditory", json={"participant": participant, "selected": ["helicopter"], "lanes": {}}
-        )
-        assert response.status_code == 400
+    """§5 asks the same five families of everyone, and requires all five.
 
-    def test_selecting_without_playing_is_computed_by_the_server(self, client: TestClient) -> None:
-        participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
-        answer(client, participant, "art")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
-        body = client.post(
-            "/api/auditory",
-            json={
-                "participant": participant,
-                "selected": ["traffic", "bird"],
-                "lanes": {
-                    "traffic": {"plays": 2, "listened_ms": 900},
-                    "bird": {"plays": 0, "listened_ms": 0},
-                },
-            },
-        ).json()
-        assert body["selected_without_playback"] == ["bird"]
+    The lane tests this replaces asserted a selection among the sources a clip
+    carried, per-lane playback counts, and a selected-without-playing flag.
+    None of those exist now: the screen is a fixed judgment, so what has to be
+    guarded is that it stays fixed, that a blank is not read as a denial, and
+    that a family the clip does not contain is answerable.
+    """
 
-    def test_lane_statistics_that_are_not_statistics_are_refused(self, client: TestClient) -> None:
-        # Every other input on this surface is shape-checked; this one reads a
-        # count out of each lane, and a malformed batch must read like the
-        # neighbouring refusals rather than as a server error.
+    def _at_auditory(self, client: TestClient) -> str:
         participant = enrol(client)
         client.post(
             "/api/viewing",
@@ -396,39 +380,132 @@ class TestAuditory:
         )
         answer(client, participant, "art")
         client.post("/api/visual", json={"participant": participant, "points": POINTS})
-        response = client.post(
-            "/api/auditory",
-            json={"participant": participant, "selected": ["traffic"], "lanes": {"traffic": "played"}},
-        )
-        assert response.status_code == 400
-        assert response.json()["invalid"] == ["traffic"]
+        return participant
 
-    def test_a_lane_without_a_count_reads_as_unplayed(self, client: TestClient) -> None:
-        """ "No count" is not evidence a playback happened."""
-        participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
-        answer(client, participant, "art")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
-        body = client.post(
-            "/api/auditory",
-            json={"participant": participant, "selected": ["traffic"], "lanes": {"traffic": {}}},
-        ).json()
-        assert body["selected_without_playback"] == ["traffic"]
+    def test_the_same_five_families_are_asked_whatever_the_clip_holds(self, client: TestClient) -> None:
+        participant = self._at_auditory(client)
+        detail = client.get(f"/api/step/auditory?participant={participant}").json()
+        assert detail["families"] == list(SOUND_FAMILIES)
+        assert "stems" not in detail, "the sources the clip carries are not the question any more"
 
-    def test_an_empty_selection_is_allowed(self, client: TestClient) -> None:
-        participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
-        answer(client, participant, "art")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
-        response = client.post("/api/auditory", json={"participant": participant, "selected": []})
+    def test_a_family_the_clip_does_not_contain_can_still_be_reported(self, client: TestClient) -> None:
+        # The point of the redesign. The fixture's stems are traffic and bird;
+        # nothing in it is music, and claiming music has to be possible or a
+        # false alarm cannot be measured.
+        participant = self._at_auditory(client)
+        response = hear(client, participant, heard=("music",))
         assert response.status_code == 200
+        assert response.json()["heard"] == ["music"]
+
+    def test_every_family_has_to_be_answered(self, client: TestClient) -> None:
+        # A blank is a participant who did not answer, which is not the same
+        # as one who did not hear; §6 must not be conditioned on the
+        # difference between a denial and a shrug.
+        participant = self._at_auditory(client)
+        response = client.post("/api/auditory", json={"participant": participant, "heard": {"human": True}})
+        assert response.status_code == 400
+        assert set(response.json()["missing"]) == set(SOUND_FAMILIES) - {"human"}
+
+    def test_hearing_none_of_them_is_a_complete_answer(self, client: TestClient) -> None:
+        participant = self._at_auditory(client)
+        response = hear(client, participant, heard=())
+        assert response.status_code == 200
+        assert response.json()["heard"] == []
         assert response.json()["step"] == "regenerating"
+
+    def test_a_family_the_study_does_not_ask_about_is_refused(self, client: TestClient) -> None:
+        participant = self._at_auditory(client)
+        payload = {family: True for family in SOUND_FAMILIES}
+        payload["helicopter"] = True
+        response = client.post("/api/auditory", json={"participant": participant, "heard": payload})
+        assert response.status_code == 400
+        assert response.json()["unknown"] == ["helicopter"]
+
+    def test_an_answer_that_is_not_yes_or_no_is_refused(self, client: TestClient) -> None:
+        # Every other input on this surface is shape-checked, and "maybe" has
+        # to read like the neighbouring refusals rather than as a server error.
+        participant = self._at_auditory(client)
+        payload: dict[str, Any] = {family: True for family in SOUND_FAMILIES}
+        payload["music"] = "maybe"
+        response = client.post("/api/auditory", json={"participant": participant, "heard": payload})
+        assert response.status_code == 400
+        assert response.json()["invalid"] == ["music"]
+
+    def test_the_log_records_both_answers_and_what_the_clip_carried(self, client: TestClient) -> None:
+        """A false alarm has to be readable without joining to the document."""
+        participant = self._at_auditory(client)
+        hear(client, participant, heard=("music", "things"))
+        events = client.get(f"/api/log?participant={participant}").json()["events"]
+        submitted = [row for row in events if row["type"] == "auditory.submitted"][-1]
+        assert submitted["heard"] == ["things", "music"], "reported in the study's order, not the page's"
+        assert set(submitted["not_heard"]) == set(SOUND_FAMILIES) - {"music", "things"}
+        assert submitted["present"], "what the clip actually carries is recorded beside the answer"
+
+    def test_what_the_clip_carried_is_written_in_the_answers_vocabulary(self, client: TestClient) -> None:
+        """The three fields have to be comparable, which is the point of the row.
+
+        The document stores AudioSet's own class names in ``stem.parent``; §5
+        answers in family keys. Written straight through, the row read
+        ``heard: ["things"]`` beside ``present: ["Sounds of things"]`` — two
+        lists with nothing in common, in a row whose purpose is comparing them.
+        """
+        participant = self._at_auditory(client)
+        hear(client, participant, heard=("music",))
+        events = client.get(f"/api/log?participant={participant}").json()["events"]
+        submitted = [row for row in events if row["type"] == "auditory.submitted"][-1]
+        assert set(submitted["present"]) <= set(SOUND_FAMILIES), submitted["present"]
+        assert "things" in submitted["present"], "the fixture's traffic stem is a sound of things"
+        # And the comparison the row exists for: claimed but not there.
+        false_alarm = set(submitted["heard"]) - set(submitted["present"])
+        assert false_alarm == {"music"}
+
+    def test_a_family_the_study_does_not_ask_about_is_kept_not_dropped(
+        self, document: dict[str, Any], media_dir: Path, tmp_path: Path
+    ) -> None:
+        # AudioSet has top-level classes §5 has no row for. One in a clip is
+        # not a false alarm the participant could have made, and dropping it
+        # silently would leave the log looking as though the clip held nothing.
+        document["segments"]["A"]["stems"][0]["parent"] = "Source-ambiguous sounds"
+        client = TestClient(build_app(document, media_dir, tmp_path / "out", RegenTemplateWriter()))
+        participant = self._at_auditory(client)
+        hear(client, participant, heard=())
+        events = client.get(f"/api/log?participant={participant}").json()["events"]
+        submitted = [row for row in events if row["type"] == "auditory.submitted"][-1]
+        assert submitted["present_unasked"] == ["Source-ambiguous sounds"]
+        assert "Source-ambiguous sounds" not in submitted["present"]
+
+    def test_what_reaches_the_regeneration_does_not_depend_on_the_language_read(
+        self, client: TestClient
+    ) -> None:
+        """Two participants reporting the same families hand §6 the same input.
+
+        The display label is chrome and changes with the interface language;
+        the prose form the writer is given must not, or the same report would
+        produce a different caption in each language.
+        """
+
+        def walked(language: str | None) -> list[str]:
+            participant = enrol(client)
+            if language:
+                client.post("/api/language", json={"participant": participant, "language": language})
+            client.post(
+                "/api/viewing",
+                json={
+                    "participant": participant,
+                    "step": "view_prepared",
+                    "started_at": "t0",
+                    "ended_at": "t1",
+                },
+            )
+            answer(client, participant, "art")
+            client.post("/api/visual", json={"participant": participant, "points": POINTS})
+            hear(client, participant, heard=("human",))
+            client.post("/api/regenerate", json={"participant": participant})
+            events = client.get(f"/api/log?participant={participant}").json()["events"]
+            written = next(row for row in events if row["type"] == "regeneration.written")
+            return list(written["auditory_labels"])
+
+        assert walked(None) == walked("ko") == [SOUND_FAMILIES["human"]]
 
 
 class TestRegeneration:
@@ -445,7 +522,7 @@ class TestRegeneration:
         written = next(event for event in events if event["type"] == "regeneration.written")
         assert written["prompt"]
         assert written["raw_output"]
-        assert written["auditory_labels"] == ["Traffic"]
+        assert written["auditory_labels"] == [SOUND_FAMILIES["things"]]
         assert written["visual_labels"]
         assert written["fallback"] is False
         assert written["duration_ms"] >= 0
@@ -489,6 +566,32 @@ class TestSurface:
         assert body["scale"]["points"] == 7
         assert len(body["scale"]["anchors"]) == 2
         assert len(body["steps"]) == 6
+
+    def test_the_chrome_is_served_in_every_language_the_study_offers(self, client: TestClient) -> None:
+        """All of them at once, so a switch redraws rather than re-fetches.
+
+        §9.3 lets the participant change language until the first clip plays.
+        Sending only the language they are currently reading would put a round
+        trip between the press and the redraw, and would stop boot asking for
+        the copy and the enrolment together — the copy would have to wait to
+        learn which language the enrolment assigned.
+        """
+        body = client.get("/api/strings").json()
+        assert set(body["strings"]) == {"en", "ko"}, "the fixture's study offers both"
+        assert body["strings"]["en"]["app_title"] == "Sound captions"
+        assert body["strings"]["ko"]["app_title"] != body["strings"]["en"]["app_title"]
+        assert body["strings"]["ko"]["steps"][2] != body["strings"]["en"]["steps"][2]
+
+    def test_a_study_in_one_language_is_served_one_tree(
+        self, document: dict[str, Any], media_dir: Path, tmp_path: Path
+    ) -> None:
+        english = dict(document)
+        english["config"] = {
+            **document["config"],
+            "calibration": {**document["config"]["calibration"], "languages": ["en"]},
+        }
+        client = TestClient(build_app(english, media_dir, tmp_path / "out", RegenTemplateWriter()))
+        assert set(client.get("/api/strings").json()["strings"]) == {"en"}
 
     def test_media_is_served_by_segment(self, client: TestClient) -> None:
         assert client.get("/media/frame/A/0").status_code == 200
@@ -544,6 +647,44 @@ class TestSurface:
         served = client.get(f"/api/step/auditory?participant={participant}")
         assert "mask" not in json.dumps(served.json())
 
+    def test_the_fallback_track_never_reaches_the_browser(self, client: TestClient) -> None:
+        """A page holding it could show it before §6 decided it was needed.
+
+        The participant would then be reading the default policy under the
+        label of their own regeneration. This was asserted against
+        ``participant_document`` until that helper stopped being what the app
+        serves; it is asserted against the routes now, which is where a leak
+        would actually happen.
+
+        Each step is read while it is the *current* step. Read at the end of
+        the walk they all answer 409 — §9.1 blocks re-entry — and a test that
+        skipped those would assert nothing about four of the five payloads.
+        """
+        participant = enrol(client)
+        seen = 0
+
+        def check(step: str) -> None:
+            nonlocal seen
+            served = client.get(f"/api/step/{step}?participant={participant}")
+            assert served.status_code == 200, f"{step} was not the current step"
+            assert "Fallback" not in json.dumps(served.json()), step
+            seen += 1
+
+        check("view_prepared")
+        client.post(
+            "/api/viewing",
+            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
+        )
+        check("art")
+        answer(client, participant, "art")
+        check("visual")
+        client.post("/api/visual", json={"participant": participant, "points": POINTS})
+        check("auditory")
+        hear(client, participant)
+        client.post("/api/regenerate", json={"participant": participant})
+        check("view_regenerated")
+        assert seen == 5, "every step a participant can read was actually read"
+
 
 class TestRegenerationProgress:
     """§6 reports cues written, for the screen waiting on it and the console."""
@@ -555,7 +696,14 @@ class TestRegenerationProgress:
         body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
         # The count is there even when nothing is running, so the waiting screen
         # can draw a bar of the right width rather than growing one.
-        assert body == {"writing": False, "done": 0, "total": 4}
+        prepared = client.get(f"/api/step/view_prepared?participant={participant}").json()["segment"]
+        assert body == {
+            "writing": False,
+            "done": 0,
+            "total": 4,
+            # The clip §6's wait is used to fetch: the other segment.
+            "next_segment": "B" if prepared == "A" else "A",
+        }
 
     def test_it_reads_as_idle_again_once_the_track_is_written(self, client: TestClient) -> None:
         participant = walk_to_regenerated(client)
@@ -564,6 +712,34 @@ class TestRegenerationProgress:
 
     def test_a_malformed_participant_is_refused_like_its_neighbours(self, client: TestClient) -> None:
         assert client.get("/api/regenerate/progress").status_code == 400
+
+    def test_it_names_the_clip_the_next_viewing_will_play(self, client: TestClient) -> None:
+        """§6's wait is what pays for the second clip's five to seven megabytes.
+
+        The page cannot ask ``/api/step/view_regenerated`` yet — that step is
+        gated and the answer would be a 409 — so the route the waiting screen
+        is already polling carries it. It is the same fact that step returns a
+        moment later, never a different one.
+        """
+        participant = walk_to_regenerated(client)
+        waiting = client.get("/api/regenerate/progress", params={"participant": participant}).json()
+        viewing = client.get(f"/api/step/view_regenerated?participant={participant}").json()
+        assert waiting["next_segment"] == viewing["segment"]
+
+    def test_it_is_the_segment_the_first_viewing_did_not_use(self, client: TestClient) -> None:
+        participant = enrol(client)
+        prepared = client.get(f"/api/step/view_prepared?participant={participant}").json()["segment"]
+        body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
+        assert body["next_segment"] != prepared
+
+    def test_an_unenrolled_participant_still_reads_as_idle(self, client: TestClient) -> None:
+        # Best-effort, as the route has always been: no assignment yet is a
+        # missing field, not a 404. A progress display may not be the thing
+        # that ends a session.
+        body = client.get("/api/regenerate/progress", params={"participant": "pfffffff"})
+        assert body.status_code == 200
+        assert "next_segment" not in body.json()
+        assert body.json()["writing"] is False
 
     def test_it_reports_the_cues_written_while_the_model_is_still_in_the_call(
         self, document: dict[str, Any], media_dir: Path, tmp_path: Path
@@ -605,7 +781,7 @@ class TestRegenerationProgress:
         )
         answer(walker, participant, "art")
         walker.post("/api/visual", json={"participant": participant, "points": POINTS})
-        walker.post("/api/auditory", json={"participant": participant, "selected": ["traffic"], "lanes": {}})
+        hear(walker, participant)
 
         writing = threading.Thread(
             target=lambda: walker.post("/api/regenerate", json={"participant": participant})
@@ -617,7 +793,11 @@ class TestRegenerationProgress:
         finally:
             release.set()
             writing.join(20)
-        assert body == {"writing": True, "done": 1, "total": 4}
+        assert {key: body[key] for key in ("writing", "done", "total")} == {
+            "writing": True,
+            "done": 1,
+            "total": 4,
+        }
         # And nothing is left in flight for a screen to keep reading.
         after = watcher.get("/api/regenerate/progress", params={"participant": participant}).json()
         assert after["writing"] is False

@@ -7,6 +7,7 @@ import pytest
 from dpo.regen.config import (
     CONFIG_SCHEMA,
     METHOD_CONSTANTS,
+    SOUND_FAMILIES,
     Calibration,
     ConfigError,
     Configuration,
@@ -102,3 +103,46 @@ class TestCalibration:
     def test_a_calibration_a_study_could_not_run_under_is_refused(self, overrides: dict[str, object]) -> None:
         with pytest.raises(ConfigError):
             Calibration(**overrides)  # type: ignore[arg-type]
+
+
+class TestTheSoundFamiliesAreHashed:
+    """§5's vocabulary is a study input, so the stamp has to cover it.
+
+    The prose beside each family is handed straight to §6's writer, so editing
+    one changes the captions a participant is shown. For a while the artifact
+    hashed only ``method_constants``, which declares the *shape* of §5's
+    question — five families, heard or not — and says nothing about which five
+    or what they are called. Two studies asking about different things would
+    have shared one stamp.
+    """
+
+    def test_they_are_in_the_artifact(self) -> None:
+        assert _configuration().artifact()["sound_families"] == dict(SOUND_FAMILIES)
+
+    def test_changing_a_family_s_prose_changes_the_stamp(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The prose is what §6 puts in a caption, so this edits the stimulus.
+        before = _configuration().hash
+        monkeypatch.setattr(
+            "dpo.regen.config.SOUND_FAMILIES", {**SOUND_FAMILIES, "natural": "rain and thunder"}
+        )
+        assert _configuration().hash != before
+
+    def test_adding_a_family_changes_the_stamp(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        before = _configuration().hash
+        monkeypatch.setattr("dpo.regen.config.SOUND_FAMILIES", {**SOUND_FAMILIES, "silence": "quiet"})
+        assert _configuration().hash != before
+
+    def test_an_artifact_with_other_families_is_refused(self) -> None:
+        # The same refusal method_constants gets: an artifact written by a
+        # build that asked about different sounds cannot be loaded here and
+        # stamped as though it were this one.
+        artifact = _configuration().artifact()
+        artifact["sound_families"] = {**SOUND_FAMILIES, "silence": "quiet"}
+        with pytest.raises(ConfigError, match="sound families"):
+            load_configuration(artifact)
+
+    def test_an_artifact_written_before_they_were_hashed_is_refused(self) -> None:
+        artifact = _configuration().artifact()
+        del artifact["sound_families"]
+        with pytest.raises(ConfigError, match="sound families"):
+            load_configuration(artifact)

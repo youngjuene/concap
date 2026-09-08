@@ -145,6 +145,10 @@ CUDA_VISIBLE_DEVICES=1 uv run dpo regen serve … \
 `--writer gemma` is held to the same backend pin as the pipeline and refuses a
 config the contract does not pin, on any machine, before it touches CUDA.
 
+It binds to loopback and should stay there: the instrument has no login of
+its own, and the way off campus reaches it, "Running it for someone off
+campus" below, reaches loopback.
+
 While §6 runs, the console draws a bar over the cues in the track — the same
 report the participant's waiting screen is polling, so the two cannot disagree
 about where the model has got to. It is drawn only when a terminal is watching:
@@ -170,6 +174,156 @@ sessions on template captions.
 Launch the participant's browser with
 `--autoplay-policy=no-user-gesture-required`; the viewing screens go fullscreen
 on a click, but the clip must start without a second gesture.
+
+## Running it for someone off campus
+
+The instrument has no login and no TLS. Anyone who reaches it can enrol,
+which spends a sequence number that §1's alternation is balanced on, and can
+fetch any participant's log. So it is never bound to a public address, and
+it stays on loopback. Off campus it is published by **Tailscale Funnel**:
+`https://concap.<tailnet>.ts.net` goes to Tailscale's public ingress, from
+there encrypted to a Tailscale node running in a container on this machine,
+which ends the TLS connection and proxies to `127.0.0.1:8779`. The access
+control is a switch: `make open` publishes, `make close` withdraws, and
+nothing is handed to the person running sessions except the link. Everything
+for it is in `deploy/`, whose `README.md` is the operator's card.
+
+**What the instrument itself adds when published** (`--public`,
+`--access-code-file`; `src/dpo/regen/gate.py`). A kiosk has no login because
+the researcher is in the room; a tunnel has no room, so three things stand
+in: a new enrolment must carry the access code the link holds (`?code=…`),
+read from `data/live/access-code` on every enrolment, so `make code` closes
+every earlier link at once and restarts nothing, while an enrolled
+participant resumes without it; the log download on the done screen is
+offered and served only on this machine, since a guessable identifier would
+otherwise export any session to anyone; and requests are rate-limited by
+address, with a tighter limit on enrolment, the one request that spends a
+sequence number §1's alternation is balanced on. None of it is on for a
+kiosk run.
+
+**Why this and not the website's proxy.** The lab website's Traefik on this
+machine was the first design; it worked and its fault isolation was tested,
+but a new name under `kaist.ac.kr` is a request to KAIST IT, and the
+alternative of reusing `www.tx.kaist.ac.kr` puts a study on the lab site's
+name. Funnel needs no name, no port, no certificate work and no contact with
+anyone: the node's ts.net name resolves publicly, Tailscale fetches its
+Let's Encrypt certificate, and this machine opens nothing inbound. The
+container runs with no privileges (userspace networking), and only the one
+served port is public; the website's proxy, certificate store and network are
+not involved at all.
+
+**What it costs.** A Tailscale account, free, signed in once from the link
+`make open` prints. Funnel's bandwidth is capped at a figure Tailscale does
+not publish, and the feature is labelled beta. The cap changes how long
+*Preparing the clip…* takes before Start, not what plays: the page fetches
+the whole clip first and plays it from memory (below).
+
+**After a reboot.** The node's container restarts on its own and keeps its
+identity in a volume; whether Funnel is on is remembered too. The instrument
+does not restart on its own, and `make open` starts it.
+
+**While it is open.**
+
+- Anyone with the current link can enrol, run a session and spend one
+  regeneration on the GPU. Open it for the session block and close it after,
+  and `make code` if a link has gone somewhere it should not have. A stray
+  enrolment is identifiable in `roster.json` as an entry with no
+  `viewings-<p>.jsonl` against it; exclude it and read the sequence numbers
+  around it as they stand.
+- Start reads *Preparing the clip…* until the whole clip (5–7 MB) is in the
+  browser; it then plays from memory. This is what keeps an off-campus
+  viewing the same stimulus as an on-campus one: once started, nothing about
+  the connection can halt it. If the clip could not be fetched whole, the page
+  streams it instead and says so — `viewing.prefetch` with
+  `prefetched: false` in `events-<p>.jsonl` — and every viewing ends with a
+  `viewing.integrity` event carrying `stalls` (halts on an empty buffer)
+  beside `interruptions` (fullscreen lost). A viewing with either non-zero
+  was not the stimulus; separate it in the analysis.
+- The click on Start is the gesture browsers require before a clip with
+  sound may play, so no browser setting is expected off campus. A browser
+  that refuses anyway shows *the clip would not start* rather than playing
+  silently; the kiosk's `--autoplay-policy` flag is the remedy there.
+- One tab, as ever. The log download on the last screen lands in the
+  participant's browser; the copy that matters is under `--out` on this
+  machine.
+- **§4 is served web copies, not the staged files.** The staged stills are
+  full-resolution PNGs because the masks were cut from those pixels, which is
+  not what a browser should download. So a WebP of each still at its own size
+  is made once and served instead, and §4's strip falls from 6.4 MB to 0.5 MB.
+  Nothing is re-staged: the files under `--media-dir` are untouched, and the
+  copies sit beside them in `.derived/`, keyed by what they were made from, so
+  a re-staged clip is never answered for by the old picture. They are made at
+  startup — `dpo regen serve` prints *web copies ready: 10 stills* — and a
+  count of *served whole* means a derivative could not be made and the source
+  is going out instead, which costs bandwidth and nothing else. The still
+  keeps its dimensions, so §4's marks land where they were put. `--media-dir`
+  may be read-only: the copies are then skipped with a warning.
+- **The second clip is fetched during §6's wait.** The two viewings play
+  different segments, so the second is 5–7 MB the participant would otherwise
+  wait for again, from a standing start, behind *Preparing the clip…*. §6 is
+  the one wait the session already has — the model is writing and the bar is
+  indeterminate — so the clip is fetched behind it. `/api/regenerate/progress`,
+  which the waiting screen already polls, now also names the segment coming
+  next; the page fetches it once and the viewing takes what was warmed rather
+  than asking again. Nothing about the stimulus changes: it is the same
+  whole-file-before-Start that §3 does, only started earlier, and a fetch that
+  has not finished when the screen opens is awaited rather than restarted. If
+  it failed, the viewing falls back to fetching it itself, exactly as before.
+  In the log it is a `viewing.prefetch` for `view_regenerated` timed inside §6.
+- **The strip is fetched when §4 opens**, all five moments at once, so moving
+  between them costs nothing. Media carries a day's `Cache-Control` and an
+  entity tag, and a return to a moment already seen is a 304 with no body.
+  The page's own files revalidate instead, so a fix to the instrument reaches
+  the next reload rather than the reload after that.
+
+## When the instrument refuses a document it served yesterday
+
+> `config: the artifact's method constants are not this build's` — or the same
+> sentence about its sound families.
+
+Not a corruption. The document carries a copy of the configuration it was
+staged under, and the build refuses to serve one whose method surface is not
+its own, because results computed here would otherwise be stamped with a hash
+that no longer describes how they were computed. It is the guard working.
+
+It fires whenever a released change touches `METHOD_CONSTANTS` or
+`SOUND_FAMILIES`, and it fires for **every** staged document, not just the
+live one — `data/regen-demo/` and anything on another machine need the same
+treatment. There is no command for it. Re-pin by rebuilding the config block
+from the document's own calibration:
+
+```python
+import json
+from pathlib import Path
+from dpo.regen.config import Calibration, Configuration, Scale
+
+p = Path("data/live/regen.json")
+doc = json.loads(p.read_text(encoding="utf-8"))
+old = doc["config"]
+calibration = dict(old["calibration"])
+scale = calibration.pop("scale")
+fresh = Configuration(
+    study_id=old["study_id"],
+    corpus_id=old["corpus_id"],
+    calibration=Calibration(
+        **calibration,
+        # Carried across explicitly: the anchors are hashed copy (§9.3), and a
+        # study that chose its own would have them silently replaced by the
+        # build's defaults.
+        scale=Scale(points=scale["points"], anchors=tuple(scale["anchors"])),
+    ),
+).artifact()
+assert json.loads(json.dumps(fresh))["calibration"] == old["calibration"]
+doc["config"] = json.loads(json.dumps(fresh))
+p.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+```
+
+Then `uv run dpo regen validate --session data/live/regen.json`, which prints
+the new hash. **Sessions logged under the old hash are not comparable with
+sessions logged under the new one** — that is what the change of hash means,
+and the hash on every row is what tells them apart. Re-staging instead of
+re-pinning also works, but blanks `fallback_track` and costs you the mask
+tree.
 
 ## What lands on disk
 

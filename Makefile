@@ -1,7 +1,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo
+.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo open close status code
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -38,6 +38,21 @@ regen-demo:
 	  --session tests/regen/fixtures/regen.json --out data/regen-demo/media
 	uv run dpo regen serve --session tests/regen/fixtures/regen.json \
 	  --media-dir data/regen-demo/media --out data/regen-demo/responses --writer template
+
+# The regeneration instrument's public door (deploy/README.md):
+# open = instrument serving + Tailscale Funnel on + link printed, close =
+# Funnel off, status = what is up and why, code = new access code (old links die).
+open:
+	deploy/edge open
+
+close:
+	deploy/edge close
+
+status:
+	deploy/edge status
+
+code:
+	deploy/edge code
 
 sync:
 	uv sync --dev

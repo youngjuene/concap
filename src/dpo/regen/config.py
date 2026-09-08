@@ -54,10 +54,45 @@ from typing import Any
 CONFIG_SCHEMA = "dpo.caption-regen-config/v1"
 HASH_LENGTH = 12
 
+# §5's vocabulary: AudioSet's top-level classes, in AudioSet's own order,
+# restricted to the five that occur in this corpus. Fixed rather than drawn
+# from the clip, which is the point of the redesign — a participant shown only
+# the families a clip contains can report a true positive and nothing else, so
+# the screen could not tell "heard it" from "had the chance to say so". Asked
+# about all five, they can claim a family that is not there, and a false alarm
+# is a measure rather than an impossibility.
+#
+# `prose` is what §6 puts in a caption, and is deliberately not the display
+# label: "the sound of sounds of things" is not a sentence. The label is what
+# the participant reads and what the log records; the prose is what the writer
+# is handed.
+SOUND_FAMILIES: Mapping[str, str] = {
+    "human": "people",
+    "animal": "animals",
+    "things": "vehicles and machinery",
+    "music": "music",
+    "natural": "wind and water",
+}
+
 # Declared, hashed, never dispatched on. Each line states what some module in
 # this package does, so a study's stamp changes when the method changes.
 # Changing a formula without changing the declaration beside it leaves two
 # studies sharing one stamp, which is the failure the stamp exists to prevent.
+# The AudioSet class name a staged document stores in `stem.parent`, mapped to
+# the family key §5 answers in. The two vocabularies exist because the document
+# records the ontology's own words and §5 records its own ids, and for a while
+# the log wrote one field in each: `heard: ["things"]` beside
+# `present: ["Sounds of things"]`, two lists with no value in common, in a row
+# whose whole purpose was letting the two be compared. Mapped here, at the one
+# boundary they meet, rather than by whoever reads the log later.
+FAMILY_OF_PARENT: Mapping[str, str] = {
+    "Human sounds": "human",
+    "Animal": "animal",
+    "Sounds of things": "things",
+    "Music": "music",
+    "Natural sounds": "natural",
+}
+
 METHOD_CONSTANTS: Mapping[str, Any] = {
     "assignment": "prepared on segment A when the sequence number is even, on B when it is odd",
     "assignment_from": "participant sequence number alone; no stored table",
@@ -66,7 +101,14 @@ METHOD_CONSTANTS: Mapping[str, Any] = {
     "art_block": "one definition, referenced by both survey pages",
     "point_matching": "once, on the submitted coordinates; smallest containing mask wins",
     "unclassified": "points outside every mask are kept with their coordinates",
-    "regeneration_inputs": "matched visual labels excluding unclassified, plus selected source labels",
+    "regeneration_inputs": "matched visual labels excluding unclassified, plus the sound "
+    "families reported heard",
+    # §5 stopped being a selection among the sources a clip happens to carry
+    # and became a fixed judgment on all five families, so what the screen
+    # measures — and what §6 is conditioned on — is a different thing. Named
+    # here because it is hashed: a session run before this constant changed is
+    # not comparable with one run after, and the config hash is what says so.
+    "auditory_report": "heard / did not hear, on each of five fixed sound families",
 }
 
 
@@ -184,6 +226,15 @@ class Configuration:
             "study_id": self.study_id,
             "corpus_id": self.corpus_id,
             "method_constants": dict(METHOD_CONSTANTS),
+            # §5's vocabulary is hashed because it is a study input, not a
+            # presentation detail. The prose beside each family is handed
+            # straight to §6's writer, so editing "wind and water" — or adding
+            # a sixth family — changes the stimulus a participant is shown.
+            # `method_constants` declares only the *shape* of §5's question;
+            # without this, two studies asking about different families would
+            # share one stamp, which is the failure the stamp exists to
+            # prevent.
+            "sound_families": dict(SOUND_FAMILIES),
             "calibration": asdict(self.calibration),
         }
 
@@ -233,6 +284,11 @@ def load_configuration(raw: Mapping[str, Any]) -> Configuration:
         raise ConfigError(
             "the artifact's method constants are not this build's; "
             "results computed here could not carry its hash honestly"
+        )
+    if raw.get("sound_families") != dict(SOUND_FAMILIES):
+        raise ConfigError(
+            "the artifact's sound families are not this build's; §5 would ask a "
+            "different question and §6 would be given different words for it"
         )
     calibration = dict(raw.get("calibration") or {})
     if "languages" in calibration:

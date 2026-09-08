@@ -1,0 +1,39 @@
+# The regeneration instrument's public door, by Tailscale Funnel.
+#
+# One container runs a Tailscale node for this machine, with no privileges:
+# userspace networking, no tun device, no capabilities. `make open` turns
+# Funnel on, which publishes https://concap.<your tailnet>.ts.net through
+# Tailscale's public ingress; the TLS connection is terminated by the node
+# in this container, so the relays carry only ciphertext, and the plain
+# request goes to the instrument on 127.0.0.1:8779. `make close` turns it
+# off. Only the served port is ever public. Nothing of the website's is
+# involved: no shared proxy, no shared certificate store, no shared network,
+# and no port is opened on this machine.
+#
+# host networking is what makes "127.0.0.1:8779" mean the instrument on the
+# host rather than something inside the container. The node's identity
+# lives in the `state` volume, so a recreated container is the same node.
+#
+# The daemon is started directly rather than through the image's boot
+# script: that script insists on finishing the sign-in within a minute,
+# and without an auth key it cannot, so it exits, the container restarts,
+# and every restart issues a fresh sign-in link. Started this way the
+# daemon just waits, and the link `make open` prints stays valid until
+# it is used.
+name: concap-edge
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.102.3
+    hostname: concap
+    network_mode: host
+    entrypoint:
+      - sh
+      - -c
+      - mkdir -p /var/run/tailscale && exec tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock
+    volumes:
+      - state:/var/lib/tailscale
+    restart: unless-stopped
+
+volumes:
+  state:

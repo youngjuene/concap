@@ -1,46 +1,189 @@
 {
   "schema": "dpo.caption-regen-items/v1",
   "provenance": "placeholder",
-  "note": "Placeholder wording in the right shape, so the instrument runs end to end before the study's validated items exist. Replace with the researcher's own scale wording and set provenance to \"authored\"; `dpo regen serve` announces which is loaded and stamps it on every response record.",
+  "note": "Placeholder wording in the right shape, so the instrument runs end to end before the study's validated items exist. Replace with the researcher's own scale wording and set provenance to \"authored\"; `dpo regen serve` announces which is loaded and stamps it on every response record. The Korean is a draft translation of this placeholder English, added so a Korean participant is not answering an English instrument with Korean chrome around it. It is not a validated Korean ART/PRSS: back-translation and a native review belong before it is used for anything but a pilot.",
   "blocks": [
     {
       "id": "art",
-      "title": "This scene",
+      "title": {
+        "en": "This scene",
+        "ko": "이 장면"
+      },
       "items": [
-        { "id": "art_away_1", "text": "Being in this scene is an escape from my everyday demands." },
-        { "id": "art_away_2", "text": "This scene is a place away from the things I usually have to attend to." },
-        { "id": "art_fascination_1", "text": "This scene holds my attention without any effort." },
-        { "id": "art_fascination_2", "text": "There are things in this scene I would like to keep looking at and listening to." },
-        { "id": "art_extent_1", "text": "This scene hangs together as one place." },
-        { "id": "art_extent_2", "text": "There is enough going on here to explore for a while." },
-        { "id": "art_compatibility_1", "text": "What I would want to do here fits what this place invites." },
-        { "id": "art_compatibility_2", "text": "I could settle into this scene easily." }
+        {
+          "id": "art_away_1",
+          "text": {
+            "en": "Being in this scene is an escape from my everyday demands.",
+            "ko": "이 장면 속에 있는 것은 일상의 요구에서 벗어나는 일이다."
+          }
+        },
+        {
+          "id": "art_away_2",
+          "text": {
+            "en": "This scene is a place away from the things I usually have to attend to.",
+            "ko": "이 장면은 평소 신경 써야 하는 것들로부터 떨어져 있는 곳이다."
+          }
+        },
+        {
+          "id": "art_fascination_1",
+          "text": {
+            "en": "This scene holds my attention without any effort.",
+            "ko": "이 장면은 애쓰지 않아도 내 주의를 붙든다."
+          }
+        },
+        {
+          "id": "art_fascination_2",
+          "text": {
+            "en": "There are things in this scene I would like to keep looking at and listening to.",
+            "ko": "이 장면에는 계속 보고 듣고 싶은 것들이 있다."
+          }
+        },
+        {
+          "id": "art_extent_1",
+          "text": {
+            "en": "This scene hangs together as one place.",
+            "ko": "이 장면은 여러 곳이 아니라 하나의 장소처럼 느껴진다."
+          }
+        },
+        {
+          "id": "art_extent_2",
+          "text": {
+            "en": "There is enough going on here to explore for a while.",
+            "ko": "여기에는 한동안 둘러볼 만한 것이 충분히 있다."
+          }
+        },
+        {
+          "id": "art_compatibility_1",
+          "text": {
+            "en": "What I would want to do here fits what this place invites.",
+            "ko": "여기서 하고 싶은 일이 이곳이 권하는 것과 잘 맞는다."
+          }
+        },
+        {
+          "id": "art_compatibility_2",
+          "text": {
+            "en": "I could settle into this scene easily.",
+            "ko": "나는 이 장면에 쉽게 녹아들 수 있을 것 같다."
+          }
+        }
       ]
     },
     {
       "id": "caption",
-      "title": "The captions",
+      "title": {
+        "en": "The captions",
+        "ko": "자막"
+      },
       "items": [
-        { "id": "caption_credible_1", "text": "The captions described sounds that were actually there." },
-        { "id": "caption_credible_2", "text": "I trusted the captions to name what I was hearing." },
-        { "id": "caption_credible_3", "text": "The captions named sounds I could not hear.", "reverse": true },
-        { "id": "caption_restorative_1", "text": "The captions made the scene feel more restful." },
-        { "id": "caption_restorative_2", "text": "The captions helped me take in the place rather than distracting me from it." },
-        { "id": "caption_restorative_3", "text": "Reading the captions pulled my attention away from the scene.", "reverse": true }
+        {
+          "id": "caption_credible_1",
+          "text": {
+            "en": "The captions described sounds that were actually there.",
+            "ko": "자막은 실제로 있던 소리를 설명했다."
+          }
+        },
+        {
+          "id": "caption_credible_2",
+          "text": {
+            "en": "I trusted the captions to name what I was hearing.",
+            "ko": "자막이 내가 듣고 있던 소리의 이름을 제대로 붙였다고 믿었다."
+          }
+        },
+        {
+          "id": "caption_credible_3",
+          "text": {
+            "en": "The captions named sounds I could not hear.",
+            "ko": "자막은 내가 듣지 못한 소리의 이름을 붙였다."
+          },
+          "reverse": true
+        },
+        {
+          "id": "caption_restorative_1",
+          "text": {
+            "en": "The captions made the scene feel more restful.",
+            "ko": "자막은 장면을 더 편안하게 느끼도록 만들었다."
+          }
+        },
+        {
+          "id": "caption_restorative_2",
+          "text": {
+            "en": "The captions helped me take in the place rather than distracting me from it.",
+            "ko": "자막은 내 주의를 장면에서 빼앗기보다, 그 장면을 더 잘 느끼게 해 주었다."
+          }
+        },
+        {
+          "id": "caption_restorative_3",
+          "text": {
+            "en": "Reading the captions pulled my attention away from the scene.",
+            "ko": "자막을 읽느라 장면에 대한 주의가 흐트러졌다."
+          },
+          "reverse": true
+        }
       ]
     },
     {
       "id": "prss",
-      "title": "The sounds of this place",
+      "title": {
+        "en": "The sounds of this place",
+        "ko": "이곳의 소리"
+      },
       "items": [
-        { "id": "prss_away_1", "text": "The sounds here are different from the ones I usually have around me." },
-        { "id": "prss_away_2", "text": "Listening here is a break from the noise of my ordinary day." },
-        { "id": "prss_fascination_1", "text": "The sounds here draw my attention on their own." },
-        { "id": "prss_fascination_2", "text": "I would happily go on listening to this place." },
-        { "id": "prss_extent_1", "text": "The sounds here belong to one place rather than several." },
-        { "id": "prss_extent_2", "text": "There is enough to hear here to keep listening for a while." },
-        { "id": "prss_compatibility_1", "text": "The sounds here suit what I would want to be doing in this place." },
-        { "id": "prss_compatibility_2", "text": "I could be comfortable in the sound of this place." }
+        {
+          "id": "prss_away_1",
+          "text": {
+            "en": "The sounds here are different from the ones I usually have around me.",
+            "ko": "여기의 소리는 평소 내 주변에 있는 소리와 다르다."
+          }
+        },
+        {
+          "id": "prss_away_2",
+          "text": {
+            "en": "Listening here is a break from the noise of my ordinary day.",
+            "ko": "여기서 듣는 것은 평범한 하루의 소음에서 벗어나는 일이다."
+          }
+        },
+        {
+          "id": "prss_fascination_1",
+          "text": {
+            "en": "The sounds here draw my attention on their own.",
+            "ko": "여기의 소리는 저절로 내 주의를 끈다."
+          }
+        },
+        {
+          "id": "prss_fascination_2",
+          "text": {
+            "en": "I would happily go on listening to this place.",
+            "ko": "나는 이곳의 소리를 기꺼이 계속 듣고 있을 것 같다."
+          }
+        },
+        {
+          "id": "prss_extent_1",
+          "text": {
+            "en": "The sounds here belong to one place rather than several.",
+            "ko": "여기의 소리는 여러 곳이 아니라 한 곳에 속해 있다."
+          }
+        },
+        {
+          "id": "prss_extent_2",
+          "text": {
+            "en": "There is enough to hear here to keep listening for a while.",
+            "ko": "여기에는 한동안 계속 들을 만한 소리가 충분히 있다."
+          }
+        },
+        {
+          "id": "prss_compatibility_1",
+          "text": {
+            "en": "The sounds here suit what I would want to be doing in this place.",
+            "ko": "여기의 소리는 내가 이곳에서 하고 싶은 일과 어울린다."
+          }
+        },
+        {
+          "id": "prss_compatibility_2",
+          "text": {
+            "en": "I could be comfortable in the sound of this place.",
+            "ko": "나는 이곳의 소리 속에서 편안할 수 있을 것 같다."
+          }
+        }
       ]
     }
   ]

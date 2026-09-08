@@ -30,6 +30,10 @@ const state = {
   participant: null,
   step: null,
   strings: null,
+  // Every language's chrome, keyed by tag, and `strings` is the one being
+  // read. Both are held because §9.3 lets the participant switch until the
+  // first clip plays, and a switch should redraw rather than re-fetch.
+  chrome: null,
   scale: null,
   minimumPoints: 3,
   ceilingMs: 20000,
@@ -42,11 +46,10 @@ const state = {
   language: "en",
   languages: [],
   languageLocked: false,
-  lanes: new Map(),
-  selected: [],
-  audio: null,
-  playing: null,
-  mix: null,
+  // The second viewing's clip, fetched during §6's wait. A promise rather than
+  // a blob: the viewing may open before the fetch has finished, and awaiting
+  // the one in flight is right where starting a second one would not be.
+  warming: null,
 };
 
 const SCREENS = [
@@ -56,6 +59,7 @@ const SCREENS = [
   "screen-auditory",
   "screen-waiting",
   "screen-done",
+  "screen-closed",
   "screen-error",
   "screen-viewing",
 ];
@@ -100,6 +104,17 @@ function head(prefix, heading) {
 
 function stepName(index) {
   return state.strings.steps[index] || "";
+}
+
+/* The study is not taking new participants: no code in the link, a stale
+   one, or the operator has closed it. Not an error, so not the error screen:
+   nothing has gone wrong and there is no researcher in the room to tell. */
+function closed() {
+  const copy = state.strings.closed;
+  $("closed-eyebrow").textContent = state.strings.app_title;
+  $("closed-heading").textContent = copy.heading;
+  $("closed-body").textContent = copy.body;
+  show("screen-closed");
 }
 
 function fail(message, cause) {
@@ -230,6 +245,7 @@ async function choose(tag) {
   const result = await api("/api/language", { participant: state.participant, language: tag });
   if (!result || !result.language) return;
   state.language = result.language;
+  state.strings = state.chrome[state.language] || state.chrome.en;
   state.languageLocked = Boolean(result.language_locked);
   // The page's lang drives the Korean font stack and line-heights in
   // identity.css, so the document has to carry it rather than the strings
@@ -267,6 +283,28 @@ function drawRail() {
   });
 }
 
+/* The clip is the stimulus, and a clip that arrives over the network while it
+   plays is a different stimulus on a slow link than on a fast one: the browser
+   starts on a partial buffer and halts when it runs dry, and onended fires
+   the same either way. So the whole file is fetched before Start is enabled
+   and played from memory, which makes playback independent of the connection
+   the participant happens to be on. A fetch that fails falls back to
+   streaming rather than stranding the participant, and says so in the log. */
+async function prefetchClip(source, step) {
+  const began = performance.now();
+  try {
+    const response = await fetch(source);
+    if (!response.ok) throw new Error(`${response.status}`);
+    const blob = await response.blob();
+    const ms = Math.round(performance.now() - began);
+    note("viewing.prefetch", { step, prefetched: true, bytes: blob.size, ms });
+    return { url: URL.createObjectURL(blob), prefetched: true, bytes: blob.size };
+  } catch (error) {
+    note("viewing.prefetch", { step, prefetched: false, error: error.message });
+    return { url: source, prefetched: false, bytes: null };
+  }
+}
+
 /* §2 and §7 — the viewing. One start button, then fullscreen and no controls. */
 async function renderViewing(step) {
   const detail = await api(`/api/step/${step}?participant=${state.participant}`);
@@ -274,12 +312,28 @@ async function renderViewing(step) {
   const strings = state.strings.view;
   const index = step === "view_prepared" ? 0 : 4;
   head("start", stepName(index));
+  // The second viewing plays the *other* segment (§1). This screen was
+  // otherwise identical to the first viewing's, so nothing on it said so.
+  const different = $("start-different");
+  different.hidden = step !== "view_regenerated";
+  different.textContent = different.hidden ? "" : strings.different;
   $("start-headphones").textContent = strings.headphones;
   $("start-ready").textContent = strings.ready;
   const button = $("start-button");
+  // Start is enabled only once the clip is local. The button says so rather
+  // than sitting dead: on campus the wait is unnoticeable, off campus it can
+  // be seconds, and a participant who reads the instruction line meanwhile
+  // is doing what the screen is for.
+  button.textContent = strings.preparing;
+  button.disabled = true;
+  show("screen-start");
+  // Warmed during §6 if this is the viewing that follows it, and claimed here
+  // so a second viewing can never be handed a URL the first one revoked.
+  const warmed = state.warming && state.warming.segment === detail.segment ? state.warming : null;
+  state.warming = null;
+  const clip = warmed ? await warmed.clip : await prefetchClip(`/media/video/${detail.segment}`, step);
   button.textContent = state.strings.actions.start;
   button.disabled = false;
-  show("screen-start");
 
   button.onclick = async () => {
     button.disabled = true;
@@ -287,7 +341,7 @@ async function renderViewing(step) {
     const stage = $("screen-viewing");
     const band = $("cue");
     const cues = detail.captions;
-    video.src = `/media/video/${detail.segment}`;
+    video.src = clip.url;
     band.textContent = "";
     $("viewing-interrupted").hidden = true;
     show("screen-viewing");
@@ -349,6 +403,33 @@ async function renderViewing(step) {
     let ending = false;
     let interruptions = 0;
 
+    /* A halt for want of data is the other way a viewing stops being the
+       stimulus, and it leaves no trace of its own: the clip resumes, onended
+       fires, the timestamps are a little further apart. `waiting` is the
+       browser saying playback has stopped on an empty buffer; `stalled` that
+       the fetch behind a streamed source has gone quiet. Neither counts
+       before the first frame, which is loading rather than stalling, nor
+       while the clip is paused for an interruption, nor across a seek —
+       the instrument never seeks, but a seek fires `waiting` too, and a
+       count that means "halted mid-play" should not be movable by one. */
+    let stalls = 0;
+    let playing = false;
+    video.onplaying = () => {
+      playing = true;
+    };
+    const onStall = (event) => {
+      if (!playing || ending || video.ended || video.paused || video.seeking) return;
+      if (event.type === "waiting") stalls += 1;
+      note("viewing.stall", {
+        step,
+        kind: event.type,
+        at_ms: Math.round(video.currentTime * 1000),
+        count: stalls,
+      });
+    };
+    video.onwaiting = onStall;
+    video.onstalled = onStall;
+
     /* Fullscreen was requested and never watched. Escape is the browser's own
        shortcut and the first thing a nervous participant tries; the clip used
        to keep playing in a 720px column with the band pinned to the viewport,
@@ -381,12 +462,19 @@ async function renderViewing(step) {
       ending = true;
       document.removeEventListener("fullscreenchange", onFullscreen);
       track.track.oncuechange = null;
+      video.onplaying = video.onwaiting = video.onstalled = null;
       const endedAt = new Date().toISOString();
       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
       // Whether the clip was watched as the stimulus it is meant to be. It
       // rides the event stream rather than the viewing payload so the route's
       // contract is unchanged, and flushes before the step turns over.
-      note("viewing.integrity", { step, interruptions });
+      note("viewing.integrity", {
+        step,
+        interruptions,
+        stalls,
+        prefetched: clip.prefetched,
+        bytes: clip.bytes,
+      });
       await flush();
       const result = await api("/api/viewing", {
         participant: state.participant,
@@ -396,6 +484,7 @@ async function renderViewing(step) {
       });
       // A clip has played; the language is the session's now.
       state.languageLocked = true;
+      if (clip.prefetched) URL.revokeObjectURL(clip.url);
       if (result) render(result.step);
     };
     try {
@@ -591,6 +680,22 @@ async function renderVisual() {
 
   const seconds = (index) => (detail.frames[index].at_ms / 1000).toFixed(1);
 
+  /* Every moment is fetched when §4 opens, not when it is first chosen. The
+     strip is five pictures and the screen's whole job is comparing one against
+     another, so fetching on the click charged a wait to every first visit —
+     and charged it again on the way back, because the stills were served with
+     no cache headers and revalidation returned the whole file. They are held
+     in a list so the browser keeps them for the life of the screen. The one on
+     screen is asked for first; the other four are explicitly the lower
+     priority, so the picture being marked on is never behind the ones that are
+     not. */
+  const strip = detail.frames.map((frame, index) => {
+    const picture = new Image();
+    picture.fetchPriority = index === 0 ? "high" : "low";
+    picture.src = `/media/frame/${detail.segment}/${frame.index}`;
+    return picture;
+  });
+
   const buttons = detail.frames.map((frame, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -608,7 +713,7 @@ async function renderVisual() {
     if (index < 0 || index >= buttons.length) return;
     const changed = index !== state.frame;
     state.frame = index;
-    image.src = `/media/frame/${detail.segment}/${detail.frames[index].index}`;
+    image.src = strip[index].src;
     $("visual-heading").textContent = fill(copy.heading, { seconds: seconds(index) });
     plate.setAttribute("aria-label", fill(copy.plate, { seconds: seconds(index) }));
     if (changed) note("frame.selected", { frame: index, at_ms: detail.frames[index].at_ms });
@@ -794,350 +899,103 @@ async function renderVisual() {
   show("screen-visual");
 }
 
-/* §5 — the lanes. One stem at a time, levels from the document's gain, and a
-   playhead drawn over the envelope while it plays. */
+/* §5 — heard or did not hear, on each of five fixed sound families.
+
+   It used to be a selection among the sources a clip happened to carry, with a
+   waveform lane and a playback control for each. Two things were wrong with
+   that. A participant could only ever report a source that was there, so the
+   screen could not tell "I heard it" from "I was given the chance to say so",
+   and a family nobody put in the clip was unreportable rather than a false
+   alarm. And the lanes needed separated stem audio, which does not exist for
+   this corpus — every lane read "No sound".
+
+   Five families, asked of everyone, every time. Both answers are explicit:
+   a blank is a participant who did not answer, which is not the same as one
+   who did not hear, and §6 must not be conditioned on the difference between
+   a denial and a shrug. */
 async function renderAuditory() {
   const detail = await api(`/api/step/auditory?participant=${state.participant}`);
   if (!detail) return;
-  state.lanes = new Map(detail.stems.map((stem) => [stem.id, { plays: 0, listened_ms: 0 }]));
-  state.selected = [];
   state.segment = detail.segment;
   const strings = state.strings.auditory;
+  const answers = new Map();
   head("auditory", stepName(railAt()));
   $("auditory-instruction").textContent = strings.instruction;
   $("lanes-legend").textContent = strings.legend;
-  $("auditory-submit").textContent = state.strings.actions.submit;
+  const submit = $("auditory-submit");
+  submit.textContent = state.strings.actions.submit;
 
   const container = $("lanes");
-  for (const node of [...container.querySelectorAll(".lane")]) node.remove();
-  const canvases = new Map();
-  const clocks = new Map();
-  let confirming = false;
+  for (const node of [...container.querySelectorAll(".family")]) node.remove();
 
   const count = () => {
-    $("auditory-note").textContent = state.selected.length
-      ? fill(strings.chosen, { count: state.selected.length, total: detail.stems.length })
-      : strings.chosen_none;
+    const done = answers.size;
+    $("auditory-note").textContent = done
+      ? fill(strings.answered, { count: done, total: detail.families.length })
+      : strings.answered_none;
+    submit.disabled = done < detail.families.length;
   };
 
-  /* The reference mix. §5 asks the participant to compare a stem against a
-     ten-second memory, and there was no way to hear the clip again once it had
-     played. It is the clip's own audio, at the clip's own level: nothing here
-     is a separated source, so nothing here is one of the things being asked
-     about. */
-  const mix = new Audio(`/media/video/${detail.segment}`);
-  state.mix = mix;
-  const mixButton = $("mix-play");
-  const mixProgress = $("mix-progress");
-  const mixClock = $("mix-clock");
-  const duration = detail.duration_ms / 1000;
-  $("mix-title").textContent = strings.mix;
-  const clock = (at) => `${at.toFixed(1)} / ${duration.toFixed(1)}`;
-  mixClock.textContent = clock(0);
-  mixProgress.style.width = "0%";
-  const drawMix = () => {
-    const at = mix.currentTime;
-    mixProgress.style.width = `${Math.min(100, (at / (mix.duration || duration)) * 100)}%`;
-    mixClock.textContent = clock(at);
-    if (!mix.paused) requestAnimationFrame(drawMix);
-  };
-  mixButton.onclick = () => {
-    if (!mix.paused) {
-      mix.pause();
-      mixButton.textContent = "▶";
-      return;
-    }
-    stop();
-    mix.play().then(
-      () => {
-        mixButton.textContent = "◼";
-        note("mix.played", { at_ms: Math.round(mix.currentTime * 1000) });
-        requestAnimationFrame(drawMix);
-      },
-      (error) => note("mix.unplayable", { error: String((error && error.message) || error) })
-    );
-  };
-  mix.onended = () => {
-    mixButton.textContent = "▶";
-    mixProgress.style.width = "100%";
-  };
-
-  for (const stem of detail.stems) {
-    const lane = document.createElement("div");
-    lane.className = "lane";
-    lane.dataset.stem = stem.id;
-
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "play";
-    play.textContent = "▶";
-    play.setAttribute("aria-label", `${strings.play} ${stem.label}`);
+  for (const family of detail.families) {
+    const row = document.createElement("div");
+    row.className = "family";
+    /* Each row is its own question, and has to say so. The two radios are
+       named "Heard" and "Didn't hear" and nothing else, so without this a
+       screen reader reads ten controls with five identical pairs of labels and
+       never says which family any of them is about — the same defect the lanes
+       this replaced were explicitly fixed for. The group carries the family
+       name, and the examples ride along as its description. */
+    row.setAttribute("role", "radiogroup");
+    row.setAttribute("aria-labelledby", `family-${family}-name`);
 
     const label = document.createElement("div");
     label.className = "label";
-    // identity.css exempts these lanes from its no-meaningful-colour rule
-    // because the colours identify sources — but the colour only ever appeared
-    // inside the waveform, with no legend, so it identified nothing the
-    // participant could name. Against the label it does.
-    const chip = document.createElement("i");
-    chip.className = "chip";
-    chip.style.background = stem.colour;
-    const naming = document.createElement("div");
-    naming.append(document.createTextNode(stem.label));
-    // The family, where the source vocabulary has one. A label can be a
-    // narrower claim than its neighbour, and the colour already groups by
-    // family; naming it makes what the colour is doing legible.
-    if (stem.parent) {
-      const family = document.createElement("small");
-      family.textContent = stem.parent;
-      naming.append(family);
+    const name = document.createElement("span");
+    name.id = `family-${family}-name`;
+    name.textContent = strings.families[family] || family;
+    const hint = document.createElement("small");
+    hint.textContent = strings.examples[family] || "";
+    if (hint.textContent) {
+      hint.id = `family-${family}-examples`;
+      row.setAttribute("aria-describedby", hint.id);
     }
-    label.append(chip, naming);
+    label.append(name, hint);
 
-    const wave = document.createElement("div");
-    wave.className = "wave";
-    const canvas = document.createElement("canvas");
-    canvas.tabIndex = 0;
-    canvas.setAttribute("role", "slider");
-    canvas.setAttribute("aria-label", fill(strings.seek, { label: stem.label }));
-    canvas.setAttribute("aria-valuemin", "0");
-    canvas.setAttribute("aria-valuemax", "100");
-    canvas.setAttribute("aria-valuenow", "0");
-    const elapsed = document.createElement("span");
-    elapsed.className = "elapsed";
-    elapsed.textContent = clock(0);
-    wave.append(canvas, elapsed);
-    canvases.set(stem.id, canvas);
-    clocks.set(stem.id, elapsed);
-
-    /* Selection is a checkbox. It was five buttons with no aria-pressed, no
-       role and no fieldset, whose label swapped between Select and Selected:
-       a screen reader heard "Select, button" five times and never learned that
-       any of them was on, and a sighted participant had to press a button
-       labelled Selected in order to deselect. The label says what ticking it
-       claims, not what state it is in. */
-    const choose = document.createElement("label");
-    choose.className = "choose";
-    const tick = document.createElement("input");
-    tick.type = "checkbox";
-    const word = document.createElement("span");
-    word.textContent = strings.noticed;
-    choose.append(tick, word);
-    tick.onchange = () => {
-      const index = state.selected.indexOf(stem.id);
-      if (tick.checked && index === -1) state.selected.push(stem.id);
-      if (!tick.checked && index !== -1) state.selected.splice(index, 1);
-      lane.classList.toggle("selected", tick.checked);
-      confirming = false;
-      count();
-      note("lane.selected", {
-        stem: stem.id,
-        selected: tick.checked,
-        order: state.selected.indexOf(stem.id),
-      });
-    };
-
-    play.onclick = () => toggle(stem, play, lane, 0);
-    // The envelope already shows where the events are; §5 asks the participant
-    // to compare a stem against a ten-second memory, and not letting them go
-    // back to the third second was the largest avoidable cost on this screen.
-    canvas.onclick = (event) => {
-      const box = canvas.getBoundingClientRect();
-      toggle(stem, play, lane, Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)), true);
-    };
-    canvas.onkeydown = (event) => {
-      const nudge = { ArrowLeft: -0.05, ArrowRight: 0.05, Home: -1, End: 1 }[event.key];
-      if (nudge === undefined) return;
-      event.preventDefault();
-      const now = Number(canvas.getAttribute("aria-valuenow")) / 100;
-      const to = nudge === -1 ? 0 : nudge === 1 ? 0.98 : Math.min(1, Math.max(0, now + nudge));
-      toggle(stem, play, lane, to, true);
-    };
-
-    lane.append(play, label, wave, choose);
-    container.append(lane);
-    size(canvas);
-    drawWave(canvas, stem, 0);
-  }
-
-  /* The backing store was fixed at 600×48 while the CSS was width: 100%, so
-     600 pixels were squeezed into about 400 and then doubled again by a retina
-     display, and bars drawn on fractional boundaries blurred. */
-  function size(canvas) {
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
-    const height = Math.max(1, Math.round(48 * ratio));
-    if (canvas.width === width && canvas.height === height) return false;
-    canvas.width = width;
-    canvas.height = height;
-    return true;
-  }
-
-  function drawWave(canvas, stem, progress) {
-    const context = canvas.getContext("2d");
-    const { width, height } = canvas;
-    context.clearRect(0, 0, width, height);
-    context.fillStyle = stem.colour;
-    const step = width / stem.waveform.length;
-    stem.waveform.forEach((sample, index) => {
-      const bar = Math.max(1, sample * height);
-      context.fillRect(index * step, (height - bar) / 2, Math.max(1, step - 1), bar);
-    });
-    if (progress > 0) {
-      context.fillStyle = "rgba(22, 24, 26, 0.85)";
-      context.fillRect(progress * width, 0, Math.max(2, 2 * (window.devicePixelRatio || 1)), height);
+    /* Radios rather than a checkbox: a checkbox has one explicit state and
+       one that means both "no" and "not yet", and this screen has to keep
+       those apart. Grouped by family so the two answers are one question. */
+    const choice = document.createElement("div");
+    choice.className = "choice";
+    for (const [value, text] of [[true, strings.heard], [false, strings.not_heard]]) {
+      const option = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `family-${family}`;
+      input.onchange = () => {
+        answers.set(family, value);
+        note("family.answered", { family, heard: value });
+        count();
+      };
+      const caption = document.createElement("span");
+      caption.textContent = text;
+      option.append(input, caption);
+      choice.append(option);
     }
-    canvas.setAttribute("aria-valuenow", String(Math.round(progress * 100)));
-  }
 
-  const relayout = () => {
-    for (const stem of detail.stems) {
-      const canvas = canvases.get(stem.id);
-      if (size(canvas)) {
-        const playing = state.playing && state.playing.stem.id === stem.id ? state.playing.element : null;
-        drawWave(canvas, stem, playing && playing.duration ? playing.currentTime / playing.duration : 0);
-      }
-    }
-  };
-  window.addEventListener("resize", relayout);
-  requestAnimationFrame(relayout);
-
-  function stop() {
-    if (!state.playing) return;
-    const { stem, element, since, button, opening } = state.playing;
-    state.playing = null;
-    element.pause();
-    button.textContent = "▶";
-    drawWave(canvases.get(stem.id), stem, 0);
-    clocks.get(stem.id).textContent = clock(0);
-    // A lane stopped before it ever made a sound contributes no listening
-    // time and no stop worth recording: nothing was heard.
-    if (opening) return;
-    const counts = state.lanes.get(stem.id);
-    counts.listened_ms += Date.now() - since;
-    note("lane.stopped", { stem: stem.id, ...counts });
-  }
-
-  function toggle(stem, button, lane, from, always) {
-    if (state.playing && state.playing.stem.id === stem.id) {
-      // A click on the waveform of the lane already playing is a seek, not a
-      // stop: the two controls stay distinct in both directions.
-      if (always) {
-        const element = state.playing.element;
-        element.currentTime = from * (element.duration || 0);
-        note("lane.sought", { stem: stem.id, to: from });
-        return;
-      }
-      return stop();
-    }
-    // §5: starting another lane stops the previous one. Enforced here rather
-    // than by pausing on the element's own play event, so the listening time
-    // of the lane being interrupted is closed before the next one opens.
-    stop();
-    if (!mix.paused) {
-      mix.pause();
-      mixButton.textContent = "▶";
-    }
-    const element = new Audio(`/media/stem/${state.segment}/${stem.id}`);
-    // Levels are normalised against the original mix by the gain measured when
-    // the stems were cut (§5). WebAudio, not element.volume, because a gain
-    // above 1 is a legitimate normalisation and volume clamps at 1.
-    if (!state.audio) state.audio = new (window.AudioContext || window.webkitAudioContext)();
-    const source = state.audio.createMediaElementSource(element);
-    const gain = state.audio.createGain();
-    gain.gain.value = stem.gain;
-    source.connect(gain).connect(state.audio.destination);
-    // The playhead was redrawn from ontimeupdate, so it advanced in visible
-    // ~250ms steps over an envelope the participant is reading for onsets.
-    const follow = () => {
-      if (!state.playing || state.playing.element !== element) return;
-      if (element.duration) {
-        drawWave(canvases.get(stem.id), stem, element.currentTime / element.duration);
-        clocks.get(stem.id).textContent = clock(element.currentTime);
-      }
-      requestAnimationFrame(follow);
-    };
-    element.onloadedmetadata = () => {
-      if (from > 0) element.currentTime = from * element.duration;
-    };
-    element.onended = () => {
-      if (state.playing && state.playing.element === element) stop();
-    };
-    // The lane is claimed here, synchronously, and not when play() settles.
-    // Two presses in one task both used to find no lane playing, so neither
-    // stopped the other and both were heard at once — which §5 forbids and
-    // which a sequential click is too slow to reach.
-    state.playing = { stem, element, since: Date.now(), button, opening: true };
-    button.textContent = "◼";
-    element.play().then(
-      () => {
-        if (!state.playing || state.playing.element !== element) {
-          // Stopped, or overtaken by another lane, while this one was opening.
-          element.pause();
-          return;
-        }
-        // The play count is what §5 reports a selection against, so it moves
-        // when sound actually starts rather than when the control was pressed,
-        // and the clock starts here for the same reason.
-        state.playing.opening = false;
-        state.playing.since = Date.now();
-        const counts = state.lanes.get(stem.id);
-        counts.plays += 1;
-        note("lane.played", { stem: stem.id, plays: counts.plays, from });
-        requestAnimationFrame(follow);
-      },
-      (error) => {
-        // Pausing a play() that has not settled rejects it, so stopping a lane
-        // while it opens arrives here as an AbortError. That is this code's
-        // own doing and says nothing about the lane: if it is no longer the
-        // one playing, the rejection is ours and the lane stays usable.
-        if (!state.playing || state.playing.element !== element) return;
-        state.playing = null;
-        // A lane that will not play is this lane's problem and not the
-        // session's. Ending the run here would lose §6, §7 and §8 to one
-        // missing or undecodable file, and the participant has already given
-        // two of the study's measures by this point. The lane says it has no
-        // sound, its selection control is untouched — they may well have
-        // heard the source in the clip — and the log carries the failure so
-        // the researcher sees it without the participant losing the session.
-        lane.classList.add("unplayable");
-        button.textContent = "—";
-        button.setAttribute("aria-label", `${strings.unavailable}: ${stem.label}`);
-        button.disabled = true;
-        clocks.get(stem.id).textContent = strings.unavailable;
-        note("lane.unplayable", { stem: stem.id, error: String((error && error.message) || error) });
-      }
-    );
+    row.append(label, choice);
+    container.append(row);
   }
 
   count();
 
-  const submit = $("auditory-submit");
-  submit.disabled = false;
   submit.onclick = async () => {
-    /* §5 could be finished in one press, on a screen whose result conditions
-       the captions the participant then rates in §7 and §8 — so an empty §5
-       does not thin one measure, it moves the stimulus for two more. Noticing
-       none of them is still a valid answer and is still allowed; it takes a
-       second press and says so. */
-    if (!state.selected.length && !confirming) {
-      confirming = true;
-      $("auditory-note").textContent = strings.confirm_none;
-      note("auditory.empty_confirm_asked", {});
-      return;
-    }
-    stop();
-    if (!mix.paused) mix.pause();
-    window.removeEventListener("resize", relayout);
     submit.disabled = true;
-    const lanes = Object.fromEntries(state.lanes);
-    const result = await api("/api/auditory", {
-      participant: state.participant,
-      selected: state.selected,
-      lanes,
-    });
+    const heard = {};
+    for (const family of detail.families) heard[family] = answers.get(family) === true;
+    await flush();
+    const result = await api("/api/auditory", { participant: state.participant, heard });
     if (result) render(result.step);
-    else submit.disabled = false;
+    else count();
   };
 
   show("screen-auditory");
@@ -1205,11 +1063,24 @@ async function renderWaiting() {
      GET is answered while it is still in flight. Best-effort like the event
      stream: a poll that fails leaves the bar where it was, because a progress
      display may not be the thing that ends a session. */
+  /* §6 is the one wait the session already has, and the clip that follows it
+     is 5–7 MB the participant would otherwise wait for a second time, from a
+     standing start, on the next screen. So it is fetched here, behind a bar
+     they are already watching. Nothing about the viewing changes: it is the
+     same whole-file-then-play that §3 does, only started earlier, and if this
+     has not finished by the time the screen opens the viewing awaits it rather
+     than asking again. Once only — the poll runs every 700 ms. */
+  const warm = (segment) => {
+    if (state.warming || !segment) return;
+    state.warming = { segment, clip: prefetchClip(`/media/video/${segment}`, "view_regenerated") };
+  };
+
   const poll = async () => {
     try {
       const response = await fetch(`/api/regenerate/progress?participant=${state.participant}`);
       if (!response.ok) return;
       const at = await response.json();
+      warm(at.next_segment);
       if (at.writing) paintSlots(at.done, at.total);
     } catch {
       /* the next poll will do */
@@ -1243,6 +1114,9 @@ function renderDone() {
     at: new Date().toISOString().replace("T", " ").slice(0, 19),
   });
   $("done-for").textContent = copy.for_researcher;
+  // Off the study machine the server keeps the log to itself, and a button
+  // that led to that refusal would replace this screen with an error body.
+  $("done-for").parentElement.hidden = !state.download;
   const button = $("done-download");
   button.textContent = state.strings.actions.download;
   // Navigate rather than open a tab: the server sends the log as an
@@ -1275,8 +1149,34 @@ async function render(step) {
 
 async function boot() {
   try {
+    /* The copy and the enrolment are asked for at once. Neither needs anything
+       from the other — the enrolment carries the identifier and the code from
+       the URL, the copy is the same for everyone — and asking in turn spent two
+       round trips on the landing screen where one does. On the published link
+       a round trip is not free, and this is the one place the participant is
+       looking at nothing at all. */
+    const stored = window.sessionStorage.getItem("regen.participant");
+    const code = new URLSearchParams(window.location.search).get("code");
+    const enrolment = stored ? { participant: stored } : {};
+    if (code) enrolment.code = code;
+    const asked = fetch("/api/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(enrolment),
+    })
+      .then((response) => response.json())
+      // A request in flight before anything awaits it would otherwise reject
+      // into nobody's hands. The failure becomes the shape the screen below
+      // already reads, and is reported there rather than in the console.
+      .catch((error) => ({ error: error.message }));
     const meta = await fetch("/api/strings").then((response) => response.json());
-    state.strings = meta.strings;
+    state.chrome = meta.strings;
+    // English until the enrolment says which language this session reads. The
+    // screens reachable before that answer — the closed screen for a stale
+    // link, the error screen for an enrolment that failed — are read by
+    // someone who has no language on record, and both are drawn from
+    // `state.strings`.
+    state.strings = state.chrome.en || Object.values(state.chrome)[0];
     state.scale = meta.scale;
     state.minimumPoints = meta.minimum_points;
     state.ceilingMs = meta.latency_ceiling_ms || state.ceilingMs;
@@ -1286,15 +1186,15 @@ async function boot() {
     document.title = state.strings.app_title;
     document.documentElement.style.setProperty("--points", String(meta.scale.points));
     // The identifier survives a reload; a fresh tab with none enrols anew (§1).
-    const stored = window.sessionStorage.getItem("regen.participant");
-    const session = await fetch("/api/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(stored ? { participant: stored } : {}),
-    }).then((response) => response.json());
+    // The study link may carry an access code; a published instrument refuses
+    // new enrolments without it. It rides only the enrolment, sent above.
+    const session = await asked;
+    if (session.closed) return closed();
     if (session.error) return fail(session.error, session.error);
     state.participant = session.participant;
+    state.download = session.download !== false;
     state.language = session.language || state.languages[0] || "en";
+    state.strings = state.chrome[state.language] || state.chrome.en;
     state.languageLocked = Boolean(session.language_locked);
     document.documentElement.lang = state.language;
     window.sessionStorage.setItem("regen.participant", session.participant);

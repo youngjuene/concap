@@ -32,14 +32,17 @@
    landmark called Progress with six empty spans inside it. */
 .rail { flex: 1; }
 .rail ol { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; list-style: none; }
-.rail .n { display: block; font: 10.5px/1.4 var(--mono); color: var(--rule); margin-bottom: 5px; }
+.rail .n { display: block; font: 10.5px/1.4 var(--mono); color: var(--ahead); margin-bottom: 5px; }
 .rail .name {
   display: block;
   min-height: 34px;
   margin-bottom: 8px;
   font-size: 13px;
   line-height: var(--leading-ui);
-  color: var(--rule);
+  /* The steps still ahead. Faint on purpose, but this is the participant's
+     only "where am I" indicator, so it is the faintest text that still
+     clears 4.5:1 rather than the border grey it used to borrow. */
+  color: var(--ahead);
 }
 .rail .bar { display: block; height: 3px; border-radius: 2px; background: var(--hairline); }
 .rail .done .n, .rail .done .name { color: var(--dim); }
@@ -54,16 +57,43 @@
    as a bug, and in a supervised session that becomes a question for the
    researcher mid-run. The reason is printed rather than left in a title. */
 .languages { flex: 0 0 auto; position: relative; }
-.languages .pair { display: flex; gap: 6px; }
-.languages button { min-height: var(--target); padding: 0 20px; font-size: 13px; }
-.languages button.at { background: var(--accent); border-color: var(--accent); color: #FFFFFF; }
+/* One pill holding two segments, rather than two separate buttons with a gap.
+   The pair is a single choice with exactly two answers and no third state, and
+   a segmented control is the shape that says so — two bordered rectangles side
+   by side read as two independent things to press, which is what a gap makes
+   them look like. The track carries the border and the rounding; the segments
+   carry neither until one of them is the answer. */
+.languages .pair {
+  display: flex;
+  gap: 0;
+  padding: 3px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.languages button {
+  min-height: calc(var(--target) - 8px);
+  padding: 0 16px;
+  font-size: 13px;
+  border: 0;
+  background: none;
+  border-radius: 999px;
+  color: var(--dim);
+}
+/* The hover on the base button moves a border this control does not have, so
+   it is restated as the thing that is actually visible here. */
+.languages button:hover:not(:disabled):not(.at) { background: var(--accent-wash); color: var(--ink); }
+.languages button.at { background: var(--accent); color: #FFFFFF; }
 /* Locked, and still saying which one is in force. The generic disabled fill is
    darker than the panel, so a locked pair styled with it alone pointed at the
    wrong language: the greyer chip read as the chosen one. The language being
-   read keeps the accent; the one that is no longer on offer recedes. */
+   read keeps the accent; the one that is no longer on offer recedes. The track
+   greys instead, which is what carries "no longer a control" now that the
+   segments have no border of their own. */
+.languages button:disabled { background: none; color: var(--dim); cursor: not-allowed; }
+.languages .pair:has(button:disabled) { background: var(--muted-fill); border-color: var(--rule); }
 .languages button.at:disabled {
   background: var(--accent-wash);
-  border-color: var(--accent);
   color: var(--accent-press);
 }
 .languages .locked {
@@ -289,34 +319,6 @@ p.lede {
   color: #FFFFFF;
 }
 
-/* §5 — the lanes. Playback and selection are separate controls with separate
-   hit areas, which the spec requires and the grid enforces: they sit at
-   opposite ends of the row and are never nested.
-
-   Selection is a checkbox now. It is a multi-choice set, and it was five
-   buttons with no aria-pressed and no fieldset whose label swapped between
-   Select and Selected — so a screen reader heard "Select, button" five times
-   and never learned that any of them was on, and a sighted participant had to
-   press a button labelled Selected in order to deselect. One real control
-   fixes the semantics, the label and the state together. */
-.mix {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 16px 18px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  margin-bottom: 24px;
-}
-.mix .play { flex: 0 0 auto; width: 56px; height: 56px; min-height: 0; padding: 0; border-radius: var(--radius); font-size: 17px; }
-.mix .body { flex: 1; min-width: 0; }
-.mix .title { font: 600 14.5px/1.35 var(--body); margin-bottom: 8px; }
-.mix .clock { flex: 0 0 auto; font: 12.5px/1.4 var(--mono); color: var(--body-ink); }
-
-.track { height: 8px; border-radius: 4px; background: var(--hairline); overflow: hidden; }
-.track i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
-
 /* A fieldset, because the five lanes are one multi-choice set and a screen
    reader needs to be told so once rather than five times. Its default border,
    and the min-width: min-content that would let one long label widen the whole
@@ -324,63 +326,55 @@ p.lede {
 .lanes { display: flex; flex-direction: column; gap: 8px; border: 0; min-width: 0; }
 .lanes legend { margin-bottom: 10px; }
 
-.lane {
+/* One family, one question, two answers. The waveform lanes this replaces
+   carried a canvas, a playhead and a playback control per source; a fixed
+   judgment on five families needs a name, an example and a pair of radios,
+   so the row is a two-column grid rather than the five-track one it was. */
+.family {
   display: grid;
-  /* The label track sizes to its own content. A fixed 96px fitted "Road
-     traffic" and turned 멀리서 들리는 목소리 into three lines, which pushed the
-     row taller than its waveform and misaligned it against its neighbours —
-     the same lesson the actions track had already learned once. */
-  grid-template-columns: auto minmax(150px, max-content) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   padding: 10px 14px;
   border: 1px solid var(--rule);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   background: var(--panel);
 }
-
-.lane.selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-/* A lane whose stem would not play. Dimmed, not removed: it is still a
-   source the participant may have heard, and §5 still takes the selection. */
-.lane.unplayable canvas { opacity: 0.35; }
-.lane.unplayable .label { color: var(--dim); }
-
-.lane .play { width: var(--target); height: var(--target); min-height: 0; padding: 0; font-size: 14px; }
-.lane .label { font: 13px/var(--leading-ui) var(--body); display: flex; align-items: baseline; gap: 9px; }
-/* identity.css exempts these lanes from its no-meaningful-colour rule because
-   the colours identify sources. The colour only ever appeared inside the
-   waveform, with no legend, so it identified nothing the participant could
-   name; against the label it does. */
-.lane .chip {
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  border: 1px solid rgba(22, 24, 26, 0.28);
-  align-self: center;
+.family .label { font: 15px/var(--leading-ui) var(--body); min-width: 0; }
+/* The examples are the answer to "Sounds of things" being a taxonomy node
+   rather than a phrase a participant can act on. */
+.family .label small {
+  display: block;
+  margin-top: 3px;
+  font: 12px/var(--leading-ui) var(--body);
+  color: var(--dim);
 }
-.lane .label small { display: block; margin-top: 3px; font: 10px/var(--leading-ui) var(--mono); color: var(--dim); }
-
-.lane .wave { position: relative; min-width: 0; }
-/* min-width: 0 above, or the canvas's own backing width becomes the track's
-   minimum and the lane grows past the column it was given. */
-.lane canvas { width: 100%; height: 48px; display: block; cursor: pointer; border-radius: 4px; }
-.lane canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.lane .elapsed { display: block; margin-top: 3px; font: 10px/1.3 var(--mono); color: var(--dim); text-align: right; }
-
-.lane .choose {
+.family .choice { display: flex; gap: 6px; flex: 0 0 auto; }
+.family .choice label {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: var(--target);
-  padding: 0 4px 0 10px;
+  padding: 0 14px 0 10px;
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   cursor: pointer;
   font: 13px/1.3 var(--body);
   white-space: nowrap;
+  background: var(--ground);
 }
-.lane .choose input { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
-.lane .choose:hover { background: var(--accent-wash); }
+.family .choice label:hover { background: var(--accent-wash); border-color: var(--accent); }
+.family .choice input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+/* The answered row is marked on the row, not only inside the control: five
+   rows of two radios is a lot of small marks to scan for what is still blank,
+   and the count in the action bar says how many rather than which. */
+.family:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.family .choice label:has(input:checked) { background: var(--accent-wash); border-color: var(--accent); }
+
+@media (max-width: 620px) {
+  .family { grid-template-columns: minmax(0, 1fr); }
+  .family .choice { justify-content: flex-start; }
+}
 
 /* §3, §8 — the survey. One scale, stated once per block and kept on screen.
 
