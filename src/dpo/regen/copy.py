@@ -135,8 +135,15 @@ STRINGS: dict[str, Any] = {
     # examples underneath, because "Sounds of things" is a taxonomy label and
     # a participant should not have to guess what counts.
     "auditory": {
+        # "not whether you can hear it now" is the guard. It was written for
+        # this screen in an earlier commit and then lost when the whole block
+        # was replaced by the five-family redesign — the screen still carries
+        # the clip's audio, so without the sentence the question reads as
+        # being about what is audible on this page rather than about the
+        # viewing. There is a test for it now, which is what was missing.
         "instruction": "For each kind of sound, say whether you heard it while the clip was "
-        "playing. Answer all five — including the ones you did not hear.",
+        "playing — not whether you can hear it now. Answer all five, including the ones you "
+        "did not hear.",
         "legend": "The five kinds of sound",
         "families": {
             "human": "Human sounds",
@@ -283,8 +290,14 @@ KOREAN: dict[str, Any] = {
         # "이 장면을 이 장면답게" was a word-for-word calque that repeats 장면
         # twice in six syllables, and "클릭하신 다음, 다음 순간으로" stuttered.
         # Both sat in the sentence that has to be understood on first read.
-        "instruction": "이곳을 이런 곳으로 만드는 것들을 클릭해 주십시오. 이 장소를 설명한다면 "
-        "이름을 댈 사물이나 특징을 고르시면 됩니다. 이어서 다음 순간으로 넘어가십시오.",
+        # The English is one sentence and says nothing about moving on — the
+        # picker is the navigation and speaks for itself. The Korean had kept a
+        # third sentence telling the participant to advance, so the two arms
+        # were being given different instructions on the screen that produces
+        # half of §6's input. It also displaced the "또는" in `keyboard`, which
+        # then attached to advancing rather than to clicking.
+        "instruction": "이곳을 이곳답게 만드는 것들을 사진에서 클릭해 주십시오. 누군가에게 이 "
+        "장소를 설명한다면 이름을 댈 만한 사물이나 특징을 고르면 됩니다.",
         "keyboard": "또는 방향키로 십자선을 옮기고 Enter로 표시하실 수 있습니다.",
         "drag": "표시는 끌어서 옮길 수 있습니다. 옆의 ✕를 누르면 지워집니다.",
         "minimum": "계속하시려면 적어도 {minimum}곳은 표시해 주십시오.",
@@ -300,8 +313,8 @@ KOREAN: dict[str, Any] = {
         "plate": "{seconds}초의 화면입니다. 클릭하여 표시하십시오.",
     },
     "auditory": {
-        "instruction": "각 소리의 종류에 대해, 영상이 재생되는 동안 그 소리를 들었는지 답해 "
-        "주십시오. 듣지 못한 것까지 다섯 가지 모두 답해 주십시오.",
+        "instruction": "아래 다섯 가지 소리 각각에 대해, 지금 들리는지가 아니라 영상이 "
+        "재생되는 동안 들었는지를 답해 주십시오. 듣지 못한 것까지 모두 답해 주십시오.",
         "legend": "다섯 가지 소리의 종류",
         "families": {
             "human": "사람 소리",

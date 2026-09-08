@@ -133,3 +133,42 @@ class TestResolving:
         before = strings(STRINGS)
         strings_for("ko")
         assert strings(STRINGS) == before
+
+
+class TestTheTwoLoadBearingInstructions:
+    """§4 and §5 produce everything §6 is conditioned on.
+
+    Both of these guard a property that was written once, lost to a later
+    rewrite, and only found by re-reading the rendered screens. The gate could
+    not catch either, because nothing asserted them.
+    """
+
+    def test_the_sound_question_is_about_the_viewing_not_this_page(self) -> None:
+        """§5 still carries the clip's audio, so the contrast has to be stated.
+
+        Without it the question reads as being about what is audible on this
+        page. It was written for exactly that reason and then overwritten
+        wholesale when §5 was redesigned around the five families.
+        """
+        assert "not whether you can hear it now" in STRINGS["auditory"]["instruction"]
+        assert "지금 들리는지가 아니라" in KOREAN["auditory"]["instruction"]
+
+    def test_neither_language_tells_the_participant_to_move_on(self) -> None:
+        """The moment picker is the navigation and speaks for itself.
+
+        The Korean had carried a third sentence instructing the participant to
+        advance that the English did not have, so the two arms were given
+        different instructions on the screen that produces half of §6's input.
+        """
+        assert "next moment" not in STRINGS["visual"]["instruction"].lower()
+        assert "넘어가십시오" not in KOREAN["visual"]["instruction"]
+        assert "넘어가" not in KOREAN["visual"]["instruction"]
+
+    # There is deliberately no general "the two arms match" test here. The
+    # obvious proxy — equal sentence counts — fails honestly on this very
+    # copy: the English §4 instruction is one sentence with an em-dash clause
+    # and its Korean is naturally two. Making that test pass would mean
+    # bending the Korean to fit the assertion, which is backwards. What can be
+    # asserted is the specific property each rewrite lost, which is what the
+    # two tests above do; catching a *new* divergence still needs someone to
+    # read the two screens side by side.

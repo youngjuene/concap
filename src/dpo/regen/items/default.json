@@ -101,21 +101,21 @@
           "id": "caption_restorative_1",
           "text": {
             "en": "The captions made the scene feel more restful.",
-            "ko": "자막 덕분에 장면이 더 편안하게 느껴졌다."
+            "ko": "자막은 장면을 더 편안하게 느끼도록 만들었다."
           }
         },
         {
           "id": "caption_restorative_2",
           "text": {
             "en": "The captions helped me take in the place rather than distracting me from it.",
-            "ko": "자막은 장면에서 주의를 빼앗기보다 그곳을 받아들이는 데 도움이 되었다."
+            "ko": "자막은 내 주의를 장면에서 빼앗기보다, 그 장면을 더 잘 느끼게 해 주었다."
           }
         },
         {
           "id": "caption_restorative_3",
           "text": {
             "en": "Reading the captions pulled my attention away from the scene.",
-            "ko": "자막을 읽느라 장면에서 주의가 멀어졌다."
+            "ko": "자막을 읽느라 장면에 대한 주의가 흐트러졌다."
           },
           "reverse": true
         }
