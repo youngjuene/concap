@@ -141,19 +141,6 @@ def _unchanged(request: Request, etag: str, modified: float | None = None) -> bo
     return False
 
 
-def _played(lane: object) -> bool:
-    """Whether §5's lane statistics report this lane as having been played.
-
-    Total over anything the page could send, and false for a lane it did not
-    report or reported without a count: "no count" is not evidence that a
-    playback happened, and the flag this feeds says a selection was made
-    without one. The shape is refused separately, so a malformed batch is a
-    400 rather than a lane silently reading as unplayed.
-    """
-    plays = lane.get("plays") if isinstance(lane, Mapping) else None
-    return isinstance(plays, int) and not isinstance(plays, bool) and plays > 0
-
-
 def build_app(
     document: Mapping[str, Any],
     media_dir: Path,

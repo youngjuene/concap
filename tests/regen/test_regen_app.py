@@ -647,6 +647,44 @@ class TestSurface:
         served = client.get(f"/api/step/auditory?participant={participant}")
         assert "mask" not in json.dumps(served.json())
 
+    def test_the_fallback_track_never_reaches_the_browser(self, client: TestClient) -> None:
+        """A page holding it could show it before §6 decided it was needed.
+
+        The participant would then be reading the default policy under the
+        label of their own regeneration. This was asserted against
+        ``participant_document`` until that helper stopped being what the app
+        serves; it is asserted against the routes now, which is where a leak
+        would actually happen.
+
+        Each step is read while it is the *current* step. Read at the end of
+        the walk they all answer 409 — §9.1 blocks re-entry — and a test that
+        skipped those would assert nothing about four of the five payloads.
+        """
+        participant = enrol(client)
+        seen = 0
+
+        def check(step: str) -> None:
+            nonlocal seen
+            served = client.get(f"/api/step/{step}?participant={participant}")
+            assert served.status_code == 200, f"{step} was not the current step"
+            assert "Fallback" not in json.dumps(served.json()), step
+            seen += 1
+
+        check("view_prepared")
+        client.post(
+            "/api/viewing",
+            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
+        )
+        check("art")
+        answer(client, participant, "art")
+        check("visual")
+        client.post("/api/visual", json={"participant": participant, "points": POINTS})
+        check("auditory")
+        hear(client, participant)
+        client.post("/api/regenerate", json={"participant": participant})
+        check("view_regenerated")
+        assert seen == 5, "every step a participant can read was actually read"
+
 
 class TestRegenerationProgress:
     """§6 reports cues written, for the screen waiting on it and the console."""

@@ -240,7 +240,6 @@ def _validate_segment(raw: object, path: str, name: str, configuration: Configur
     # participant should meet — it is four failed slots and a fallback track
     # nobody asked for. Staged from the clip after loudness correction, so the
     # model hears what the participant hears. Server-side only; it is not in
-    # `participant_document` because no screen plays it.
     _relative(segment.get("audio"), f"{path}.audio")
     duration = _integer(segment.get("duration_ms"), f"{path}.duration_ms", minimum=1)
 
@@ -349,35 +348,3 @@ def track_of(document: Mapping[str, Any], name: str, which: str) -> tuple[Cue, .
     if which not in TRACKS:
         raise _fail("track", f"must be one of {list(TRACKS)}")
     return cues_of(segment_of(document, name)[which], configuration_of(document).language)
-
-
-def participant_document(document: Mapping[str, Any], name: str) -> dict[str, Any]:
-    """What the browser is given for one segment.
-
-    Mask files and the fallback track stay on the server. The masks because §4
-    matches once, on submission, and a browser holding the masks could match
-    continuously — the thing that rule exists to prevent. The fallback track
-    because a page that already has it could show it before §6 has decided
-    whether it is needed, and a participant would be reading the default policy
-    under the label of their own regeneration.
-    """
-    segment = segment_of(document, name)
-    return {
-        "segment": name,
-        "clip_id": segment["clip_id"],
-        "duration_ms": segment["duration_ms"],
-        "frames": [
-            {"index": index, "at_ms": frame["at_ms"]} for index, frame in enumerate(segment["frames"])
-        ],
-        "stems": [
-            {
-                "id": stem["id"],
-                "label": stem["label"],
-                "parent": stem.get("parent"),
-                "colour": stem["colour"],
-                "gain": stem["gain"],
-                "waveform": list(stem["waveform"]),
-            }
-            for stem in segment["stems"]
-        ],
-    }

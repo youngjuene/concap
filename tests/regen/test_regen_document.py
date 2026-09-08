@@ -12,7 +12,6 @@ from dpo.regen.document import (
     RegenDocumentError,
     load_regen_document,
     objects_of,
-    participant_document,
     slug,
     track_of,
     validate_regen_document,
@@ -121,37 +120,14 @@ class TestRefusals:
             validate_regen_document(document)
 
 
-class TestWhatTheBrowserGets:
-    def test_the_masks_never_leave_the_server(self, document: dict[str, Any]) -> None:
-        # §4 matches once, on submit. A browser holding the masks could match
-        # on every click, which is the thing that rule prevents. The strip
-        # travels as timings only; the pictures come one route at a time.
-        served = participant_document(document, "A")
-        assert all(set(entry) == {"index", "at_ms"} for entry in served["frames"])
-        assert "mask" not in json.dumps(served)
-        assert "still" not in json.dumps(served)
+class TestTheFamilyOnAStem:
+    """§5 records which families a clip carries, so the parent has to survive.
 
-    def test_the_fallback_track_never_leaves_the_server(self, document: dict[str, Any]) -> None:
-        assert "Fallback" not in json.dumps(participant_document(document, "A"))
-
-    def test_the_lanes_carry_what_they_need_to_be_drawn_and_played(self, document: dict[str, Any]) -> None:
-        stem = participant_document(document, "A")["stems"][0]
-        assert set(stem) == {"id", "label", "parent", "colour", "gain", "waveform"}
-
-    def test_a_lane_carries_its_family_when_the_document_names_one(self, document: dict[str, Any]) -> None:
-        document["segments"]["A"]["stems"][0]["parent"] = "Sounds of things"
-        validate_regen_document(document)
-        assert participant_document(document, "A")["stems"][0]["parent"] == "Sounds of things"
-
-    def test_a_lane_without_a_family_still_serves(self, document: dict[str, Any]) -> None:
-        # Stated on the stem rather than taken from the fixture's default: the
-        # fixture names a family for every stem now, because §5 records which
-        # families a clip carries and a parentless one would leave that
-        # untested. The property here is the other one — that a document which
-        # omits it is still servable.
-        document["segments"]["A"]["stems"][0].pop("parent", None)
-        validate_regen_document(document)
-        assert participant_document(document, "A")["stems"][0]["parent"] is None
+    What the browser is *given* is asserted at the routes now
+    (``tests/regen/test_regen_app.py``): the helper these tests used to call,
+    ``participant_document``, stopped being what the app serves when §5 became
+    five fixed families, and went with the screen it fed.
+    """
 
     def test_a_family_that_is_not_words_is_refused(self, document: dict[str, Any]) -> None:
         document["segments"]["A"]["stems"][0]["parent"] = 7
