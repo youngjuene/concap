@@ -29,13 +29,15 @@ six names only for their count. They are the headings now. A participant told
 they are on *What you heard*, four of six, is a participant who knows the wait
 is nearly over.
 
-``auditory.confirm_none`` is the one string here that changes an interaction.
-§5 could be finished in a single click, on a screen whose result conditions the
-captions the participant then rates in §7 and §8 — an empty §5 does not thin
-one measure, it moves the stimulus for two more. Submitting nothing is still a
-valid answer, so it is still allowed; it now takes a second press and says so,
-which costs a participant who means it one keystroke and stops the one who is
-scanning for the way forward.
+``auditory.heard`` and ``auditory.not_heard`` are the one pair here that
+changes an interaction. §5 conditions the captions the participant then rates
+in §7 and §8, so an unanswered family does not thin one measure, it moves the
+stimulus for two more. Both answers are offered explicitly rather than one
+checkbox, because a blank is a participant who has not answered and is not the
+same as one who did not hear; all five are required, and the count beside the
+submit says how many are left. The screen this replaced could be finished in a
+single click, and the string that guarded it — ``confirm_none``, a second press
+that said so — went with it.
 
 Section numbers cite ``docs/v3-regen/spec-behavior.md``; findings cite the
 interface audit in ``docs/v3-regen/interface-audit.md``.

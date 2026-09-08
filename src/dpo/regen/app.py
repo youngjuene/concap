@@ -836,28 +836,6 @@ def build_app(
     def video(request: Request, segment: str) -> Any:
         return _file_response(request, segment, "video")
 
-    @app.get("/media/audio/{segment}")
-    def audio(request: Request, segment: str) -> Any:
-        """§5's reference mix: the clip's own sound, without the clip's picture.
-
-        The mix used to be the mp4, played through an ``Audio`` element that
-        downloaded all of it — six megabytes fetched a second time, on a screen
-        that shows no video, for the quarter of a megabyte of sound inside. The
-        audio track is copied out rather than re-encoded, so this is the same
-        bitstream the participant heard in §3 at the same level, which is what
-        §5 requires of it. Where the copy cannot be made the clip is served
-        whole, exactly as before.
-        """
-        try:
-            entry = segment_of(document, segment)
-        except ValueError as exc:
-            return _error(404, str(exc))
-        resolved = _media(str(entry["video"]))
-        if isinstance(resolved, JSONResponse):
-            return resolved
-        path, media_type = derivatives.sound(resolved)
-        return _serve(request, path, media_type)
-
     @app.get("/media/frame/{segment}/{index}")
     def frame(request: Request, segment: str, index: int) -> Any:
         """One frame of §4's strip. The masks for it never leave the server.
@@ -914,7 +892,7 @@ def build_app(
     return app
 
 
-def warm_derivatives(document: Mapping[str, Any], media_dir: Path) -> tuple[int, int, int]:
+def warm_derivatives(document: Mapping[str, Any], media_dir: Path) -> tuple[int, int]:
     """Make every web-sized copy the document will ask for, before anyone asks.
 
     Encoding on first request would put the cost on a participant — the first
@@ -923,18 +901,13 @@ def warm_derivatives(document: Mapping[str, Any], media_dir: Path) -> tuple[int,
     instrument's behaviour the same for the first session as for the tenth.
     """
     derivatives = Derivatives(Path(media_dir))
-    stills: list[Path] = []
-    sounds: list[Path] = []
-    for name in document["segments"]:
-        entry = segment_of(document, name)
-        clip = Path(media_dir) / str(entry["video"])
-        if clip.is_file():
-            sounds.append(clip)
-        for moment in frames_of(document, name):
-            still = Path(media_dir) / str(moment["still"])
-            if still.is_file():
-                stills.append(still)
-    return derivatives.warm(stills, sounds)
+    stills = [
+        still
+        for name in document["segments"]
+        for moment in frames_of(document, name)
+        if (still := Path(media_dir) / str(moment["still"])).is_file()
+    ]
+    return derivatives.warm(stills)
 
 
 def run_regen_app(
@@ -951,7 +924,7 @@ def run_regen_app(
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
     app = build_app(document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate)
-    stills, sounds, whole = warm_derivatives(document, Path(media_dir))
-    print(f"web copies ready: {stills} stills, {sounds} soundtracks", end="")
+    stills, whole = warm_derivatives(document, Path(media_dir))
+    print(f"web copies ready: {stills} stills", end="")
     print(f"; {whole} served whole" if whole else "", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="warning")

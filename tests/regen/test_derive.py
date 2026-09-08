@@ -1,23 +1,18 @@
 """How the staged media reaches the browser: what is sent, and what is sent twice.
 
-The instrument's media is archival — full-resolution stills because §4's masks
-were cut from those pixels, one clip carrying both tracks because that is what
-§3 plays. What a participant should be made to download is a different question,
-and these are the answers to it: a web-sized copy where one can be made, the
-source where one cannot, and in both cases enough of a cache to stop the same
-bytes arriving a second time.
+The instrument's media is archival — full-resolution stills, because §4's masks
+were cut from those pixels. What a participant should be made to download is a
+different question, and these are the answers to it: a web-sized copy where one
+can be made, the source where one cannot, and in both cases enough of a cache to
+stop the same bytes arriving a second time.
 
-The two properties that matter to the study, rather than to the network, are
-asserted here as well: the still keeps its dimensions, so a mark lands where it
-was put, and the clip's audio is copied rather than re-encoded, so §5's mix is
-the sound §3 played.
+The property that matters to the study rather than to the network is asserted
+here as well: the still keeps its dimensions, so a mark lands where it was put.
 """
 
 from __future__ import annotations
 
 import random
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +23,6 @@ from PIL import Image
 from dpo.regen.app import build_app, warm_derivatives
 from dpo.regen.derive import Derivatives
 from dpo.regen.regeneration import RegenTemplateWriter
-
-ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg to copy an audio track")
 
 
 @pytest.fixture
@@ -107,97 +100,6 @@ class TestTheStill:
         assert response.headers["content-type"] == "image/png"
 
 
-class TestTheReferenceMix:
-    @ffmpeg
-    def test_it_is_the_sound_without_the_picture(self, media_dir: Path, tmp_path: Path) -> None:
-        # Built here rather than in the fixture: the staged clip is a stub, and
-        # this is the one test that needs a real container to copy out of.
-        clip = media_dir / "A" / "clip.mp4"
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "testsrc=size=320x240:rate=30:duration=2",
-                "-f",
-                "lavfi",
-                "-i",
-                "sine=frequency=440:duration=2",
-                "-c:v",
-                "libx264",
-                "-c:a",
-                "aac",
-                "-shortest",
-                str(clip),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        derived, media_type = Derivatives(media_dir).sound(clip)
-        assert derived != clip, "a clip with an audio track has a soundtrack to serve"
-        assert media_type == "audio/mp4"
-        assert derived.stat().st_size < clip.stat().st_size
-
-    @ffmpeg
-    def test_the_audio_is_copied_rather_than_re_encoded(self, media_dir: Path) -> None:
-        """§5 compares a stem against the memory of §3. The mix has to be §3's sound.
-
-        A re-encode would be a second, quieter rendering of it, and the
-        comparison the screen asks for would be against something the
-        participant never heard. So the bitstream is asserted, not the duration.
-        """
-        clip = media_dir / "A" / "clip.mp4"
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "testsrc=size=320x240:rate=30:duration=2",
-                "-f",
-                "lavfi",
-                "-i",
-                "sine=frequency=440:duration=2",
-                "-c:v",
-                "libx264",
-                "-c:a",
-                "aac",
-                "-shortest",
-                str(clip),
-            ],
-            check=True,
-            capture_output=True,
-        )
-
-        def bitstream(path: Path) -> bytes:
-            done = subprocess.run(
-                ["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-c:a", "copy", "-f", "md5", "-"],
-                check=True,
-                capture_output=True,
-            )
-            return done.stdout
-
-        derived, _ = Derivatives(media_dir).sound(clip)
-        assert bitstream(derived) == bitstream(clip)
-
-    def test_a_clip_with_no_soundtrack_to_copy_is_served_whole(self, client: TestClient) -> None:
-        # The fixture stages a stub for the clip, so nothing can be copied out
-        # of it. §5 still gets a mix: the file the route always returned.
-        response = client.get("/media/audio/A")
-        assert response.status_code == 200
-        assert response.content == b"\x00"
-
-    def test_an_unknown_segment_has_no_mix(self, client: TestClient) -> None:
-        assert client.get("/media/audio/Z").status_code == 404
-
-
 class TestFetchingTwice:
     def test_a_still_the_browser_already_holds_is_not_sent_again(self, client: TestClient) -> None:
         first = client.get("/media/frame/A/0")
@@ -251,17 +153,20 @@ class TestWarming:
         for name in ("A", "B"):
             for frame in document["segments"][name]["frames"]:
                 photograph(media_dir / str(frame["still"]))
-        stills, _, whole = warm_derivatives(document, media_dir)
-        assert stills == 10, "five moments in each of two segments"
-        assert whole == 2, "the fixture's clips are stubs with no audio to copy"
+        made, whole = warm_derivatives(document, media_dir)
+        assert made == 10, "five moments in each of two segments"
+        assert whole == 0
 
     def test_it_is_reported_rather_than_assumed(self, document: dict[str, Any], media_dir: Path) -> None:
         # A count short of what was asked for is the operator's signal that
         # something is being served whole, which is the thing worth knowing.
+        for name in ("A", "B"):
+            for frame in document["segments"][name]["frames"]:
+                photograph(media_dir / str(frame["still"]))
         (media_dir / str(document["segments"]["A"]["frames"][0]["still"])).write_bytes(b"broken")
-        stills, _, whole = warm_derivatives(document, media_dir)
-        assert stills == 9
-        assert whole == 3
+        made, whole = warm_derivatives(document, media_dir)
+        assert made == 9
+        assert whole == 1
 
 
 class TestTheCache:

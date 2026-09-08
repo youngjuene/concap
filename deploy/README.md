@@ -89,11 +89,10 @@ nothing about the procedure.
 - **Bandwidth.** Tailscale caps Funnel bandwidth and does not publish the
   number. A slow link means a longer "Preparing the clip…" before Start, not
   a different stimulus: the page fetches the whole clip before it enables
-  Start and plays it from memory. That fetch is the only heavy one left. The
-  other screens are served web-sized copies made at startup — §4's strip of
-  five stills is half a megabyte rather than six, §5's reference mix a
-  quarter of one rather than six — and a picture already seen is not fetched
-  again. See the runbook's "While it is open".
+  Start and plays it from memory. That fetch is the only heavy one left: §4's
+  strip of five stills is served as web-sized copies made at startup, half a
+  megabyte rather than six, and a picture already seen is not fetched again.
+  See the runbook's "While it is open".
 - **The certificate.** Tailscale fetches a Let's Encrypt certificate for
   the node's name at the first HTTPS request; `make open` waits for it.
 

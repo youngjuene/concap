@@ -246,22 +246,18 @@ does not restart on its own, and `make open` starts it.
 - One tab, as ever. The log download on the last screen lands in the
   participant's browser; the copy that matters is under `--out` on this
   machine.
-- **§4 and §5 are served web copies, not the staged files.** The staged
-  stills are full-resolution PNGs because the masks were cut from those
-  pixels, and the clip is one container because §3 plays it; neither is what
-  a browser should download. So a WebP of each still at its own size, and
-  the clip's audio track copied into a container of its own, are made once
-  and served instead — §4's strip falls from 6.4 MB to 0.5 MB and §5's
-  reference mix from 6.2 MB to 0.24 MB. Nothing is re-staged: the files under
-  `--media-dir` are untouched, and the copies sit beside them in `.derived/`,
-  keyed by what they were made from, so a re-staged clip is never answered
-  for by the old picture. They are made at startup — `dpo regen serve` prints
-  *web copies ready: 10 stills, 2 soundtracks* — and a count of *served
-  whole* means a derivative could not be made and the source is going out
-  instead, which costs bandwidth and nothing else. The still keeps its
-  dimensions, so §4's marks land where they were put, and the audio is
-  copied rather than re-encoded, so §5's mix is the sound §3 played.
-  `--media-dir` may be read-only: the copies are then skipped with a warning.
+- **§4 is served web copies, not the staged files.** The staged stills are
+  full-resolution PNGs because the masks were cut from those pixels, which is
+  not what a browser should download. So a WebP of each still at its own size
+  is made once and served instead, and §4's strip falls from 6.4 MB to 0.5 MB.
+  Nothing is re-staged: the files under `--media-dir` are untouched, and the
+  copies sit beside them in `.derived/`, keyed by what they were made from, so
+  a re-staged clip is never answered for by the old picture. They are made at
+  startup — `dpo regen serve` prints *web copies ready: 10 stills* — and a
+  count of *served whole* means a derivative could not be made and the source
+  is going out instead, which costs bandwidth and nothing else. The still
+  keeps its dimensions, so §4's marks land where they were put. `--media-dir`
+  may be read-only: the copies are then skipped with a warning.
 - **The second clip is fetched during §6's wait.** The two viewings play
   different segments, so the second is 5–7 MB the participant would otherwise
   wait for again, from a standing start, behind *Preparing the clip…*. §6 is
