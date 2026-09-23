@@ -47,17 +47,18 @@ unknown in exports. Playback coverage is browser-reported, not proof of attentio
 
 Phase 2 persists video drafts as `{video_id, answers}` and renders frozen group
 headings. Accepted settings events include `settings_revision` and control origin
-(slider, pad, preset or reset). New sessions suppress unchanged settings revisions
-and generation scheduling; queued superseded controls are coalesced. Exposures
+(slider, preset or reset; historical events may also report pad input). New sessions
+suppress unchanged settings revisions and generation scheduling; queued superseded
+controls are coalesced. Exposures
 still identify actual displayed captions, independently of selected values.
 
 Newly compiled viewing profiles freeze a `detail_control` contract with version
 `five-level/v1`. Each slider selects an integer from 1 to 5: Very little, A little,
 A moderate amount, Quite a lot, or A lot. The stored axes remain normalized to
 `0, 0.25, 0.5, 0.75, 1`; the API rejects intermediate values for these profiles.
-The pad snaps to the same five-by-five grid, presets select its corners, and reset
-restores the frozen initial levels. Selected levels update immediately; applied
-levels describe only the caption that is currently displayed. Prepared fallback
+The panel contains two labeled sliders, presets for the four extreme combinations,
+and Reset to restore the frozen initial levels. Selected levels update immediately;
+applied levels describe only the caption that is currently displayed. Prepared fallback
 captions do not claim that the selected levels were applied.
 
 Edit `DETAIL_CONTROL` in `study_schema.py` to change the labels or replace one of

@@ -217,12 +217,19 @@ async function applyControls(page, index) {
     await page.waitForFunction(() => fetch(new URL("api/study/state", location.href), { credentials: "same-origin" })
       .then(r => r.json()).then(s => s.axes.texture > 0.5), null, { timeout: 10000 });
   } else {
-    const box = await page.locator(".detail-pad").boundingBox();
-    check(Boolean(box), "detail pad missing");
-    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.25);
+    const texture = page.getByRole("slider").first(), context = page.getByRole("slider").nth(1);
+    const textureBefore = await texture.inputValue(), contextBefore = await context.inputValue();
+    const box = await context.boundingBox();
+    check(Boolean(box), "source/scene slider missing");
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.1);
+    await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2, {steps: 4});
     await page.mouse.up();
+    check(await context.inputValue() !== contextBefore, "pointer drag changes source/scene detail");
+    check(await texture.inputValue() === textureBefore, "source/scene pointer drag leaves acoustic detail unchanged");
+    await context.press("End");
+    await page.waitForFunction(() => fetch(new URL("api/study/state", location.href), { credentials: "same-origin" })
+      .then(r => r.json()).then(s => s.axes.context === 1), null, { timeout: 10000 });
     await page.waitForTimeout(600);
     await clickViewingButton(page, "Fullscreen");
     await clickViewingButton(page, "Exit fullscreen");

@@ -24,9 +24,12 @@ test('five ordinal inputs map to exact stored quarter steps and meaningful label
     assert.equal(s.display(axis), `${input}/5 · ${label}`);
   }
 });
-test('pointer positions snap to five cells, including boundaries and clamped edges', () => {
+test('out-of-range stored values render within the ordinal slider bounds', () => {
   const s = scale();
-  for (const [input, expected] of [[-.1,0],[.12,0],[.125,.25],[.37,.25],[.375,.5],[.62,.5],[.625,.75],[.87,.75],[.875,1],[1.1,1]]) assert.equal(s.snap(input), expected);
+  assert.equal(s.toInput(-.1), 1);
+  assert.equal(s.toInput(1.1), 5);
+  assert.equal(s.display(-.1), '1/5 · Very little');
+  assert.equal(s.display(1.1), '5/5 · A lot');
 });
 test('localized display comes from the frozen contract and does not confuse selected axes', () => {
   const custom = structuredClone(contract);
@@ -40,7 +43,6 @@ test('profiles without a control contract preserve legacy percentages and contin
   const s = scale(null);
   assert.deepEqual([s.min,s.max,s.step],[0,100,1]);
   assert.equal(s.fromInput(51), .51);
-  assert.equal(s.toInput(.77), 77);
-  assert.equal(s.snap(.773), .77);
+  assert.equal(s.toInput(.773), 77);
   assert.equal(s.display(.08), '8%');
 });

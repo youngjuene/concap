@@ -264,13 +264,18 @@ async function applyControls(page, index) {
     await page.keyboard.press("ArrowRight");
     await waitState(page, "state => state.axes.texture > 0.5");
   } else {
-    const box = await page.locator(".detail-pad").boundingBox();
-    check(Boolean(box), "Detail drag pad is present");
-    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.25);
+    const texture = page.getByRole("slider").first(), context = page.getByRole("slider").nth(1);
+    const textureBefore = await texture.inputValue(), contextBefore = await context.inputValue();
+    const box = await context.boundingBox();
+    check(Boolean(box), "Source/scene slider is present");
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.1);
+    await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2, {steps: 4});
     await page.mouse.up();
-    await waitState(page, "state => state.axes.texture >= 0.85 && state.axes.context >= 0.85");
+    check(await context.inputValue() !== contextBefore, "Pointer drag changes source/scene detail");
+    check(await texture.inputValue() === textureBefore, "Source/scene pointer drag leaves acoustic detail unchanged");
+    await context.press("End");
+    await waitState(page, "state => state.axes.context === 1");
     await clickViewingButton(page, "Fullscreen");
     await page.waitForFunction(() => Boolean(document.fullscreenElement), null, { timeout: 10000 });
     await clickViewingButton(page, "Exit fullscreen");
@@ -293,17 +298,20 @@ async function finishRealVideo(page, locale, index) {
     await page.locator("video").evaluate(video => { video.play().catch(() => {}); });
     await page.waitForFunction(start => document.querySelector("video").currentTime > start + 2, playbackStart, {timeout: 120000});
     await page.getByText(await viewingLabel(page, "Detail presets"), {exact: true}).click();
+    const discrete = state.detail_control?.version === "five-level/v1";
     for (const [preset, percent] of [["Both detailed", 100], ["Both brief", 0]]) {
       const changedAt = Date.now();
       await clickViewingButton(page, preset);
-      await page.waitForFunction(percent => {
-        const status = document.querySelector(".study-controls [role=status]")?.textContent || "";
-        const levels = [...status.matchAll(/(\d+)%/g)].map(match => Number(match[1]));
+      const expectedLevel = discrete ? 1 + percent / 25 : percent;
+      await page.waitForFunction(({expectedLevel, discrete}) => {
+        const status = document.querySelector(".caption-level-status")?.textContent || "";
+        const levels = [...status.matchAll(discrete ? /(\d+)\/5/g : /(\d+)%/g)].map(match => Number(match[1]));
         return document.querySelector("video").currentTime > 0 &&
-          levels.length === 2 && levels.every(value => value === percent);
-      }, percent, {timeout: 90000});
-      check(true, `${locale} video ${index + 1} displayed a generated caption at ${percent}% detail`);
-      const timing = {event:"steering-applied",locale,video:index+1,percent,ms:Date.now()-changedAt};
+          levels.length === 2 && levels.every(value => value === expectedLevel);
+      }, {expectedLevel, discrete}, {timeout: 90000});
+      check(true, `${locale} video ${index + 1} displayed a generated caption at ${expectedLevel}${discrete ? "/5" : "%"} detail`);
+      const timing = {event:"steering-applied",locale,video:index+1,percent,
+        ...(discrete ? {level:expectedLevel} : {}),ms:Date.now()-changedAt};
       steeringTimings.push(timing); console.log(JSON.stringify(timing));
     }
     await clickViewingButton(page, "Reset to calibration");

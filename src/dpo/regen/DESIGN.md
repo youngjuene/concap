@@ -2,7 +2,7 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-09-22
+- Last refreshed: 2026-09-23
 - Surfaces: paired short-clip calibration, per-video questions, chapter-level PRSS.
 - Evidence: `app.py`, `regen.js`, `study_api.py`, `study.js`, `items/default.json`, `identity.css`.
 
@@ -60,14 +60,15 @@ reserved caption band, white controls. Respect reduced motion.
 
 ## Components
 Reuse primary/secondary buttons, eyebrow/head/lede hierarchy and bordered panels.
-Add a two-stage progress rail, typed survey fields, visual-point editor and two-axis
-pad. Native sliders are synchronized keyboard-accessible alternatives to dragging.
+Add a two-stage progress rail, typed survey fields and a visual-point editor.
+Viewing controls use two labeled native sliders, presets and Reset. Each slider
+supports pointer and keyboard input for its own detail dimension.
 All surfaces use the same button geometry and caption/control terminology.
 
 Steering feedback uses a compact volume-style overlay at the top of the video,
 away from its captions and playback controls. It displays both **selected** detail
-levels as filled bars and percentages, with no implication of sound volume or
-model confidence. Sliders appear before the optional two-axis pad. Input reveals
+levels as filled bars and values, with no implication of sound volume or
+model confidence. Input on either slider reveals
 the overlay; holding a pointer keeps it visible; it fades after 1.5 seconds of
 idle time. New input restarts that hold. Reduced motion removes the transition.
 The overlay is non-interactive and duplicates the accessible native slider values.

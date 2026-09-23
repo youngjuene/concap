@@ -33,7 +33,6 @@ function captionDetailScale(contract, language) {
   return {
     discrete, min: discrete ? 1 : 0, max: discrete ? 5 : 100, step: 1,
     labels, toInput, fromInput, compact,
-    snap: value => fromInput(toInput(value)),
     display: value => discrete ? `${compact(value)} · ${labels[toInput(value) - 1]}` : compact(value),
   };
 }
@@ -380,10 +379,7 @@ function watching() {
   const panel = el("aside", undefined, "study-card study-controls");
   panel.append(el("h2", "Your caption detail"), el("p", detailScale.discrete
     ? "Choose a level from 1 to 5 for each kind of detail. Changes apply with a new caption once it is ready."
-    : "Move the point or use the sliders. Changes apply at a caption boundary."));
-  const pad = el("div", undefined, "detail-pad"); pad.setAttribute("aria-hidden", "true");
-  if (detailScale.discrete) pad.classList.add("detail-pad-discrete");
-  const dot = el("span", undefined, "detail-dot"); pad.append(dot);
+    : "Use the sliders to adjust caption detail. Changes apply at a caption boundary."));
   const desired = {...state.axes}, ranges = {}, labels = {};
   const settingsKey = axes => JSON.stringify({texture: axes.texture, context: axes.context});
   let acceptedSettingsKey = settingsKey(desired), pendingSettings = null, sendingSettings = false, failedSettings = null;
@@ -392,7 +388,6 @@ function watching() {
   let seekGeneration = 0, acknowledgedSeek = 0;
   const status = el("p", "Your calibrated settings are ready."); status.setAttribute("role", "status");
   const updateControls = (reveal = false) => {
-    dot.style.left = `${desired.context * 100}%`; dot.style.top = `${(1 - desired.texture) * 100}%`;
     for (const key of ["texture", "context"]) {
       const percent = Math.round(desired[key] * 100);
       ranges[key].value = detailScale.toInput(desired[key]);
@@ -479,14 +474,8 @@ function watching() {
     };
     input.onchange = () => commit(`slider:${key}`);
   }
-  panel.append(el("div", "More acoustic detail ↑", "pad-key"), pad, el("div", "More source and scene detail →", "pad-key"));
   document.addEventListener("pointerup", releaseMeter);
   document.addEventListener("pointercancel", releaseMeter);
-  const move = event => { const box = pad.getBoundingClientRect(); desired.context = detailScale.snap((event.clientX - box.left) / box.width); desired.texture = detailScale.snap(1 - (event.clientY - box.top) / box.height); updateControls(true); };
-  pad.onpointerdown = event => { holdMeter(event); pad.setPointerCapture(event.pointerId); move(event); };
-  pad.onlostpointercapture = releaseMeter;
-  pad.onpointermove = event => { if (pad.hasPointerCapture(event.pointerId)) move(event); };
-  pad.onpointerup = event => { if (pad.hasPointerCapture(event.pointerId)) { move(event); pad.releasePointerCapture(event.pointerId); commit("pad"); } };
   const presets = el("div", undefined, "presets");
   for (const [name, texture, context] of [["Both brief", 0, 0], ["More texture", 1, 0], ["More context", 0, 1], ["Both detailed", 1, 1]]) presets.append(button(name, () => { Object.assign(desired, {texture, context}); updateControls(); commit(`preset:${name}`); }));
   const presetMenu = el("details"); presetMenu.append(el("summary", "Detail presets"), presets);

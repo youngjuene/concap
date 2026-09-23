@@ -51,14 +51,14 @@ const context = vm.createContext({structuredClone, Promise, setTimeout});
 vm.runInContext(script, context);
 const snap = () => JSON.parse(JSON.stringify(context.snapshot()));
 
-context.setDesired({texture: 1, context: 1});
-context.commitSettings("pad");
+context.setDesired({context: 1});
+context.commitSettings("slider:context");
 assert.equal(snap().sends.length, 1);
 assert.deepEqual(snap().sends[0], {
   video_id: "video-1",
   position_hint_ms: 45000,
-  origin: "pad",
-  texture: 1,
+  origin: "slider:context",
+  texture: 0.5,
   context: 1,
 });
 
