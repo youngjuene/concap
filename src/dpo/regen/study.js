@@ -22,6 +22,21 @@ const notice = (text = "") => {
   const message = text || recoveryNotice;
   node.textContent = t(message); node.hidden = !message;
 };
+function captionDetailScale(contract, language) {
+  const discrete = contract?.version === "five-level/v1";
+  const values = discrete ? contract.values : null;
+  const labels = discrete ? (contract.labels[language] || contract.labels.en) : null;
+  const clamp = value => Math.max(0, Math.min(1, value));
+  const toInput = value => Math.round(clamp(value) * (discrete ? 4 : 100)) + (discrete ? 1 : 0);
+  const fromInput = value => discrete ? values[Number(value) - 1] : Number(value) / 100;
+  const compact = value => discrete ? `${toInput(value)}/5` : `${toInput(value)}%`;
+  return {
+    discrete, min: discrete ? 1 : 0, max: discrete ? 5 : 100, step: 1,
+    labels, toInput, fromInput, compact,
+    snap: value => fromInput(toInput(value)),
+    display: value => discrete ? `${compact(value)} · ${labels[toInput(value) - 1]}` : compact(value),
+  };
+}
 function storageKey(kind) { return `caption-study:${state.session_id}:${kind}`; }
 function saved(kind, fallback) {
   try { return JSON.parse(localStorage.getItem(storageKey(kind))) ?? fallback; } catch { return fallback; }
@@ -334,6 +349,7 @@ function observation() {
 }
 function watching() {
   const videoInfo = state.video, resumePosition = state.position_ms;
+  const detailScale = captionDetailScale(state.detail_control, state.language);
   heading(videoInfo.title, t("Video {number} of {total} · Adjust the captions as you watch.", {number: state.video_index + 1, total: viewingTotal()}));
   const layout = el("div", undefined, "watch-layout"), {wrapper, video, release} = player(videoInfo.url, true);
   const caption = el("div", "", "study-caption"); wrapper.append(caption);
@@ -362,8 +378,11 @@ function watching() {
     if (event.pointerId === heldPointer) { heldPointer = null; showMeter(); }
   };
   const panel = el("aside", undefined, "study-card study-controls");
-  panel.append(el("h2", "Your caption detail"), el("p", "Move the point or use the sliders. Changes apply at a caption boundary."));
+  panel.append(el("h2", "Your caption detail"), el("p", detailScale.discrete
+    ? "Choose a level from 1 to 5 for each kind of detail. Changes apply with a new caption once it is ready."
+    : "Move the point or use the sliders. Changes apply at a caption boundary."));
   const pad = el("div", undefined, "detail-pad"); pad.setAttribute("aria-hidden", "true");
+  if (detailScale.discrete) pad.classList.add("detail-pad-discrete");
   const dot = el("span", undefined, "detail-dot"); pad.append(dot);
   const desired = {...state.axes}, ranges = {}, labels = {};
   const settingsKey = axes => JSON.stringify({texture: axes.texture, context: axes.context});
@@ -376,11 +395,12 @@ function watching() {
     dot.style.left = `${desired.context * 100}%`; dot.style.top = `${(1 - desired.texture) * 100}%`;
     for (const key of ["texture", "context"]) {
       const percent = Math.round(desired[key] * 100);
-      ranges[key].value = percent;
+      ranges[key].value = detailScale.toInput(desired[key]);
       ranges[key].style.setProperty("--detail-level", `${percent}%`);
-      ranges[key].setAttribute("aria-valuetext", t("Selected: {percent}%", {percent}));
-      labels[key].textContent = `${t(key === "texture" ? "Acoustic detail" : "Source and scene detail")}: ${percent}%`;
-      meterRows[key].value.textContent = `${percent}%`;
+      ranges[key].setAttribute("aria-valuetext", detailScale.discrete
+        ? t("Selected: {level}", {level: detailScale.display(desired[key])}) : t("Selected: {percent}%", {percent}));
+      labels[key].textContent = `${t(key === "texture" ? "Acoustic detail" : "Source and scene detail")}: ${detailScale.display(desired[key])}`;
+      meterRows[key].value.textContent = detailScale.compact(desired[key]);
       meterRows[key].fill.style.width = `${percent}%`;
     }
     if (reveal) showMeter();
@@ -437,14 +457,24 @@ function watching() {
     flushSettings();
   };
   for (const key of ["texture", "context"]) {
-    const label = el("label"), text = el("span"), input = el("input"); input.type = "range"; input.min = 0; input.max = 100; input.step = 1;
+    const label = el("label"), text = el("span"), input = el("input"); input.type = "range";
+    input.min = detailScale.min; input.max = detailScale.max; input.step = detailScale.step;
     ranges[key] = input; labels[key] = text; label.append(text, input); panel.append(label);
+    if (detailScale.discrete) {
+      const steps = el("span", undefined, "detail-steps"); steps.setAttribute("aria-hidden", "true");
+      for (let level = 1; level <= 5; level++) steps.append(el("span", String(level)));
+      label.append(steps);
+    }
     const endpoints = el("span", undefined, "detail-endpoints"); endpoints.setAttribute("aria-hidden", "true");
-    endpoints.append(el("span", key === "texture" ? "Brief" : "General"), el("span", key === "texture" ? "Detailed" : "Specific"));
+    if (detailScale.discrete) {
+      const low = el("span"), high = el("span");
+      low.textContent = detailScale.labels[0]; high.textContent = detailScale.labels[4];
+      endpoints.append(low, high);
+    } else endpoints.append(el("span", key === "texture" ? "Brief" : "General"), el("span", key === "texture" ? "Detailed" : "Specific"));
     label.append(endpoints);
     input.onpointerdown = holdMeter;
     input.oninput = () => {
-      desired[key] = +input.value / 100; updateControls(true); clearTimeout(controlTimer);
+      desired[key] = detailScale.fromInput(input.value); updateControls(true); clearTimeout(controlTimer);
       controlTimer = setTimeout(() => commit(`slider:${key}`), 300);
     };
     input.onchange = () => commit(`slider:${key}`);
@@ -452,7 +482,7 @@ function watching() {
   panel.append(el("div", "More acoustic detail ↑", "pad-key"), pad, el("div", "More source and scene detail →", "pad-key"));
   document.addEventListener("pointerup", releaseMeter);
   document.addEventListener("pointercancel", releaseMeter);
-  const move = event => { const box = pad.getBoundingClientRect(); desired.context = Math.round(Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * 100) / 100; desired.texture = Math.round(Math.max(0, Math.min(1, 1 - (event.clientY - box.top) / box.height)) * 100) / 100; updateControls(true); };
+  const move = event => { const box = pad.getBoundingClientRect(); desired.context = detailScale.snap((event.clientX - box.left) / box.width); desired.texture = detailScale.snap(1 - (event.clientY - box.top) / box.height); updateControls(true); };
   pad.onpointerdown = event => { holdMeter(event); pad.setPointerCapture(event.pointerId); move(event); };
   pad.onlostpointercapture = releaseMeter;
   pad.onpointermove = event => { if (pad.hasPointerCapture(event.pointerId)) move(event); };
@@ -499,10 +529,15 @@ function watching() {
         applied = job?.result && !job.result.fallback ? {...job.result, job_id: job.id, revision: job.revision, axes: {...state.axes}} : {text: cue.fallback, fallback: true, reason: "not_ready_at_boundary"};
         caption.textContent = applied.text;
         captionLevels.textContent = applied.fallback ? t("Prepared caption · selected levels not applied.")
-          : t("Current caption: acoustic {texture}%, source/scene {context}%.", {
+          : detailScale.discrete ? t("Current caption: acoustic {texture}; source/scene {context}.", {
+            texture: detailScale.display(applied.axes.texture), context: detailScale.display(applied.axes.context),
+          }) : t("Current caption: acoustic {texture}%, source/scene {context}%.", {
             texture: Math.round(applied.axes.texture * 100), context: Math.round(applied.axes.context * 100),
           });
-        status.textContent = applied.fallback ? t("Showing the available caption for this moment.") : t("Applied: acoustic {texture}%, source/scene {context}%.", {texture: Math.round(state.axes.texture * 100), context: Math.round(state.axes.context * 100)});
+        status.textContent = applied.fallback ? t("Showing the available caption for this moment.")
+          : detailScale.discrete ? t("Applied: acoustic {texture}; source/scene {context}.", {
+            texture: detailScale.display(applied.axes.texture), context: detailScale.display(applied.axes.context),
+          }) : t("Applied: acoustic {texture}%, source/scene {context}%.", {texture: Math.round(applied.axes.texture * 100), context: Math.round(applied.axes.context * 100)});
       } else { caption.textContent = ""; captionLevels.textContent = t("No caption applied yet."); }
     }
     if (!exposure && applied && !video.paused && !video.seeking && !document.hidden) {

@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import {randomUUID} from 'node:crypto';
 
 const source = fs.readFileSync(new URL('../study.js', import.meta.url), 'utf8');
+const scale = source.slice(source.indexOf('function captionDetailScale'), source.indexOf('function storageKey'));
 const display = source.slice(source.indexOf('  const outboxKey = "exposures";'),
   source.indexOf('  async function tick(seek = false, force = false)', source.indexOf('function watching()')));
 const watching = source.slice(source.indexOf('function watching()'));
@@ -16,7 +17,10 @@ const pagehide = watching.match(/  const pagehide = [^\n]+/)[0];
 function fixture(initialStorage = {}) {
   const context = vm.createContext({crypto: {randomUUID}, structuredClone, initialStorage});
   vm.runInContext(`
+    ${scale}
     const state = {settings_revision: 0, axes: {texture: .5, context: .5}};
+    const detailScale = captionDetailScale({version: 'five-level/v1', values: [0,.25,.5,.75,1],
+      labels: {en: ['Very little','A little','A moderate amount','Quite a lot','A lot']}}, 'en');
     const video = {currentTime: 4.9, seeking: false, paused: false};
     const document = {hidden: false};
     const videoInfo = {id: 'fixture', duration_ms: 10000, cues: [
@@ -27,7 +31,8 @@ function fixture(initialStorage = {}) {
     let seekGeneration = 0;
     const caption = {textContent: ''}, captionLevels = {}, status = {};
     const storage = structuredClone(initialStorage);
-    const t = x => x, saved = (key, fallback) => storage[key] ?? fallback;
+    const t = (text, values = {}) => Object.entries(values).reduce((result, [key, value]) => result.replaceAll('{' + key + '}', value), text);
+    const saved = (key, fallback) => storage[key] ?? fallback;
     const save = (key, value) => { storage[key] = structuredClone(value); };
     const send = async () => {};
     ${display}
@@ -35,7 +40,7 @@ function fixture(initialStorage = {}) {
     ${handlers}
     ${pagehide}
     globalThis.run = code => eval(code);
-    globalThis.read = () => structuredClone({storage, exposure, caption});
+    globalThis.read = () => structuredClone({storage, exposure, caption, captionLevels});
   `, context);
   return context;
 }
@@ -94,4 +99,19 @@ const interrupted = fixture({'open-exposure': transition.exposure});
 assert.equal(interrupted.read().storage.exposures[0].end_ms, 5215);
 assert.equal(interrupted.read().storage.exposures[0].incomplete, true);
 assert.equal(interrupted.read().storage['open-exposure'], null);
-console.log('PASS: actual replacement, pause/resume, seek, final boundary and interrupted recovery');
+
+// A saved level must not relabel the old caption before a boundary replacement.
+const levels = fixture();
+levels.run(`jobs = [{id:'old',cue:0,revision:0,result:{text:'Old generated caption',fallback:false}}]; paint();`);
+assert.equal(levels.read().captionLevels.textContent,
+  'Current caption: acoustic 3/5 · A moderate amount; source/scene 3/5 · A moderate amount.');
+levels.run(`state.axes = {texture:1,context:0}; state.settings_revision = 1;
+  jobs = [{id:'new',cue:1,revision:1,result:{text:'New generated caption',fallback:false}}]; paint();`);
+assert.ok(levels.read().captionLevels.textContent.includes('acoustic 3/5'));
+levels.run('video.currentTime = 5.2; paint();');
+assert.equal(levels.read().captionLevels.textContent,
+  'Current caption: acoustic 5/5 · A lot; source/scene 1/5 · Very little.');
+assert.deepEqual(levels.read().exposure.axes, {texture:1,context:0});
+const fallback = fixture(); fallback.run('paint();');
+assert.equal(fallback.read().captionLevels.textContent, 'Prepared caption · selected levels not applied.');
+console.log('PASS: actual replacement, pause/resume, seek, final boundary, interrupted recovery and five-level applied labels');

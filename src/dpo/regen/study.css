@@ -44,7 +44,10 @@
 .study-controls input[type="range"]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
 .study-controls input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); }
 .detail-endpoints { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; margin-top: -6px; margin-bottom: 12px; }
+.detail-steps { display: flex; justify-content: space-between; padding: 0 7px; margin: -7px 0 8px; color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.detail-steps + .detail-endpoints { margin-top: 0; gap: 12px; }
 .detail-pad { position: relative; width: 168px; max-width: 100%; margin: auto; aspect-ratio: 1; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--accent-wash); touch-action: none; cursor: crosshair; }
+.detail-pad-discrete { background-image: linear-gradient(to right, var(--rule) 1px, transparent 1px), linear-gradient(to bottom, var(--rule) 1px, transparent 1px); background-size: 25% 25%; }
 .study-controls summary { min-height: var(--target); display: list-item; padding-top: 10px; cursor: pointer; font-size: 14px; }
 .is-watching .study-rail { margin-bottom: 24px; }
 .is-watching .head { margin-bottom: 18px; }

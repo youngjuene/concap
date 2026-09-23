@@ -35,7 +35,7 @@ def window_reader_worker(pipe: Any, settings: Any) -> None:
 
 
 def test_four_corner_axis_contract_is_distinct_and_bounded() -> None:
-    report = qualify_axis_contract(default_profile(), default_cue())
+    report = qualify_axis_contract(default_profile(legacy=True), default_cue())
 
     assert report["passed"] is True
     assert report["checks"] == {
@@ -54,7 +54,7 @@ def test_four_corner_axis_contract_is_distinct_and_bounded() -> None:
 
 
 def test_axis_contract_keys_change_one_dimension_at_a_time() -> None:
-    rows = {row["name"]: row for row in axis_matrix(default_profile(), default_cue())}
+    rows = {row["name"]: row for row in axis_matrix(default_profile(legacy=True), default_cue())}
 
     assert rows["low_texture_low_context"]["descriptor_limit"] == 0
     assert rows["high_texture_low_context"]["descriptor_limit"] == 4

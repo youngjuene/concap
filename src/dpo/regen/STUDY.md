@@ -51,6 +51,24 @@ headings. Accepted settings events include `settings_revision` and control origi
 and generation scheduling; queued superseded controls are coalesced. Exposures
 still identify actual displayed captions, independently of selected values.
 
+Newly compiled viewing profiles freeze a `detail_control` contract with version
+`five-level/v1`. Each slider selects an integer from 1 to 5: Very little, A little,
+A moderate amount, Quite a lot, or A lot. The stored axes remain normalized to
+`0, 0.25, 0.5, 0.75, 1`; the API rejects intermediate values for these profiles.
+The pad snaps to the same five-by-five grid, presets select its corners, and reset
+restores the frozen initial levels. Selected levels update immediately; applied
+levels describe only the caption that is currently displayed. Prepared fallback
+captions do not claim that the selected levels were applied.
+
+Edit `DETAIL_CONTROL` in `study_schema.py` to change the labels or replace one of
+the five acoustic-detail or source/scene-detail prose instructions. These are
+independent description policies, not model sampling temperatures. Profile
+compilation deep-copies the tables before hashing; prompt composition reads that
+snapshot, and the full instruction remains part of the generation cache key.
+Wording edits therefore affect future profiles without rewriting a participant's
+frozen instructions. Profiles lacking the contract retain the continuous controls
+and original prompt policy. Questionnaire items and existing evidence are unchanged.
+
 New participants in the integrated `dpo regen serve` interface complete two chapters:
 
 1. For each configured short clip, watch its prepared captions, answer ART and
@@ -89,7 +107,7 @@ The link imports the completed visual/sound observations for every short clip an
 keeps all viewing records and questionnaire responses in `calibration_source`. It does
 not repeat the standalone preference form or short calibration clips. The legacy
 ART/PRSS responses are not direct detail-preference ratings, so both axes still
-start at 50%. New handoffs now compile the Phase 1 ART, caption, and PRSS ratings
+start at level 3 of 5 (normalized value 0.5). New handoffs now compile the Phase 1 ART, caption, and PRSS ratings
 into a frozen questionnaire profile and include it in the Phase 2 system prompt.
 Credibility and distraction responses guide source caution and conciseness;
 paired ART and overall PRSS provide restorative-experience context. These are

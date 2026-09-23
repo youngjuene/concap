@@ -28,6 +28,7 @@ from dpo.regen.study_schema import (
     bound_media,
     caption_instruction,
     compile_profile,
+    control_axes,
     digest,
     fingerprint,
     load_manifest,
@@ -191,6 +192,8 @@ def build_study_app(
             }
         if "profile" in state:
             result["defaults"] = state["profile"]["defaults"]
+            if "detail_control" in state["profile"]:
+                result["detail_control"] = state["profile"]["detail_control"]
         if state["stage"] == "watch":
             video = state["viewing"][state["video_index"]]
             result["video"] = {
@@ -403,7 +406,7 @@ def build_study_app(
                 if action == "settings":
                     if "position_hint_ms" in data:
                         number(data["position_hint_ms"], 0, video["duration_ms"])
-                    axes = {key: round(number(data.get(key), 0, 1), 2) for key in ("texture", "context")}
+                    axes = control_axes(state["profile"], data)
                     origin = data.get("origin", "api")
                     if not isinstance(origin, str) or not (
                         origin == "api"

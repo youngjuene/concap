@@ -165,8 +165,8 @@ def test_live_controls_override_guidance_and_frozen_profile_is_not_mutated() -> 
     low = caption_instruction(profile, {"texture": 0, "context": 0}, cue)
     high = caption_instruction(profile, {"texture": 1, "context": 1}, cue)
     assert profile["questionnaire"]["prompt"] in low and profile["questionnaire"]["prompt"] in high
-    assert "Use up to 0 supported acoustic descriptors" in low
-    assert "Use up to 4 supported acoustic descriptors" in high
+    assert profile["detail_control"]["texture"][0] in low
+    assert profile["detail_control"]["texture"][4] in high
     assert "Current interactive controls override" in high
     assert profile == held
 
@@ -253,7 +253,8 @@ def test_handoff_freezes_ratings_and_schedules_them_into_model_messages(
     assert job is not None
     spec = json.loads(job["spec"])
     assert profile["questionnaire"]["prompt"] in spec["instruction"]
-    assert "Acoustic detail: 1.00/1. Source and scene detail: 0.00/1." in spec["instruction"]
+    assert profile["detail_control"]["texture"][4] in spec["instruction"]
+    assert profile["detail_control"]["context"][0] in spec["instruction"]
 
     captured = []
 
