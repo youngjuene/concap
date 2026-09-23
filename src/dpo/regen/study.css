@@ -70,6 +70,11 @@
 .study-empty .eyebrow { color: var(--accent); }
 .study-empty h1 { margin: 12px 0; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+@media (min-width: 761px) {
+  .watch-layout { align-content: start; }
+  /* Let the player set the row height; keep every control reachable inside it. */
+  .watch-layout > .study-controls { align-self: stretch; min-height: 0; contain: size; overflow-y: auto; }
+}
 @media (max-width: 760px) {
   .study-shell { padding: 20px 16px 48px; }
   .watch-layout { grid-template-columns: minmax(0,1fr); }
