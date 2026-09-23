@@ -39,6 +39,7 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -54,6 +55,20 @@ LOG_SCHEMA = "dpo.caption-regen-log/v1"
 SNAPSHOT_SCHEMA = "dpo.caption-regen-snapshot/v1"
 VIEWING_SCHEMA = "dpo.caption-regen-viewing/v1"
 RESPONSE_SCHEMA = "dpo.caption-regen-response/v1"
+CLIENT_EVENT_ID_MAX_LENGTH = 100
+CLIENT_EVENT_MAX_BYTES = 16 * 1024
+CLIENT_EVENT_REQUIRED_FIELDS = {
+    "phase",
+    "stage",
+    "clip_id",
+    "clip_index",
+    "view_id",
+    "condition",
+    "flow_version",
+    "context_id",
+    "at",
+}
+CLIENT_EVENT_SERVER_FIELDS = {"received_at", "config_hash"}
 
 
 class RegenLogError(ValueError):
@@ -72,6 +87,10 @@ def _received_at() -> str:
 
 def _json_bytes(document: Mapping[str, Any]) -> bytes:
     return json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
+
+
+def _finite_json_number(value: Any) -> int | float | None:
+    return value if type(value) in (int, float) and math.isfinite(value) else None
 
 
 def view_id(participant: str, index: int) -> str:
@@ -93,6 +112,7 @@ class EventLog:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.config_hash = config_hash
         self._lock = threading.Lock()
+        self._client_event_indexes: dict[str, dict[str, str]] = {}
 
     def _path(self, kind: str, participant: str) -> Path:
         return (
@@ -150,6 +170,90 @@ class EventLog:
                 raise
         return rows
 
+    def _repair_torn_tail(self, path: Path) -> None:
+        if not path.is_file():
+            return
+        data = path.read_bytes()
+        offset = 0
+        for line in data.splitlines(keepends=True):
+            start = offset
+            offset += len(line)
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                json.loads(stripped.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                if offset == len(data):
+                    with path.open("r+b") as handle:
+                        handle.truncate(start)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    return
+                raise
+        if data and not data.endswith(b"\n"):
+            with path.open("ab") as handle:
+                handle.write(b"\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+
+    def _client_event_fingerprint(self, event: Mapping[str, Any]) -> str:
+        client_event = {key: value for key, value in event.items() if key not in CLIENT_EVENT_SERVER_FIELDS}
+        try:
+            return json.dumps(
+                client_event,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RegenLogError("event payload must be JSON serializable") from exc
+
+    def _validate_client_event(self, event: Mapping[str, Any], index: int) -> str:
+        event_id = event.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            raise RegenLogError(f"events[{index}] must have a non-empty string 'event_id'")
+        if len(event_id) > CLIENT_EVENT_ID_MAX_LENGTH:
+            raise RegenLogError(
+                f"events[{index}].event_id must be at most {CLIENT_EVENT_ID_MAX_LENGTH} characters"
+            )
+        if not isinstance(event.get("type"), str):
+            raise RegenLogError(f"events[{index}] must be an object with a string 'type'")
+        missing = sorted(field for field in CLIENT_EVENT_REQUIRED_FIELDS if field not in event)
+        if missing:
+            joined = ", ".join(missing)
+            raise RegenLogError(f"events[{index}] missing required client scope fields: {joined}")
+        if (
+            "position_ms" in event
+            and event["position_ms"] is not None
+            and _finite_json_number(event["position_ms"]) is None
+        ):
+            raise RegenLogError(f"events[{index}].position_ms must be a finite number when present")
+        fingerprint = self._client_event_fingerprint(event)
+        if len(fingerprint.encode("utf-8")) > CLIENT_EVENT_MAX_BYTES:
+            raise RegenLogError(f"events[{index}] exceeds {CLIENT_EVENT_MAX_BYTES} bytes")
+        return event_id
+
+    def _client_event_index(self, participant: str) -> dict[str, str]:
+        cached = self._client_event_indexes.get(participant)
+        if cached is not None:
+            return cached
+        path = self.events_path(participant)
+        self._repair_torn_tail(path)
+        indexed: dict[str, str] = {}
+        for row in self._read(path):
+            event_id = row.get("event_id")
+            if not isinstance(event_id, str) or not event_id:
+                continue
+            fingerprint = self._client_event_fingerprint(row)
+            previous = indexed.get(event_id)
+            if previous is not None and previous != fingerprint:
+                raise RegenLogError(f"event_id {event_id!r} was already written with different content")
+            indexed[event_id] = fingerprint
+        self._client_event_indexes[participant] = indexed
+        return indexed
+
     def append(
         self, participant: str, events: Sequence[Mapping[str, Any]], snapshot: Mapping[str, Any] | None
     ) -> int:
@@ -162,6 +266,48 @@ class EventLog:
             if snapshot is not None:
                 replace_atomically(self.snapshot_path(participant), _json_bytes(snapshot))
         return written
+
+    def append_events(self, participant: str, events: Sequence[Mapping[str, Any]]) -> list[str]:
+        """Append idempotent client telemetry and return acknowledged event ids."""
+        if isinstance(events, str):
+            raise RegenLogError("events must be a list")
+        participant = validate_participant(participant)
+        batch: list[tuple[str, Mapping[str, Any], str]] = []
+        batch_index: dict[str, str] = {}
+        for index, event in enumerate(events):
+            if not isinstance(event, Mapping):
+                raise RegenLogError(f"events[{index}] must be an object")
+            event_id = self._validate_client_event(event, index)
+            fingerprint = self._client_event_fingerprint(event)
+            previous = batch_index.get(event_id)
+            if previous is not None:
+                if previous != fingerprint:
+                    raise RegenLogError(f"event_id {event_id!r} reused with different content in batch")
+                continue
+            batch_index[event_id] = fingerprint
+            batch.append((event_id, event, fingerprint))
+
+        with self._lock:
+            indexed = self._client_event_index(participant)
+            new_rows: list[Mapping[str, Any]] = []
+            for event_id, event, fingerprint in batch:
+                previous = indexed.get(event_id)
+                if previous is not None:
+                    if previous != fingerprint:
+                        raise RegenLogError(
+                            f"event_id {event_id!r} was already written with different content"
+                        )
+                    continue
+                new_rows.append(event)
+            if new_rows:
+                try:
+                    self._append(self.events_path(participant), new_rows)
+                except Exception:
+                    self._client_event_indexes.pop(participant, None)
+                    raise
+                for event_id, _event, fingerprint in batch:
+                    indexed.setdefault(event_id, fingerprint)
+        return list(batch_index)
 
     def events(self, participant: str) -> list[dict[str, Any]]:
         return self._read(self.events_path(participant))
@@ -239,6 +385,7 @@ class EventLog:
         submitted_at: str,
         items_digest: str,
         items_provenance: str,
+        extra: Mapping[str, Any] | None = None,
     ) -> bool:
         """§3 and §8's row, joined to a viewing by ``key``. False if already there.
 
@@ -263,6 +410,7 @@ class EventLog:
                         "submitted_at": submitted_at,
                         "items_digest": items_digest,
                         "items_provenance": items_provenance,
+                        **dict(extra or {}),
                     }
                 ],
             )
@@ -270,6 +418,9 @@ class EventLog:
 
     def export(self, participant: str, session_id: str) -> dict[str, Any]:
         """Everything one participant produced, in one document."""
+        snapshot = self.snapshot(participant)
+        if snapshot is not None:
+            snapshot.pop("event_secret", None)
         return {
             "schema": LOG_SCHEMA,
             "session_id": session_id,
@@ -278,5 +429,5 @@ class EventLog:
             "viewings": self.viewings(participant),
             "responses": self.responses(participant),
             "events": self.events(participant),
-            "snapshot": self.snapshot(participant),
+            "snapshot": snapshot,
         }

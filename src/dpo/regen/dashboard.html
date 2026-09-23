@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Caption study · Research dashboard</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Research dashboard">
+      <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">c</span><span>Caption study<small>RESEARCH WORKSPACE</small></span></a>
+      <div class="sidebar-label">COLLECTION</div>
+      <nav class="navigation" aria-label="Dashboard views">
+        <button type="button" data-view="overview" aria-current="page"><span aria-hidden="true">▦</span>Overview</button>
+        <button type="button" data-view="responses"><span aria-hidden="true">≡</span>Responses</button>
+        <button type="button" data-view="inspector"><span aria-hidden="true">⌁</span>Session inspector</button>
+      </nav>
+      <div class="sidebar-footer"><span class="local-dot" aria-hidden="true"></span> Local · read only<small>Phase 1 / Calibration<br>Phase 2 / Viewing experience</small></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div><span class="eyebrow">CAPTION EXPERIENCE / RESEARCH</span><h1 id="view-title">Overview</h1></div>
+        <div class="header-actions"><span id="refresh-status" class="refresh-status" role="status">Loading collection…</span><button type="button" class="button" id="refresh-button">Refresh</button><a class="button primary" id="export-responses" href="/api/export/responses.csv?include_qa=false" title="Export all submitted responses in the current QA cohort. Search, language and response filters do not restrict this export." download>Export cohort CSV <span aria-hidden="true">↗</span></a></div>
+      </header>
+      <div class="global-filters" aria-label="Collection filters">
+        <label class="search-field"><span>Find participant</span><input id="participant-search" type="search" placeholder="Participant ID…" autocomplete="off"></label>
+        <label><span>Language</span><select id="language-filter"><option value="">All languages</option></select></label>
+        <label><span>Progress</span><select id="status-filter"><option value="">All participants</option><option value="complete">Phase 2 complete</option><option value="active">In progress</option><option value="phase1">Phase 1 complete</option><option value="no_phase2">Phase 2 not started</option></select></label>
+        <div class="toggle-filters"><label class="check-label"><input id="include-qa" type="checkbox"> Include QA sessions</label><label class="check-label"><input id="auto-refresh" type="checkbox"> Refresh every 15s</label></div>
+      </div>
+      <div id="source-warnings" class="warnings" hidden></div>
+      <main id="main" tabindex="-1">
+        <section id="view-overview" class="view" aria-labelledby="view-title"><div class="empty-state">Loading collection…</div></section>
+        <section id="view-responses" class="view" aria-labelledby="view-title" hidden></section>
+        <section id="view-inspector" class="view" aria-labelledby="view-title" hidden></section>
+      </main>
+      <footer class="workspace-footer"><span>Submitted records · source data remains unchanged</span><span id="collection-updated">Timestamps shown in UTC</span></footer>
+    </div>
+  </div>
+</body>
+</html>

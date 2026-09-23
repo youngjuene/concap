@@ -71,6 +71,7 @@ from dpo.regen.config import Configuration
 
 TASK = "regenerated"
 LEVEL = "regen"
+SAME_CLIP_FLOW = "clip-caption-prss-v2"
 
 # The system text. Assembled per slot from the participant's own report, which
 # is the whole point: a caption track that does not change when the report
@@ -101,6 +102,13 @@ REGEN_FRAMING = (
     "noticed. They pointed at these things in the frame: {seen}. They picked "
     "out these sounds: {heard}. Write for that viewer: name what they attend "
     "to, in their terms, and add nothing they did not mention.\n"
+)
+REGEN_FRAMING_SAME_CLIP = (
+    "A viewer has watched this same clip and said what they noticed before "
+    "seeing updated captions. They pointed at these things in the frame: {seen}. "
+    "They picked out these sounds: {heard}. Write updated captions for that "
+    "viewer: name what they attend to, in their terms, and add nothing they did "
+    "not mention.\n"
 )
 REGEN_SLOT = (
     "This is line {position} of {total}, covering seconds {start:.1f} to {end:.1f}. "
@@ -189,6 +197,7 @@ class RegenCaptionRequest(CaptionRequest):
     """Carry the participant language to the actual writer, not only the log."""
 
     language: str = "en"
+    flow_version: str | None = None
 
 
 class RegenRequestBuilder:
@@ -198,9 +207,12 @@ class RegenRequestBuilder:
     first: a bilingual study generates for the participant in front of it.
     """
 
-    def __init__(self, configuration: Configuration, language: str | None = None) -> None:
+    def __init__(
+        self, configuration: Configuration, language: str | None = None, flow_version: str | None = None
+    ) -> None:
         self.configuration = configuration
         self.language = language or configuration.calibration.language
+        self.flow_version = flow_version
 
     def instruction(self, request: CaptionRequest) -> str:
         """The exact system text for a request, assembled from the constants.
@@ -211,12 +223,14 @@ class RegenRequestBuilder:
         """
         heard = _listed([spec.prose for spec in request.sources], NOTHING_HEARD)
         language = request.language if isinstance(request, RegenCaptionRequest) else self.language
+        flow_version = request.flow_version if isinstance(request, RegenCaptionRequest) else self.flow_version
+        framing = REGEN_FRAMING_SAME_CLIP if flow_version == SAME_CLIP_FLOW else REGEN_FRAMING
         return (
             REGEN_PREAMBLE.format(
                 chars=self.configuration.calibration.slot_max_chars,
                 language=LANGUAGE_NAMES.get(language.split("-")[0].lower(), language),
             )
-            + REGEN_FRAMING.format(seen=request.scene_prose or NOTHING_SEEN, heard=heard)
+            + framing.format(seen=request.scene_prose or NOTHING_SEEN, heard=heard)
             + request.atmosphere_prose
         )
 
@@ -233,8 +247,17 @@ class RegenRequestBuilder:
         slot = REGEN_SLOT.format(
             position=cue.index + 1, total=total, start=cue.start_ms / 1000, end=cue.end_ms / 1000
         )
+        key_parts = [
+            str(cue.index),
+            self.language,
+            ",".join(report.visual_labels),
+            ",".join(report.auditory_labels),
+        ]
+        if self.flow_version:
+            key_parts.append(self.flow_version)
         return RegenCaptionRequest(
             language=self.language,
+            flow_version=self.flow_version,
             clip_id=clip_id,
             shot_id=f"cue{cue.index}",
             task=TASK,
@@ -246,14 +269,7 @@ class RegenRequestBuilder:
             # The language is in the key: the same report in two languages is
             # two captions, and a cache that could not tell them apart would
             # serve one participant the other's reading.
-            settings_key="|".join(
-                (
-                    str(cue.index),
-                    self.language,
-                    ",".join(report.visual_labels),
-                    ",".join(report.auditory_labels),
-                )
-            ),
+            settings_key="|".join(key_parts),
             sources=report.sources(),
             heads=(),
             scene_prose=seen,
@@ -351,7 +367,10 @@ def regenerate(
     does may decide whether a participant gets a caption track.
     """
     reading = language or configuration.calibration.language
-    builder = RegenRequestBuilder(configuration, reading)
+    flow_version = (settings or {}).get("flow_version")
+    builder = RegenRequestBuilder(
+        configuration, reading, str(flow_version) if isinstance(flow_version, str) else None
+    )
     ceiling = configuration.calibration.latency_ceiling_ms
     started = time.monotonic()
     prompts: list[str] = []

@@ -29,12 +29,32 @@ def enrol(client: TestClient) -> str:
     return str(body["participant"])
 
 
+def current_clip(client: TestClient, participant: str) -> int:
+    return int(client.get(f"/api/state?participant={participant}").json().get("clip_index", 0))
+
+
+def view(
+    client: TestClient, participant: str, step: str, started_at: str = "t0", ended_at: str = "t1"
+) -> Any:
+    return client.post(
+        "/api/viewing",
+        json={
+            "participant": participant,
+            "step": step,
+            "clip_index": current_clip(client, participant),
+            "started_at": started_at,
+            "ended_at": ended_at,
+        },
+    )
+
+
 def hear(client: TestClient, participant: str, heard: tuple[str, ...] = ("things",)) -> Any:
     """Answer §5: every family, with `heard` the ones reported as heard."""
     return client.post(
         "/api/auditory",
         json={
             "participant": participant,
+            "clip_index": current_clip(client, participant),
             "heard": {family: family in heard for family in SOUND_FAMILIES},
         },
     )
@@ -52,6 +72,7 @@ def submit(client: TestClient, participant: str, page: str) -> Any:
         json={
             "participant": participant,
             "page": page,
+            "clip_index": current_clip(client, participant),
             "responses": responses,
             "entered_at": "t0",
             "submitted_at": "t1",
@@ -61,13 +82,15 @@ def submit(client: TestClient, participant: str, page: str) -> Any:
 
 def answer(client: TestClient, participant: str, page: str) -> Any:
     """Read the page, then answer every item it asks — the participant's path."""
-    blocks = client.get(f"/api/step/{page}?participant={participant}").json()["blocks"]
+    detail = client.get(f"/api/step/{page}?participant={participant}").json()
+    blocks = detail["blocks"]
     responses = {item["id"]: 4 for block in blocks for item in block["items"]}
     return client.post(
         "/api/survey",
         json={
             "participant": participant,
             "page": page,
+            "clip_index": current_clip(client, participant),
             "responses": responses,
             "entered_at": "t0",
             "submitted_at": "t1",
@@ -75,17 +98,19 @@ def answer(client: TestClient, participant: str, page: str) -> Any:
     )
 
 
-def walk_to_regenerated(client: TestClient) -> str:
-    """Every step up to and including the regeneration."""
-    participant = enrol(client)
-    client.post(
-        "/api/viewing",
-        json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-    )
+def walk_to_regenerated(client: TestClient, participant: str | None = None) -> str:
+    """Every step in the current clip up to and including the regeneration."""
+    participant = participant or enrol(client)
+    view(client, participant, "view_prepared")
     answer(client, participant, "art")
-    client.post("/api/visual", json={"participant": participant, "points": POINTS})
+    client.post(
+        "/api/visual",
+        json={"participant": participant, "clip_index": current_clip(client, participant), "points": POINTS},
+    )
     hear(client, participant)
-    client.post("/api/regenerate", json={"participant": participant})
+    client.post(
+        "/api/regenerate", json={"participant": participant, "clip_index": current_clip(client, participant)}
+    )
     return participant
 
 
@@ -95,6 +120,9 @@ class TestEntry:
         assert body["participant"]
         assert body["assignment"]["prepared_segment"] in ("A", "B")
         assert body["step"] == "view_prepared"
+        assert body["flow_version"] == "clip-caption-prss-v2"
+        assert body["clip_index"] == 0
+        assert body["clip_count"] == 2
 
     def test_consecutive_participants_alternate_which_segment_is_prepared(self, client: TestClient) -> None:
         first = client.post("/api/session", json={}).json()["assignment"]
@@ -142,10 +170,7 @@ class TestLanguage:
         # §8 is compared against §3. A session read half in one language and
         # half in the other has moved something the study measures.
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         response = client.post("/api/language", json={"participant": participant, "language": "ko"})
         assert response.status_code == 409
         assert response.json()["language"] == "en"
@@ -154,10 +179,7 @@ class TestLanguage:
     def test_the_viewing_row_says_which_language_was_read(self, client: TestClient) -> None:
         participant = enrol(client)
         client.post("/api/language", json={"participant": participant, "language": "ko"})
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         row = client.get(f"/api/log?participant={participant}").json()["viewings"][0]
         assert row["language"] == "ko"
         assert all(cue["language"] == "ko" for cue in row["captions"])
@@ -165,14 +187,21 @@ class TestLanguage:
     def test_the_regenerated_track_is_written_in_the_language_on_screen(self, client: TestClient) -> None:
         participant = enrol(client)
         client.post("/api/language", json={"participant": participant, "language": "ko"})
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         answer(client, participant, "art")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
+        client.post(
+            "/api/visual",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "points": POINTS,
+            },
+        )
         hear(client, participant)
-        body = client.post("/api/regenerate", json={"participant": participant}).json()
+        body = client.post(
+            "/api/regenerate",
+            json={"participant": participant, "clip_index": current_clip(client, participant)},
+        ).json()
         assert all(cue["language"] == "ko" for cue in body["track"])
         events = client.get(f"/api/log?participant={participant}").json()["events"]
         written = next(event for event in events if event["type"] == "regeneration.written")
@@ -188,16 +217,13 @@ class TestOrder:
     def test_the_whole_session_walks_forward(self, client: TestClient) -> None:
         participant = walk_to_regenerated(client)
         assert client.get(f"/api/state?participant={participant}").json()["step"] == "view_regenerated"
-        client.post(
-            "/api/viewing",
-            json={
-                "participant": participant,
-                "step": "view_regenerated",
-                "started_at": "t2",
-                "ended_at": "t3",
-            },
-        )
-        assert answer(client, participant, "survey").json()["step"] == "done"
+        view(client, participant, "view_regenerated", "t2", "t3")
+        assert answer(client, participant, "survey").json()["step"] == "view_prepared"
+        assert current_clip(client, participant) == 1
+        assert walk_to_regenerated(client, participant) == participant
+        view(client, participant, "view_regenerated", "t4", "t5")
+        assert answer(client, participant, "survey").json()["step"] == "overall"
+        assert answer(client, participant, "overall").json()["step"] == "done"
 
     def test_a_skipped_step_is_refused(self, client: TestClient) -> None:
         participant = enrol(client)
@@ -229,28 +255,18 @@ class TestViewings:
         assert detail["condition"] == "regenerated"
         assert not any(cue["text"].startswith("Prepared") for cue in detail["captions"])
 
-    def test_the_two_viewings_are_different_segments(self, client: TestClient) -> None:
+    def test_the_two_viewings_for_one_clip_use_the_same_segment(self, client: TestClient) -> None:
         participant = walk_to_regenerated(client)
-        client.post(
-            "/api/viewing",
-            json={
-                "participant": participant,
-                "step": "view_regenerated",
-                "started_at": "t2",
-                "ended_at": "t3",
-            },
-        )
+        view(client, participant, "view_regenerated", "t2", "t3")
         rows = client.get(f"/api/log?participant={participant}").json()["viewings"]
         assert [row["condition"] for row in rows] == ["prepared", "regenerated"]
-        assert rows[0]["segment"] != rows[1]["segment"]
-        assert rows[0]["clip_id"] != rows[1]["clip_id"]
+        assert rows[0]["segment"] == rows[1]["segment"]
+        assert rows[0]["clip_id"] == rows[1]["clip_id"]
+        assert [row["scope"] for row in rows] == ["clip_original", "clip_updated"]
 
     def test_the_viewing_row_carries_the_full_caption_text(self, client: TestClient) -> None:
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         row = client.get(f"/api/log?participant={participant}").json()["viewings"][0]
         assert len(row["captions"]) == 4
         assert row["playback_started_at"] == "t0"
@@ -260,15 +276,13 @@ class TestViewings:
 class TestSurvey:
     def test_an_incomplete_submission_is_refused(self, client: TestClient) -> None:
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         response = client.post(
             "/api/survey",
             json={
                 "participant": participant,
                 "page": "art",
+                "clip_index": current_clip(client, participant),
                 "responses": {},
                 "entered_at": "t0",
                 "submitted_at": "t1",
@@ -279,16 +293,14 @@ class TestSurvey:
 
     def test_an_answer_off_the_scale_is_refused(self, client: TestClient) -> None:
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         items = load_items().item_ids("art")
         response = client.post(
             "/api/survey",
             json={
                 "participant": participant,
                 "page": "art",
+                "clip_index": current_clip(client, participant),
                 "responses": {item: 99 for item in items},
                 "entered_at": "t0",
                 "submitted_at": "t1",
@@ -297,18 +309,13 @@ class TestSurvey:
         assert response.status_code == 400
         assert response.json()["invalid"]
 
-    def test_both_pages_ask_the_identical_art_items(self, client: TestClient) -> None:
+    def test_the_updated_clip_survey_adds_caption_items_after_the_same_art_items(
+        self, client: TestClient
+    ) -> None:
         participant = walk_to_regenerated(client)
-        client.post(
-            "/api/viewing",
-            json={
-                "participant": participant,
-                "step": "view_regenerated",
-                "started_at": "t2",
-                "ended_at": "t3",
-            },
-        )
+        view(client, participant, "view_regenerated", "t2", "t3")
         second = client.get(f"/api/step/survey?participant={participant}").json()["blocks"]
+        assert [block["id"] for block in second] == ["art", "caption"]
         art = next(block for block in second if block["id"] == "art")
         assert art["items"] == [
             item for block in load_items().page_blocks("art") for item in [i.record() for i in block.items]
@@ -323,12 +330,16 @@ class TestSurvey:
 class TestVisual:
     def test_fewer_points_than_the_floor_are_refused(self, client: TestClient) -> None:
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         answer(client, participant, "art")
-        response = client.post("/api/visual", json={"participant": participant, "points": POINTS[:1]})
+        response = client.post(
+            "/api/visual",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "points": POINTS[:1],
+            },
+        )
         assert response.status_code == 400
         assert "at least 2 points" in response.json()["error"]
 
@@ -336,24 +347,30 @@ class TestVisual:
         # §4 matches once, on submit; telling the participant would turn the
         # task into hunting for a mask.
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         answer(client, participant, "art")
-        body = client.post("/api/visual", json={"participant": participant, "points": POINTS}).json()
-        assert set(body) == {"step", "points", "unclassified", "unclassified_proportion"}
+        body = client.post(
+            "/api/visual",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "points": POINTS,
+            },
+        ).json()
+        assert {"step", "points", "unclassified", "unclassified_proportion"} <= set(body)
+        assert "labels" not in body
 
     def test_the_matched_labels_and_the_unclassified_count_reach_the_log(self, client: TestClient) -> None:
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         answer(client, participant, "art")
         client.post(
             "/api/visual",
-            json={"participant": participant, "points": [*POINTS, {"x": 0.95, "y": 0.95}]},
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "points": [*POINTS, {"x": 0.95, "y": 0.95}],
+            },
         )
         events = client.get(f"/api/log?participant={participant}").json()["events"]
         submitted = next(event for event in events if event["type"] == "visual.submitted")
@@ -374,12 +391,16 @@ class TestAuditory:
 
     def _at_auditory(self, client: TestClient) -> str:
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         answer(client, participant, "art")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
+        client.post(
+            "/api/visual",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "points": POINTS,
+            },
+        )
         return participant
 
     def test_the_same_five_families_are_asked_whatever_the_clip_holds(self, client: TestClient) -> None:
@@ -402,7 +423,14 @@ class TestAuditory:
         # as one who did not hear; §6 must not be conditioned on the
         # difference between a denial and a shrug.
         participant = self._at_auditory(client)
-        response = client.post("/api/auditory", json={"participant": participant, "heard": {"human": True}})
+        response = client.post(
+            "/api/auditory",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "heard": {"human": True},
+            },
+        )
         assert response.status_code == 400
         assert set(response.json()["missing"]) == set(SOUND_FAMILIES) - {"human"}
 
@@ -417,7 +445,14 @@ class TestAuditory:
         participant = self._at_auditory(client)
         payload = {family: True for family in SOUND_FAMILIES}
         payload["helicopter"] = True
-        response = client.post("/api/auditory", json={"participant": participant, "heard": payload})
+        response = client.post(
+            "/api/auditory",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "heard": payload,
+            },
+        )
         assert response.status_code == 400
         assert response.json()["unknown"] == ["helicopter"]
 
@@ -427,7 +462,14 @@ class TestAuditory:
         participant = self._at_auditory(client)
         payload: dict[str, Any] = {family: True for family in SOUND_FAMILIES}
         payload["music"] = "maybe"
-        response = client.post("/api/auditory", json={"participant": participant, "heard": payload})
+        response = client.post(
+            "/api/auditory",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "heard": payload,
+            },
+        )
         assert response.status_code == 400
         assert response.json()["invalid"] == ["music"]
 
@@ -488,19 +530,21 @@ class TestAuditory:
             participant = enrol(client)
             if language:
                 client.post("/api/language", json={"participant": participant, "language": language})
+            view(client, participant, "view_prepared")
+            answer(client, participant, "art")
             client.post(
-                "/api/viewing",
+                "/api/visual",
                 json={
                     "participant": participant,
-                    "step": "view_prepared",
-                    "started_at": "t0",
-                    "ended_at": "t1",
+                    "clip_index": current_clip(client, participant),
+                    "points": POINTS,
                 },
             )
-            answer(client, participant, "art")
-            client.post("/api/visual", json={"participant": participant, "points": POINTS})
             hear(client, participant, heard=("human",))
-            client.post("/api/regenerate", json={"participant": participant})
+            client.post(
+                "/api/regenerate",
+                json={"participant": participant, "clip_index": current_clip(client, participant)},
+            )
             events = client.get(f"/api/log?participant={participant}").json()["events"]
             written = next(row for row in events if row["type"] == "regeneration.written")
             return list(written["auditory_labels"])
@@ -511,7 +555,10 @@ class TestAuditory:
 class TestRegeneration:
     def test_the_track_is_written_once_and_returned_again_on_a_reload(self, client: TestClient) -> None:
         participant = walk_to_regenerated(client)
-        again = client.post("/api/regenerate", json={"participant": participant}).json()
+        again = client.post(
+            "/api/regenerate",
+            json={"participant": participant, "clip_index": current_clip(client, participant)},
+        ).json()
         assert again["cached"] is True
         rows = client.get(f"/api/log?participant={participant}").json()["events"]
         assert sum(1 for row in rows if row["type"] == "regeneration.written") == 1
@@ -565,7 +612,15 @@ class TestSurface:
         body = client.get("/api/strings").json()
         assert body["scale"]["points"] == 7
         assert len(body["scale"]["anchors"]) == 2
-        assert len(body["steps"]) == 6
+        assert body["steps"] == [
+            "view_prepared",
+            "art",
+            "visual",
+            "auditory",
+            "view_regenerated",
+            "survey",
+            "overall",
+        ]
 
     def test_the_chrome_is_served_in_every_language_the_study_offers(self, client: TestClient) -> None:
         """All of them at once, so a switch redraws rather than re-fetches.
@@ -604,10 +659,7 @@ class TestSurface:
         # §4 matches once, on submit. The page is told when each frame is from
         # and nothing about what is in it.
         participant = enrol(client)
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         answer(client, participant, "art")
         detail = client.get(f"/api/step/visual?participant={participant}").json()
         assert [frame["index"] for frame in detail["frames"]] == [0, 1, 2, 3, 4]
@@ -671,17 +723,24 @@ class TestSurface:
             seen += 1
 
         check("view_prepared")
-        client.post(
-            "/api/viewing",
-            json={"participant": participant, "step": "view_prepared", "started_at": "t0", "ended_at": "t1"},
-        )
+        view(client, participant, "view_prepared")
         check("art")
         answer(client, participant, "art")
         check("visual")
-        client.post("/api/visual", json={"participant": participant, "points": POINTS})
+        client.post(
+            "/api/visual",
+            json={
+                "participant": participant,
+                "clip_index": current_clip(client, participant),
+                "points": POINTS,
+            },
+        )
         check("auditory")
         hear(client, participant)
-        client.post("/api/regenerate", json={"participant": participant})
+        client.post(
+            "/api/regenerate",
+            json={"participant": participant, "clip_index": current_clip(client, participant)},
+        )
         check("view_regenerated")
         assert seen == 5, "every step a participant can read was actually read"
 
@@ -701,8 +760,10 @@ class TestRegenerationProgress:
             "writing": False,
             "done": 0,
             "total": 4,
-            # The clip §6's wait is used to fetch: the other segment.
-            "next_segment": "B" if prepared == "A" else "A",
+            "next_segment": prepared,
+            "flow_version": "clip-caption-prss-v2",
+            "clip_index": 0,
+            "clip_count": 2,
         }
 
     def test_it_reads_as_idle_again_once_the_track_is_written(self, client: TestClient) -> None:
@@ -714,7 +775,7 @@ class TestRegenerationProgress:
         assert client.get("/api/regenerate/progress").status_code == 400
 
     def test_it_names_the_clip_the_next_viewing_will_play(self, client: TestClient) -> None:
-        """§6's wait is what pays for the second clip's five to seven megabytes.
+        """§6's wait is what pays for the updated-caption clip's media.
 
         The page cannot ask ``/api/step/view_regenerated`` yet — that step is
         gated and the answer would be a 409 — so the route the waiting screen
@@ -726,11 +787,12 @@ class TestRegenerationProgress:
         viewing = client.get(f"/api/step/view_regenerated?participant={participant}").json()
         assert waiting["next_segment"] == viewing["segment"]
 
-    def test_it_is_the_segment_the_first_viewing_did_not_use(self, client: TestClient) -> None:
+    def test_it_is_the_segment_the_current_clip_uses(self, client: TestClient) -> None:
         participant = enrol(client)
         prepared = client.get(f"/api/step/view_prepared?participant={participant}").json()["segment"]
         body = client.get("/api/regenerate/progress", params={"participant": participant}).json()
-        assert body["next_segment"] != prepared
+        assert body["next_segment"] == prepared
+        assert body["clip_index"] == 0
 
     def test_an_unenrolled_participant_still_reads_as_idle(self, client: TestClient) -> None:
         # Best-effort, as the route has always been: no assignment yet is a
@@ -770,21 +832,23 @@ class TestRegenerationProgress:
         app = build_app(document, media_dir, tmp_path / "out", Blocks(), items=load_items())
         walker, watcher = TestClient(app), TestClient(app)
         participant = enrol(walker)
+        view(walker, participant, "view_prepared")
+        answer(walker, participant, "art")
         walker.post(
-            "/api/viewing",
+            "/api/visual",
             json={
                 "participant": participant,
-                "step": "view_prepared",
-                "started_at": "t0",
-                "ended_at": "t1",
+                "clip_index": current_clip(walker, participant),
+                "points": POINTS,
             },
         )
-        answer(walker, participant, "art")
-        walker.post("/api/visual", json={"participant": participant, "points": POINTS})
         hear(walker, participant)
 
         writing = threading.Thread(
-            target=lambda: walker.post("/api/regenerate", json={"participant": participant})
+            target=lambda: walker.post(
+                "/api/regenerate",
+                json={"participant": participant, "clip_index": current_clip(walker, participant)},
+            )
         )
         writing.start()
         try:

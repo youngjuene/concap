@@ -39,7 +39,9 @@ from dpo.caption.writer import CacheMismatch, CaptionWriter, StimulusAdapter
 from dpo.cli._shared import _emit
 from dpo.regen.config import Calibration, ConfigError, Configuration
 from dpo.regen.document import (
+    ID_RE,
     REGEN_SCHEMA,
+    REGEN_SCHEMA_V4,
     RegenDocumentError,
     configuration_of,
     load_regen_document,
@@ -156,7 +158,23 @@ def _segment(
 def _regen_scaffold(arguments: argparse.Namespace) -> int:
     root = Path(arguments.media_dir)
     clips = list(arguments.clips or [])
-    if len(clips) != 2:
+    names = getattr(arguments, "segment_ids", None)
+    if names is not None and (
+        not names
+        or len(names) != len(clips)
+        or len(set(names)) != len(names)
+        or any(not ID_RE.fullmatch(name) for name in names)
+        or len(set(clips)) != len(clips)
+    ):
+        _emit(
+            {
+                "status": "error",
+                "command": "regen scaffold",
+                "error": "--segment-ids must be distinct safe IDs matching the distinct --clips",
+            }
+        )
+        return 2
+    if names is None and len(clips) != 2:
         _emit(
             {
                 "status": "error",
@@ -175,13 +193,14 @@ def _regen_scaffold(arguments: argparse.Namespace) -> int:
         )
         segments = {
             name: _segment(root, name, clip, calibration, int(arguments.duration_ms))
-            for name, clip in zip(SEGMENTS, clips, strict=True)
+            for name, clip in zip(names or SEGMENTS, clips, strict=True)
         }
     except (RegenUsageError, ConfigError) as exc:
         _emit({"status": "error", "command": "regen scaffold", "error": str(exc)})
         return 2
     document = {
-        "schema": REGEN_SCHEMA,
+        "schema": REGEN_SCHEMA_V4 if names is not None else REGEN_SCHEMA,
+        **({"clip_order": names} if names is not None else {}),
         "session_id": arguments.session_id,
         "config": configuration.artifact(),
         "segments": segments,
@@ -444,12 +463,20 @@ def register(subparsers: Any) -> None:
     actions = regen.add_subparsers(dest="action", required=True)
 
     scaffold = actions.add_parser("scaffold", help="turn a staged media directory into a session document")
-    scaffold.add_argument("--media-dir", required=True, help="directory holding A/ and B/")
+    scaffold.add_argument("--media-dir", required=True, help="directory holding the segment subdirectories")
     scaffold.add_argument("--out", required=True)
     scaffold.add_argument("--session-id", required=True)
     scaffold.add_argument("--study-id", required=True)
     scaffold.add_argument("--corpus-id", required=True)
-    scaffold.add_argument("--clips", nargs=2, required=True, metavar=("A", "B"), help="clip ids, A then B")
+    scaffold.add_argument(
+        "--clips", nargs="+", required=True, metavar="CLIP", help="clip IDs in segment order"
+    )
+    scaffold.add_argument(
+        "--segment-ids",
+        nargs="+",
+        metavar="SEGMENT",
+        help="explicit segment directory IDs for a variable-count v4 document; default A B",
+    )
     scaffold.add_argument(
         "--duration-ms", type=int, default=10000, help="segment length; §10 matches the two"
     )

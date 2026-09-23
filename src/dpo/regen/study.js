@@ -10,6 +10,7 @@ const t = (text, values = {}) => {
   return result;
 };
 let state, chain = Promise.resolve(), cleanup = () => {};
+let recoveryNotice = "";
 const el = (tag, text, className) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = t(text);
@@ -18,34 +19,59 @@ const el = (tag, text, className) => {
 };
 const notice = (text = "") => {
   const node = document.getElementById("notice");
-  node.textContent = t(text); node.hidden = !text;
+  const message = text || recoveryNotice;
+  node.textContent = t(message); node.hidden = !message;
 };
 function storageKey(kind) { return `caption-study:${state.session_id}:${kind}`; }
 function saved(kind, fallback) {
   try { return JSON.parse(localStorage.getItem(storageKey(kind))) ?? fallback; } catch { return fallback; }
 }
 function save(kind, value) { localStorage.setItem(storageKey(kind), JSON.stringify(value)); }
+function viewingTotal() { return state.viewing_total || Math.max(state.completed_videos || 0, state.video_index + 1, 3); }
+function isLastVideo() { return state.video_index + 1 >= viewingTotal(); }
 async function request(path, payload) {
-  const response = await fetch(studyURL(path), payload === undefined ? {} : {
-    method: "POST", headers: {"content-type": "application/json", "x-study-request": "1"},
-    body: JSON.stringify(payload),
-  });
-  const result = await response.json();
-  if (!response.ok) { const error = new Error(result.error || "Request failed"); error.status = response.status; throw error; }
-  return result;
+  const controller = new AbortController();
+  // Public relay requests can take several seconds while media is streaming.
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(studyURL(path), {signal: controller.signal, ...(payload === undefined ? {} : {
+      method: "POST", headers: {"content-type": "application/json", "x-study-request": "1"},
+      body: JSON.stringify(payload),
+    })});
+    const result = await response.json();
+    if (!response.ok) { const error = new Error(result.error || "Request failed"); error.status = response.status; throw error; }
+    return result;
+  } finally { clearTimeout(timer); }
 }
-function send(action, data, redraw = false) {
+
+function pauseForRecovery(video) {
+  if (!video.paused || video.ended) {
+    // Replay the last unacknowledged interval instead of leaving a gap that
+    // would prevent completion after an ordinary interruption.
+    const checkpoint = Math.min(video.currentTime, state.position_ms / 1000,
+      video.ended ? Math.max(0, video.duration - 0.75) : Infinity);
+    video.pause();
+    video.currentTime = Math.max(0, checkpoint - 0.25);
+    recoveryNotice = "Playback paused after an interruption. Press play to resume from your saved position.";
+  }
+  notice();
+}
+function send(action, data, redraw = false, valid = () => true) {
   const key = crypto.randomUUID();
-  data = structuredClone(data);
+  const input = typeof data === "function" ? data : structuredClone(data);
   const run = async () => {
+    if (!valid()) return null;
+    const data = typeof input === "function" ? structuredClone(input()) : input;
     const payload = {key, revision: state.revision, data};
     let result;
     try { result = await request(`/api/study/${action}`, payload); }
     catch (error) {
+      if (!valid()) return null;
       // A lost response may already have committed: same key safely retrieves its receipt.
       if (!error.status) result = await request(`/api/study/${action}`, payload);
       else if (error.status === 409) {
         const fresh = await request("/api/study/state");
+        if (!valid()) return null;
         const stageChanged = fresh.stage !== state.stage;
         state = fresh;
         if (stageChanged) { render(); throw error; }
@@ -54,6 +80,7 @@ function send(action, data, redraw = false) {
         result = await request(`/api/study/${action}`, payload);
       } else throw error;
     }
+    if (!valid()) return null;
     state = result;
     notice();
     if (redraw) render();
@@ -61,80 +88,154 @@ function send(action, data, redraw = false) {
   };
   const pending = chain.then(run);
   chain = pending.catch(async error => {
+    if (!valid()) return;
     notice(error.message);
     if (error.status === 409) {
-      try { state = await request("/api/study/state"); render(); } catch { /* next user retry */ }
+      try { const fresh = await request("/api/study/state"); if (valid()) { state = fresh; render(); } } catch { /* next user retry */ }
     }
   });
   return pending;
 }
-function button(text, action, primary = false) {
+function button(text, action, primary = false, available = () => true) {
   const node = el("button", text, primary ? "primary" : "");
   node.type = "button";
   node.onclick = async () => {
     node.disabled = true; notice();
-    try { await action(); } catch (error) { notice(error.message); }
-    finally { node.disabled = false; }
+    try { await action(); } catch (error) { notice(recoveryNotice || error.message); }
+    finally { node.disabled = !available(); }
   };
   return node;
 }
 function heading(title, description) {
   const head = el("div", undefined, "head");
-  head.append(el("h1", title));
+  const titleNode = el("h1", title);
+  titleNode.tabIndex = -1;
+  head.append(titleNode);
   if (description) head.append(el("p", description, "lede"));
   content.append(head);
+  titleNode.focus();
 }
 function actions(...nodes) { const row = el("div", undefined, "actions"); row.append(...nodes); content.append(row); }
-function form(items, submitAction, title, description) {
+function form(items, submitAction, title, description, submitLabel = "Submit your experience") {
   heading(title, description);
-  const key = `form:${state.stage}`;
-  const values = saved(key, state.draft || {});
+  const key = `form:${state.stage}${state.stage === "video-survey" ? `:${state.video_index}` : ""}`;
+  const draft = state.stage === "video-survey" && state.draft?.answers ? state.draft.answers : state.draft || {};
+  const values = saved(key, draft);
   const node = el("form");
   node.onsubmit = event => event.preventDefault();
   let timer;
+  const videoID = state.stage === "video-survey" ? state.video.id : null;
   const changed = () => {
     save(key, values);
     clearTimeout(timer);
-    timer = setTimeout(() => send("draft", values).catch(() => {}), 800);
+    timer = setTimeout(() => send("draft", videoID ? {video_id: videoID, answers: values} : values).catch(() => {}), 800);
   };
+  let previousGroup;
   for (const item of items) {
+    if (item.group && item.group !== previousGroup) {
+      const groupTitle = el("h2");
+      groupTitle.textContent = item.group_title || (item.group === "prss" ? t("Overall soundscape experience (PRSS)") : "");
+      node.append(groupTitle);
+      previousGroup = item.group;
+    }
     const field = el("fieldset", undefined, "study-card");
-    field.append(el("legend", item.text));
+    const itemText = state.instrument_hash ? item.text : t(item.text);
+    const legend = el("legend"); legend.textContent = itemText; field.append(legend);
     if (item.type === "text") {
       const input = el("textarea"); input.maxLength = 2000; input.value = values[item.id] || "";
-      input.setAttribute("aria-label", t("{question} (optional)", {question: t(item.text)}));
+      input.setAttribute("aria-label", t("{question} (optional)", {question: itemText}));
       input.oninput = () => { values[item.id] = input.value; changed(); };
       field.append(el("p", "Optional"), input);
     } else {
-      if (item.type === "rating") field.append(el("p", `${t(item.low || "Strongly disagree")} (1) → ${t(item.high || "Strongly agree")} (5)`));
-      const choices = item.type === "rating" ? [1, 2, 3, 4, 5, ...(item.na ? ["na"] : [])] : item.options;
+      if (item.type === "rating") {
+        const [low, high] = item.anchors || [t(item.low || "Strongly disagree"), t(item.high || "Strongly agree")];
+        const anchors = el("p"); anchors.textContent = `${low} (1) → ${high} (${item.points || 5})`; field.append(anchors);
+      }
+      const choices = item.type === "rating"
+        ? [...Array.from({length: item.points || 5}, (_, i) => i + 1), ...(item.na ? ["na"] : [])] : item.options;
       const group = el("div", undefined, item.type === "rating" ? "ratings" : "");
       for (const value of choices) {
         const label = el("label"); const input = el("input");
         input.type = "radio"; input.name = item.id; input.value = String(value);
         input.checked = values[item.id] === value;
         input.onchange = () => { values[item.id] = value; changed(); };
-        label.append(input, el("span", value === "na" ? "Not applicable" : String(value))); group.append(label);
+        const text = el("span");
+        text.textContent = value === "na" ? (item.na_label || t("Not applicable"))
+          : item.option_labels?.[item.options?.indexOf(value)] || t(String(value));
+        label.append(input, text); group.append(label);
       }
       field.append(group);
     }
     node.append(field);
   }
   content.append(node);
-  actions(button(submitAction === "preferences" ? "Begin calibration clips" : "Submit your experience", async () => {
+  actions(button(submitAction === "preferences" ? "Begin calibration clips" : submitLabel, async () => {
     clearTimeout(timer);
-    const data = {...values};
+    const data = videoID ? {video_id: videoID, answers: {...values}} : {...values};
     await send(submitAction, data, true); save(key, {});
   }, true));
   cleanup = () => clearTimeout(timer);
 }
-function player(source) {
+function player(source, prepare = false) {
   const wrapper = el("div", undefined, "study-player");
-  const video = el("video"); video.controls = true; video.playsInline = true; video.preload = "metadata"; video.src = studyURL(source);
+  const video = el("video"); video.controls = !prepare; video.playsInline = true; video.preload = "metadata";
   video.setAttribute("controlslist", "nofullscreen noremoteplayback"); video.disablePictureInPicture = true;
   video.onerror = () => notice("This video could not be played. Reload to retry, or contact the researcher if the problem continues.");
   wrapper.append(video);
-  return {wrapper, video};
+  const controller = new AbortController();
+  let objectURL;
+  if (!prepare) video.src = studyURL(source);
+  else {
+    const progress = el("p", "Preparing the video… Playback will be available when the download finishes.", "study-preparation");
+    progress.setAttribute("role", "status");
+    const retry = button("Retry video download", load);
+    retry.hidden = true;
+    wrapper.append(progress, retry);
+    async function load() {
+      retry.hidden = true;
+      try {
+        const sourceURL = new URL(studyURL(source), location.href).href;
+        const cacheKey = new URL(sourceURL);
+        cacheKey.searchParams.set("study_session", state.session_id);
+        let cache;
+        try { cache = await window.caches?.open("caption-study-video-v1"); } catch {}
+        const cached = await cache?.match(cacheKey.href);
+        const response = cached || await fetch(sourceURL, {signal: controller.signal});
+        if (!response.ok) throw new Error("Video download failed");
+        const total = Number(response.headers.get("content-length"));
+        const reader = response.body.getReader(), chunks = [];
+        let received = 0;
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          chunks.push(value); received += value.length;
+          progress.textContent = total > 0
+            ? t("Preparing the video… {percent}%", {percent: Math.floor(received / total * 100)})
+            : t("Preparing the video… Playback will be available when the download finishes.");
+        }
+        const blob = new Blob(chunks, {type: response.headers.get("content-type") || "video/mp4"});
+        if (!cached && cache) {
+          try { await cache.put(cacheKey.href, new Response(blob, {headers: {
+            "content-type": blob.type, "content-length": String(blob.size),
+          }})); } catch { /* Storage quota/private mode may require another download on reload. */ }
+        }
+        if (controller.signal.aborted) return;
+        objectURL = URL.createObjectURL(blob);
+        video.src = objectURL; video.controls = true;
+        progress.textContent = t("Video ready. Press play when you are ready.");
+        video.addEventListener("play", () => { progress.hidden = true; }, {once: true});
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          progress.textContent = t("The video download was interrupted. Retry to continue.");
+          retry.hidden = false;
+        }
+      }
+    }
+    load();
+  }
+  return {wrapper, video, release: () => {
+    controller.abort(); if (objectURL) URL.revokeObjectURL(objectURL);
+  }};
 }
 function calibrationClip() {
   const clip = state.clip, resumePosition = state.position_ms;
@@ -142,21 +243,43 @@ function calibrationClip() {
   const {wrapper, video} = player(state.clip.video);
   content.append(wrapper);
   let sequence = state.sequence, busy = false, alive = true, initialized = false;
-  const tick = async (seek = false) => {
-    if (!alive || !initialized || (busy && !seek)) return;
+  let seekGeneration = 0, acknowledgedSeek = 0;
+  const tick = async (seek = false, force = false) => {
+    if (!alive || !initialized || (video.seeking && !seek) || (busy && !seek && !force)) return;
+    const generation = seekGeneration, valid = () => alive && generation === seekGeneration;
+    let sentSeek = false;
     busy = true;
     sequence = Math.max(sequence, state.sequence) + 1;
-    try { await send("clip-playback", {clip_id: clip.id, position_ms: Math.min(clip.duration_ms, video.currentTime * 1000), sequence, playing: !video.paused, hidden: document.hidden, seek}); }
+    try {
+      const sample = {clip_id: clip.id, position_ms: Math.min(clip.duration_ms, video.currentTime * 1000), sequence, playing: !video.paused, hidden: document.hidden};
+      const result = await send("clip-playback", () => {
+        sentSeek = generation > acknowledgedSeek;
+        return {...sample, seek: sentSeek};
+      }, false, valid);
+      if (result && valid() && sentSeek) acknowledgedSeek = generation;
+    }
+    catch (error) { if (valid()) { next.disabled = true; pauseForRecovery(video); } throw error; }
     finally { busy = false; }
   };
-  const next = button("Continue to what you noticed", async () => { await tick(); await send("clip-ended", {}, true); }, true);
+  const next = button("Continue to what you noticed", async () => {
+    await tick(false, true); await send("clip-ended", {}, true);
+  }, true, () => video.ended);
   next.disabled = true;
-  video.onloadedmetadata = () => { initialized = true; if (resumePosition > 0) video.currentTime = resumePosition / 1000; };
-  video.onplay = () => tick().catch(() => {});
-  video.onpause = () => tick().catch(() => {});
+  video.onloadedmetadata = () => {
+    initialized = true;
+    if (resumePosition > 0) video.currentTime = resumePosition / 1000;
+    else tick(false, true).catch(() => {});
+  };
+  video.onplay = () => { recoveryNotice = ""; notice(); tick(false, true).catch(() => {}); };
+  video.onpause = () => tick(false, true).catch(() => {});
+  video.onseeking = () => { seekGeneration++; };
   video.onseeked = () => tick(true).catch(() => {});
-  video.onended = () => { tick().catch(() => {}); next.disabled = false; };
-  const visibility = () => tick().catch(() => {});
+  video.onended = async () => {
+    next.disabled = true;
+    try { await tick(false, true); if (alive && video.ended) next.disabled = false; }
+    catch { /* Recovery pauses at the last acknowledged position. */ }
+  };
+  const visibility = () => { if (document.hidden) pauseForRecovery(video); tick(false, true).catch(() => {}); };
   document.addEventListener("visibilitychange", visibility);
   const timer = setInterval(() => { if (!video.paused) tick().catch(() => {}); }, 750);
   actions(next);
@@ -211,37 +334,130 @@ function observation() {
 }
 function watching() {
   const videoInfo = state.video, resumePosition = state.position_ms;
-  heading(videoInfo.title, t("Video {number} of 3 · Adjust the captions as you watch.", {number: state.video_index + 1}));
-  const layout = el("div", undefined, "watch-layout"), {wrapper, video} = player(videoInfo.url);
+  heading(videoInfo.title, t("Video {number} of {total} · Adjust the captions as you watch.", {number: state.video_index + 1, total: viewingTotal()}));
+  const layout = el("div", undefined, "watch-layout"), {wrapper, video, release} = player(videoInfo.url, true);
   const caption = el("div", "", "study-caption"); wrapper.append(caption);
+  const captionLevels = el("p", "No caption applied yet.", "caption-level-status");
+  wrapper.append(captionLevels);
+  const meter = el("div", undefined, "detail-meter");
+  meter.setAttribute("aria-hidden", "true");
+  meter.append(el("div", "Selected caption detail", "detail-meter-title"));
+  const meterRows = {};
+  for (const key of ["texture", "context"]) {
+    const row = el("div", undefined, "detail-meter-row");
+    const label = el("span", key === "texture" ? "Acoustic detail" : "Source and scene detail");
+    const value = el("span", "", "detail-meter-value");
+    const track = el("div", undefined, "detail-meter-track"), fill = el("div", undefined, "detail-meter-fill");
+    track.append(fill); row.append(label, value, track); meter.append(row);
+    meterRows[key] = {value, fill};
+  }
+  wrapper.append(meter);
+  let meterTimer, heldPointer = null;
+  const showMeter = () => {
+    clearTimeout(meterTimer); meter.classList.add("is-visible");
+    if (heldPointer === null) meterTimer = setTimeout(() => meter.classList.remove("is-visible"), 1500);
+  };
+  const holdMeter = event => { heldPointer = event.pointerId; showMeter(); };
+  const releaseMeter = event => {
+    if (event.pointerId === heldPointer) { heldPointer = null; showMeter(); }
+  };
   const panel = el("aside", undefined, "study-card study-controls");
   panel.append(el("h2", "Your caption detail"), el("p", "Move the point or use the sliders. Changes apply at a caption boundary."));
   const pad = el("div", undefined, "detail-pad"); pad.setAttribute("aria-hidden", "true");
   const dot = el("span", undefined, "detail-dot"); pad.append(dot);
-  panel.append(el("div", "More acoustic detail ↑", "pad-key"), pad, el("div", "More source and scene detail →", "pad-key"));
   const desired = {...state.axes}, ranges = {}, labels = {};
+  const settingsKey = axes => JSON.stringify({texture: axes.texture, context: axes.context});
+  let acceptedSettingsKey = settingsKey(desired), pendingSettings = null, sendingSettings = false, failedSettings = null;
   let controlTimer, alive = true, jobs = [], activeIndex = -1, applied = null, exposure = null, lastPosition = state.position_ms;
   let polling = false, tickPending = false, sequence = state.sequence, initialized = false;
+  let seekGeneration = 0, acknowledgedSeek = 0;
   const status = el("p", "Your calibrated settings are ready."); status.setAttribute("role", "status");
-  const updateControls = () => {
+  const updateControls = (reveal = false) => {
     dot.style.left = `${desired.context * 100}%`; dot.style.top = `${(1 - desired.texture) * 100}%`;
-    for (const key of ["texture", "context"]) { ranges[key].value = Math.round(desired[key] * 100); labels[key].textContent = `${t(key === "texture" ? "Acoustic detail" : "Source and scene detail")}: ${Math.round(desired[key] * 100)}%`; }
+    for (const key of ["texture", "context"]) {
+      const percent = Math.round(desired[key] * 100);
+      ranges[key].value = percent;
+      ranges[key].style.setProperty("--detail-level", `${percent}%`);
+      ranges[key].setAttribute("aria-valuetext", t("Selected: {percent}%", {percent}));
+      labels[key].textContent = `${t(key === "texture" ? "Acoustic detail" : "Source and scene detail")}: ${percent}%`;
+      meterRows[key].value.textContent = `${percent}%`;
+      meterRows[key].fill.style.width = `${percent}%`;
+    }
+    if (reveal) showMeter();
   };
-  const commit = () => { clearTimeout(controlTimer); status.textContent = t("Applying your settings…"); send("settings", {video_id: videoInfo.id, ...desired}).catch(() => {}); };
+  const retrySettings = button("Retry settings", () => {
+    if (!failedSettings) return;
+    pendingSettings = failedSettings; failedSettings = null; retrySettings.hidden = true; flushSettings();
+  });
+  retrySettings.hidden = true;
+  async function flushSettings() {
+    if (sendingSettings) return;
+    sendingSettings = true;
+    try {
+      while (alive && pendingSettings) {
+        const entry = pendingSettings;
+        pendingSettings = null;
+        if (entry.key === acceptedSettingsKey) continue;
+        showMeter(); status.textContent = t("Applying your settings…"); retrySettings.hidden = true;
+        try {
+          const result = await send("settings", entry.data, false, () => alive);
+          if (!result) continue;
+          acceptedSettingsKey = settingsKey(result.axes || entry.data); failedSettings = null;
+          status.textContent = t("Settings saved. Captions will update at a caption boundary.");
+        } catch (error) {
+          if (pendingSettings && pendingSettings.key !== entry.key) continue;
+          failedSettings = entry; retrySettings.hidden = false;
+          status.textContent = t("Settings were not saved. Retry when the connection is stable.");
+          break;
+        }
+      }
+    } finally {
+      sendingSettings = false;
+    }
+    if (alive && pendingSettings && (!failedSettings || pendingSettings.key !== failedSettings.key)) flushSettings();
+  }
+  const commit = (origin = "slider") => {
+    clearTimeout(controlTimer);
+    const key = settingsKey(desired);
+    if (!sendingSettings && key === acceptedSettingsKey && failedSettings?.key !== key) return;
+    pendingSettings = {
+      key,
+      data: {
+        video_id: videoInfo.id,
+        position_hint_ms: Math.min(videoInfo.duration_ms, video.currentTime * 1000),
+        origin,
+        ...desired,
+      },
+    };
+    failedSettings = failedSettings?.key === key ? null : failedSettings;
+    retrySettings.hidden = true;
+    flushSettings();
+  };
   for (const key of ["texture", "context"]) {
     const label = el("label"), text = el("span"), input = el("input"); input.type = "range"; input.min = 0; input.max = 100; input.step = 1;
     ranges[key] = input; labels[key] = text; label.append(text, input); panel.append(label);
-    input.oninput = () => { desired[key] = +input.value / 100; updateControls(); clearTimeout(controlTimer); controlTimer = setTimeout(commit, 300); };
-    input.onchange = commit;
+    const endpoints = el("span", undefined, "detail-endpoints"); endpoints.setAttribute("aria-hidden", "true");
+    endpoints.append(el("span", key === "texture" ? "Brief" : "General"), el("span", key === "texture" ? "Detailed" : "Specific"));
+    label.append(endpoints);
+    input.onpointerdown = holdMeter;
+    input.oninput = () => {
+      desired[key] = +input.value / 100; updateControls(true); clearTimeout(controlTimer);
+      controlTimer = setTimeout(() => commit(`slider:${key}`), 300);
+    };
+    input.onchange = () => commit(`slider:${key}`);
   }
-  const move = event => { const box = pad.getBoundingClientRect(); desired.context = Math.round(Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * 100) / 100; desired.texture = Math.round(Math.max(0, Math.min(1, 1 - (event.clientY - box.top) / box.height)) * 100) / 100; updateControls(); };
-  pad.onpointerdown = event => { pad.setPointerCapture(event.pointerId); move(event); };
+  panel.append(el("div", "More acoustic detail ↑", "pad-key"), pad, el("div", "More source and scene detail →", "pad-key"));
+  document.addEventListener("pointerup", releaseMeter);
+  document.addEventListener("pointercancel", releaseMeter);
+  const move = event => { const box = pad.getBoundingClientRect(); desired.context = Math.round(Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * 100) / 100; desired.texture = Math.round(Math.max(0, Math.min(1, 1 - (event.clientY - box.top) / box.height)) * 100) / 100; updateControls(true); };
+  pad.onpointerdown = event => { holdMeter(event); pad.setPointerCapture(event.pointerId); move(event); };
+  pad.onlostpointercapture = releaseMeter;
   pad.onpointermove = event => { if (pad.hasPointerCapture(event.pointerId)) move(event); };
-  pad.onpointerup = event => { if (pad.hasPointerCapture(event.pointerId)) { move(event); pad.releasePointerCapture(event.pointerId); commit(); } };
+  pad.onpointerup = event => { if (pad.hasPointerCapture(event.pointerId)) { move(event); pad.releasePointerCapture(event.pointerId); commit("pad"); } };
   const presets = el("div", undefined, "presets");
-  for (const [name, texture, context] of [["Both brief", 0, 0], ["More texture", 1, 0], ["More context", 0, 1], ["Both detailed", 1, 1]]) presets.append(button(name, () => { Object.assign(desired, {texture, context}); updateControls(); commit(); }));
+  for (const [name, texture, context] of [["Both brief", 0, 0], ["More texture", 1, 0], ["More context", 0, 1], ["Both detailed", 1, 1]]) presets.append(button(name, () => { Object.assign(desired, {texture, context}); updateControls(); commit(`preset:${name}`); }));
   const presetMenu = el("details"); presetMenu.append(el("summary", "Detail presets"), presets);
-  panel.append(presetMenu, button("Reset to calibration", () => { Object.assign(desired, state.defaults); updateControls(); commit(); }), status);
+  panel.append(presetMenu, button("Reset to calibration", () => { Object.assign(desired, state.defaults); updateControls(); commit("reset"); }), status, retrySettings);
   layout.append(wrapper, panel); content.append(layout); updateControls();
   const outboxKey = "exposures";
   const interrupted = saved("open-exposure", null);
@@ -270,8 +486,12 @@ function watching() {
         const job = jobs.find(j => j.cue === index && j.result && j.revision === state.settings_revision);
         applied = job?.result && !job.result.fallback ? {...job.result, job_id: job.id, revision: job.revision, axes: {...state.axes}} : {text: cue.fallback, fallback: true, reason: "not_ready_at_boundary"};
         caption.textContent = applied.text;
+        captionLevels.textContent = applied.fallback ? t("Prepared caption · selected levels not applied.")
+          : t("Current caption: acoustic {texture}%, source/scene {context}%.", {
+            texture: Math.round(applied.axes.texture * 100), context: Math.round(applied.axes.context * 100),
+          });
         status.textContent = applied.fallback ? t("Showing the available caption for this moment.") : t("Applied: acoustic {texture}%, source/scene {context}%.", {texture: Math.round(state.axes.texture * 100), context: Math.round(state.axes.context * 100)});
-      } else caption.textContent = "";
+      } else { caption.textContent = ""; captionLevels.textContent = t("No caption applied yet."); }
     }
     if (!exposure && applied && !video.paused && !video.seeking && !document.hidden) {
       exposure = {id: crypto.randomUUID(), video_id: videoInfo.id, cue: index,
@@ -281,12 +501,22 @@ function watching() {
     }
     if (exposure) { exposure.end_ms = Math.max(exposure.start_ms, Math.min(exposure.cue_end, lastPosition)); save("open-exposure", exposure); }
   }
-  async function tick(seek = false) {
-    if (!alive || !initialized || (tickPending && !seek)) return;
+  async function tick(seek = false, force = false) {
+    if (!alive || !initialized || (video.seeking && !seek) || (tickPending && !seek && !force)) return;
     tickPending = true;
+    const generation = seekGeneration, valid = () => alive && generation === seekGeneration;
+    let sentSeek = false;
     sequence = Math.max(sequence, state.sequence) + 1;
-    try { await send("playback", {video_id: videoInfo.id, position_ms: Math.min(videoInfo.duration_ms, video.currentTime * 1000),
-      sequence, playing: !video.paused, hidden: document.hidden, seek}); }
+    try {
+      const sample = {video_id: videoInfo.id, position_ms: Math.min(videoInfo.duration_ms, video.currentTime * 1000),
+        sequence, playing: !video.paused, hidden: document.hidden};
+      const result = await send("playback", () => {
+        sentSeek = generation > acknowledgedSeek;
+        return {...sample, seek: sentSeek};
+      }, false, valid);
+      if (result && valid() && sentSeek) acknowledgedSeek = generation;
+    }
+    catch (error) { if (valid()) { next.disabled = true; pauseForRecovery(video); } throw error; }
     finally { tickPending = false; }
   }
   video.onloadedmetadata = () => {
@@ -295,33 +525,68 @@ function watching() {
     else { tick().catch(() => {}); paint(); }
   };
   video.ontimeupdate = paint;
-  video.onplay = () => { tick().catch(() => {}); paint(); };
-  video.onpause = () => { finishExposure(); tick().then(flush).catch(() => {}); };
-  video.onseeking = () => { finishExposure(); activeIndex = -1; jobs = []; caption.textContent = ""; };
+  video.onplay = () => { recoveryNotice = ""; notice(); tick(false, true).catch(() => {}); paint(); };
+  video.onpause = () => { finishExposure(); tick(false, true).then(flush).catch(() => {}); };
+  video.onseeking = () => { seekGeneration++; finishExposure(); activeIndex = -1; jobs = []; caption.textContent = ""; captionLevels.textContent = t("No caption applied yet."); };
   video.onseeked = () => { lastPosition = video.currentTime * 1000; tick(true).catch(() => {}); paint(); };
-  const visibility = () => { if (document.hidden) finishExposure(); tick().then(flush).catch(() => {}); };
+  const visibility = () => {
+    if (document.hidden) { finishExposure(); pauseForRecovery(video); }
+    tick(false, true).then(flush).catch(() => { if (alive) pauseForRecovery(video); });
+  };
   document.addEventListener("visibilitychange", visibility);
-  const next = button(state.video_index === 2 ? "Continue to the final survey" : "Finish video", async () => {
-    finishExposure(); await tick();
-    while (saved(outboxKey, []).some(e => e.video_id === videoInfo.id)) await flush();
+  const next = button(state.survey_flow ? "Continue to this video's questions"
+    : isLastVideo() ? "Continue to the final survey" : "Finish video", async () => {
+    finishExposure();
+    try {
+      await tick(false, true);
+      while (saved(outboxKey, []).some(e => e.video_id === videoInfo.id)) await flush();
+    } catch (error) { pauseForRecovery(video); throw error; }
     await send("video-ended", {video_id: videoInfo.id}, true);
-  }, true);
-  next.disabled = true; video.onended = () => { finishExposure(); next.disabled = false; tick().then(flush).catch(() => {}); };
-  actions(button("Fullscreen", () => layout.requestFullscreen()), next);
+  }, true, () => video.ended);
+  next.disabled = true;
+  video.onended = async () => {
+    next.disabled = true; finishExposure();
+    try { await tick(false, true); await flush(); if (alive && video.ended) next.disabled = false; }
+    catch { if (alive) pauseForRecovery(video); }
+  };
+  const fullscreen = button("Fullscreen", () => document.fullscreenElement === layout
+    ? document.exitFullscreen() : layout.requestFullscreen());
+  const fullscreenChanged = () => {
+    fullscreen.textContent = t(document.fullscreenElement === layout ? "Exit fullscreen" : "Fullscreen");
+  };
+  document.addEventListener("fullscreenchange", fullscreenChanged);
+  const playbackActions = el("div", undefined, "actions");
+  playbackActions.append(fullscreen, next); layout.append(playbackActions);
+  // Playback acknowledgements must not wait behind a slow caption fetch.
+  const playbackTimer = setInterval(() => {
+    if (!video.paused) tick().catch(() => {});
+  }, 1000);
   const timer = setInterval(async () => {
-    if (polling || !alive) return; polling = true;
+    if (polling || !alive || !initialized) return; polling = true;
     try {
       const result = await request("/api/study/captions");
       if (alive && result.epoch === state.epoch && result.revision === state.settings_revision) jobs = result.jobs;
-      if (!video.paused) await tick();
       await flush();
-    } catch (error) { if (alive) notice(t("Connection interrupted. Your progress will retry.")); }
+    } catch (error) {
+      // A missing caption uses the prepared cue; playback failures have their
+      // own pause/recovery path. Caption delivery alone must not rewind video.
+      if (alive && !recoveryNotice) notice("Connection interrupted. Your progress will retry.");
+    }
     finally { polling = false; }
   }, 1000);
-  cleanup = () => { alive = false; clearInterval(timer); clearTimeout(controlTimer); document.removeEventListener("visibilitychange", visibility); finishExposure(); video.onpause = null; video.pause(); };
+  cleanup = () => {
+    alive = false; clearInterval(timer); clearInterval(playbackTimer); clearTimeout(controlTimer);
+    clearTimeout(meterTimer);
+    document.removeEventListener("pointerup", releaseMeter);
+    document.removeEventListener("pointercancel", releaseMeter);
+    document.removeEventListener("visibilitychange", visibility);
+    document.removeEventListener("fullscreenchange", fullscreenChanged);
+    finishExposure(); video.onpause = null; video.pause();
+    release();
+  };
 }
 function render() {
-  cleanup(); cleanup = () => {}; content.replaceChildren();
+  cleanup(); cleanup = () => {}; recoveryNotice = ""; content.replaceChildren();
   document.documentElement.lang = state.language;
   document.title = t("Sound captions — your viewing experience");
   document.querySelector(".study-top .eyebrow").textContent = t("SOUND CAPTIONS");
@@ -334,20 +599,30 @@ function render() {
   const calibration = ["preferences", "clip", "observe"].includes(state.stage);
   document.getElementById("rail-calibration").setAttribute("aria-current", calibration ? "step" : "false");
   document.getElementById("rail-viewing").setAttribute("aria-current", calibration ? "false" : "step");
-  document.getElementById("progress").textContent = calibration ? t("Calibration · {number} of {count} clips", {number: Math.min(state.clip_index + 1, state.calibration_count), count: state.calibration_count}) : state.stage === "done" ? t("Study complete") : t("Viewing experience · {count} of 3 complete", {count: state.completed_videos});
+  document.getElementById("progress").textContent = calibration ? t("Calibration · {number} of {count} clips", {number: Math.min(state.clip_index + 1, state.calibration_count), count: state.calibration_count}) : state.stage === "done" ? t("Study complete") : t("Viewing experience · {count} of {total} complete", {count: state.completed_videos, total: viewingTotal()});
   if (state.stage === "preferences") return form(state.items, "preferences", "Make the captions yours", "First, tell us how much detail you prefer. Then watch a few short clips and tell us what you notice.");
   if (state.stage === "clip") return calibrationClip();
   if (state.stage === "observe") return observation();
   if (state.stage === "watch") return watching();
-  if (state.stage === "final") return form(state.items, "final-survey", "Your viewing experience", "Thinking about the three videos you just watched, tell us how the captions and controls felt.");
+  if (state.stage === "video-survey") return form(state.items, "video-survey",
+    t("Video {number} of {total} · Your experience", {number: state.video_index + 1, total: viewingTotal()}),
+    "Answer these four questions about the video you just watched. Overall soundscape questions come after all videos.",
+    isLastVideo() ? "Save and continue to overall experience" : "Save this video's answers");
+  if (state.stage === "final") return form(state.items, "final-survey", "Your viewing experience",
+    state.survey_flow
+      ? "Thinking about your overall experience across the longer videos in Chapter 2, answer the soundscape questions (PRSS) and reflect on the caption controls."
+      : "Thinking about the videos you just watched, tell us how the captions and controls felt.");
   if (state.stage === "ready") {
-    heading("Your calibration is saved", "Next, watch three five-minute videos with captions shaped by your responses. You can adjust the level of detail while watching.");
+    heading("Your calibration is saved", state.survey_flow
+      ? "Next, watch the five-minute videos with adjustable captions. Answer four questions after each video, then reflect on your overall experience and soundscapes once at the end."
+      : "Next, watch the five-minute videos with captions shaped by your responses. You can adjust the level of detail while watching.");
     actions(button("Start viewing experience", () => send("start-viewing", {}, true), true));
   } else if (state.stage === "break") {
-    heading("Take a moment", t("You have finished {count} of 3 videos. Your chosen detail settings will carry into the next video.", {count: state.completed_videos}));
+    heading("Take a moment", t("You have finished {count} of {total} videos. Your chosen detail settings will carry into the next video.", {count: state.completed_videos, total: viewingTotal()}));
     actions(button("Continue to the next video", () => send("continue", {}, true), true));
   } else {
     heading("Thank you for taking part", "Your calibration, viewing experience and final responses have been saved. You can close this page.");
+    content.append(el("p", t("Receipt: {id}", {id: state.session_id}), "receipt"));
   }
 }
 async function boot(code) {

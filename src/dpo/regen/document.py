@@ -43,7 +43,9 @@ from dpo.regen.captions import Cue, TrackError, cues_of, validate_track
 from dpo.regen.config import Configuration, load_configuration
 from dpo.regen.points import MaskObject
 
-REGEN_SCHEMA = "dpo.caption-regen/v3"
+REGEN_SCHEMA_V3 = "dpo.caption-regen/v3"
+REGEN_SCHEMA_V4 = "dpo.caption-regen/v4"
+REGEN_SCHEMA = REGEN_SCHEMA_V3
 ID_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
 COLOUR_RE = re.compile(r"#[0-9A-Fa-f]{6}\Z")
 # §5 draws the lanes stacked over one ten-second timeline. Past this the lanes
@@ -269,24 +271,104 @@ def _validate_segment(raw: object, path: str, name: str, configuration: Configur
     return clip_id
 
 
+def _validate_v3_segments(segments: Mapping[str, Any], configuration: Configuration) -> dict[str, str]:
+    if set(segments) != set(SEGMENTS):
+        raise _fail("segments", f"must be exactly {list(SEGMENTS)}; both are needed whichever way §1 assigns")
+    return {
+        name: _validate_segment(segments[name], f"segments.{name}", name, configuration) for name in SEGMENTS
+    }
+
+
+def _validate_v4_segment_order(root: Mapping[str, Any], segments: Mapping[str, Any]) -> tuple[str, ...]:
+    order = _sequence(root.get("clip_order"), "clip_order", minimum=1)
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, candidate in enumerate(order):
+        name = _identifier(candidate, f"clip_order[{index}]")
+        if name in seen:
+            raise _fail(f"clip_order[{index}]", f"{name!r} is declared twice")
+        seen.add(name)
+        result.append(name)
+    segment_ids = set(segments)
+    if seen != segment_ids:
+        missing = sorted(segment_ids - seen)
+        unknown = sorted(seen - segment_ids)
+        details = []
+        if missing:
+            details.append(f"missing {missing}")
+        if unknown:
+            details.append(f"unknown {unknown}")
+        suffix = f" ({'; '.join(details)})" if details else ""
+        raise _fail("clip_order", "must name exactly every segment id" + suffix)
+    return tuple(result)
+
+
+def _validate_v4_segments(
+    root: Mapping[str, Any], segments: Mapping[str, Any], configuration: Configuration
+) -> dict[str, str]:
+    if not segments:
+        raise _fail("segments", "must have at least 1 entry")
+    for name in segments:
+        _identifier(name, f"segments.{name}")
+    order = _validate_v4_segment_order(root, segments)
+    return {
+        name: _validate_segment(segments[name], f"segments.{name}", name, configuration) for name in order
+    }
+
+
 def validate_regen_document(document: Mapping[str, Any]) -> None:
     """Refuse a document a session could not be run from. Raises on the path."""
     root = _mapping(document, "document")
-    if root.get("schema") != REGEN_SCHEMA:
-        raise _fail("schema", f"must be {REGEN_SCHEMA!r}")
+    schema = root.get("schema")
+    if schema not in (REGEN_SCHEMA_V3, REGEN_SCHEMA_V4):
+        raise _fail("schema", f"must be one of {[REGEN_SCHEMA_V3, REGEN_SCHEMA_V4]}")
     _identifier(root.get("session_id"), "session_id")
     configuration = configuration_of(root)
     segments = _mapping(root.get("segments"), "segments")
-    if set(segments) != set(SEGMENTS):
-        raise _fail("segments", f"must be exactly {list(SEGMENTS)}; both are needed whichever way §1 assigns")
-    clips = {}
-    for name in SEGMENTS:
-        clips[name] = _validate_segment(segments[name], f"segments.{name}", name, configuration)
-    if clips["A"] == clips["B"]:
-        raise _fail(
-            "segments.B.clip_id",
-            f"is the same clip as segment A ({clips['A']!r}); the two viewings must be different footage",
-        )
+    if schema == REGEN_SCHEMA_V3:
+        clips = _validate_v3_segments(segments, configuration)
+    else:
+        clips = _validate_v4_segments(root, segments, configuration)
+    seen_clips: dict[str, str] = {}
+    for name, clip_id in clips.items():
+        if clip_id in seen_clips:
+            first = seen_clips[clip_id]
+            path = f"segments.{name}.clip_id"
+            if schema == REGEN_SCHEMA_V3 and name == "B" and first == "A":
+                path = "segments.B.clip_id"
+                message = (
+                    f"is the same clip as segment A ({clip_id!r}); the two viewings must be different footage"
+                )
+            else:
+                message = (
+                    f"is the same clip as segment {first} ({clip_id!r}); "
+                    "the viewings must be different footage"
+                )
+            raise _fail(
+                path,
+                message,
+            )
+        seen_clips[clip_id] = name
+
+
+def segment_order(document: Mapping[str, Any], sequence: int = 0) -> tuple[str, ...]:
+    """The ordered segment ids for a participant sequence.
+
+    v3 documents keep the legacy parity rule from :mod:`dpo.regen.assignment`.
+    v4 documents use the explicit author-provided ``clip_order`` and rotate it
+    by sequence number so arbitrary clip counts still get balanced starts.
+    """
+    root = _mapping(document, "document")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+        raise _fail("sequence", "must be a non-negative integer")
+    schema = root.get("schema")
+    if schema == REGEN_SCHEMA_V3:
+        return SEGMENTS if sequence % 2 == 0 else tuple(reversed(SEGMENTS))
+    if schema != REGEN_SCHEMA_V4:
+        raise _fail("schema", f"must be one of {[REGEN_SCHEMA_V3, REGEN_SCHEMA_V4]}")
+    order = tuple(_validate_v4_segment_order(root, _mapping(root.get("segments"), "segments")))
+    offset = sequence % len(order)
+    return order[offset:] + order[:offset]
 
 
 def configuration_of(document: Mapping[str, Any]) -> Configuration:
