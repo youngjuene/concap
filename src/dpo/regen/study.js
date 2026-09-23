@@ -405,6 +405,9 @@ function watching() {
           acceptedSettingsKey = settingsKey(result.axes || entry.data); failedSettings = null;
           status.textContent = t("Settings saved. Captions will update at a caption boundary.");
         } catch (error) {
+          // The server may have committed the request despite a lost reply.
+          // Reconcile the latest selection instead of trusting the old key.
+          acceptedSettingsKey = null;
           if (pendingSettings && pendingSettings.key !== entry.key) continue;
           failedSettings = entry; retrySettings.hidden = false;
           status.textContent = t("Settings were not saved. Retry when the connection is stable.");
@@ -460,11 +463,21 @@ function watching() {
   panel.append(presetMenu, button("Reset to calibration", () => { Object.assign(desired, state.defaults); updateControls(); commit("reset"); }), status, retrySettings);
   layout.append(wrapper, panel); content.append(layout); updateControls();
   const outboxKey = "exposures";
+  let exposureEpisode = crypto.randomUUID();
   const interrupted = saved("open-exposure", null);
-  if (interrupted) { const queue = saved(outboxKey, []); queue.push({...interrupted, incomplete: true}); save(outboxKey, queue); save("open-exposure", null); }
-  function finishExposure() {
+  if (interrupted) { const queue = saved(outboxKey, []); queue.push({...interrupted, incomplete: true, closed_by: "interrupted"}); save(outboxKey, queue); save("open-exposure", null); }
+  function exposurePosition() {
+    const ms = Math.min(videoInfo.duration_ms, video.currentTime * 1000);
+    if (!video.seeking && ms >= lastPosition) lastPosition = ms;
+    return ms;
+  }
+  function finishExposure(reason = "replacement", sample = true) {
     if (!exposure) return;
-    exposure.end_ms = Math.max(exposure.start_ms, Math.min(exposure.cue_end, lastPosition));
+    if (sample) exposurePosition();
+    // The DOM retains this text until replacement. The cue's nominal end is
+    // provenance, not the actual end of the displayed exposure.
+    exposure.end_ms = Math.max(exposure.start_ms, lastPosition);
+    exposure.closed_by = reason;
     const queue = saved(outboxKey, []); queue.push(exposure); save(outboxKey, queue); exposure = null;
     save("open-exposure", null);
   }
@@ -476,11 +489,10 @@ function watching() {
     const ids = new Set(entries.map(e => e.id)); save(outboxKey, saved(outboxKey, []).filter(e => !ids.has(e.id)));
   }
   function paint() {
-    const ms = video.currentTime * 1000;
-    if (!video.seeking && ms >= lastPosition && ms - lastPosition < 1000) lastPosition = ms;
+    const ms = exposurePosition();
     const index = videoInfo.cues.findIndex(cue => cue.start_ms <= ms && ms < cue.end_ms);
     if (index !== activeIndex) {
-      finishExposure(); activeIndex = index; applied = null;
+      finishExposure("replacement", false); activeIndex = index; applied = null;
       if (index >= 0) {
         const cue = videoInfo.cues[index];
         const job = jobs.find(j => j.cue === index && j.result && j.revision === state.settings_revision);
@@ -495,11 +507,12 @@ function watching() {
     }
     if (!exposure && applied && !video.paused && !video.seeking && !document.hidden) {
       exposure = {id: crypto.randomUUID(), video_id: videoInfo.id, cue: index,
+        timing: "display-v1", episode_id: exposureEpisode,
         cue_end: videoInfo.cues[index].end_ms, start_ms: ms, end_ms: ms,
         text: applied.text, fallback: applied.fallback, job_id: applied.job_id || null,
         settings_revision: applied.revision ?? null, axes: applied.fallback ? null : applied.axes};
     }
-    if (exposure) { exposure.end_ms = Math.max(exposure.start_ms, Math.min(exposure.cue_end, lastPosition)); save("open-exposure", exposure); }
+    if (exposure) { exposure.end_ms = Math.max(exposure.start_ms, lastPosition); save("open-exposure", exposure); }
   }
   async function tick(seek = false, force = false) {
     if (!alive || !initialized || (video.seeking && !seek) || (tickPending && !seek && !force)) return;
@@ -526,14 +539,16 @@ function watching() {
   };
   video.ontimeupdate = paint;
   video.onplay = () => { recoveryNotice = ""; notice(); tick(false, true).catch(() => {}); paint(); };
-  video.onpause = () => { finishExposure(); tick(false, true).then(flush).catch(() => {}); };
-  video.onseeking = () => { seekGeneration++; finishExposure(); activeIndex = -1; jobs = []; caption.textContent = ""; captionLevels.textContent = t("No caption applied yet."); };
+  video.onpause = () => { finishExposure("pause"); tick(false, true).then(flush).catch(() => {}); };
+  video.onseeking = () => { seekGeneration++; finishExposure("seek", false); exposureEpisode = crypto.randomUUID(); activeIndex = -1; jobs = []; caption.textContent = ""; captionLevels.textContent = t("No caption applied yet."); };
   video.onseeked = () => { lastPosition = video.currentTime * 1000; tick(true).catch(() => {}); paint(); };
   const visibility = () => {
-    if (document.hidden) { finishExposure(); pauseForRecovery(video); }
+    if (document.hidden) { finishExposure("hidden"); pauseForRecovery(video); }
     tick(false, true).then(flush).catch(() => { if (alive) pauseForRecovery(video); });
   };
   document.addEventListener("visibilitychange", visibility);
+  const pagehide = () => finishExposure("pagehide");
+  window.addEventListener("pagehide", pagehide);
   const next = button(state.survey_flow ? "Continue to this video's questions"
     : isLastVideo() ? "Continue to the final survey" : "Finish video", async () => {
     finishExposure();
@@ -545,7 +560,7 @@ function watching() {
   }, true, () => video.ended);
   next.disabled = true;
   video.onended = async () => {
-    next.disabled = true; finishExposure();
+    next.disabled = true; finishExposure("ended");
     try { await tick(false, true); await flush(); if (alive && video.ended) next.disabled = false; }
     catch { if (alive) pauseForRecovery(video); }
   };
@@ -581,7 +596,8 @@ function watching() {
     document.removeEventListener("pointercancel", releaseMeter);
     document.removeEventListener("visibilitychange", visibility);
     document.removeEventListener("fullscreenchange", fullscreenChanged);
-    finishExposure(); video.onpause = null; video.pause();
+    window.removeEventListener("pagehide", pagehide);
+    finishExposure("cleanup"); video.onpause = null; video.pause();
     release();
   };
 }

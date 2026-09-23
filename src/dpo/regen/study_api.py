@@ -451,8 +451,23 @@ def build_study_app(
                         if type(cue_index) is not int or not 0 <= cue_index < len(video["cues"]):
                             raise ValueError("Exposure must name a video cue")
                         cue = video["cues"][cue_index]
-                        if not cue["start_ms"] <= start <= end <= cue["end_ms"]:
-                            raise ValueError("Exposure crosses its cue boundary")
+                        timing = entry.get("timing")
+                        if timing == "display-v1":
+                            # Activation belongs to this cue; its text may remain
+                            # displayed until a later sampled DOM replacement.
+                            # These are client display records, never playback credit.
+                            if not cue["start_ms"] <= start < cue["end_ms"]:
+                                raise ValueError("Exposure activation is outside its cue")
+                            if entry.get("cue_end") != cue["end_ms"]:
+                                raise ValueError("Exposure cue metadata does not match")
+                            episode = entry.get("episode_id")
+                            if not isinstance(episode, str) or not 1 <= len(episode) <= 100:
+                                raise ValueError("Exposure playback episode required")
+                        elif timing is None:
+                            if not cue["start_ms"] <= start <= end <= cue["end_ms"]:
+                                raise ValueError("Exposure crosses its cue boundary")
+                        else:
+                            raise ValueError("Unsupported exposure timing contract")
                         if len(json.dumps(entry)) > 3000:
                             raise ValueError("Exposure record too large")
                         batch.append({**entry, "start_ms": start, "end_ms": end, "video_id": video["id"]})

@@ -247,6 +247,19 @@ The browser keeps draft forms and an exposure outbox keyed to its non-secret
 session ID. Failed uploads retry with stable event IDs. An interrupted open cue
 is marked incomplete on resume; no browser can prove unobserved time after a crash.
 Exposure timestamps describe reported display, not verified gaze or attention.
+New records use `timing: "display-v1"`: `start_ms` is the media position at
+caption activation and `end_ms` is the sampled position when the DOM text is
+replaced or playback is interrupted. `cue_end` preserves the nominal cue bound;
+the displayed interval may extend beyond it until the next sampled replacement.
+These records describe DOM assignment, not a measured rendered frame. An
+`episode_id` separates each page load and seek, so replayed intervals must not be
+treated as one monotonic viewing pass. Seeks close at the last pre-seek sample;
+crash recovery retains only the last saved checkpoint and marks it incomplete.
+Those unobserved tails remain unknown. Pause, visibility loss, page exit and
+normal completion sample the current media position. The server validates
+activation against its cue and the interval against video duration. Legacy
+records without a timing version retain their original cue-bound validation.
+Exposure records never grant played coverage or completion eligibility.
 Researchers may read `StudyStore.export(session_cookie)` locally; session
 credentials are omitted from its returned jobs. No public log-download endpoint
 is exposed.

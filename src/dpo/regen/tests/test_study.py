@@ -457,6 +457,51 @@ def test_exposure_deduplication_and_window_bounds(session: Any) -> None:
     s.submit("exposures", {"video_id": "long-0", "entries": [{**event, "end_ms": 2000}]}, expected=409)
 
 
+def test_actual_display_exposure_crosses_nominal_end_without_crediting_playback(session: Any) -> None:
+    s, store, _ = session
+    s.calibrate()
+    s.submit("start-viewing")
+    before = store.state(s.token)
+    event = {
+        "id": "display-1",
+        "cue": 0,
+        "cue_end": 5000,
+        "start_ms": 4900,
+        "end_ms": 5215,
+        "fallback": True,
+        "timing": "display-v1",
+        "episode_id": "playback-episode-1",
+    }
+    s.submit("exposures", {"video_id": "long-0", "entries": [event]})
+    s.submit("exposures", {"video_id": "long-0", "entries": [event]})
+    exported = store.export(s.token)
+    assert len(exported["exposures"]) == 1
+    assert exported["exposures"][0]["end_ms"] == 5215
+    for key in ("coverage", "position_ms", "epoch"):
+        assert exported["state"][key] == before[key]
+    s.submit("video-ended", {"video_id": "long-0"}, expected=400)
+    s.submit("exposures", {"video_id": "long-0", "entries": [{**event, "end_ms": 5220}]}, expected=409)
+    for index, invalid_fields in enumerate(
+        (
+            {"start_ms": 5100},
+            {"end_ms": 300001},
+            {"cue_end": 6000},
+            {"episode_id": ""},
+            {"timing": "unknown"},
+        )
+    ):
+        s.submit(
+            "exposures",
+            {
+                "video_id": "long-0",
+                "entries": [
+                    {**event, "id": f"invalid-{index}", **invalid_fields},
+                ],
+            },
+            expected=400,
+        )
+
+
 def test_receipt_replay_does_not_rewind_state(tmp_path: Path) -> None:
     store = StudyStore(tmp_path / "db")
     token = store.create("hash", "en")
