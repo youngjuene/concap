@@ -1,0 +1,1176 @@
+{
+  "source_url": "https://docs.google.com/spreadsheets/d/1JP44YNkE2hgOTHUUJ69WrseeD8_fqXHDxYZ5_cMI-5Q/edit",
+  "spreadsheet_id": "1JP44YNkE2hgOTHUUJ69WrseeD8_fqXHDxYZ5_cMI-5Q",
+  "title": "소리자막_설문문항표",
+  "read_date": "2026-10-04",
+  "sheets": [
+    {
+      "properties": {
+        "sheetId": 482581367,
+        "title": "안내",
+        "index": 0,
+        "sheetType": "GRID",
+        "gridProperties": {
+          "rowCount": 1000,
+          "columnCount": 26,
+          "rowGroupControlAfter": true,
+          "columnGroupControlAfter": true
+        }
+      },
+      "range": "'안내'!A1:Z1000",
+      "majorDimension": "ROWS",
+      "values": [
+        [
+          "소리자막 연구 설문 문항표"
+        ],
+        [
+          "작성",
+          "안채영 / 2026.09 / 영준님과 공동 편집용"
+        ],
+        [],
+        [
+          "시트 구성"
+        ],
+        [
+          "문항표",
+          "스테이지·페이지 순서대로 모든 화면과 문항. 웹 인터페이스에 그대로 옮기는 기준"
+        ],
+        [
+          "척도라벨",
+          "0~6 응답 척도의 단계별 라벨"
+        ],
+        [
+          "참고문헌",
+          "출처 문헌과 DOI"
+        ],
+        [],
+        [
+          "색 구분"
+        ],
+        [
+          "노란 칸",
+          "판단 필요. '확인 필요' 열에 이유가 적혀 있음"
+        ],
+        [
+          "파란 칸",
+          "한국어 번역을 수정한 문항. 이전 번역과 수정 사유를 옆 열에서 비교 가능"
+        ],
+        [
+          "회색 칸",
+          "영준님 담당 (인터페이스). 문구는 임시"
+        ],
+        [
+          "초록 칸",
+          "화면 전환 (영상 시청 등). 문항 아님"
+        ],
+        [],
+        [
+          "수정 방법",
+          "한국어(수정안) 열을 직접 고치고, 수정 사유 열에 이유를 남겨주세요."
+        ],
+        [
+          "주의",
+          "한국어는 AI 임시 번역을 1차 다듬은 상태. 역번역 절차 미적용 (Limitations에 기재 예정)"
+        ],
+        [],
+        [
+          "문항 수",
+          "1스테이지 영상 1개당 채영 담당 30문항 (1차 14 + 2차 16). 실험 전체 종료 후 인터뷰 2문항. 2스테이지 문항은 미정"
+        ]
+      ]
+    },
+    {
+      "properties": {
+        "sheetId": 959486356,
+        "title": "문항표",
+        "index": 1,
+        "sheetType": "GRID",
+        "gridProperties": {
+          "rowCount": 1000,
+          "columnCount": 26,
+          "frozenRowCount": 1,
+          "rowGroupControlAfter": true,
+          "columnGroupControlAfter": true
+        }
+      },
+      "range": "'문항표'!A1:Z1000",
+      "majorDimension": "ROWS",
+      "values": [
+        [
+          "스테이지",
+          "페이지",
+          "페이지명",
+          "순서",
+          "유형",
+          "코드",
+          "담당",
+          "하위척도",
+          "영문 원본",
+          "한국어 (수정안)",
+          "이전 번역",
+          "수정 사유",
+          "응답 형식",
+          "척도 라벨",
+          "역채점",
+          "출처",
+          "확인 필요"
+        ],
+        [
+          "공통",
+          "P0",
+          "도입",
+          null,
+          "화면",
+          null,
+          "—",
+          null,
+          null,
+          "동의서, 안내문, 연습 시행 1회 (연습 응답은 분석 제외)"
+        ],
+        [
+          "공통",
+          "P0",
+          "도입",
+          null,
+          "안내",
+          null,
+          "채영",
+          null,
+          null,
+          "본 연구는 영상에 자동으로 붙는 소리 자막이 영상 속 소리를 얼마나 잘 묘사하는지 평가하기 위한 연구입니다.\n\n짧은 영상 여러 편을 보시게 되며, 각 영상마다 화면과 소리에 대한 질문, 그리고 자막에 대한 질문에 답해 주시면 됩니다. 같은 영상을 두 번 보시는 경우가 있는데, 이는 서로 다른 버전의 자막을 비교하기 위한 것입니다.\n\n정답은 없으며 느끼신 대로 답해 주시면 됩니다. 모든 영상이 끝난 뒤에는 2~3분 정도 간단한 인터뷰가 있습니다.\n\n실험이 끝난 뒤 연구의 구체적인 목적을 자세히 안내해 드립니다.",
+          null,
+          null,
+          null,
+          null,
+          null,
+          "자체 작성 (커버 스토리)",
+          "9/17 미팅에서 방향 승인됨. 거짓 정보는 없고 연구 목적의 일부만 밝히는 형태. 최종 문구는 IRB 동의서와 표현을 맞출 것"
+        ],
+        [
+          "1스테이지",
+          "P1",
+          "영상 시청 1",
+          null,
+          "화면",
+          null,
+          "—",
+          null,
+          null,
+          "영상 + 첫 번째 자막 (2×2 조건 배정: 시청각 일치도 × 묘사의 깊이)"
+        ],
+        [
+          "1스테이지",
+          "P2",
+          "1차 시각 지각",
+          "1",
+          "문항",
+          "V1",
+          "영준",
+          "환경 지각",
+          null,
+          "영상에서 가장 먼저 눈에 들어온 요소를 골라주세요",
+          null,
+          null,
+          "대표 프레임 위 마스크 클릭",
+          null,
+          null,
+          "자체 제작"
+        ],
+        [
+          "1스테이지",
+          "P3",
+          "1차 청각 지각",
+          "1",
+          "문항",
+          "A1s",
+          "영준",
+          "환경 지각",
+          null,
+          "영상에서 가장 주의를 끈 소리를 골라주세요",
+          null,
+          null,
+          "객관식 (영상별 소리 목록)",
+          null,
+          null,
+          "자체 제작"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          null,
+          "안내",
+          null,
+          "채영",
+          null,
+          "Imagine that you are in the environment shown in the video. Check the rating scales so that your response describe your experience of the environment. (Laumann et al., 2001, Study 2) / how much do you agree with the statement…? (Payne, 2013)",
+          "방금 본 영상 속 환경에 자신이 있다고 상상해 주세요. 다음 진술이 그 환경에 대한 자신의 경험에 얼마나 들어맞는지 골라주세요.",
+          null,
+          null,
+          null,
+          null,
+          null,
+          "Laumann et al. (2001) / Payne (2013)",
+          "Laumann et al.(2001) Study 2가 영상 자극으로 회복성 척도를 받을 때 사용한 지시문을 따름. PRSS 교시문(동의 정도)과 PRS 교시문(경험에 들어맞는 정도)이 한 페이지에 섞이는 문제도 이 문장으로 함께 해결됨."
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "1",
+          "문항",
+          "F1",
+          "채영",
+          "Fascination",
+          "I find this sonic environment appealing",
+          "나는 영상 속 소리 환경이 마음에 든다",
+          "나는 이 소리 환경이 마음에 든다",
+          "지시어 통일 (this → 영상 속)",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "2",
+          "문항",
+          "F2",
+          "채영",
+          "Fascination",
+          "My attention is drawn to many of the interesting sounds here",
+          "영상 속 여러 흥미로운 소리들에 나의 주의가 이끌렸다",
+          "이곳의 흥미로운 소리들에 나의 주의가 이끌린다",
+          "지시어 통일 (here → 영상 속). 원문의 'many of' 반영. 시청 중 경험이므로 과거형",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "3",
+          "문항",
+          "F3",
+          "채영",
+          "Fascination",
+          "I am engrossed by this sonic environment",
+          "나는 영상 속 소리 환경에 몰입했다",
+          "나는 이 소리 환경에 몰입해 있다",
+          "지시어 통일. 시청 중 경험이므로 과거형",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "4",
+          "문항",
+          "BF1",
+          "채영",
+          "Being-Away-From",
+          "This sonic environment is a refuge from unwanted distractions",
+          "영상 속 소리 환경은 원치 않는 방해로부터의 피난처가 된다",
+          "이 소리 환경은 원치 않는 방해로부터의 피난처다",
+          "지시어 통일. '피난처다'의 단정이 어색해 '피난처가 된다'로",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)",
+          "Payne(2013)에서 환경 유형에 따라 요인 적재가 바뀐 문항. 도시 영상에서 불안정할 수 있음"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "5",
+          "문항",
+          "BF2",
+          "채영",
+          "Being-Away-From",
+          "When I hear these sounds I feel free from work, routine and responsibilities",
+          "영상 속 소리들을 듣는 동안, 일과 일상, 책임에서 벗어나 자유로워지는 느낌이 든다",
+          "이 소리들을 들으면 일, 일상, 책임으로부터 자유로워지는 느낌이 든다",
+          "지시어 통일. 원문 'When I hear'는 조건이 아니라 시점이므로 '들으면'을 '듣는 동안'으로",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)",
+          "실험실에서 '일과 책임'을 떠올리게 하는 어색함이 지적되었으나 유지하기로 함. Being-Away-From이 2문항으로 줄면 하위척도 신뢰도가 불안정해지고, P4·P9 교시문(영상 속 환경에 있다고 상상)이 맥락을 만들어 어색함을 덜어줌"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "6",
+          "문항",
+          "BF3",
+          "채영",
+          "Being-Away-From",
+          "Listening to these sounds gives me a break from my day-to-day listening experience",
+          "영상 속 소리들을 듣는 동안, 평소 듣던 소리들에서 잠시 벗어난 느낌이 든다",
+          "이 소리들을 듣는 것은 일상적인 청취 경험에서 잠시 벗어나게 해준다",
+          "'청취 경험'이 번역투라 풀어씀. '소리에서 벗어난다'가 실제 이탈로 읽혀 원문의 'gives me a break'가 뜻하는 주관적 느낌을 살림",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "7",
+          "문항",
+          "E1",
+          "채영",
+          "Extent-Coherence",
+          "All the sounds I'm hearing belong here (with the place shown)",
+          "영상에서 들린 모든 소리는 화면 속 장소에 속해 있다",
+          "내가 듣고 있는 모든 소리는 이곳에 속해 있다",
+          "원문 괄호 '(with the place shown)'을 문장에 반영. 축 1 조작 점검 문항이므로 화면과의 관계가 드러나야 함",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)",
+          "Payne(2013)이 도시 소리 환경에서 Extent 신뢰도가 낮았다고 보고"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "8",
+          "문항",
+          "E2",
+          "채영",
+          "Extent-Coherence",
+          "All the sounds merge to form a coherent sonic environment",
+          "영상 속 모든 소리가 어우러져 하나의 일관된 소리 환경을 이룬다",
+          "모든 소리가 어우러져 하나의 일관된 소리 환경을 이룬다",
+          "지시어 추가",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "9",
+          "문항",
+          "E3",
+          "채영",
+          "Extent-Coherence",
+          "The sounds I am hearing seem to fit together quite naturally with this place",
+          "영상에서 들린 소리들은 화면 속 장소와 꽤 자연스럽게 어울리는 것 같다",
+          "내가 듣는 소리들은 이 장소와 꽤 자연스럽게 어울리는 것 같다",
+          "지시어 통일 (this place → 화면 속 장소)",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "10",
+          "문항",
+          "P1",
+          "채영",
+          "Being Away (PRS)",
+          "It is an escape experience.",
+          "영상 속 장소는 일상에서 벗어나는 경험을 준다",
+          "이곳은 벗어나는 경험을 준다",
+          "9/17 미팅 지적 반영 ('어디에서 벗어난다는 거지'). 벗어나는 대상을 '일상'으로 명시",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Hartig et al. (1997)",
+          "원문에 없는 '일상'을 보충한 해석적 번역. Being Away의 정의(일상적 요구로부터의 이탈)에 근거하며 9/17 미팅 지적('어디에서 벗어난다는 거지')을 반영한 것. 채택 확정"
+        ],
+        [
+          "1스테이지",
+          "P4",
+          "1차 회복성",
+          "11",
+          "문항",
+          "P2",
+          "채영",
+          "Being Away (PRS)",
+          "Spending time here gives me a good break from my day-to-day routine.",
+          "영상 속 장소에서 시간을 보내는 것은 반복되는 일상에서 제대로 쉬어가게 해준다",
+          "이곳에서 시간을 보내면 일상적인 반복에서 잘 쉬어갈 수 있다",
+          "지시어 통일. '~하면'이 가정투로 읽혀 원문 'Spending time here gives me...'의 명사형 구조로 옮김",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Hartig et al. (1997)"
+        ],
+        [
+          "1스테이지",
+          "P5",
+          "1차 친숙도·선호",
+          "1",
+          "문항",
+          "FA1",
+          "채영",
+          "사전 친숙도",
+          null,
+          "영상 속 장소에 실제로 가본 적이 있습니까?",
+          "이 장소에 실제로 가본 적이 있습니까?",
+          "지시어 통일",
+          "단일 선택: 있다 / 없다 / 잘 모르겠다",
+          null,
+          "N",
+          "자체 제작 (Basu et al., 2019; Payne & Guastavino, 2018 근거)"
+        ],
+        [
+          "1스테이지",
+          "P5",
+          "1차 친숙도·선호",
+          "2",
+          "문항",
+          "FA2",
+          "채영",
+          "사전 친숙도",
+          null,
+          "영상 속 장소는 얼마나 익숙하게 느껴집니까?",
+          "이 장소가 얼마나 익숙하게 느껴집니까?",
+          "지시어 통일",
+          "리커트 7점",
+          "0 전혀 익숙하지 않다 ~ 6 완전히 익숙하다 (척도라벨 B)",
+          "N",
+          "자체 제작 (Basu et al., 2019; Payne & Guastavino, 2018 근거)"
+        ],
+        [
+          "1스테이지",
+          "P5",
+          "1차 친숙도·선호",
+          "3",
+          "문항",
+          "FA3",
+          "채영",
+          "선호도",
+          null,
+          "영상 속 장소와 같은 종류의 장소를 얼마나 좋아합니까?",
+          "이런 종류의 장소를 얼마나 좋아합니까?",
+          "'이런 종류'가 무엇을 가리키는지 명확하게",
+          "리커트 7점",
+          "0 전혀 좋아하지 않는다 ~ 6 매우 좋아한다 (척도라벨 B)",
+          "N",
+          "자체 제작 (Basu et al., 2019; Payne & Guastavino, 2018 근거)"
+        ],
+        [
+          "1스테이지",
+          "P6",
+          "영상 시청 2",
+          null,
+          "화면",
+          null,
+          "—",
+          null,
+          null,
+          "같은 영상 + 두 번째 자막 (1차 클릭 응답과 반대 방향을 짚음. 일부 영상은 유지 조건)"
+        ],
+        [
+          "1스테이지",
+          "P7",
+          "2차 시각 지각",
+          "1",
+          "문항",
+          "V2",
+          "영준",
+          "환경 지각",
+          null,
+          "영상에서 가장 먼저 눈에 들어온 요소를 골라주세요",
+          null,
+          null,
+          "대표 프레임 위 마스크 클릭 (1차와 동일)",
+          null,
+          null,
+          "자체 제작"
+        ],
+        [
+          "1스테이지",
+          "P8",
+          "2차 청각 지각",
+          "1",
+          "문항",
+          "A2s",
+          "영준",
+          "환경 지각",
+          null,
+          "영상에서 가장 주의를 끈 소리를 골라주세요",
+          null,
+          null,
+          "객관식 (1차와 동일)",
+          null,
+          null,
+          "자체 제작"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          null,
+          "안내",
+          null,
+          "채영",
+          null,
+          "Imagine that you are in the environment shown in the video. Check the rating scales so that your response describe your experience of the environment. (Laumann et al., 2001, Study 2) / how much do you agree with the statement…? (Payne, 2013)",
+          "방금 본 영상 속 환경에 자신이 있다고 상상해 주세요. 다음 진술이 그 환경에 대한 자신의 경험에 얼마나 들어맞는지 골라주세요.",
+          null,
+          null,
+          null,
+          null,
+          null,
+          "Laumann et al. (2001) / Payne (2013)",
+          "Laumann et al.(2001) Study 2가 영상 자극으로 회복성 척도를 받을 때 사용한 지시문을 따름. PRSS 교시문(동의 정도)과 PRS 교시문(경험에 들어맞는 정도)이 한 페이지에 섞이는 문제도 이 문장으로 함께 해결됨."
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "1",
+          "문항",
+          "F1_2",
+          "채영",
+          "Fascination",
+          "I find this sonic environment appealing",
+          "나는 영상 속 소리 환경이 마음에 든다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "2",
+          "문항",
+          "F2_2",
+          "채영",
+          "Fascination",
+          "My attention is drawn to many of the interesting sounds here",
+          "영상 속 여러 흥미로운 소리들에 나의 주의가 이끌렸다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "3",
+          "문항",
+          "F3_2",
+          "채영",
+          "Fascination",
+          "I am engrossed by this sonic environment",
+          "나는 영상 속 소리 환경에 몰입했다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "4",
+          "문항",
+          "BF1_2",
+          "채영",
+          "Being-Away-From",
+          "This sonic environment is a refuge from unwanted distractions",
+          "영상 속 소리 환경은 원치 않는 방해로부터의 피난처가 된다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "5",
+          "문항",
+          "BF2_2",
+          "채영",
+          "Being-Away-From",
+          "When I hear these sounds I feel free from work, routine and responsibilities",
+          "영상 속 소리들을 듣는 동안, 일과 일상, 책임에서 벗어나 자유로워지는 느낌이 든다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)",
+          "실험실에서 '일과 책임'을 떠올리게 하는 어색함이 지적되었으나 유지하기로 함. Being-Away-From이 2문항으로 줄면 하위척도 신뢰도가 불안정해지고, P4·P9 교시문(영상 속 환경에 있다고 상상)이 맥락을 만들어 어색함을 덜어줌"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "6",
+          "문항",
+          "BF3_2",
+          "채영",
+          "Being-Away-From",
+          "Listening to these sounds gives me a break from my day-to-day listening experience",
+          "영상 속 소리들을 듣는 동안, 평소 듣던 소리들에서 잠시 벗어난 느낌이 든다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "7",
+          "문항",
+          "E1_2",
+          "채영",
+          "Extent-Coherence",
+          "All the sounds I'm hearing belong here (with the place shown)",
+          "영상에서 들린 모든 소리는 화면 속 장소에 속해 있다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "8",
+          "문항",
+          "E2_2",
+          "채영",
+          "Extent-Coherence",
+          "All the sounds merge to form a coherent sonic environment",
+          "영상 속 모든 소리가 어우러져 하나의 일관된 소리 환경을 이룬다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "9",
+          "문항",
+          "E3_2",
+          "채영",
+          "Extent-Coherence",
+          "The sounds I am hearing seem to fit together quite naturally with this place",
+          "영상에서 들린 소리들은 화면 속 장소와 꽤 자연스럽게 어울리는 것 같다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Payne (2013)"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "10",
+          "문항",
+          "P1_2",
+          "채영",
+          "Being Away (PRS)",
+          "It is an escape experience.",
+          "영상 속 장소는 일상에서 벗어나는 경험을 준다",
+          null,
+          "1차와 동일 문항. 제시 순서 무작위",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Hartig et al. (1997)",
+          "원문에 없는 '일상'을 보충한 해석적 번역. Being Away의 정의(일상적 요구로부터의 이탈)에 근거하며 9/17 미팅 지적('어디에서 벗어난다는 거지')을 반영한 것. 채택 확정"
+        ],
+        [
+          "1스테이지",
+          "P9",
+          "2차 회복성",
+          "11",
+          "문항",
+          "P2_2",
+          "채영",
+          "Being Away (PRS)",
+          "Spending time here gives me a good break from my day-to-day routine.",
+          "영상 속 장소에서 시간을 보내는 것은 반복되는 일상에서 제대로 쉬어가게 해준다",
+          null,
+          "지시어 통일. 앞서 가정형('시간을 보낸다면 ~할 것 같다')으로 바꿨으나, 교시문에서 영상 속 환경에 있다고 상상하도록 지시하므로 원문 시제로 되돌림",
+          "리커트 7점",
+          "0 전혀 그렇지 않다 ~ 6 완전히 그렇다 (7단계 전체 라벨: 척도라벨 A)",
+          "N",
+          "Hartig et al. (1997)"
+        ],
+        [
+          "1스테이지",
+          "P10",
+          "2차 자막 평가",
+          "1",
+          "문항",
+          "S1",
+          "채영",
+          "자막 평가",
+          null,
+          "자막은 영상에서 들린 소리를 얼마나 잘 나타냈습니까?",
+          "자막이 실제로 들리는 소리를 얼마나 잘 나타냈습니까?",
+          "시제 통일 (들리는 → 들린)",
+          "리커트 7점",
+          "0 전혀 나타내지 못했다 ~ 6 완전히 나타냈다 (척도라벨 B)",
+          "N",
+          "자체 제작 (Payne, 2013의 음질 문항 선례)"
+        ],
+        [
+          "1스테이지",
+          "P10",
+          "2차 자막 평가",
+          "2",
+          "문항",
+          "S2",
+          "채영",
+          "자막 평가 (축 1 점검)",
+          null,
+          "자막이 묘사한 소리는 화면에 보이는 장면과 얼마나 잘 맞았습니까?",
+          "자막이 묘사한 소리가 화면에서 보이는 것과 얼마나 잘 맞았습니까?",
+          "'보이는 것'을 '보이는 장면'으로 구체화",
+          "리커트 7점",
+          "0 전혀 맞지 않았다 ~ 6 완전히 맞았다 (척도라벨 B)",
+          "N",
+          "자체 제작 (GreenAR; Jo & Jeon, 2020 근거)"
+        ],
+        [
+          "1스테이지",
+          "P10",
+          "2차 자막 평가",
+          "3",
+          "문항",
+          "S3",
+          "채영",
+          "자막 평가 (인지 부하)",
+          null,
+          "자막은 영상 속 장면을 이해하는 데 어떤 영향을 주었습니까?",
+          "자막은 이 장면을 이해하는 데 어떤 영향을 주었습니까?",
+          "지시어 통일",
+          "리커트 7점 (양방향)",
+          "0 매우 방해되었다 / 3 영향 없었다 / 6 매우 도움이 되었다 (척도라벨 C)",
+          "N",
+          "자체 제작 (CapTune 근거)"
+        ],
+        [
+          "1스테이지",
+          "P11",
+          "2차 자막 읽음 확인",
+          "1",
+          "문항",
+          "R1",
+          "채영",
+          "주의 확인",
+          null,
+          "영상을 보는 동안 자막을 얼마나 읽으셨습니까?",
+          "영상을 보는 동안 자막을 얼마나 읽으셨습니까?",
+          null,
+          "리커트 7점",
+          "0 전혀 읽지 않았다 ~ 6 모두 읽었다 (척도라벨 B)",
+          "N",
+          "자체 제작 (주의 확인 관행)"
+        ],
+        [
+          "1스테이지",
+          "P11",
+          "2차 자막 읽음 확인",
+          "2",
+          "문항",
+          "R2",
+          "채영",
+          "주의 확인",
+          null,
+          "방금 본 영상의 자막에 다음 중 어떤 소리가 언급되었습니까? (모두 고르세요)",
+          "방금 영상의 자막에 다음 중 어떤 소리가 언급되었습니까?",
+          "'모두 고르세요'로 복수 선택임을 명시",
+          "복수 선택: 실제 자막의 소리 3~4개 + 없던 소리 1~2개 + 기억나지 않음",
+          null,
+          "N",
+          "자체 제작 (주의 확인 관행)",
+          "영상 샘플 확정 후 선택지 작성 가능. 영준님의 '어떤 소리가 들렸습니까' 문항과 통합"
+        ],
+        [
+          "2스테이지",
+          "—",
+          "긴 영상 인터랙션",
+          null,
+          "화면",
+          null,
+          "영준",
+          null,
+          null,
+          "영준님 설계 중. 긴 영상을 보며 조절하는 단계. 구성과 소요 시간 미정"
+        ],
+        [
+          "종료 후",
+          "P12",
+          "종료 후 인터뷰",
+          "1",
+          "화면",
+          "D1",
+          "—",
+          "조작·요구특성 확인",
+          null,
+          "1스테이지와 2스테이지를 모두 마친 뒤, 실험 전체가 끝나고 진행하는 2~3분 구두 인터뷰. 녹음 후 AI 전사 (9/17 미팅 결정)",
+          "실험에서 같은 영상을 두 번 보셨습니다. 두 번째에 달라진 점이 있었습니까?",
+          "설문에서 구두 인터뷰로 바뀌어 말투 조정",
+          "구두 응답",
+          null,
+          "N",
+          "자체 제작",
+          "인터뷰 녹음이 IRB 동의서에 포함되어 있는지 확인 필요"
+        ],
+        [
+          "종료 후",
+          "P12",
+          "종료 후 인터뷰",
+          "1",
+          "문항",
+          "D1",
+          "채영",
+          "조작·요구특성 확인",
+          null,
+          "같은 영상을 두 번 보셨는데, 두 번째에 달라진 점이 있었나요?",
+          "실험에서 같은 영상을 두 번 보셨습니다. 두 번째에 달라진 점이 있었습니까?",
+          "설문에서 구두 인터뷰로 바뀌어 말투 조정",
+          "구두 응답",
+          null,
+          "N",
+          "자체 제작",
+          "인터뷰 녹음이 IRB 동의서에 포함되어 있는지 확인 필요"
+        ],
+        [
+          "종료 후",
+          "P12",
+          "종료 후 인터뷰",
+          "2",
+          "문항",
+          "D2",
+          "채영",
+          "조작·요구특성 확인",
+          null,
+          "(달라졌다고 답한 경우) 어떤 점이 달라졌다고 느끼셨나요?",
+          "무엇이 달라졌다고 느끼셨습니까?",
+          "구두 말투로 조정",
+          "구두 응답",
+          null,
+          "N",
+          "자체 제작"
+        ],
+        [
+          "종료 후",
+          "P13",
+          "디브리핑",
+          null,
+          "화면",
+          null,
+          "채영",
+          null,
+          null,
+          "인터뷰가 끝난 뒤 연구의 실제 목적(자막이 환경 지각과 회복성에 미치는 영향)을 구두와 서면으로 안내",
+          null,
+          null,
+          null,
+          null,
+          null,
+          "자체 작성",
+          "불완전 고지를 사용하므로 디브리핑이 필요함. IRB 서류에 포함되어 있는지 확인할 것"
+        ]
+      ]
+    },
+    {
+      "properties": {
+        "sheetId": 1014605519,
+        "title": "척도라벨",
+        "index": 2,
+        "sheetType": "GRID",
+        "gridProperties": {
+          "rowCount": 1000,
+          "columnCount": 26,
+          "rowGroupControlAfter": true,
+          "columnGroupControlAfter": true
+        }
+      },
+      "range": "'척도라벨'!A1:Z1000",
+      "majorDimension": "ROWS",
+      "values": [
+        [
+          "A. 회복성 문항 (PRSS 9 + PRS 2)의 응답 라벨"
+        ],
+        [
+          "점수",
+          "Payne(2013) 원문",
+          "한국어",
+          "Hartig(1997) 원문",
+          "비고"
+        ],
+        [
+          "0",
+          "not at all",
+          "전혀 그렇지 않다",
+          "Not at all"
+        ],
+        [
+          "1",
+          "very little",
+          "거의 그렇지 않다",
+          "—",
+          "'아주 조금 그렇다'로 옮기면 2점과 거의 같게 느껴져서 바꿈"
+        ],
+        [
+          "2",
+          "a little",
+          "조금 그렇다",
+          "—"
+        ],
+        [
+          "3",
+          "somewhat",
+          "중간 정도 그렇다",
+          "—",
+          "'보통이다'로 옮기면 '잘 모르겠다'는 뜻으로 읽힐 수 있어서 쓰지 않음. 2점(조금)과 4점(꽤) 사이라는 게 드러나야 함"
+        ],
+        [
+          "4",
+          "a fair bit",
+          "꽤 그렇다",
+          "—"
+        ],
+        [
+          "5",
+          "very much",
+          "매우 그렇다",
+          "—"
+        ],
+        [
+          "6",
+          "completely",
+          "완전히 그렇다",
+          "Completely"
+        ],
+        [],
+        [
+          "B. 우리가 만든 문항의 응답 라벨 — A와 같은 표현을 쓰고 서술어만 문항에 맞춤"
+        ],
+        [
+          "코드",
+          "0점",
+          "3점",
+          "6점",
+          "비고"
+        ],
+        [
+          "FA2",
+          "전혀 익숙하지 않다",
+          "중간 정도 익숙하다",
+          "완전히 익숙하다"
+        ],
+        [
+          "FA3",
+          "전혀 좋아하지 않는다",
+          "중간 정도 좋아한다",
+          "매우 좋아한다",
+          "'완전히 좋아한다'가 어색해서 6점만 '매우'"
+        ],
+        [
+          "S1",
+          "전혀 나타내지 못했다",
+          "중간 정도 나타냈다",
+          "완전히 나타냈다"
+        ],
+        [
+          "S2",
+          "전혀 맞지 않았다",
+          "중간 정도 맞았다",
+          "완전히 맞았다"
+        ],
+        [
+          "R1",
+          "전혀 읽지 않았다",
+          "절반 정도 읽었다",
+          "모두 읽었다",
+          "읽은 양을 묻는 문항이라 3점은 '절반 정도'"
+        ],
+        [],
+        [
+          "C. S3만 방해 ↔ 도움 양쪽으로 나뉨"
+        ],
+        [
+          "점수",
+          "한국어",
+          null,
+          null,
+          "비고"
+        ],
+        [
+          "0",
+          "매우 방해되었다"
+        ],
+        [
+          "1",
+          "방해되었다"
+        ],
+        [
+          "2",
+          "약간 방해되었다"
+        ],
+        [
+          "3",
+          "영향 없었다",
+          null,
+          null,
+          "가운데(3점)가 중립인 유일한 문항"
+        ],
+        [
+          "4",
+          "약간 도움이 되었다"
+        ],
+        [
+          "5",
+          "도움이 되었다"
+        ],
+        [
+          "6",
+          "매우 도움이 되었다"
+        ]
+      ]
+    },
+    {
+      "properties": {
+        "sheetId": 1379029318,
+        "title": "참고문헌",
+        "index": 3,
+        "sheetType": "GRID",
+        "gridProperties": {
+          "rowCount": 1000,
+          "columnCount": 26,
+          "frozenRowCount": 1,
+          "rowGroupControlAfter": true,
+          "columnGroupControlAfter": true
+        }
+      },
+      "range": "'참고문헌'!A1:Z1000",
+      "majorDimension": "ROWS",
+      "values": [
+        [
+          "문헌",
+          "DOI",
+          "어디에 쓰였나"
+        ],
+        [
+          "Hartig, T., Korpela, K., Evans, G. W., & Gärling, T. (1997). A measure of restorative quality in environments. Scandinavian Housing and Planning Research, 14(4), 175–194.",
+          "https://doi.org/10.1080/02815739708730435",
+          "P1, P2"
+        ],
+        [
+          "Payne, S. R. (2013). The production of a Perceived Restorativeness Soundscape Scale. Applied Acoustics, 74(2), 255–263.",
+          "https://doi.org/10.1016/j.apacoust.2011.11.005",
+          "F1~E3, S1 선례"
+        ],
+        [
+          "Payne, S. R., & Guastavino, C. (2018). Exploring the validity of the Perceived Restorativeness Soundscape Scale. Frontiers in Psychology, 9, 2224.",
+          "https://doi.org/10.3389/fpsyg.2018.02224",
+          "문항 선별, FA1~FA2 근거"
+        ],
+        [
+          "Basu, A., Duvall, J., & Kaplan, R. (2019). Attention restoration theory. Environment and Behavior, 51(9–10), 1055–1081.",
+          "https://doi.org/10.1177/0013916518774400",
+          "FA3 근거, Compatibility 제외 선례"
+        ],
+        [
+          "Axelsson, Ö., Nilsson, M. E., & Berglund, B. (2010). A principal components model of soundscape perception. JASA, 128(5), 2836–2846.",
+          "https://doi.org/10.1121/1.3493436",
+          "FA1~FA2 근거"
+        ],
+        [
+          "Steffens, J., Steele, D., & Guastavino, C. (2017). Situational and person-related factors influencing momentary and retrospective soundscape evaluations. JASA, 141(3), 1414–1425.",
+          "https://doi.org/10.1121/1.4976627",
+          "FA1~FA2 근거"
+        ],
+        [
+          "Herzog, T. R., Maguire, P., & Nebel, M. B. (2003). Assessing the restorative components of environments. JEP, 23(2), 159–170.",
+          "https://doi.org/10.1016/S0272-4944(02)00113-5",
+          "FA3 근거"
+        ],
+        [
+          "Berto, R. (2014). The role of nature in coping with psycho-physiological stress. Behavioral Sciences, 4(4), 394–409.",
+          "https://doi.org/10.3390/bs4040394",
+          "FA3 근거"
+        ],
+        [
+          "Chen, Y., Chang, Y.-C., Hsu, Y. L., & Chen, M. Y. (2026). Reacquainting with everyday urban nature. CHI '26.",
+          "https://doi.org/10.1145/3772318.3791961",
+          "S1, S2 근거"
+        ],
+        [
+          "Jo, H. I., & Jeon, J. Y. (2020). Effect of the appropriateness of sound environment on urban soundscape assessment. Building and Environment, 179, 106975.",
+          "https://doi.org/10.1016/j.buildenv.2020.106975",
+          "S2 근거"
+        ],
+        [
+          "Carles, J. L., López Barrio, I., & de Lucio, J. V. (1999). Sound influence on landscape values. Landscape and Urban Planning, 43(4), 191–200.",
+          "https://doi.org/10.1016/S0169-2046(98)00112-1",
+          "S2 근거"
+        ],
+        [
+          "Huang, J. Z., de Lacerda Pataca, C., Wu, L. Y., & Jain, D. (2025, October). CapTune: Adapting Non-Speech Captions With Anchored Generative Models. In Proceedings of the 27th International ACM SIGACCESS Conference on Computers and Accessibility (pp. 1-18).",
+          "https://doi.org/10.1145/3663547.3746346",
+          "S3 근거"
+        ],
+        [
+          "Kim, T., Kim, G., & Hong, J. (2024). Translating perceived affective quality attributes of soundscape from English into Korean. Applied Acoustics, 222, 110051.",
+          "https://doi.org/10.1016/j.apacoust.2024.110051",
+          "척도라벨 번역 주의 근거"
+        ],
+        [
+          "Aletta, F., Mitchell, A., Oberman, T., et al. (2024). Soundscape descriptors in eighteen languages: Translation and validation through listening experiments. Applied Acoustics, 224, 110109.",
+          "https://doi.org/10.1016/j.apacoust.2024.110109",
+          "척도라벨 번역 주의 근거"
+        ],
+        [
+          "Laumann, K., Gärling, T., & Stormark, K. M. (2001). Rating scale measures of restorative components of environments. Journal of Environmental Psychology, 21(1), 31–44.",
+          "https://doi.org/10.1006/jevp.2000.0179",
+          "P4·P9 교시문 근거"
+        ]
+      ]
+    }
+  ]
+}
