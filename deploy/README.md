@@ -36,6 +36,25 @@ flags to the instrument when it has to start: `deploy/edge open
 (detach with `Ctrl-b d`). The kiosk browser on this machine uses
 `http://127.0.0.1:8779/`.
 
+When `data/live/viewing-study.json` exists, `make open` also enables the
+three-video viewing experience after the six calibration pages. Its media uses
+`REGEN_MEDIA`, and viewing records go to `data/live/regen-viewing-responses`.
+Override these with `REGEN_VIEWING_MANIFEST`, `REGEN_VIEWING_MEDIA`, and
+`REGEN_VIEWING_OUT` when operating a separately staged study.
+
+Long MP4 videos use cached web delivery copies under the viewing output's
+`streamable-media/` directory. They retain resolution, nominal frame rate and
+original audio, encode video with a 1.6 Mbps target ceiling, and put startup metadata first.
+These are lossy delivery copies: variable source frame timing is normalized to
+the nominal cadence; use the original files for frame-exact research analysis.
+The original media and caption-generation WAV files are unchanged. Delivery is
+paced at 256 KiB/s for byte-range responses. The viewing player downloads each
+complete video before enabling playback and shows download progress; captions
+and controls then use the connection without a concurrent video transfer.
+Reloads can reuse the browser's private cached download. Preparation time depends
+on the public connection. This is not a multi-participant capacity guarantee. Prepare copies before
+recruitment; generating a new copy on first request can take several minutes.
+
 ## The first `make open`
 
 It stops once or twice for things only you can click and prints the link
@@ -95,6 +114,14 @@ nothing about the procedure.
   See the runbook's "While it is open".
 - **The certificate.** Tailscale fetches a Let's Encrypt certificate for
   the node's name at the first HTTPS request; `make open` waits for it.
+
+## Research dashboard
+
+`make dashboard` serves the read-only researcher console at
+`http://127.0.0.1:8781/`. It reads the current Phase 1/2 responses and interaction
+records independently of the participant server. It is local-only and is never
+included in `make open` or the public Funnel. See
+[`DASHBOARD.md`](../src/dpo/regen/DASHBOARD.md) for views, exports and data definitions.
 
 ## Files
 

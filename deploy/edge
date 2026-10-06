@@ -183,6 +183,15 @@ cmd_serve() {
   cmd+=" --host $BIND --port $PORT"
   ensure_code
   cmd+=" --public --access-code-file $CODE_FILE"
+  # Keep the viewing continuation enabled when reopening the live study.
+  : "${REGEN_VIEWING_MANIFEST:=data/live/viewing-study.json}"
+  : "${REGEN_VIEWING_MEDIA:=$REGEN_MEDIA}"
+  : "${REGEN_VIEWING_OUT:=data/live/regen-viewing-responses}"
+  if [ -f "$REGEN_VIEWING_MANIFEST" ]; then
+    cmd+=" --viewing-manifest $(printf '%q' "$REGEN_VIEWING_MANIFEST")"
+    cmd+=" --viewing-media $(printf '%q' "$REGEN_VIEWING_MEDIA")"
+    cmd+=" --viewing-out $(printf '%q' "$REGEN_VIEWING_OUT")"
+  fi
   local extra; for extra in "$@"; do cmd+=" $(printf '%q' "$extra")"; done
   tmux new-session -d -s "$TMUX_SESSION" -c "$REPO_DIR" \
     "bash -c \"$cmd 2>&1; echo; echo '[server exited - press a key]'; read -n1\""
