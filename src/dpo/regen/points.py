@@ -1,9 +1,8 @@
-"""§4: turning the points a participant placed into objects they named.
+"""§4: turning participant clicks into operational mask-selection records.
 
-A participant clicks on the five-second still to say what characterises the
-scene. Those clicks are coordinates; the study needs labels. This module is the
-one place that crosses between them, and it does so once, on the coordinates
-submitted with the page — not live, as they are placed.
+A participant places a click on a representative frame. The submitted
+coordinates are matched to declared mask codes here, once on submission rather
+than while the participant is choosing.
 
 *Once* is a requirement, not an optimisation. Matching on every click would put
 the mask tree's answer on screen while the participant is still deciding, and a
@@ -16,28 +15,26 @@ it was placed on and is matched against that frame's masks. Objects move; a
 mask cut two seconds earlier would put a click on empty road where a person was
 standing, and the record would name an object nobody pointed at.
 
-**Overlap.** Masks overlap by construction: a person stands in front of a
-building, and both masks contain that pixel. The smallest containing mask wins.
-A smaller mask is the more specific claim about a pixel, and it is also what
-the participant saw — the person occludes the building there, so the building's
-mask covering that pixel is an artefact of how the masks were cut, not
-something visible in the frame. Ties, which mean two masks of exactly equal
-area, go to document order so the result is deterministic.
+**Overlap.** Select the containing mask with the smallest total foreground
+area, breaking equal-area ties by document order. This is the existing
+operational selection rule, not a ground-truth judgment about object identity,
+visibility, or what the participant perceived. Measurements retain each
+original mask's complete area; overlapping pixels are neither subtracted nor
+reassigned to a winner map.
 
 **Points that match nothing** are kept, tagged ``unclassified``, with their
-coordinates intact (§4). They are not a failure to be cleaned up: a participant
-pointing at something the segmentation has no object for is evidence about the
-segmentation, and dropping those points would silently improve every downstream
-count. §6 excludes them from the regeneration inputs — they carry no label to
-put in a prompt — but the record keeps them, and the log carries their count
-and proportion so the exclusion is visible in the data rather than implied.
+coordinates intact (§4). Their occupancy is missing, not zero. §6 excludes
+them from regeneration inputs because there is no declared mask label to use;
+the records retain their count and proportion so this distinction is explicit.
 
 Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import hashlib
+import io
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -47,6 +44,7 @@ UNCLASSIFIED = "unclassified"
 # A mask PNG is a binary mask written as 8-bit grey; anything above mid-grey is
 # inside. The same threshold the overlay renderer uses on the same trees.
 INSIDE = 127
+MATCHING_RULE = "smallest-containing-mask-v1"
 
 
 class PointError(ValueError):
@@ -100,6 +98,26 @@ class Match:
         }
 
 
+@dataclass(frozen=True)
+class PointMeasurement:
+    """Keep the legacy match separate from reproducible whole-mask measurements."""
+
+    match: Match
+    metrics: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _MaskData:
+    inside: Any
+    area: int
+    width: int
+    height: int
+    sha256: str
+
+
+_Hit = tuple[MaskObject, _MaskData]
+
+
 def parse_points(raw: object, frames: int) -> tuple[Point, ...]:
     """Read the page's points, in the creation order it sends them in.
 
@@ -127,30 +145,66 @@ def parse_points(raw: object, frames: int) -> tuple[Point, ...]:
 
 
 @lru_cache(maxsize=64)
-def _mask(path: str) -> tuple[Any, int]:
-    """One decoded mask as a boolean array, and its area in pixels.
-
-    Cached by path: every point of one submission tests every mask of one
-    segment, and a segment's masks are the same files for every participant.
-    """
+def _decoded_mask(content: bytes) -> _MaskData:
+    """Cache the exact decoded bytes, never a mutable path/mtime identity."""
     import numpy as np
     from PIL import Image
 
     try:
-        with Image.open(path) as handle:
+        with Image.open(io.BytesIO(content)) as handle:
             inside = np.asarray(handle.convert("L")) > INSIDE
-    except OSError as exc:
-        raise PointError(f"{path}: cannot be read as a mask image: {exc}") from exc
-    return inside, int(inside.sum())
-
-
-def _contains(path: Path, x: float, y: float) -> tuple[bool, int]:
-    """Whether the mask covers the normalised point, and the mask's area."""
-    inside, area = _mask(str(path))
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise PointError(f"Cannot decode mask image: {exc}") from exc
+    inside.setflags(write=False)
     height, width = inside.shape
-    column = min(width - 1, max(0, round(x * (width - 1))))
-    top = min(height - 1, max(0, round(y * (height - 1))))
-    return bool(inside[top, column]), area
+    return _MaskData(inside, int(inside.sum()), int(width), int(height), hashlib.sha256(content).hexdigest())
+
+
+def _read_once(path: Path, contents: dict[Path, bytes]) -> bytes:
+    key = path.resolve()
+    if key not in contents:
+        try:
+            contents[key] = key.read_bytes()
+        except OSError as exc:
+            raise PointError(f"{path}: cannot read image: {exc}") from exc
+    return contents[key]
+
+
+def _contains(mask: _MaskData, x: float, y: float) -> bool:
+    column = min(mask.width - 1, max(0, round(x * (mask.width - 1))))
+    top = min(mask.height - 1, max(0, round(y * (mask.height - 1))))
+    return bool(mask.inside[top, column])
+
+
+def _candidate_record(hit: _Hit, width: int, height: int) -> dict[str, Any]:
+    obj, mask = hit
+    aligned = (mask.width, mask.height) == (width, height)
+    return {
+        "object_id": obj.id,
+        "label": obj.label,
+        "mask_area_px": mask.area,
+        "mask_area_ratio": mask.area / (width * height) if aligned else None,
+        "mask_sha256": mask.sha256,
+        "mask_width": mask.width,
+        "mask_height": mask.height,
+        "status": "matched" if aligned else "resolution_mismatch",
+    }
+
+
+def _match_pass(
+    points: Sequence[Point], objects: Mapping[int, Sequence[MaskObject]], contents: dict[Path, bytes]
+) -> Iterator[tuple[Match, _Hit | None, list[_Hit]]]:
+    for point in points:
+        best: _Hit | None = None
+        hits: list[_Hit] = []
+        for candidate in objects.get(point.frame, ()):
+            mask = _decoded_mask(_read_once(candidate.path, contents))
+            if _contains(mask, point.x, point.y):
+                hits.append((candidate, mask))
+                if best is None or mask.area < best[1].area:
+                    best = candidate, mask
+        match = Match(point, best[0].id if best else None, best[0].label if best else None)
+        yield match, best, hits
 
 
 def match_points(points: Sequence[Point], objects: Mapping[int, Sequence[MaskObject]]) -> tuple[Match, ...]:
@@ -164,22 +218,62 @@ def match_points(points: Sequence[Point], objects: Mapping[int, Sequence[MaskObj
     Objects are tested in document order, and a strictly smaller area is needed
     to displace an incumbent, so equal-area masks resolve to the first declared.
     """
-    matches = []
-    for point in points:
-        best: MaskObject | None = None
-        best_area = 0
-        for candidate in objects.get(point.frame, ()):
-            inside, area = _contains(candidate.path, point.x, point.y)
-            if inside and (best is None or area < best_area):
-                best, best_area = candidate, area
-        matches.append(
-            Match(
-                point=point,
-                object_id=None if best is None else best.id,
-                label=None if best is None else best.label,
-            )
-        )
-    return tuple(matches)
+    return tuple(match for match, _, _ in _match_pass(points, objects, {}))
+
+
+def measure_points(
+    points: Sequence[Point],
+    objects: Mapping[int, Sequence[MaskObject]],
+    frames: Mapping[int, Path],
+) -> tuple[PointMeasurement, ...]:
+    """Measure the selected original mask against its original frame, once.
+
+    Candidate masks contain the click; their complete foreground areas retain
+    overlap and are never subtracted or summed. Resolution differences keep
+    the legacy match and raw pixel counts but leave occupancy undefined.
+    """
+    from PIL import Image
+
+    contents: dict[Path, bytes] = {}
+    frame_data: dict[Path, tuple[int, int, str]] = {}
+    measurements = []
+    for match, best, hits in _match_pass(points, objects, contents):
+        if match.point.frame not in frames:
+            raise PointError(f"Frame {match.point.frame} has no source image")
+        path = frames[match.point.frame].resolve()
+        if path not in frame_data:
+            content = _read_once(path, contents)
+            try:
+                with Image.open(io.BytesIO(content)) as handle:
+                    handle.load()
+                    width, height = handle.size
+            except (OSError, SyntaxError, ValueError) as exc:
+                raise PointError(f"{path}: cannot decode frame image: {exc}") from exc
+            frame_data[path] = width, height, hashlib.sha256(content).hexdigest()
+        width, height, frame_hash = frame_data[path]
+        total = width * height
+
+        selected = _candidate_record(best, width, height) if best else {}
+        metrics = {
+            "selected_mask_id": match.object_id,
+            "label": match.label if match.classified else UNCLASSIFIED,
+            "selected_mask_area_px": selected.get("mask_area_px"),
+            "selected_mask_area_ratio": selected.get("mask_area_ratio"),
+            "frame_id": str(match.point.frame),
+            "frame_width": width,
+            "frame_height": height,
+            "frame_area_px": total,
+            "frame_sha256": frame_hash,
+            "mask_sha256": selected.get("mask_sha256"),
+            "mask_width": selected.get("mask_width"),
+            "mask_height": selected.get("mask_height"),
+            "matching_rule": MATCHING_RULE,
+            "threshold": INSIDE,
+            "candidate_masks": [_candidate_record(hit, width, height) for hit in hits],
+            "status": selected.get("status", "unclassified"),
+        }
+        measurements.append(PointMeasurement(match, metrics))
+    return tuple(measurements)
 
 
 def summary_of(matches: Sequence[Match]) -> dict[str, Any]:
