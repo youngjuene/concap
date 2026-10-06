@@ -1,7 +1,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo open close status code
+.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo open close status code dashboard
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -53,6 +53,10 @@ status:
 
 code:
 	deploy/edge code
+
+# Researcher-only, separate loopback port; never part of the participant Funnel.
+dashboard:
+	uv run python -m dpo.regen.dashboard
 
 sync:
 	uv sync --dev
