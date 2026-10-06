@@ -1,5 +1,8 @@
 # Regen bilingual QA — 2026-09-08
 
+Historical run. See [READINESS.md](READINESS.md) for the September 9 software
+changes and subsequent regression, browser, accessibility and model-probe evidence.
+
 **Result: both original A/B interface journeys pass after fixes. One study-content localization gap remains: Korean survey scale anchors are still English.**
 
 The requested localhost was freshly restarted at **http://127.0.0.1:8779/**. Final server PID: **3148767** (original PID 2700137). Existing Gemma settings, CUDA device selection, access-code gate and study output were preserved. Test participants were created only in `/tmp/regen-qa-20260908/responses`, through a separate loopback instance on port 18779, which was stopped after QA.
