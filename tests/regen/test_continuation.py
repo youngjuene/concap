@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from test_regen_app import POINTS, answer, hear
+from test_regen_app import POINTS, answer, current_clip, hear, view
 
 from dpo.regen.app import build_app
 from dpo.regen.continuation import ViewingConfig
@@ -48,22 +48,31 @@ def complete(client: TestClient, entry: dict[str, Any], language: str = "en") ->
         client.post("/api/language", json={"participant": participant, "language": language}).status_code
         == 200
     )
-    for step in ("view_prepared", "view_regenerated"):
+    for clip in range(entry.get("clip_count", 1)):
+        assert view(client, participant, "view_prepared", f"p{clip}-0", f"p{clip}-1").status_code == 200
+        assert answer(client, participant, "art").status_code == 200
         assert (
             client.post(
-                "/api/viewing",
-                json={"participant": participant, "step": step, "started_at": "t0", "ended_at": "t1"},
+                "/api/visual",
+                json={
+                    "participant": participant,
+                    "clip_index": current_clip(client, participant),
+                    "points": POINTS,
+                },
             ).status_code
             == 200
         )
-        assert answer(client, participant, "art" if step == "view_prepared" else "survey").status_code == 200
-        if step == "view_prepared":
-            assert (
-                client.post("/api/visual", json={"participant": participant, "points": POINTS}).status_code
-                == 200
-            )
-            assert hear(client, participant).status_code == 200
-            assert client.post("/api/regenerate", json={"participant": participant}).status_code == 200
+        assert hear(client, participant).status_code == 200
+        assert (
+            client.post(
+                "/api/regenerate",
+                json={"participant": participant, "clip_index": current_clip(client, participant)},
+            ).status_code
+            == 200
+        )
+        assert view(client, participant, "view_regenerated", f"r{clip}-0", f"r{clip}-1").status_code == 200
+        assert answer(client, participant, "survey").status_code == 200
+    assert answer(client, participant, "overall").status_code == 200
 
 
 def handoff(client: TestClient, entry: dict[str, Any]) -> Any:
@@ -93,13 +102,18 @@ def test_page_six_freezes_calibration_and_continues_without_recollecting(
     assert current["stage"] == "ready"
     assert current["language"] == language
     frozen = continuation.store.state(entry["viewing_token"])
-    assert frozen["profile"]["sample_count"] == 1
-    assert frozen["profile"]["heard_observations"] == {"things": 1}
-    assert frozen["profile"]["visual_observations"] == {"Building": 1, "Person": 1}
+    assert frozen["profile"]["sample_count"] == 2
+    assert frozen["profile"]["heard_observations"] == {"things": 2}
+    assert frozen["profile"]["visual_observations"] == {
+        "Building": 1,
+        "Person": 1,
+        "Road": 1,
+        "Vegetation": 1,
+    }
     assert frozen["profile"]["defaults"] == {"texture": 0.5, "context": 0.5}
     assert frozen["profile"]["preference_source"] == "not_collected"
-    assert [len(r["responses"]) for r in frozen["calibration_source"]["responses"]] == [8, 22]
-    assert len(frozen["calibration_source"]["viewings"]) == 2
+    assert [len(r["responses"]) for r in frozen["calibration_source"]["responses"]] == [8, 14, 8, 14, 8]
+    assert len(frozen["calibration_source"]["viewings"]) == 4
     profile_hash = frozen["profile"]["hash"]
     assert handoff(client, entry).json()["url"] == url
     assert continuation.store.state(entry["viewing_token"])["profile"]["hash"] == profile_hash

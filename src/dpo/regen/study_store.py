@@ -11,6 +11,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from dpo.regen.study_instrument import instrument_snapshot
+
 
 class Conflict(ValueError):
     """A mutation targets an old revision or the wrong stage."""
@@ -60,11 +62,14 @@ class StudyStore:
         return {
             "revision": 0,
             "session_id": secrets.token_hex(12),
+            "protocol_version": 3,
+            "flow_version": 2,
             "stage": "preferences",
             "clip_index": 0,
             "video_index": 0,
             "calibration_hash": calibration_hash,
             "language": language,
+            "instrument": instrument_snapshot(language),
             "observations": [],
             "axes": {"texture": 0.5, "context": 0.5},
             "settings_revision": 0,
@@ -73,14 +78,32 @@ class StudyStore:
             "sequence": -1,
             "coverage": [],
             "completions": [],
+            "video_surveys": [],
             "draft": {},
         }
 
-    def create(self, calibration_hash: str, language: str) -> str:
+    def create(
+        self,
+        calibration_hash: str,
+        language: str,
+        *,
+        initialize: Callable[[dict[str, Any], int], None] | None = None,
+    ) -> str:
         token = secrets.token_urlsafe(32)
         state = self._initial_state(calibration_hash, language)
         with self.connection() as db:
-            db.execute("INSERT INTO sessions VALUES(?,?)", (token, json.dumps(state)))
+            db.execute("BEGIN IMMEDIATE")
+            if initialize is not None:
+                sequence = int(db.execute("SELECT count(*) FROM sessions").fetchone()[0])
+                initialize(state, sequence)
+            event = state.pop("_event_request", None)
+            encoded = json.dumps(state, ensure_ascii=False, allow_nan=False)
+            db.execute("INSERT INTO sessions VALUES(?,?)", (token, encoded))
+            if event is not None:
+                db.execute(
+                    "INSERT INTO events(session,kind,body,at) VALUES(?,?,?,?)",
+                    (token, "mutation", event, time.time()),
+                )
         return token
 
     def link(self, source: str, calibration_hash: str, language: str, *, create: bool) -> str | None:
@@ -129,6 +152,7 @@ class StudyStore:
             if type(revision) is not int or state["revision"] != revision:
                 raise Conflict("Session changed; reload its current state")
             operation(state)
+            event_request = state.pop("_event_request", request)
             for entry in state.pop("_exposure_batch", []):
                 body = json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False)
                 existing = db.execute(
@@ -146,7 +170,7 @@ class StudyStore:
             )
             db.execute(
                 "INSERT INTO events(session,kind,body,at) VALUES(?,?,?,?)",
-                (token, "mutation", request, time.time()),
+                (token, "mutation", event_request, time.time()),
             )
             if state["stage"] != "watch":
                 db.execute("UPDATE jobs SET state='superseded' WHERE session=? AND state='queued'", (token,))

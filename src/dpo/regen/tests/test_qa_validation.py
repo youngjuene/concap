@@ -95,4 +95,4 @@ def test_survey_rejects_non_string_pages(client: TestClient, page: object) -> No
     )
 
     assert response.status_code == 400
-    assert response.json()["error"] == "page must be one of ['art', 'survey']"
+    assert response.json()["error"] == "page must be one of ['art', 'overall', 'survey']"

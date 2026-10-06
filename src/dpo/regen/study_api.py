@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
-import time
+import time as time  # Kept as a compatibility clock for existing callers/tests.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.resources import files
@@ -15,11 +15,21 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
+from dpo.core.atomic import replace_atomically
 from dpo.regen.config import SOUND_FAMILIES
+from dpo.regen.playback import merged as merged
+from dpo.regen.playback import record_playback as record_playback
 from dpo.regen.points import MaskObject, match_points, matched_labels, parse_points
+from dpo.regen.study_media import (
+    VIEWING_VIDEO_RATE,
+    PacedVideoResponse,
+    prepare_delivery_videos,
+    prepared_video,
+)
 from dpo.regen.study_schema import (
     FINAL_ITEMS,
     PREFERENCES,
+    VIDEO_ITEMS,
     answers,
     bound_media,
     caption_instruction,
@@ -32,41 +42,12 @@ from dpo.regen.study_schema import (
 from dpo.regen.study_store import Conflict, StudyStore
 from dpo.regen.study_worker import InferenceProcess, Supervisor
 
+SHEET_SURVEY_POLICY = "interaction-only-sheet-v1"
+
 
 def require(state: dict[str, Any], stage: str) -> None:
     if state["stage"] != stage:
         raise Conflict(f"This action belongs to {stage}; session is at {state['stage']}")
-
-
-def merged(intervals: list[list[float]]) -> list[list[float]]:
-    result: list[list[float]] = []
-    for start, end in sorted(intervals):
-        if result and start <= result[-1][1]:
-            result[-1][1] = max(result[-1][1], end)
-        else:
-            result.append([start, end])
-    return result
-
-
-def record_playback(state: dict[str, Any], data: dict[str, Any], duration: float) -> None:
-    sequence = data.get("sequence")
-    if type(sequence) is not int or sequence <= state["sequence"]:
-        raise Conflict("Playback update is out of order")
-    position = number(data.get("position_ms"), 0, duration)
-    now, previous = time.time(), state.get("last_tick")
-    if data.get("seek") is True:
-        state["epoch"] += 1
-    elif previous and previous["playing"] and not data.get("hidden", False):
-        delta = position - previous["position"]
-        elapsed = (now - previous["at"]) * 1000
-        if 0 <= delta <= min(7000, elapsed * 1.25 + 300):
-            state["coverage"] = merged(state["coverage"] + [[previous["position"], position]])
-    state["position_ms"], state["sequence"] = position, sequence
-    state["last_tick"] = {
-        "position": position,
-        "at": now,
-        "playing": data.get("playing") is True and not data.get("hidden", False),
-    }
 
 
 def build_study_app(
@@ -79,6 +60,7 @@ def build_study_app(
     *,
     linked_only: bool = False,
     engine: InferenceProcess | None = None,
+    startup_timeout: float = 180,
 ) -> FastAPI:
     manifest = load_manifest(manifest_path, media_dir)
     calibration_hash = digest(
@@ -89,10 +71,14 @@ def build_study_app(
     (out_dir / "excerpts").mkdir(exist_ok=True)
     model = model or {}
     number(inference_timeout, 0.1, 600)
+    number(startup_timeout, 0.1, 600)
     model_identity: dict[str, Any] = {
         "settings": model,
         "implementation": digest(
-            [files("dpo.regen").joinpath(name).read_text() for name in ("study_schema.py", "study_worker.py")]
+            [
+                files("dpo.regen").joinpath(name).read_text()
+                for name in ("study_schema.py", "study_worker.py", "caption_controls.py")
+            ]
         ),
     }
     for field in ("backend_config", "contract"):
@@ -105,7 +91,17 @@ def build_study_app(
             for path in sorted(checkpoint.rglob("*"))
             if path.is_file()
         }
-    supervisor = Supervisor(store, model, inference_timeout, engine)
+    supervisor = Supervisor(store, model, inference_timeout, engine, startup_timeout=startup_timeout)
+    preparation: dict[str, Any] = {
+        "ready": False,
+        "inference_timeout_seconds": inference_timeout,
+        "model_startup_timeout_seconds": startup_timeout,
+    }
+
+    def record_preparation() -> None:
+        replace_atomically(
+            out_dir / "preparation.json", json.dumps(preparation, ensure_ascii=False, indent=2).encode()
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -114,9 +110,33 @@ def build_study_app(
                 fcntl.flock(ownership, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise RuntimeError("This study output is already served by another process") from exc
-            supervisor.start()
             try:
+                preparation.update(started_at=time.time(), phase="media")
+                record_preparation()
+                preparation["media"] = prepare_delivery_videos(
+                    manifest, media_dir, out_dir / "streamable-media"
+                )
+                preparation["phase"] = "model"
+                record_preparation()
+                supervisor.start()
+                preparation.update(
+                    ready=True, phase="ready", model=supervisor.readiness, completed_at=time.time()
+                )
+                record_preparation()
                 yield
+            except BaseException as exc:
+                preparation.update(
+                    ready=False,
+                    phase="failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    failed_at=time.time(),
+                )
+                readiness_events = getattr(supervisor.engine, "readiness_events", [])
+                if readiness_events:
+                    preparation["model"] = readiness_events[-1]
+                record_preparation()
+                raise
             finally:
                 supervisor.stop()
 
@@ -130,13 +150,14 @@ def build_study_app(
     app.state.store = store
     app.state.calibration_hash = calibration_hash
     app.state.cookie_name = cookie_name
+    app.state.preparation = preparation
 
     @app.middleware("http")
     async def boundary(request: Request, call_next: Any) -> Response:
         if request.method == "POST" and request.headers.get("x-study-request") != "1":
             return JSONResponse({"error": "Same-origin study request required"}, status_code=403)
         response: Response = await call_next(request)
-        response.headers["cache-control"] = "no-store"
+        response.headers.setdefault("cache-control", "no-store")
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["referrer-policy"] = "same-origin"
         return response
@@ -159,11 +180,12 @@ def build_study_app(
         return token, state
 
     def present(state: dict[str, Any]) -> dict[str, Any]:
-        result = {
+        result: dict[str, Any] = {
             key: state[key]
             for key in (
                 "revision",
                 "session_id",
+                "protocol_version",
                 "stage",
                 "clip_index",
                 "video_index",
@@ -174,11 +196,48 @@ def build_study_app(
                 "sequence",
                 "draft",
                 "language",
+                "survey_policy",
             )
+            if key in state
         }
         result["calibration_count"] = len(manifest["calibration_clips"])
+        result["viewing_total"] = len(state.get("viewing", manifest["viewing_videos"]))
         result["families"] = list(SOUND_FAMILIES)
-        result["items"] = PREFERENCES if state["stage"] == "preferences" else FINAL_ITEMS
+        questionnaire = (
+            "preferences"
+            if state["stage"] == "preferences"
+            else "video"
+            if state["stage"] == "video-survey"
+            else "final"
+        )
+        instrument = state.get("instrument")
+        result["items"] = (
+            instrument["items"][questionnaire]
+            if instrument and questionnaire in instrument.get("items", {})
+            else PREFERENCES
+            if questionnaire == "preferences"
+            else VIDEO_ITEMS
+            if questionnaire == "video"
+            else FINAL_ITEMS
+        )
+        if instrument:
+            result["instrument_hash"] = instrument["hash"]
+            result["items_provenance"] = instrument["provenance"]
+            if instrument.get("flow"):
+                result["survey_flow"] = instrument["flow"]
+        if state.get("survey_policy") == SHEET_SURVEY_POLICY:
+            result["items"] = []
+            result.pop("survey_flow", None)
+            result.pop("items_provenance", None)
+            result["instrument_hash"] = state.get("sheet_instrument", {}).get("hash")
+            if state["stage"] in ("poststudy", "debrief", "done"):
+                poststudy = state.get("poststudy", {})
+                # Reveal the explanation only after the oral interview has ended.
+                result["poststudy"] = {
+                    key: value
+                    for key, value in poststudy.items()
+                    if key != "debrief" or state["stage"] in ("debrief", "done")
+                }
         result["completed_videos"] = len(state["completions"])
         if state["stage"] in ("clip", "observe"):
             clip = manifest["calibration_clips"][state["clip_index"]]
@@ -209,6 +268,13 @@ def build_study_app(
                     }
                     for cue in video["cues"]
                 ],
+            }
+        if state["stage"] == "video-survey":
+            video = state["viewing"][state["video_index"]]
+            result["video"] = {
+                "id": video["id"],
+                "title": video.get("title", "Your viewing experience"),
+                "duration_ms": video["duration_ms"],
             }
         return result
 
@@ -299,7 +365,19 @@ def build_study_app(
             raise ValueError("Study action is too large")
         prepared = load_manifest(manifest_path, media_dir) if action == "start-viewing" else None
 
+        skip_caption_schedule = False
+
         def apply(state: dict[str, Any]) -> None:
+            nonlocal skip_caption_schedule
+            sheet_flow = state.get("survey_policy") == SHEET_SURVEY_POLICY
+            if sheet_flow and action in (
+                "preferences",
+                "observation",
+                "video-survey",
+                "final-survey",
+                "draft",
+            ):
+                raise Conflict("This protocol does not collect stage-two survey responses")
             if action == "preferences":
                 require(state, "preferences")
                 state["preferences"] = answers(data, PREFERENCES)
@@ -370,7 +448,7 @@ def build_study_app(
                 require(state, "ready")
                 assert prepared is not None
                 if any(video["status"] != "ready" for video in prepared["viewing_videos"]):
-                    raise ValueError("Your calibration is saved. The three viewing videos are not ready yet.")
+                    raise ValueError("Your calibration is saved. The viewing videos are not ready yet.")
                 if (
                     digest(
                         {
@@ -384,6 +462,14 @@ def build_study_app(
                     raise Conflict("Calibration changed while preparing viewing media")
                 if state["language"] not in prepared.get("languages", [prepared["language"]]):
                     raise ValueError("Viewing captions are not prepared in your language yet.")
+                if model.get("backend_config") and preparation.get("ready") is not True:
+                    raise ValueError("The caption model is not ready; contact the researcher")
+                for video in prepared["viewing_videos"]:
+                    prepared_video(
+                        bound_media(media_dir, video, "video"),
+                        out_dir / "streamable-media",
+                        video_rate=VIEWING_VIDEO_RATE,
+                    )
                 state["viewing"] = prepared["viewing_videos"]
                 state["viewing_hash"] = digest(state["viewing"])
                 state["stage"] = "watch"
@@ -394,10 +480,37 @@ def build_study_app(
                 if data.get("video_id") != video["id"]:
                     raise Conflict("This update belongs to a different video")
                 if action == "settings":
-                    state["axes"] = {
-                        key: round(number(data.get(key), 0, 1), 2) for key in ("texture", "context")
+                    if "position_hint_ms" in data:
+                        number(data["position_hint_ms"], 0, video["duration_ms"])
+                    axes = {key: round(number(data.get(key), 0, 1), 2) for key in ("texture", "context")}
+                    origin = data.get("origin", "api")
+                    if not isinstance(origin, str) or not (
+                        origin == "api"
+                        or origin == "pad"
+                        or origin == "reset"
+                        or origin.startswith("slider:")
+                        or origin.startswith("preset:")
+                    ):
+                        raise ValueError("Settings origin must identify slider, pad, preset or reset")
+                    unchanged = axes == state["axes"]
+                    if unchanged and state.get("protocol_version") == 3:
+                        skip_caption_schedule = True
+                    else:
+                        state["axes"] = axes
+                        state["settings_revision"] += 1
+                    event_data = {
+                        **data,
+                        "phase": 2,
+                        "stage": state["stage"],
+                        "flow_version": state.get("flow_version", 1),
+                        "session_id": state["session_id"],
+                        "video_index": state["video_index"],
+                        "settings_revision": state["settings_revision"],
+                        "origin": origin,
                     }
-                    state["settings_revision"] += 1
+                    state["_event_request"] = json.dumps(
+                        {"action": action, "data": event_data}, sort_keys=True
+                    )
                 elif action == "playback":
                     record_playback(state, data, video["duration_ms"])
                 elif action == "exposures":
@@ -417,10 +530,99 @@ def build_study_app(
                         if type(cue_index) is not int or not 0 <= cue_index < len(video["cues"]):
                             raise ValueError("Exposure must name a video cue")
                         cue = video["cues"][cue_index]
-                        if not cue["start_ms"] <= start <= end <= cue["end_ms"]:
-                            raise ValueError("Exposure crosses its cue boundary")
+                        version = entry.get("display_interval_version", 1)
+                        if type(version) is not int or version not in (1, 2):
+                            raise ValueError("Unknown exposure display interval version")
+                        if version == 1:
+                            if not cue["start_ms"] <= start <= end <= cue["end_ms"]:
+                                raise ValueError("Exposure crosses its cue boundary")
+                        elif (
+                            number(entry.get("cue_start_ms"), 0, video["duration_ms"]) != cue["start_ms"]
+                            or number(entry.get("cue_end_ms"), 0, video["duration_ms"]) != cue["end_ms"]
+                            or start < cue["start_ms"]
+                        ):
+                            raise ValueError("Exposure cue identity does not match its source")
+                        if entry.get("video_id", video["id"]) != video["id"]:
+                            raise ValueError("Exposure belongs to another video")
                         if len(json.dumps(entry)) > 3000:
                             raise ValueError("Exposure record too large")
+                        fallback = entry.get("fallback")
+                        if version == 2 and type(fallback) is not bool:
+                            raise ValueError("Exposure must identify generated or fallback text")
+                        # Keep historical cue-bounded fallback payloads readable. New
+                        # visible-interval records bind authored text and every known
+                        # job; generated claims always require genuine job provenance.
+                        if version == 2 or fallback is False:
+                            job_id = entry.get("job_id")
+                            job = None
+                            result: dict[str, Any] = {}
+                            spec: dict[str, Any] = {}
+                            if job_id is not None:
+                                if not isinstance(job_id, str) or not 1 <= len(job_id) <= 100:
+                                    raise ValueError("Exposure job ID is invalid")
+                                with store.connection() as db:
+                                    job = db.execute(
+                                        "SELECT cue,revision,spec,result FROM jobs WHERE session=? AND id=?",
+                                        (token, job_id),
+                                    ).fetchone()
+                                if job is None:
+                                    raise ValueError("Exposure job does not belong to this participant")
+                                spec = json.loads(job["spec"])
+                                result = json.loads(job["result"]) if job["result"] else {}
+                                if (
+                                    job["cue"] != cue_index
+                                    or spec.get("video_hash") != digest(video)
+                                    or spec.get("start_ms") != cue["start_ms"]
+                                    or spec.get("end_ms") != cue["end_ms"]
+                                    or type(entry.get("settings_revision")) is not int
+                                    or entry["settings_revision"] != job["revision"]
+                                ):
+                                    raise ValueError(
+                                        "Exposure job does not match its video, cue, or revision"
+                                    )
+                            elif entry.get("settings_revision") is not None:
+                                raise ValueError("An exposure revision requires its source job")
+                            if fallback is False:
+                                exposure_axes = entry.get("axes")
+                                if not isinstance(exposure_axes, dict) or set(exposure_axes) != {
+                                    "texture",
+                                    "context",
+                                }:
+                                    raise ValueError("Generated exposure requires its applied axes")
+                                applied_axes = {
+                                    axis: number(exposure_axes[axis], 0, 1) for axis in exposure_axes
+                                }
+                                if (
+                                    job is None
+                                    or result.get("fallback") is not False
+                                    or entry.get("text") != result.get("text")
+                                    or not isinstance(entry.get("text"), str)
+                                    or applied_axes != spec.get("axes")
+                                ):
+                                    raise ValueError(
+                                        "Generated exposure does not match its successful caption job"
+                                    )
+                            else:
+                                reason = entry.get("fallback_reason")
+                                if (
+                                    entry.get("text") != cue["fallback"][state["language"]]
+                                    or entry.get("axes") is not None
+                                    or not isinstance(reason, str)
+                                    or reason
+                                    not in {
+                                        "job_failed",
+                                        "not_ready_at_boundary",
+                                        "initial_caption_timeout",
+                                        "caption_fetch_failed",
+                                    }
+                                    or (
+                                        reason == "job_failed"
+                                        and (job is None or result.get("fallback") is not True)
+                                    )
+                                ):
+                                    raise ValueError(
+                                        "Fallback exposure does not match its authored source or reason"
+                                    )
                         batch.append({**entry, "start_ms": start, "end_ms": end, "video_id": video["id"]})
                     state["_exposure_batch"] = batch
                 else:
@@ -433,8 +635,17 @@ def build_study_app(
                             "Please watch the full video before continuing. Replay any skipped sections."
                         )
                     state["completions"].append({"video_id": video["id"], "coverage": state["coverage"]})
-                    state["video_index"] += 1
-                    state["stage"] = "final" if state["video_index"] == 3 else "break"
+                    if sheet_flow:
+                        state["video_index"] += 1
+                        state["stage"] = (
+                            "poststudy" if state["video_index"] == len(state["viewing"]) else "break"
+                        )
+                        state["draft"] = {}
+                    elif state.get("flow_version", 1) >= 2:
+                        state["stage"] = "video-survey"
+                    else:
+                        state["video_index"] += 1
+                        state["stage"] = "final" if state["video_index"] == len(state["viewing"]) else "break"
                     state["epoch"] += 1
                     state["position_ms"], state["sequence"], state["coverage"], state["last_tick"] = (
                         0,
@@ -446,20 +657,87 @@ def build_study_app(
                 require(state, "break")
                 state["stage"] = "watch"
             elif action == "draft":
-                if state["stage"] not in ("preferences", "observe", "final"):
+                if state["stage"] not in ("preferences", "observe", "video-survey", "final"):
                     raise Conflict("No form is active")
                 if len(json.dumps(data)) > 20000:
                     raise ValueError("Draft too large")
-                state["draft"] = data
+                if state["stage"] == "video-survey":
+                    video = state["viewing"][state["video_index"]]
+                    if data.get("video_id") != video["id"]:
+                        raise Conflict("This draft belongs to a different video")
+                    draft_answers = data.get("answers")
+                    if not isinstance(draft_answers, dict):
+                        raise ValueError("Video survey draft answers must be an object")
+                    state["draft"] = {"video_id": video["id"], "answers": draft_answers}
+                else:
+                    state["draft"] = data
+            elif action == "video-survey":
+                require(state, "video-survey")
+                video = state["viewing"][state["video_index"]]
+                if data.get("video_id") != video["id"]:
+                    raise Conflict("This survey belongs to a different video")
+                submitted = data.get("answers")
+                if not isinstance(submitted, dict):
+                    raise ValueError("Video survey answers must be an object")
+                instrument = state.get("instrument")
+                video_items = (
+                    instrument["items"]["video"]
+                    if instrument and "video" in instrument.get("items", {})
+                    else VIDEO_ITEMS
+                )
+                state.setdefault("video_surveys", []).append(
+                    {
+                        "video_id": video["id"],
+                        "answers": answers(submitted, video_items),
+                        "items_hash": digest(video_items),
+                        "instrument_hash": instrument["hash"] if instrument else None,
+                        "profile_hash": state["profile"]["hash"],
+                        "viewing_hash": state["viewing_hash"],
+                    }
+                )
+                state["video_index"] += 1
+                state["stage"] = "final" if state["video_index"] == len(state["viewing"]) else "break"
+                state["draft"] = {}
             elif action == "final-survey":
                 require(state, "final")
+                instrument = state.get("instrument")
+                final_items = (
+                    instrument["items"]["final"]
+                    if instrument and "final" in instrument.get("items", {})
+                    else FINAL_ITEMS
+                )
                 state["final_survey"] = {
-                    "answers": answers(data, FINAL_ITEMS),
-                    "items_hash": digest(FINAL_ITEMS),
+                    "answers": answers(data, final_items),
+                    "items_hash": digest(final_items),
+                    "instrument": instrument
+                    or {"provenance": "unversioned-legacy", "language": state["language"]},
                     "profile_hash": state["profile"]["hash"],
                     "viewing_hash": state["viewing_hash"],
                 }
                 state["stage"], state["draft"] = "done", {}
+            elif action in ("interview-complete", "debrief-complete"):
+                if not sheet_flow:
+                    raise Conflict("This action belongs to the sheet interview protocol")
+                require(state, "poststudy" if action == "interview-complete" else "debrief")
+                required = {"researcher_confirmed"}
+                if action == "debrief-complete":
+                    required.add("participant_acknowledged")
+                if set(data) != required or any(data[key] is not True for key in required):
+                    raise ValueError("Confirm that the interview or debriefing has been completed")
+                poststudy = state.setdefault("poststudy", {})
+                if action == "debrief-complete":
+                    debrief_text = poststudy.get("debrief", {}).get("text")
+                    if not isinstance(debrief_text, str) or not debrief_text.strip():
+                        raise ValueError(
+                            "The researcher must configure the written debriefing before completion"
+                        )
+                completion = {**data, "at": time.time()}
+                field = "interview_completion" if action == "interview-complete" else "debrief_completion"
+                poststudy[field] = completion
+                state["stage"], state["draft"] = (
+                    "debrief" if action == "interview-complete" else "done",
+                    {},
+                )
             else:
                 raise ValueError("Unknown study action")
 
@@ -470,7 +748,18 @@ def build_study_app(
             json.dumps({"action": action, "data": data}, sort_keys=True),
             apply,
         )
-        schedule(token, store.state(token))
+        scheduling = store.state(token)
+        if (
+            action == "settings"
+            and not skip_caption_schedule
+            and "position_hint_ms" in data
+            and scheduling["stage"] == "watch"
+        ):
+            # Generate for the frame where the control was moved, even if a
+            # heartbeat is still in transit. This hint never credits playback.
+            scheduling["position_ms"] = data["position_hint_ms"]
+        if not skip_caption_schedule:
+            schedule(token, scheduling)
         return present(state)
 
     @app.get("/api/study/captions")
@@ -498,7 +787,16 @@ def build_study_app(
         )
         if not 0 <= index < len(entries):
             raise ValueError("Unknown media")
-        return FileResponse(bound_media(media_dir, entries[index], "video"))
+        source = bound_media(media_dir, entries[index], "video")
+        response_type = PacedVideoResponse if request.headers.get("range") else FileResponse
+        return response_type(
+            prepared_video(
+                source,
+                out_dir / "streamable-media",
+                video_rate=VIEWING_VIDEO_RATE if kind == "watch" else None,
+            ),
+            headers={"cache-control": "private, max-age=86400"},
+        )
 
     @app.get("/study/frame/{clip}/{index}")
     def frame(request: Request, clip: int, index: int) -> FileResponse:
@@ -535,6 +833,7 @@ def main() -> None:
     parser.add_argument("--checkpoint")
     parser.add_argument("--access-code")
     parser.add_argument("--inference-timeout", type=float, default=30)
+    parser.add_argument("--model-startup-timeout", type=float, default=180)
     args = parser.parse_args()
     if args.backend_config and not args.contract:
         parser.error("--backend-config requires --contract")
@@ -547,6 +846,7 @@ def main() -> None:
         {key: getattr(args, key) for key in ("backend_config", "contract", "checkpoint")},
         args.access_code,
         args.inference_timeout,
+        startup_timeout=args.model_startup_timeout,
     )
     uvicorn.run(app, host=args.host, port=args.port)
 

@@ -18,14 +18,32 @@
 .study-card label:has(input:checked) { color: var(--accent-press); }
 .watch-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 20px; align-items: start; }
 .watch-layout:fullscreen { background: var(--ground); padding: 24px; overflow-y: auto; }
-.study-player { border-radius: var(--radius); overflow: hidden; background: var(--stage); }
+.watch-layout > .actions { grid-column: 1 / -1; margin-top: 6px; }
+.study-player { position: relative; border-radius: var(--radius); overflow: hidden; background: var(--stage); }
 .study-player video { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: var(--stage); }
+.study-preparation { margin: 0; padding: 16px 20px; color: #fff; text-align: center; }
 .study-caption { min-height: 96px; padding: 16px 20px; display: grid; place-items: center; color: #fff; text-align: center; font-size: 20px; line-height: 1.6; }
+.caption-level-status { margin: 0; min-height: 44px; padding: 0 16px 12px; color: #d4dbe5; text-align: center; font-size: 12px; line-height: 1.5; }
+.detail-meter { position: absolute; top: 12px; right: 12px; width: 244px; max-width: calc(100% - 24px); padding: 12px 14px; border: 1px solid #616b7c; border-radius: var(--radius-sm); background: rgb(20 27 38 / 94%); color: #fff; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 220ms ease, visibility 0s linear 220ms; }
+.detail-meter.is-visible { opacity: 1; visibility: visible; transition: opacity 140ms ease; }
+.detail-meter-title { font-size: 11px; letter-spacing: .04em; color: #d4dbe5; margin-bottom: 10px; }
+.detail-meter-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; font-size: 12px; line-height: 1.4; }
+.detail-meter-row + .detail-meter-row { margin-top: 9px; }
+.detail-meter-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.detail-meter-track { grid-column: 1 / -1; height: 6px; background: #566174; border-radius: 3px; overflow: hidden; }
+.detail-meter-fill { height: 100%; background: #9fc2ff; border-radius: inherit; }
 .study-controls { margin: 0; padding: 16px; }
 .study-controls h2 { font-size: 18px; margin-bottom: 12px; }
 .study-controls p { color: var(--body-ink); font-size: 14px; margin: 8px 0 16px; }
 .study-controls label { display: block; font-size: 14px; margin-top: 8px; }
 .study-controls input[type="range"] { width: 100%; min-height: var(--target); accent-color: var(--accent); }
+.study-controls input[type="range"] { appearance: none; background: transparent; cursor: pointer; }
+.study-controls input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--accent) 0 var(--detail-level), var(--rule) var(--detail-level) 100%); }
+.study-controls input[type="range"]::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px; margin-top: -6px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.study-controls input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--rule); }
+.study-controls input[type="range"]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
+.study-controls input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); }
+.detail-endpoints { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; margin-top: -6px; margin-bottom: 12px; }
 .detail-pad { position: relative; width: 168px; max-width: 100%; margin: auto; aspect-ratio: 1; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--accent-wash); touch-action: none; cursor: crosshair; }
 .study-controls summary { min-height: var(--target); display: list-item; padding-top: 10px; cursor: pointer; font-size: 14px; }
 .is-watching .study-rail { margin-bottom: 24px; }
@@ -62,5 +80,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
   .study-card .ratings { gap: 8px; }
   .study-card .ratings label { padding: 8px; }
   .study-caption { font-size: 18px; }
+  .detail-meter { width: 218px; top: 8px; right: 8px; padding: 8px 10px; }
+  .detail-meter-title { margin-bottom: 6px; }
+  .detail-meter-row + .detail-meter-row { margin-top: 6px; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

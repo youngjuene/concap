@@ -1,0 +1,65 @@
+/* Workbook protocol: reuse the instrument's quiet identity and native controls. */
+.sheet-questionnaire .head { margin-bottom: 24px; }
+.sheet-questionnaire .lede { white-space: pre-line; }
+.sheet-questionnaire .sheet-progress { margin-bottom: 24px; color: var(--dim); }
+.sheet-questionnaire .sheet-item {
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 22px 20px;
+  margin: 0 0 22px;
+}
+.sheet-questionnaire legend { float: left; width: 100%; margin-bottom: 18px; font-weight: 600; }
+.sheet-questionnaire legend + * { clear: both; }
+.sheet-questionnaire .sheet-scale { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; }
+.sheet-questionnaire .sheet-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--target);
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--panel);
+}
+.sheet-questionnaire .sheet-option:has(input:checked) { background: var(--accent-wash); border: 2px solid var(--accent); padding: 11px; }
+.sheet-questionnaire .sheet-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sheet-questionnaire .sheet-option input { accent-color: var(--accent); width: 18px; height: 18px; flex: 0 0 18px; }
+.sheet-questionnaire .sheet-scale .sheet-option { flex-direction: column; gap: 7px; text-align: center; align-items: center; justify-content: flex-start; padding: 12px 5px; }
+.sheet-questionnaire .sheet-scale .sheet-option:has(input:checked) { padding: 11px 4px; }
+.sheet-questionnaire .sheet-score { font-size: 18px; font-weight: 600; }
+.sheet-questionnaire .sheet-label { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; word-break: keep-all; }
+.sheet-questionnaire .sheet-choices { display: grid; gap: 10px; }
+.sheet-questionnaire .sheet-text { width: 100%; min-height: 120px; font: inherit; padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.sheet-questionnaire .sheet-hint { color: var(--body-ink); font-size: 14px; margin-top: 12px; }
+.sheet-questionnaire .sheet-invalid { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.sheet-questionnaire .sheet-feedback { min-height: 1.7em; margin-top: 14px; color: var(--body-ink); white-space: pre-line; }
+.sheet-questionnaire .sheet-submitbar { position: sticky; bottom: 0; background: var(--ground); border-top: 1px solid var(--hairline); padding: 16px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; z-index: 2; }
+.sheet-questionnaire .sheet-submitbar .sheet-hint { margin: 0; }
+.sheet-questionnaire .sheet-setup { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 22px; }
+.sheet-questionnaire .sheet-setup ul { padding-left: 22px; margin: 12px 0; overflow-wrap: anywhere; }
+.sheet-questionnaire .sheet-consent { white-space: pre-line; background: var(--panel); padding: 20px; margin-bottom: 24px; border: 1px solid var(--hairline); border-radius: var(--radius); }
+.sheet-questionnaire .sheet-consent-check { margin-top: 20px; }
+.sheet-questionnaire .sheet-frame { position: relative; width: 100%; padding: 0; border: 1px solid var(--rule); border-radius: var(--radius-sm); overflow: hidden; cursor: crosshair; touch-action: manipulation; }
+.sheet-questionnaire .sheet-frame img { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; }
+.sheet-questionnaire .sheet-mark { position: absolute; width: 24px; height: 24px; background: var(--accent); border: 3px solid white; outline: 2px solid var(--ink); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.sheet-questionnaire .sheet-cursor { background: transparent; border-style: dashed; }
+.sheet-questionnaire .sheet-frames { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sheet-questionnaire .sheet-frames button[aria-pressed="true"] { background: var(--accent-wash); border: 2px solid var(--accent); }
+.sheet-questionnaire .sheet-reset { margin-top: 12px; }
+.sheet-viewing { position: fixed; inset: 0; z-index: 20; background: var(--stage); display: flex; flex-direction: column; }
+.sheet-viewing video { width: 100%; height: calc(100% - var(--caption-band)); object-fit: contain; flex: 1 1 0; min-height: 0; }
+.sheet-viewing .sheet-caption { flex: 0 0 var(--caption-band); display: flex; justify-content: center; align-items: center; color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; }
+.sheet-viewing .sheet-paused { position: absolute; inset: 0; background: rgb(0 0 0 / .88); color: white; display: grid; place-content: center; padding: 24px; text-align: center; gap: 18px; }
+.sheet-viewing .sheet-paused p { max-width: 54ch; }
+@media (max-width: 620px) {
+  .sheet-questionnaire .sheet-item { padding: 18px 12px; }
+  .sheet-questionnaire .sheet-scale { grid-template-columns: 1fr; }
+  .sheet-questionnaire .sheet-scale .sheet-option { flex-direction: row; align-items: center; text-align: left; padding: 12px; }
+  .sheet-questionnaire .sheet-scale .sheet-option:has(input:checked) { padding: 11px; }
+  .sheet-questionnaire .sheet-label { font-size: 15px; }
+  .sheet-questionnaire .sheet-score { width: 1.5em; }
+  .sheet-viewing .sheet-caption { font-size: 19px; line-height: 1.6; padding: 12px; }
+}

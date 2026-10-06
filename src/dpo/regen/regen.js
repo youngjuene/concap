@@ -28,7 +28,12 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   participant: null,
+  studyID: null,
+  configHash: null,
   step: null,
+  flow: null,
+  clipIndex: 0,
+  clipCount: 0,
   strings: null,
   // Every language's chrome, keyed by tag, and `strings` is the one being
   // read. Both are held because §9.3 lets the participant switch until the
@@ -67,6 +72,11 @@ const SCREENS = [
 function show(id) {
   for (const screen of SCREENS) $(screen).hidden = screen !== id;
   $("shell").hidden = id === "screen-viewing";
+  const heading = $(id).querySelector("h1");
+  if (heading) {
+    heading.tabIndex = -1;
+    heading.focus();
+  }
 }
 
 function clear(node) {
@@ -79,6 +89,42 @@ function fill(template, values) {
     (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)),
     template
   );
+}
+
+// A draft belongs to one instrument and participant in this tab. It never
+// overrides an acknowledged step or supplies server-side calibration evidence.
+function draftKey(step) {
+  const scope = [state.studyID, state.configHash, state.participant, state.language, step];
+  if (state.flow) scope.push(state.clipIndex);
+  return `regen.draft:${JSON.stringify(scope)}`;
+}
+
+function syncHierarchy(detail) {
+  if (!detail) return;
+  if (detail.event_context) state.eventContext = detail.event_context;
+  if (detail.protocol_version) state.protocolVersion = detail.protocol_version;
+  if (detail.flow_version !== undefined) state.flow = detail.flow_version === "clip-caption-prss-v2";
+  if (Number.isInteger(detail.clip_index)) state.clipIndex = detail.clip_index;
+  if (Number.isInteger(detail.clip_count)) state.clipCount = detail.clip_count;
+  if (state.flow && !state.steps.includes("overall")) state.steps.push("overall");
+  if (!state.flow) state.steps = state.steps.filter(step => step !== "overall");
+}
+
+function readDraft(step) {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(draftKey(step)));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+function saveDraft(step, value) {
+  try { window.sessionStorage.setItem(draftKey(step), JSON.stringify(value)); }
+  catch { /* Current input remains usable when browser storage is unavailable. */ }
+}
+
+function clearDraft(step) {
+  try { window.sessionStorage.removeItem(draftKey(step)); }
+  catch { /* Acknowledged server state still controls the next screen. */ }
 }
 
 function syncChrome() {
@@ -104,11 +150,16 @@ function head(prefix, heading) {
     total: state.steps.length,
     study: state.strings.app_title,
   });
+  if (state.flow) {
+    $(`${prefix}-eyebrow`).textContent = state.step === "overall" || state.step === "done"
+      ? state.strings.hierarchy.overall
+      : fill(state.strings.hierarchy.clip, {number: state.clipIndex + 1, count: state.clipCount});
+  }
   if (heading !== undefined) $(`${prefix}-heading`).textContent = heading;
 }
 
 function stepName(index) {
-  return state.strings.steps[index] || "";
+  return (state.flow ? state.strings.hierarchy.steps : state.strings.steps)[index] || "";
 }
 
 /* The study is not taking new participants: no code in the link, a stale
@@ -164,51 +215,106 @@ function fail(message, cause) {
 }
 
 async function api(path, payload) {
+  if (payload && state.flow) payload = {...payload, clip_index: state.clipIndex};
   const options = payload
     ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }
     : {};
   const response = await fetch(path, options);
   const body = await response.json().catch(() => ({}));
+  syncHierarchy(body);
   if (!response.ok) {
     // The server is the authority on the step; a 409 carries the real one.
     if (response.status === 409 && body.step) return render(body.step);
     throw Object.assign(new Error(body.error || `${path} failed with ${response.status}`), {
-      status: response.status,
+      status: response.status, playback: body.playback,
     });
   }
   return body;
 }
 
-/* The event stream (§9.5's third file). Batched and best-effort: a dropped
-   batch must never block a step, so failures are swallowed here rather than
-   surfaced. Anything a measure depends on goes through its own route. */
+/* Each telemetry record retains the context in which it occurred. Pending
+   records survive reload and are removed only after server acknowledgment. */
 let pending = [];
 let flushing = null;
-
-function note(type, fields) {
-  pending.push({ type, at: new Date().toISOString(), ...fields });
+let uploading = null;
+function eventPrefix() {
+  return `regen.events:${state.studyID}:${state.configHash}:${state.participant}:`;
+}
+function eventStorageWarning() {
+  let node = $("event-storage-warning");
+  if (!node) { node = document.createElement("p"); node.id = "event-storage-warning"; node.setAttribute("role", "status"); document.body.append(node); }
+  node.textContent = state.language === "ko"
+    ? "브라우저에 상호작용을 저장할 수 없습니다. 저장이 끝날 때까지 이 탭을 열어 두세요."
+    : "This browser cannot save pending interactions. Keep this tab open until they upload.";
+}
+function queuedEvents() {
+  const records = new Map(pending.map(event => [event.event_id, event]));
+  try {
+    const prefix = eventPrefix();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) {
+        const event = JSON.parse(localStorage.getItem(key));
+        if (event?.event_id) records.set(event.event_id, event);
+      }
+    }
+  } catch { eventStorageWarning(); }
+  return [...records.values()];
+}
+function note(type, fields, context = state.eventContext) {
+  if (!state.participant) return;
+  const legacyScope = {phase: 1, stage: fields?.step || state.step, clip_id: null, clip_index: null,
+    view_id: null, condition: null, flow_version: state.flow ? "clip-caption-prss-v2" : "legacy-ab-v1", context_id: null};
+  const event = {...legacyScope, ...fields, ...context, type, at: new Date().toISOString(), event_id: crypto.randomUUID()};
+  pending.push(event);
+  try { localStorage.setItem(eventPrefix() + event.event_id, JSON.stringify(event)); }
+  catch { eventStorageWarning(); }
   if (!flushing) flushing = setTimeout(flush, 1200);
 }
-
 async function flush() {
-  flushing = null;
-  const events = pending;
-  pending = [];
-  if (!events.length || !state.participant) return;
+  clearTimeout(flushing); flushing = null;
+  if (uploading) return uploading;
+  if (!state.participant) return;
+  const events = [];
+  for (const event of queuedEvents()) {
+    if (events.length >= 100 || (events.length && JSON.stringify([...events, event]).length > 45000)) break;
+    events.push(event);
+  }
+  if (!events.length) return;
+  uploading = (async () => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    await fetch("/api/events", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ participant: state.participant, events }),
+    const response = await fetch("/api/events", {
+      method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({participant: state.participant, events}), keepalive: true, signal: controller.signal,
     });
-  } catch {
-    /* best effort */
+    if (!response.ok) throw new Error(`Event upload failed: ${response.status}`);
+    const result = await response.json();
+    const ids = new Set(result.acknowledged || []);
+    pending = pending.filter(event => !ids.has(event.event_id));
+    for (const id of ids) {
+      try { localStorage.removeItem(eventPrefix() + id); } catch { eventStorageWarning(); }
+    }
+  } catch { /* The persistent outbox remains available for retry. */ }
+  finally {
+    clearTimeout(timeout); uploading = null;
+    if (queuedEvents().length && !flushing) flushing = setTimeout(flush, 3000);
+  }
+  })();
+  return uploading;
+}
+async function drainEvents() {
+  let count = queuedEvents().length;
+  while (count) {
+    await flush();
+    const left = queuedEvents().length;
+    if (left >= count) throw new Error("Pending interactions could not upload; retry when connected.");
+    count = left;
   }
 }
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") flush();
-});
+document.addEventListener("visibilitychange", () => { if (document.hidden) flush(); });
+window.addEventListener("online", flush);
 
 /* The language toggle, top right. Live until the first clip has played and a
    plain label after that: §8 compares against §3, so a session read half in
@@ -271,8 +377,13 @@ async function choose(tag) {
    there was no way — visual or otherwise — to learn which step this was. */
 function drawRail() {
   const list = clear($("rail").querySelector("ol"));
-  const at = railAt();
-  state.steps.forEach((_, index) => {
+  const stages = state.flow
+    ? [["view_prepared"], ["art", "visual", "auditory"], ["regenerating", "view_regenerated"], ["survey"], ["overall"]]
+    : state.steps.map(step => [step]);
+  const at = state.flow
+    ? state.step === "done" ? stages.length : stages.findIndex(group => group.includes(state.step))
+    : railAt();
+  stages.forEach((group, index) => {
     const entry = document.createElement("li");
     if (at >= 0 && index < at) entry.className = "done";
     if (index === at) {
@@ -284,7 +395,7 @@ function drawRail() {
     number.textContent = String(index + 1).padStart(2, "0");
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = stepName(index);
+    name.textContent = stepName(state.steps.indexOf(group[0] === "regenerating" ? "view_regenerated" : group[0]));
     const bar = document.createElement("span");
     bar.className = "bar";
     entry.append(number, name, bar);
@@ -300,21 +411,23 @@ function drawRail() {
    the participant happens to be on. A fetch that fails falls back to
    streaming rather than stranding the participant, and says so in the log. */
 async function prefetchClip(source, step) {
+  const context = state.eventContext;
   const began = performance.now();
   try {
     const response = await fetch(source);
     if (!response.ok) throw new Error(`${response.status}`);
     const blob = await response.blob();
     const ms = Math.round(performance.now() - began);
-    note("viewing.prefetch", { step, prefetched: true, bytes: blob.size, ms });
+    note("viewing.prefetch", { step, prefetched: true, bytes: blob.size, ms }, context);
     return { url: URL.createObjectURL(blob), prefetched: true, bytes: blob.size };
   } catch (error) {
-    note("viewing.prefetch", { step, prefetched: false, error: error.message });
+    note("viewing.prefetch", { step, prefetched: false, error: error.message }, context);
     return { url: source, prefetched: false, bytes: null };
   }
 }
 
 /* §2 and §7 — the viewing. One start button, then fullscreen and no controls. */
+let viewingCleanup = () => {};
 async function renderViewing(step) {
   const detail = await api(`/api/step/${step}?participant=${state.participant}`);
   if (!detail) return;
@@ -325,9 +438,10 @@ async function renderViewing(step) {
   // otherwise identical to the first viewing's, so nothing on it said so.
   const different = $("start-different");
   different.hidden = step !== "view_regenerated";
-  different.textContent = different.hidden ? "" : strings.different;
+  different.textContent = different.hidden ? "" : state.flow ? state.strings.hierarchy.repeat : strings.different;
   $("start-headphones").textContent = strings.headphones;
-  $("start-ready").textContent = strings.ready;
+  $("start-ready").textContent = state.flow && step === "view_prepared" && state.clipIndex === 0
+    ? state.strings.hierarchy.intro : strings.ready;
   const button = $("start-button");
   // Start is enabled only once the clip is local. The button says so rather
   // than sitting dead: on campus the wait is unnoticeable, off campus it can
@@ -411,6 +525,54 @@ async function renderViewing(step) {
     const startedAt = new Date().toISOString();
     let ending = false;
     let interruptions = 0;
+    let alive = true, playbackChain = Promise.resolve(), checkpointPending = false;
+    let checkpoint = detail.playback, sequence = checkpoint?.sequence ?? -1;
+    const contextID = detail.event_context?.context_id;
+    const checkpointTick = (playing = !video.paused, force = false) => {
+      if (!checkpoint || !alive || (checkpointPending && !force)) return Promise.resolve();
+      const sample = {participant: state.participant, step, context_id: contextID,
+        position_ms: Math.min(detail.duration_ms, video.currentTime * 1000),
+        playing, hidden: document.hidden, sequence: ++sequence};
+      checkpointPending = true;
+      const task = playbackChain.then(async () => {
+        if (!alive) return;
+        try {
+          const result = await api("/api/playback", sample);
+          checkpoint = result.playback;
+        } catch (error) {
+          video.pause();
+          if (error.playback) checkpoint = error.playback;
+          alive = false;
+          clearInterval(playbackTimer);
+          document.removeEventListener("visibilitychange", onVisibility);
+          document.removeEventListener("fullscreenchange", onFullscreen);
+          fail(error.message, error.message);
+          throw error;
+        } finally { checkpointPending = false; }
+      });
+      playbackChain = task.catch(() => {});
+      return task;
+    };
+    viewingCleanup = () => {
+      alive = false; clearInterval(playbackTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+      video.onended = null; video.pause();
+    };
+    const playbackTimer = checkpoint ? setInterval(() => {
+      if (!video.paused) checkpointTick().catch(() => {});
+    }, 1000) : null;
+    const onVisibility = () => {
+      if (document.hidden && !ending && !video.paused) {
+        video.pause();
+        playbackChain.then(() => {
+          if (!alive || ending) return;
+          if (checkpoint) video.currentTime = checkpoint.position_ms / 1000;
+          onFullscreen(true);
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     /* A halt for want of data is the other way a viewing stops being the
        stimulus, and it leaves no trace of its own: the clip resumes, onended
@@ -444,10 +606,11 @@ async function renderViewing(step) {
        to keep playing in a 720px column with the band pinned to the viewport,
        then onended fired and /api/viewing recorded a clean viewing. The log
        could not tell that session from a correct one. */
-    const onFullscreen = () => {
-      if (document.fullscreenElement || ending || video.ended) return;
+    const onFullscreen = (force = false) => {
+      if ((document.fullscreenElement && !document.hidden && force !== true) || ending || video.ended) return;
       interruptions += 1;
       video.pause();
+      checkpointTick(false, true).catch(() => {});
       $("interrupted-heading").textContent = strings.interrupted_heading;
       $("interrupted-body").textContent = strings.interrupted_body;
       const resume = $("interrupted-resume");
@@ -459,7 +622,7 @@ async function renderViewing(step) {
         } catch {
           /* as above: the clip matters more than the chrome */
         }
-        video.play().catch(() => {});
+        checkpointTick(true, true).then(() => video.play()).catch(() => {});
       };
       $("viewing-interrupted").hidden = false;
       resume.focus();
@@ -469,6 +632,8 @@ async function renderViewing(step) {
 
     video.onended = async () => {
       ending = true;
+      clearInterval(playbackTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("fullscreenchange", onFullscreen);
       track.track.oncuechange = null;
       video.onplaying = video.onwaiting = video.onstalled = null;
@@ -485,6 +650,8 @@ async function renderViewing(step) {
         bytes: clip.bytes,
       });
       await flush();
+      try {
+      await checkpointTick(false, true);
       const result = await api("/api/viewing", {
         participant: state.participant,
         step,
@@ -494,11 +661,21 @@ async function renderViewing(step) {
       // A clip has played; the language is the session's now.
       state.languageLocked = true;
       if (clip.prefetched) URL.revokeObjectURL(clip.url);
+      alive = false;
       if (result) render(result.step);
+      } catch (error) { fail(error.message, error.message); }
     };
     try {
+      if (checkpoint?.position_ms) {
+        if (!video.readyState) await new Promise(resolve => video.addEventListener("loadedmetadata", resolve, {once: true}));
+        video.currentTime = checkpoint.position_ms / 1000;
+        await new Promise(resolve => video.addEventListener("seeked", resolve, {once: true}));
+      }
+      await checkpointTick(true, true);
       await video.play();
     } catch (error) {
+      alive = false; clearInterval(playbackTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("fullscreenchange", onFullscreen);
       fail(`the clip would not start: ${error.message}`, `${detail.segment}: ${error.message}`);
     }
@@ -516,14 +693,19 @@ function stamp(ms) {
 async function renderSurvey(page) {
   const detail = await api(`/api/step/${page}?participant=${state.participant}`);
   if (!detail) return;
-  state.entered = new Date().toISOString();
-  const answers = new Map();
+  const draft = readDraft(page);
+  state.entered = typeof draft.entered === "string" ? draft.entered : new Date().toISOString();
+  const itemIDs = new Set(detail.blocks.flatMap(block => block.items.map(item => item.id)));
+  const answers = new Map(Object.entries(draft.answers || {}).filter(([id, value]) =>
+    itemIDs.has(id) && Number.isInteger(value) && value >= 1 && value <= detail.scale.points));
   const container = clear($("survey-blocks"));
   const copy = state.strings.survey;
   const total = detail.blocks.reduce((sum, block) => sum + block.items.length, 0);
   head("survey", stepName(railAt()));
   $("survey-instruction").textContent =
-    detail.blocks.length > 1
+    state.flow
+      ? fill(page === "overall" ? state.strings.hierarchy.overall_questions : state.strings.hierarchy.clip_questions, {count: total})
+      : detail.blocks.length > 1
       ? fill(copy.instruction_all, { blocks: detail.blocks.length, count: total })
       : fill(copy.instruction, { count: total });
   document.documentElement.style.setProperty("--points", String(detail.scale.points));
@@ -533,6 +715,9 @@ async function renderSurvey(page) {
   const submit = $("survey-submit");
   const first = $("survey-first");
   submit.textContent = state.strings.actions.submit;
+  if (state.flow && page === "overall") submit.textContent = state.strings.hierarchy.finish;
+  else if (state.flow && page === "survey") submit.textContent = state.clipIndex + 1 < state.clipCount
+    ? state.strings.hierarchy.next_clip : state.strings.hierarchy.next_overall;
   first.textContent = copy.first;
 
   const update = () => {
@@ -598,6 +783,7 @@ async function renderSurvey(page) {
     for (const item of block.items) {
       const row = document.createElement("div");
       row.className = "item";
+      row.classList.toggle("answered", answers.has(item.id));
       row.id = `row-${item.id}`;
       const text = document.createElement("p");
       text.textContent = item.text;
@@ -611,11 +797,13 @@ async function renderSurvey(page) {
         input.type = "radio";
         input.name = item.id;
         input.value = String(value);
+        input.checked = answers.get(item.id) === value;
         // The scale's meaning is at the ends of the row, so a cell needs to
         // carry it too or a screen reader hears seven bare numbers.
         input.setAttribute("aria-label", value === 1 ? `${value} — ${low}` : value === detail.scale.points ? `${value} — ${high}` : String(value));
         input.onchange = () => {
           answers.set(item.id, value);
+          saveDraft(page, {entered: state.entered, answers: Object.fromEntries(answers)});
           row.classList.add("answered");
           note("survey.answered", { page, item: item.id, value });
           update();
@@ -668,13 +856,17 @@ async function renderSurvey(page) {
 async function renderVisual() {
   const detail = await api(`/api/step/visual?participant=${state.participant}`);
   if (!detail) return;
-  state.points = [];
+  const draft = readDraft("visual");
+  state.points = Array.isArray(draft.points) ? draft.points.filter(point =>
+    point && Number.isInteger(point.frame) && point.frame >= 0 && point.frame < detail.frames.length &&
+    Number.isFinite(point.x) && point.x >= 0 && point.x <= 1 &&
+    Number.isFinite(point.y) && point.y >= 0 && point.y <= 1) : [];
   state.frames = detail.frames;
   state.minimumPoints = detail.minimum;
-  state.frame = 0;
+  state.frame = Number.isInteger(draft.frame) && draft.frame >= 0 && draft.frame < detail.frames.length ? draft.frame : 0;
   const copy = state.strings.visual;
   const plate = $("plate");
-  const picker = $("moments");
+  const picker = clear($("moments"));
   picker.setAttribute("aria-label", copy.moments_label);
   picker.style.setProperty("--moments", String(detail.frames.length));
   $("visual-clear").textContent = state.strings.actions.clear;
@@ -797,6 +989,7 @@ async function renderVisual() {
   };
 
   function paint() {
+    saveDraft("visual", {points: state.points, frame: state.frame});
     clear(plate).append(image, cross);
     cross.style.left = `${aim.x * 100}%`;
     cross.style.top = `${aim.y * 100}%`;
@@ -828,6 +1021,7 @@ async function renderVisual() {
         const [removed] = state.points.splice(index, 1);
         note("point.removed", { index, ...removed });
         paint();
+        plate.focus({preventScroll: true});
       };
       dot.append(drop);
       plate.append(dot);
@@ -916,7 +1110,7 @@ async function renderVisual() {
 
   head("visual", "");
   $("visual-instruction").textContent = `${copy.instruction} ${copy.keyboard}`;
-  select(0);
+  select(state.frame);
   show("screen-visual");
 }
 
@@ -939,7 +1133,8 @@ async function renderAuditory() {
   if (!detail) return;
   state.segment = detail.segment;
   const strings = state.strings.auditory;
-  const answers = new Map();
+  const answers = new Map(Object.entries(readDraft("auditory")).filter(([family, value]) =>
+    detail.families.includes(family) && typeof value === "boolean"));
   head("auditory", stepName(railAt()));
   $("auditory-instruction").textContent = strings.instruction;
   $("lanes-legend").textContent = strings.legend;
@@ -992,8 +1187,10 @@ async function renderAuditory() {
       const input = document.createElement("input");
       input.type = "radio";
       input.name = `family-${family}`;
+      input.checked = answers.get(family) === value;
       input.onchange = () => {
         answers.set(family, value);
+        saveDraft("auditory", Object.fromEntries(answers));
         note("family.answered", { family, heard: value });
         count();
       };
@@ -1031,13 +1228,14 @@ async function renderAuditory() {
 /* §6 — the wait. One POST, which is idempotent server-side, so a reload here
    returns the track already written rather than starting a second one. */
 async function renderWaiting() {
+  const context = state.eventContext;
   const copy = state.strings.waiting;
   head("waiting", copy.heading);
-  $("waiting-eyebrow").textContent = copy.eyebrow;
+  if (!state.flow) $("waiting-eyebrow").textContent = copy.eyebrow;
   $("waiting-explains").textContent = copy.explains;
   $("waiting-stay").textContent = copy.stay;
-  $("waiting-ahead-heading").textContent = copy.ahead_heading;
-  $("waiting-ahead-body").textContent = copy.ahead_body;
+  $("waiting-ahead-heading").textContent = state.flow ? state.strings.hierarchy.ahead_heading : copy.ahead_heading;
+  $("waiting-ahead-body").textContent = state.flow ? state.strings.hierarchy.ahead_body : copy.ahead_body;
   $("waiting-ceiling").textContent = fill(copy.ceiling, {
     seconds: Math.round(state.ceilingMs / 1000),
   });
@@ -1081,7 +1279,7 @@ async function renderWaiting() {
       cell.classList.toggle("at", index === done && done < total);
     });
     if (done > 0) $("waiting-status").textContent = fill(copy.status_at, { done, total });
-    note("regeneration.slot", { done, total });
+    note("regeneration.slot", { done, total }, context);
   };
   paintSlots(0, state.cueSlots);
 
@@ -1119,9 +1317,9 @@ async function renderWaiting() {
   try {
     const result = await api("/api/regenerate", { participant: state.participant });
     if (!result) return;
-    note("regeneration.finished", { fallback: result.fallback, cached: result.cached });
+    note("regeneration.finished", { fallback: result.fallback, cached: result.cached }, context);
     paintSlots(state.cueSlots, state.cueSlots);
-    $("waiting-status").textContent = copy.status_done;
+    $("waiting-status").textContent = state.flow ? state.strings.hierarchy.ready : copy.status_done;
     const next = await api(`/api/state?participant=${state.participant}`);
     if (next) render(next.step);
   } finally {
@@ -1168,6 +1366,7 @@ function renderDone() {
     const proceed = async () => {
       next.disabled = true; status.textContent = continuation.opening;
       try {
+        await drainEvents();
         const response = await fetch("/api/continuation", {
           method: "POST", headers: {"content-type": "application/json", "x-study-request": "1"},
           body: JSON.stringify({participant: state.participant, token: state.viewingToken}),
@@ -1185,14 +1384,18 @@ function renderDone() {
 }
 
 async function render(step) {
+  viewingCleanup(); viewingCleanup = () => {};
   state.step = step;
+  for (const formStep of ["art", "visual", "auditory", "survey", "overall"]) {
+    if (formStep !== step) clearDraft(formStep);
+  }
   syncChrome();
   drawRail();
   drawLanguages();
-  note("step.entered", { step });
+  if (!state.eventContext || state.eventContext.stage === step) note("step.entered", { step });
   try {
     if (step === "view_prepared" || step === "view_regenerated") return await renderViewing(step);
-    if (step === "art" || step === "survey") return await renderSurvey(step);
+    if (step === "art" || step === "survey" || step === "overall") return await renderSurvey(step);
     if (step === "visual") return await renderVisual();
     if (step === "auditory") return await renderAuditory();
     if (step === "regenerating") return await renderWaiting();
@@ -1205,6 +1408,16 @@ async function render(step) {
 
 async function boot() {
   try {
+    const metadata = fetch("/api/strings").then(response => response.json());
+    const query = new URLSearchParams(window.location.search);
+    const hasLegacySession = window.sessionStorage.getItem("regen.participant") ||
+      new URLSearchParams(window.location.hash.slice(1)).get("participant");
+    if (!hasLegacySession && query.get("protocol") !== "legacy" &&
+        (await metadata).questionnaire_protocol === "dpo.sheet-questionnaire/v1") {
+      const questionnaire = await import("/sheet_questionnaire.js");
+      await questionnaire.boot();
+      return;
+    }
     /* The copy and the enrolment are asked for at once. Neither needs anything
        from the other — the enrolment carries the identifier and the code from
        the URL, the copy is the same for everyone — and asking in turn spent two
@@ -1215,7 +1428,7 @@ async function boot() {
     const recoveredParticipant = recovery.get("participant"), recoveredToken = recovery.get("viewing_token");
     const stored = recoveredParticipant && recoveredToken ? recoveredParticipant : window.sessionStorage.getItem("regen.participant");
     const code = new URLSearchParams(window.location.search).get("code");
-    const enrolment = stored ? { participant: stored, viewing_token: recoveredToken || window.sessionStorage.getItem("regen.viewing-token") } : {};
+    const enrolment = stored ? { participant: stored, viewing_token: recoveredToken || window.sessionStorage.getItem("regen.viewing-token") } : {client_protocol: 3};
     if (code) enrolment.code = code;
     const asked = fetch("/api/session", {
       method: "POST",
@@ -1227,7 +1440,7 @@ async function boot() {
       // into nobody's hands. The failure becomes the shape the screen below
       // already reads, and is reported there rather than in the console.
       .catch((error) => ({ error: error.message }));
-    const meta = await fetch("/api/strings").then((response) => response.json());
+    const meta = await metadata;
     state.chrome = meta.strings;
     // English until the enrolment says which language this session reads. The
     // screens reachable before that answer — the closed screen for a stale
@@ -1250,6 +1463,9 @@ async function boot() {
     if (session.closed) return closed();
     if (session.error) return fail(session.error, session.error);
     state.participant = session.participant;
+    syncHierarchy(session);
+    state.studyID = session.session_id;
+    state.configHash = session.config_hash;
     state.viewingEnabled = Boolean(session.viewing_enabled);
     state.viewingToken = session.viewing_token || (stored ? window.sessionStorage.getItem("regen.viewing-token") : null);
     if (session.viewing_token) window.sessionStorage.setItem("regen.viewing-token", session.viewing_token);
@@ -1261,6 +1477,7 @@ async function boot() {
     syncChrome();
     window.sessionStorage.setItem("regen.participant", session.participant);
     if (recoveredParticipant && recoveredToken) history.replaceState(null, "", window.location.pathname + window.location.search);
+    flush();
     await render(session.step);
   } catch (error) {
     fail(error.message, error.message);

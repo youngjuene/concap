@@ -2,9 +2,9 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-09-08
-- Surfaces: multi-clip calibration, three-video interactive viewing, one final survey.
-- Evidence: `identity.css`, `regen.css`, `regen.html`, `.omx/plans/long-video-caption-phase.md`.
+- Last refreshed: 2026-09-22
+- Surfaces: paired short-clip calibration, per-video questions, chapter-level PRSS.
+- Evidence: `app.py`, `regen.js`, `study_api.py`, `study.js`, `items/default.json`, `identity.css`.
 
 ## Brand
 Quiet, precise and reassuring. Reuse the existing near-white ground, dark ink,
@@ -17,18 +17,40 @@ attention on the media. Success means visible progress, understandable controls,
 stable captions and recoverable interruptions. No live-video capture or weight tuning.
 
 ## Personas and jobs
-Participants report what they notice, set caption preferences and watch three
+Participants report what they notice, set caption preferences and watch the configured
 five-minute videos. Researchers prepare media and inspect versioned observations.
 The interface must work on laptops, touch screens and slow connections.
 
 ## Information architecture
-Calibration preferences → repeated clip viewing/observations → calibration complete
-→ three interactive videos → one final experience survey → receipt. Progress is
-informational; forward transitions follow acknowledged server state.
+The integrated regen interface has two chapters:
+1. For each short clip, watch the prepared captions, answer the clip questions and
+   visual/sound observations, watch the same clip with updated captions, and answer
+   the post-viewing questions. Repeat for the remaining clips, then answer overall
+   PRSS once for the short-clip chapter.
+2. Watch each longer video with adjustable captions, then answer four questions
+   about that video. Repeat for all configured videos, then answer overall PRSS and
+   questions about the controls and effort once before receiving a receipt.
+
+The longer-video chapter uses one viewing per video to limit participant burden.
+The standalone observation-only calibration entry remains a separate protocol.
+Progress identifies both chapter and clip, with totals from the frozen session;
+forward transitions follow acknowledged server state. New v4 configurations allow
+any positive short/long clip counts; legacy A/B configurations remain supported. Survey drafts belong to the specific clip and viewing. Active
+phases keep their assigned protocol and frozen instruments; an unstarted viewing
+phase receives the current instrument and matching flow together at handoff.
+Phase 1 questionnaire ratings now inform the frozen Phase 2 caption-writing
+guidance as well as being retained for analysis. Credibility and distraction
+responses inform caution and conciseness; paired ART and PRSS supply experience
+context. Explicit live controls take precedence. The numeric controls remain at
+the neutral midpoint until adjusted because the questionnaires do not directly
+measure acoustic/source-detail preference. See `PERSONALIZATION.md`.
 
 ## Design principles
 Reuse existing tokens. One primary action per screen. Keep requested controls
 distinct from applied captions. Never cover playback controls with captions.
+Separate questions about the just-watched clip from questions about the whole
+chapter. Preserve configured item wording, response scales, and provenance; use
+chapter-specific instructions to explain the overall PRSS reference period.
 
 ## Visual language
 Use `identity.css` as the token owner: color, type, radius, 44px targets and focus.
@@ -41,6 +63,17 @@ Reuse primary/secondary buttons, eyebrow/head/lede hierarchy and bordered panels
 Add a two-stage progress rail, typed survey fields, visual-point editor and two-axis
 pad. Native sliders are synchronized keyboard-accessible alternatives to dragging.
 All surfaces use the same button geometry and caption/control terminology.
+
+Steering feedback uses a compact volume-style overlay at the top of the video,
+away from its captions and playback controls. It displays both **selected** detail
+levels as filled bars and percentages, with no implication of sound volume or
+model confidence. Sliders appear before the optional two-axis pad. Input reveals
+the overlay; holding a pointer keeps it visible; it fades after 1.5 seconds of
+idle time. New input restarts that hold. Reduced motion removes the transition.
+The overlay is non-interactive and duplicates the accessible native slider values.
+A persistent line beside the caption identifies its actual applied levels, or
+explicitly identifies a prepared fallback. A control change never changes that
+line until a new caption is displayed. These rules apply on mobile and fullscreen.
 
 ## Accessibility
 Target readable contrast using existing tokens, visible focus and native input
@@ -67,9 +100,11 @@ provenance belongs in researcher exports. Draft survey wording is documented.
 FastAPI and vanilla JS/CSS, existing local assets, no new packages. New protocol
 has separate versioned state; legacy UI remains supported. Verify API transitions,
 browser flow, narrow layout and theme-token reuse. Real media/model performance
-requires the three prepared videos and a configured model.
+requires the configured prepared videos and a configured model.
 
 ## Open questions
 - Calibration clip count/content: researcher configuration.
-- Final wording/translations: pilot review before participant recruitment.
-- Actual long-video files: researcher preparation; readiness gate remains closed.
+- Existing PRSS wording refers to a place; chapter-wide administration and draft
+  translations remain research-instrument review questions. Do not silently rewrite
+  configured items or describe the pilot items as validated.
+- Each run needs validated media; viewing remains gated until every configured video is ready.

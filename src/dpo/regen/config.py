@@ -53,6 +53,12 @@ from typing import Any
 
 CONFIG_SCHEMA = "dpo.caption-regen-config/v1"
 HASH_LENGTH = 12
+SCALE_SCHEMA = "dpo.caption-regen-scale/v1"
+DEFAULT_SCALE_ANCHORS = ("Not at all", "Very much")
+DEFAULT_SCALE_ANCHORS_BY_LANGUAGE: Mapping[str, tuple[str, str]] = {
+    "en": DEFAULT_SCALE_ANCHORS,
+    "ko": ("전혀 그렇지 않다", "매우 그렇다"),
+}
 
 # §5's vocabulary: AudioSet's top-level classes, in AudioSet's own order,
 # restricted to the five that occur in this corpus. Fixed rather than drawn
@@ -120,24 +126,52 @@ class ConfigError(ValueError):
 class Scale:
     """The response format both survey pages share (§9.3).
 
-    ``anchors`` are the words at the ends. They are copy, they are hashed, and
-    they are served to the page from here, so the two survey pages cannot come
-    to disagree about what a 1 or a 7 means. ``points`` is the range: responses
-    are integers in ``1..points`` and nothing else is accepted.
+    ``anchors`` are the legacy/default words at the ends. ``anchors_by_language``
+    is the versioned participant-facing wording served to each language. Both
+    are copy, both are hashed, and both are served to the page from here, so the
+    two survey pages cannot come to disagree about what a 1 or a 7 means.
+    ``points`` is the range: responses are integers in ``1..points`` and
+    nothing else is accepted.
     """
 
     points: int = 7
-    anchors: tuple[str, str] = ("Not at all", "Very much")
+    anchors: tuple[str, str] = DEFAULT_SCALE_ANCHORS
+    anchors_by_language: Mapping[str, tuple[str, str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.points < 2:
             raise ConfigError("a scale needs at least two points")
         if len(self.anchors) != 2 or not all(anchor.strip() for anchor in self.anchors):
             raise ConfigError("a scale needs a low and a high anchor, both non-empty")
+        anchors_by_language: dict[str, tuple[str, str]] = {}
+        for tag, anchors in self.anchors_by_language.items():
+            language = str(tag).strip()
+            if not language:
+                raise ConfigError("every scale anchor language must be named")
+            if len(anchors) != 2 or not all(str(anchor).strip() for anchor in anchors):
+                raise ConfigError(
+                    f"scale anchors for {language!r} need a low and a high anchor, both non-empty"
+                )
+            anchors_by_language[language] = (str(anchors[0]), str(anchors[1]))
+        object.__setattr__(self, "anchors_by_language", anchors_by_language)
 
     def accepts(self, value: object) -> bool:
         """True for an answer this scale could have produced."""
         return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= self.points
+
+    def anchors_for(self, language: str) -> tuple[str, str]:
+        """The two verbal anchors a participant reads in ``language``."""
+        return self.anchors_by_language.get(language) or self.anchors_by_language.get("en") or self.anchors
+
+    def record(self) -> dict[str, Any]:
+        """The versioned hashable scale artifact."""
+        record: dict[str, Any] = {"points": self.points, "anchors": list(self.anchors)}
+        if self.anchors_by_language:
+            record["schema"] = SCALE_SCHEMA
+            record["anchors_by_language"] = {
+                tag: list(anchors) for tag, anchors in sorted(self.anchors_by_language.items())
+            }
+        return record
 
 
 @dataclass(frozen=True)
@@ -221,6 +255,8 @@ class Configuration:
 
     def artifact(self) -> dict[str, Any]:
         """The hashable document: everything frozen, nothing computed."""
+        calibration = asdict(self.calibration)
+        calibration["scale"] = self.calibration.scale.record()
         return {
             "schema": CONFIG_SCHEMA,
             "study_id": self.study_id,
@@ -235,7 +271,7 @@ class Configuration:
             # share one stamp, which is the failure the stamp exists to
             # prevent.
             "sound_families": dict(SOUND_FAMILIES),
-            "calibration": asdict(self.calibration),
+            "calibration": calibration,
         }
 
     @property
@@ -297,11 +333,38 @@ def load_configuration(raw: Mapping[str, Any]) -> Configuration:
     try:
         scale = calibration.pop("scale", None)
         if scale is not None:
+            if scale.get("schema", SCALE_SCHEMA) != SCALE_SCHEMA:
+                raise ConfigError("unsupported calibration scale schema")
             anchors = scale.get("anchors")
-            if not isinstance(anchors, Sequence) or isinstance(anchors, str):
+            if (
+                not isinstance(anchors, Sequence)
+                or isinstance(anchors, str)
+                or len(anchors) != 2
+                or not all(isinstance(anchor, str) for anchor in anchors)
+            ):
                 raise ConfigError("calibration.scale.anchors must be a pair of strings")
+            localized = scale.get("anchors_by_language")
+            if localized is None:
+                localized_anchors: dict[str, tuple[str, str]] = {}
+            elif not isinstance(localized, Mapping):
+                raise ConfigError("calibration.scale.anchors_by_language must map language to anchors")
+            else:
+                localized_anchors = {}
+                for tag, pair in localized.items():
+                    if (
+                        not isinstance(pair, Sequence)
+                        or isinstance(pair, str)
+                        or len(pair) != 2
+                        or not all(isinstance(anchor, str) for anchor in pair)
+                    ):
+                        raise ConfigError(
+                            "calibration.scale.anchors_by_language values must be pairs of strings"
+                        )
+                    localized_anchors[str(tag)] = (str(pair[0]), str(pair[1]))
             calibration["scale"] = Scale(
-                points=int(scale["points"]), anchors=(str(anchors[0]), str(anchors[1]))
+                points=int(scale["points"]),
+                anchors=(str(anchors[0]), str(anchors[1])),
+                anchors_by_language=localized_anchors,
             )
         return Configuration(
             study_id=str(raw["study_id"]),

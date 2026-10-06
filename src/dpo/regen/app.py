@@ -32,8 +32,12 @@ Section numbers cite ``docs/v3-regen/spec-behavior.md``.
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
+import secrets
 import threading
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from email.utils import formatdate, parsedate_to_datetime
 from functools import wraps
@@ -49,7 +53,7 @@ from dpo.caption.writer import CachedWriter, CaptionWriter
 from dpo.regen import progress
 from dpo.regen.assignment import PREPARED, REGENERATED, Assignment
 from dpo.regen.captions import Cue, cues_of, record_of
-from dpo.regen.config import FAMILY_OF_PARENT, SOUND_FAMILIES
+from dpo.regen.config import FAMILY_OF_PARENT, SCALE_SCHEMA, SOUND_FAMILIES
 from dpo.regen.continuation import Continuation, ViewingConfig
 from dpo.regen.copy import strings_for
 from dpo.regen.derive import Derivatives
@@ -58,21 +62,27 @@ from dpo.regen.document import (
     frames_of,
     objects_of,
     segment_of,
+    segment_order,
     track_of,
     validate_regen_document,
 )
 from dpo.regen.enrolment import Roster
 from dpo.regen.gate import Buckets, Gate, client_address, is_local
-from dpo.regen.items import ItemsError, ItemSet, load_items
+from dpo.regen.items import Block, ItemsError, ItemSet, load_items
 from dpo.regen.log import EventLog, RegenLogError, validate_participant, view_id
+from dpo.regen.playback import record_playback
 from dpo.regen.points import PointError, match_points, matched_labels, parse_points, summary_of
 from dpo.regen.progress import ProgressError
 from dpo.regen.regeneration import Report, regenerate
+from dpo.regen.study_schema import digest
+from dpo.regen.study_store import Conflict
 
 STATIC_FILES = {
     "identity.css": "text/css; charset=utf-8",
     "regen.css": "text/css; charset=utf-8",
     "regen.js": "text/javascript; charset=utf-8",
+    "sheet_questionnaire.js": "text/javascript; charset=utf-8",
+    "sheet_questionnaire.css": "text/css; charset=utf-8",
 }
 CACHE_FILE = "captions.json"
 # What a browser may keep, and for how long.
@@ -97,6 +107,7 @@ VIEWS = {
 # Which survey page joins to which viewing (§9.5): §3 is about the first
 # viewing, §8 about the second.
 SURVEY_PAGES = {"art": 0, "survey": 1}
+OVERALL_PAGE = progress.OVERALL
 
 
 def _now() -> str:
@@ -155,6 +166,7 @@ def build_app(
     gate: Gate | None = None,
     derive: bool = True,
     viewing: ViewingConfig | None = None,
+    questionnaire_config: Mapping[str, Any] | None = None,
 ) -> FastAPI:
     """The app over one validated document.
 
@@ -176,6 +188,7 @@ def build_app(
     validate_regen_document(document)
     configuration = configuration_of(document)
     item_set = items if items is not None else load_items()
+    document_hash = digest(document)
     app = FastAPI(title="dpo caption regen", docs_url=None, redoc_url=None, openapi_url=None)
     gate = gate or Gate()
     requests = Buckets(gate.requests_per_second, gate.burst) if gate.requests_per_second else None
@@ -199,7 +212,11 @@ def build_app(
     derivatives = Derivatives(media_dir, enabled=derive)
     log = EventLog(out_dir, configuration.hash)
     roster = Roster(out_dir)
-    continuation = Continuation(viewing, document, log) if viewing else None
+    continuation = (
+        Continuation(viewing, document, log, item_set=item_set, scale=configuration.scale)
+        if viewing
+        else None
+    )
     app.state.continuation = continuation
     cached = writer if isinstance(writer, CachedWriter) else CachedWriter(writer, out_dir / CACHE_FILE)
     # How far §6 has got, per participant, while it is running. In memory and
@@ -252,11 +269,129 @@ def build_app(
 
     def _gate(participant: str, step: str) -> Mapping[str, Any] | JSONResponse:
         snapshot = log.snapshot(participant) or {"step": progress.VIEW_PREPARED}
+        if (
+            snapshot.get("document_hash", document_hash) != document_hash
+            or snapshot.get("items_digest", item_set.digest) != item_set.digest
+            or (document["schema"] == "dpo.caption-regen/v4" and snapshot.get("protocol_version") != 3)
+        ):
+            return _error(409, "This session belongs to a different frozen study configuration")
         try:
             progress.require(snapshot, step)
         except ProgressError as exc:
-            return _error(409, str(exc), step=progress.current(snapshot))
+            return _error(409, str(exc), step=progress.current(snapshot), **_flow_meta(snapshot))
         return snapshot
+
+    def _clip_order(assignment: Assignment) -> tuple[str, ...]:
+        return segment_order(document, assignment.sequence)
+
+    def _assignment_record(snapshot: Mapping[str, Any], assignment: Assignment) -> dict[str, Any]:
+        if snapshot.get("protocol_version") == 3:
+            return {"sequence": assignment.sequence, "clip_order": snapshot["clip_order"]}
+        return assignment.record()
+
+    def _clip_count() -> int:
+        return len(document["segments"])
+
+    def _flow_meta(snapshot: Mapping[str, Any] | None) -> dict[str, Any]:
+        versioned = progress.is_versioned(snapshot)
+        return {
+            **(
+                {
+                    "clip_order": snapshot["clip_order"],
+                    "protocol_version": 3,
+                    "event_context": _event_context(snapshot),
+                }
+                if snapshot and snapshot.get("protocol_version") == 3
+                else {}
+            ),
+            "flow_version": progress.FLOW_VERSION if versioned else "legacy-ab-v1",
+            "clip_index": progress.clip_index(snapshot),
+            "clip_count": progress.clip_count(snapshot, _clip_count()) if versioned else 1,
+        }
+
+    def _active_segment(snapshot: Mapping[str, Any], assignment: Assignment) -> str:
+        if not progress.is_versioned(snapshot):
+            return assignment.prepared_segment
+        order = tuple(snapshot.get("clip_order") or _clip_order(assignment))
+        index = progress.clip_index(snapshot)
+        if index >= len(order):
+            raise ProgressError(f"clip_index {index} is outside the configured clips")
+        return str(order[index])
+
+    def _view_context(snapshot: Mapping[str, Any], assignment: Assignment, step: str) -> tuple[int, str, str]:
+        if not progress.is_versioned(snapshot):
+            index, condition = VIEWS[step]
+            return index, condition, assignment.segment_of(condition)
+        clip = progress.clip_index(snapshot)
+        condition = PREPARED if step == progress.VIEW_PREPARED else REGENERATED
+        view_index = clip * 2 + (0 if condition == PREPARED else 1)
+        return view_index, condition, _active_segment(snapshot, assignment)
+
+    def _event_context(
+        snapshot: Mapping[str, Any], *, stage: str | None = None, clip: int | None = None
+    ) -> dict[str, Any]:
+        stage = stage or progress.current(snapshot)
+        clip = progress.clip_index(snapshot) if clip is None else clip
+        overall = stage in (progress.OVERALL, progress.DONE)
+        order = snapshot["clip_order"]
+        if stage not in progress.VERSIONED_STEPS or not 0 <= clip < len(order):
+            raise RegenLogError("Invalid event stage or clip")
+        updated = stage in (progress.VIEW_REGENERATED, progress.SURVEY)
+        person = snapshot["participant"]
+        segment = None if overall else order[clip]
+        scope = {
+            "phase": 1,
+            "stage": stage,
+            "participant": person,
+            "session_id": document["session_id"],
+            "config_hash": configuration.hash,
+            "flow_version": progress.FLOW_VERSION,
+            "clip_index": None if overall else clip,
+            "clip_id": None if overall else segment_of(document, str(segment))["clip_id"],
+            "view_id": None if overall else view_id(person, clip * 2 + int(updated)),
+            "condition": None if overall else REGENERATED if updated else PREPARED,
+        }
+        scope["context_id"] = hmac.new(
+            snapshot["event_secret"].encode(), json.dumps(scope, sort_keys=True).encode(), "sha256"
+        ).hexdigest()
+        return scope
+
+    def _playback(snapshot: Mapping[str, Any], step: str) -> dict[str, Any]:
+        key = f"{progress.clip_index(snapshot)}:{step}"
+        return dict(
+            snapshot.get("playback", {}).get(key)
+            or {
+                "sequence": -1,
+                "position_ms": 0,
+                "coverage": [],
+                "epoch": 0,
+                "last_tick": None,
+            }
+        )
+
+    def _survey_context(
+        snapshot: Mapping[str, Any], page: str
+    ) -> tuple[str, str | None, int | None, tuple[Block, ...]]:
+        if not progress.is_versioned(snapshot):
+            condition = PREPARED if page == "art" else REGENERATED
+            return "view", condition, SURVEY_PAGES[page], item_set.page_blocks(page)
+        if page == "art":
+            blocks: tuple[Block, ...] = (item_set.blocks["art"],)
+            return "clip_original", PREPARED, progress.clip_index(snapshot) * 2, blocks
+        if page == "survey":
+            blocks = (item_set.blocks["art"], item_set.blocks["caption"])
+            return "clip_updated", REGENERATED, progress.clip_index(snapshot) * 2 + 1, blocks
+        if page == OVERALL_PAGE:
+            blocks = (item_set.blocks["prss"],)
+            return "overall", None, None, blocks
+        raise ItemsError(f"no page named {page!r}")
+
+    def _check_clip(snapshot: Mapping[str, Any], payload: Mapping[str, Any]) -> JSONResponse | None:
+        try:
+            progress.require_clip(snapshot, payload.get("clip_index"))
+        except ProgressError as exc:
+            return _error(409, str(exc), step=progress.current(snapshot), **_flow_meta(snapshot))
+        return None
 
     def _language(participant: str) -> str:
         """The language this session is being read in."""
@@ -265,11 +400,31 @@ def build_app(
 
     def _started_viewing(participant: str) -> bool:
         """Whether a clip has already played, which is what locks the language."""
-        return bool(log.viewings(participant))
+        snapshot = log.snapshot(participant) or {}
+        return bool(log.viewings(participant)) or any(
+            checkpoint.get("started_at") for checkpoint in snapshot.get("playback", {}).values()
+        )
 
     def _slots(segment: str) -> tuple[Cue, ...]:
         """The fixed slots §6 writes into: the segment's own prepared timings."""
         return track_of(document, segment, "prepared_track")
+
+    def _scale(language: str | None = None) -> dict[str, Any]:
+        """The survey response scale as the participant reads it.
+
+        Answers remain integers in 1..points; the localized anchors are
+        display/provenance copy from the hashed configuration artifact.
+        """
+        scale = {
+            "points": configuration.scale.points,
+            "anchors": list(configuration.scale.anchors_for(language or configuration.language)),
+        }
+        if configuration.scale.anchors_by_language:
+            scale["schema"] = SCALE_SCHEMA
+            scale["anchors_by_language"] = {
+                tag: list(anchors) for tag, anchors in sorted(configuration.scale.anchors_by_language.items())
+            }
+        return scale
 
     @app.get("/", response_class=HTMLResponse)
     def page() -> HTMLResponse:
@@ -288,11 +443,9 @@ def build_app(
         answer. Two languages of chrome is a few kilobytes.
         """
         return {
+            "questionnaire_protocol": "dpo.sheet-questionnaire/v1",
             "strings": {tag: strings_for(tag) for tag in configuration.languages},
-            "scale": {
-                "points": configuration.scale.points,
-                "anchors": list(configuration.scale.anchors),
-            },
+            "scale": _scale(),
             "minimum_points": configuration.calibration.minimum_points,
             # §6 names its worst case on the waiting screen. An indeterminate
             # bar is right — nothing on the page can predict the model — but
@@ -303,7 +456,7 @@ def build_app(
             # §9.4's slot count, so §6 can draw one cell per cue before its
             # first progress report arrives rather than growing a bar.
             "cue_slots": configuration.cue_slots,
-            "steps": list(progress.PARTICIPANT_STEPS),
+            "steps": list(progress.VERSIONED_PARTICIPANT_STEPS),
             "languages": list(configuration.languages),
         }
 
@@ -336,13 +489,39 @@ def build_app(
             return _error(400, str(exc))
         snapshot = log.snapshot(participant)
         if snapshot is None:
-            snapshot = {"schema": "dpo.caption-regen-snapshot/v1", "step": progress.VIEW_PREPARED}
+            snapshot = {
+                "schema": "dpo.caption-regen-snapshot/v1",
+                "flow_version": progress.FLOW_VERSION,
+                "step": progress.VIEW_PREPARED,
+                "clip_index": 0,
+                "clip_count": _clip_count(),
+            }
+            if (payload or {}).get("client_protocol") == 3 or document["schema"] == "dpo.caption-regen/v4":
+                snapshot.update(
+                    protocol_version=3,
+                    participant=participant,
+                    clip_order=list(_clip_order(assignment)),
+                    document_hash=document_hash,
+                    items_digest=item_set.digest,
+                    event_secret=secrets.token_hex(32),
+                )
             log.write_snapshot(participant, snapshot)
-            log.append(participant, [{"type": "session.enrolled", **assignment.record()}], snapshot)
+            log.append(
+                participant,
+                [{"type": "session.enrolled", **_assignment_record(snapshot, assignment)}],
+                snapshot,
+            )
+        if (
+            snapshot.get("document_hash", document_hash) != document_hash
+            or snapshot.get("items_digest", item_set.digest) != item_set.digest
+            or (document["schema"] == "dpo.caption-regen/v4" and snapshot.get("protocol_version") != 3)
+        ):
+            return _error(409, "This session belongs to a different frozen study configuration")
         result = {
             "participant": participant,
-            "assignment": assignment.record(),
+            "assignment": _assignment_record(snapshot, assignment),
             "step": progress.current(snapshot),
+            **_flow_meta(snapshot),
             "session_id": document["session_id"],
             "config_hash": configuration.hash,
             "items_provenance": item_set.provenance,
@@ -451,27 +630,33 @@ def build_app(
         gated = _gate(person, step)
         if isinstance(gated, JSONResponse):
             return gated
+        flow = _flow_meta(gated)
         if step in VIEWS:
-            _, condition = VIEWS[step]
-            segment = assignment.segment_of(condition)
+            _, condition, segment = _view_context(gated, assignment, step)
             captions = _prepared_or_regenerated(person, condition, segment)
             if isinstance(captions, JSONResponse):
                 return captions
             return {
                 "step": step,
+                **flow,
                 "condition": condition,
                 "segment": segment,
                 "clip_id": segment_of(document, segment)["clip_id"],
                 "duration_ms": segment_of(document, segment)["duration_ms"],
                 "captions": record_of(captions, _language(person)),
+                **({"playback": _playback(gated, step)} if gated.get("protocol_version") == 3 else {}),
             }
         if step == progress.VISUAL:
-            segment = assignment.prepared_segment
+            try:
+                segment = _active_segment(gated, assignment)
+            except ProgressError as exc:
+                return _error(409, str(exc), step=progress.current(gated), **flow)
             # The strip, and when each frame is from. The masks stay here: §4
             # matches once, on submit, and a page holding them could match on
             # every click.
             return {
                 "step": step,
+                **flow,
                 "segment": segment,
                 "minimum": configuration.calibration.minimum_points,
                 "frames": [
@@ -480,7 +665,10 @@ def build_app(
                 ],
             }
         if step == progress.AUDITORY:
-            segment = assignment.prepared_segment
+            try:
+                segment = _active_segment(gated, assignment)
+            except ProgressError as exc:
+                return _error(409, str(exc), step=progress.current(gated), **flow)
             # The five families, in one fixed order, rather than the sources
             # this clip happens to carry: §5 asks the same question of every
             # participant about every family, so a family that is not in the
@@ -490,18 +678,22 @@ def build_app(
             entry = segment_of(document, segment)
             return {
                 "step": step,
+                **flow,
                 "segment": segment,
                 "duration_ms": entry["duration_ms"],
                 "families": list(SOUND_FAMILIES),
             }
-        if step in SURVEY_PAGES:
+        if step in SURVEY_PAGES or step == OVERALL_PAGE:
+            reading = _language(person)
+            try:
+                _, _, _, blocks = _survey_context(gated, step)
+            except (ItemsError, KeyError) as exc:
+                return _error(500, str(exc))
             return {
                 "step": step,
-                "blocks": [block.record(_language(person)) for block in item_set.page_blocks(step)],
-                "scale": {
-                    "points": configuration.scale.points,
-                    "anchors": list(configuration.scale.anchors),
-                },
+                **flow,
+                "blocks": [block.record(reading) for block in blocks],
+                "scale": _scale(reading),
             }
         return _error(404, f"no step named {step!r}")
 
@@ -511,10 +703,49 @@ def build_app(
         if condition == PREPARED:
             return track_of(document, segment, "prepared_track")
         snapshot = log.snapshot(participant) or {}
-        stored = snapshot.get("regenerated")
+        tracks = snapshot.get("regenerated_tracks")
+        stored = tracks.get(segment) if isinstance(tracks, Mapping) else snapshot.get("regenerated")
         if not isinstance(stored, list):
             return _error(409, "the regenerated track has not been written yet")
         return cues_of(stored, configuration.language)
+
+    @app.post("/api/playback")
+    @session_write
+    def playback(payload: Mapping[str, Any]) -> Any:
+        person = _participant(payload.get("participant"))
+        if isinstance(person, JSONResponse):
+            return person
+        step = payload.get("step")
+        if not isinstance(step, str) or step not in VIEWS:
+            return _error(400, "Playback must name a viewing step")
+        gated = _gate(person, str(step))
+        if isinstance(gated, JSONResponse):
+            return gated
+        if gated.get("protocol_version") != 3:
+            return _error(409, "This historical session has no playback checkpoint protocol")
+        error = _check_clip(gated, payload)
+        if error is not None:
+            return error
+        context = _event_context(gated)
+        if payload.get("context_id") != context["context_id"]:
+            return _error(409, "Playback belongs to another viewing")
+        segment = gated["clip_order"][progress.clip_index(gated)]
+        checkpoint = _playback(gated, str(step))
+        try:
+            record_playback(checkpoint, dict(payload), segment_of(document, segment)["duration_ms"])
+            if payload.get("playing") is True and not payload.get("hidden", False):
+                checkpoint.setdefault("started_at", _now())
+        except Conflict as exc:
+            return _error(409, str(exc), playback=_playback(gated, str(step)))
+        except ValueError as exc:
+            return _error(400, str(exc))
+        snapshot = dict(gated)
+        snapshot["playback"] = {
+            **gated.get("playback", {}),
+            f"{progress.clip_index(gated)}:{step}": checkpoint,
+        }
+        log.write_snapshot(person, snapshot)
+        return {"playback": checkpoint}
 
     @app.post("/api/viewing")
     @session_write
@@ -529,18 +760,44 @@ def build_app(
         gated = _gate(person, str(step))
         if isinstance(gated, JSONResponse):
             return gated
+        clip_error = _check_clip(gated, payload)
+        if clip_error is not None:
+            return clip_error
         assignment = _assignment(person)
         if isinstance(assignment, JSONResponse):
             return assignment
-        index, condition = VIEWS[str(step)]
+        index, condition, segment = _view_context(gated, assignment, str(step))
         reading = _language(person)
-        segment = assignment.segment_of(condition)
         captions = _prepared_or_regenerated(person, condition, segment)
         if isinstance(captions, JSONResponse):
             return captions
         started, ended = payload.get("started_at"), payload.get("ended_at")
         if not isinstance(started, str) or not isinstance(ended, str):
             return _error(400, "started_at and ended_at are required timestamps")
+        extra_playback = {}
+        if gated.get("protocol_version") == 3:
+            checkpoint = _playback(gated, str(step))
+            duration = segment_of(document, segment)["duration_ms"]
+            tolerance = min(250, duration * 0.025)
+            if (
+                sum(end - start for start, end in checkpoint["coverage"]) < duration - tolerance
+                or checkpoint["position_ms"] < duration - tolerance
+            ):
+                return _error(409, "Watch the clip before continuing", playback=checkpoint)
+            try:
+                start_time = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                end_time = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+                if start_time.tzinfo is None or end_time.tzinfo is None or end_time < start_time:
+                    raise ValueError("Invalid viewing time")
+            except ValueError:
+                return _error(400, "Viewing timestamps must be ordered timezone-aware ISO timestamps")
+            extra_playback = {
+                "coverage": checkpoint["coverage"],
+                "protocol_version": 3,
+                "client_started_at": started,
+                "client_ended_at": ended,
+            }
+            started, ended = checkpoint.get("started_at", started), _now()
         key = log.record_viewing(
             person,
             index=index,
@@ -553,14 +810,23 @@ def build_app(
             # The language is on the viewing, not only in the caption text: a
             # row should say what a participant read without anyone having to
             # look at the characters to work it out.
-            extra={**assignment.record(), "language": reading},
+            extra={
+                **_assignment_record(gated, assignment),
+                **extra_playback,
+                "language": reading,
+                "flow_version": _flow_meta(gated)["flow_version"],
+                "clip_index": progress.clip_index(gated),
+                "clip_count": progress.clip_count(gated, _clip_count()),
+                "scope": "clip_original" if condition == PREPARED else "clip_updated",
+            },
         )
         log.append(
             person,
             [{"type": "viewing.ended", "view_id": key, "step": step}],
-            progress.advance(gated, str(step)),
+            progress.advance(gated, str(step), clip_count=_clip_count()),
         )
-        return {"view_id": key, "step": progress.current(log.snapshot(person))}
+        snapshot = log.snapshot(person)
+        return {"view_id": key, "step": progress.current(snapshot), **_flow_meta(snapshot)}
 
     @app.post("/api/survey")
     @session_write
@@ -570,17 +836,21 @@ def build_app(
         if isinstance(person, JSONResponse):
             return person
         page_name = payload.get("page")
-        if not isinstance(page_name, str) or page_name not in SURVEY_PAGES:
-            return _error(400, f"page must be one of {sorted(SURVEY_PAGES)}")
+        if not isinstance(page_name, str) or page_name not in (*SURVEY_PAGES, OVERALL_PAGE):
+            return _error(400, f"page must be one of {sorted((*SURVEY_PAGES, OVERALL_PAGE))}")
         gated = _gate(person, str(page_name))
         if isinstance(gated, JSONResponse):
             return gated
+        clip_error = _check_clip(gated, payload)
+        if clip_error is not None:
+            return clip_error
         responses = payload.get("responses")
         if not isinstance(responses, Mapping):
             return _error(400, "responses must be an object of item id to answer")
         try:
-            expected = item_set.item_ids(str(page_name))
-        except ItemsError as exc:
+            scope, condition, index, blocks = _survey_context(gated, str(page_name))
+            expected = tuple(item.id for block in blocks for item in block.items)
+        except (ItemsError, KeyError) as exc:
             return _error(500, str(exc))
         missing = [item for item in expected if item not in responses]
         if missing:
@@ -594,7 +864,23 @@ def build_app(
         entered, submitted = payload.get("entered_at"), payload.get("submitted_at")
         if not isinstance(entered, str) or not isinstance(submitted, str):
             return _error(400, "entered_at and submitted_at are required timestamps")
-        key = view_id(person, SURVEY_PAGES[str(page_name)])
+        key = f"{person}-overall" if index is None else view_id(person, index)
+        segment = None
+        clip_id = None
+        if condition is not None:
+            assignment = _assignment(person)
+            if isinstance(assignment, JSONResponse):
+                return assignment
+            try:
+                segment = (
+                    _active_segment(gated, assignment)
+                    if progress.is_versioned(gated)
+                    else assignment.segment_of(condition)
+                )
+            except ProgressError as exc:
+                return _error(409, str(exc), step=progress.current(gated), **_flow_meta(gated))
+            clip_id = str(segment_of(document, segment)["clip_id"])
+        versioned = progress.is_versioned(gated)
         log.record_responses(
             person,
             page=str(page_name),
@@ -604,13 +890,25 @@ def build_app(
             submitted_at=submitted,
             items_digest=item_set.digest,
             items_provenance=item_set.provenance,
+            extra={
+                "flow_version": _flow_meta(gated)["flow_version"],
+                "clip_index": progress.clip_index(gated)
+                if versioned and (scope != "overall" or gated.get("protocol_version") != 3)
+                else None,
+                "clip_count": progress.clip_count(gated, _clip_count()) if versioned else None,
+                "scope": scope,
+                "condition": condition,
+                "segment": segment,
+                "clip_id": clip_id,
+            },
         )
         log.append(
             person,
             [{"type": "survey.submitted", "page": page_name, "view_id": key}],
-            progress.advance(gated, str(page_name)),
+            progress.advance(gated, str(page_name), clip_count=_clip_count()),
         )
-        return {"view_id": key, "step": progress.current(log.snapshot(person))}
+        snapshot = log.snapshot(person)
+        return {"view_id": key, "step": progress.current(snapshot), **_flow_meta(snapshot)}
 
     @app.post("/api/visual")
     @session_write
@@ -622,10 +920,16 @@ def build_app(
         gated = _gate(person, progress.VISUAL)
         if isinstance(gated, JSONResponse):
             return gated
+        clip_error = _check_clip(gated, payload)
+        if clip_error is not None:
+            return clip_error
         assignment = _assignment(person)
         if isinstance(assignment, JSONResponse):
             return assignment
-        segment = assignment.prepared_segment
+        try:
+            segment = _active_segment(gated, assignment)
+        except ProgressError as exc:
+            return _error(409, str(exc), step=progress.current(gated), **_flow_meta(gated))
         try:
             points = parse_points(payload.get("points"), len(frames_of(document, segment)))
         except PointError as exc:
@@ -638,10 +942,21 @@ def build_app(
         except PointError as exc:
             return _error(500, str(exc))
         summary = summary_of(matches)
+        previous_visual = gated.get("visual_by_segment")
+        visual_by_segment: dict[str, Any] = (
+            dict(previous_visual) if isinstance(previous_visual, Mapping) else {}
+        )
         snapshot = {
             **gated,
             "visual_labels": list(matched_labels(matches)),
             "visual_points": [m.record() for m in matches],
+            "visual_by_segment": {
+                **visual_by_segment,
+                segment: {
+                    "labels": list(matched_labels(matches)),
+                    "points": [m.record() for m in matches],
+                },
+            },
         }
         log.append(
             person,
@@ -649,15 +964,17 @@ def build_app(
                 {
                     "type": "visual.submitted",
                     "segment": segment,
+                    "clip_index": progress.clip_index(gated),
                     "points": [match.record() for match in matches],
                     # Nested, not spread: the summary's own "points" is a count
                     # and would take the key the records are under.
                     "summary": summary,
                 }
             ],
-            progress.advance(snapshot, progress.VISUAL),
+            progress.advance(snapshot, progress.VISUAL, clip_count=_clip_count()),
         )
-        return {"step": progress.current(log.snapshot(person)), **summary}
+        stored = log.snapshot(person)
+        return {"step": progress.current(stored), **_flow_meta(stored), **summary}
 
     @app.post("/api/auditory")
     @session_write
@@ -676,10 +993,16 @@ def build_app(
         gated = _gate(person, progress.AUDITORY)
         if isinstance(gated, JSONResponse):
             return gated
+        clip_error = _check_clip(gated, payload)
+        if clip_error is not None:
+            return clip_error
         assignment = _assignment(person)
         if isinstance(assignment, JSONResponse):
             return assignment
-        segment = assignment.prepared_segment
+        try:
+            segment = _active_segment(gated, assignment)
+        except ProgressError as exc:
+            return _error(409, str(exc), step=progress.current(gated), **_flow_meta(gated))
         raw = payload.get("heard")
         if not isinstance(raw, Mapping):
             return _error(400, "heard must be an object of sound family to true or false")
@@ -702,10 +1025,21 @@ def build_app(
         # the same families must hand the writer the same input whichever
         # language they read the screen in. It is also the form that makes a
         # sentence — "sounds of things" is a taxonomy node, not a caption.
+        previous_auditory = gated.get("auditory_by_segment")
+        auditory_by_segment: dict[str, Any] = (
+            dict(previous_auditory) if isinstance(previous_auditory, Mapping) else {}
+        )
         snapshot = {
             **gated,
             "auditory_labels": [SOUND_FAMILIES[family] for family in heard],
             "auditory_ids": list(heard),
+            "auditory_by_segment": {
+                **auditory_by_segment,
+                segment: {
+                    "labels": [SOUND_FAMILIES[family] for family in heard],
+                    "ids": list(heard),
+                },
+            },
         }
         log.append(
             person,
@@ -713,6 +1047,7 @@ def build_app(
                 {
                     "type": "auditory.submitted",
                     "segment": segment,
+                    "clip_index": progress.clip_index(gated),
                     "heard": heard,
                     "not_heard": [family for family in SOUND_FAMILIES if not raw[family]],
                     # What the clip actually carries, in the same vocabulary
@@ -741,9 +1076,10 @@ def build_app(
                     ),
                 }
             ],
-            progress.advance(snapshot, progress.AUDITORY),
+            progress.advance(snapshot, progress.AUDITORY, clip_count=_clip_count()),
         )
-        return {"step": progress.current(log.snapshot(person)), "heard": heard}
+        stored = log.snapshot(person)
+        return {"step": progress.current(stored), **_flow_meta(stored), "heard": heard}
 
     @app.post("/api/regenerate")
     @session_write
@@ -753,27 +1089,58 @@ def build_app(
         if isinstance(person, JSONResponse):
             return person
         snapshot = log.snapshot(person) or {}
-        stored = snapshot.get("regenerated")
+        assignment = _assignment(person)
+        if isinstance(assignment, JSONResponse):
+            return assignment
+        try:
+            segment = (
+                _active_segment(snapshot, assignment)
+                if progress.is_versioned(snapshot)
+                else assignment.regenerated_segment
+            )
+        except ProgressError as exc:
+            return _error(409, str(exc), step=progress.current(snapshot), **_flow_meta(snapshot))
+        tracks = snapshot.get("regenerated_tracks")
+        stored = tracks.get(segment) if isinstance(tracks, Mapping) else snapshot.get("regenerated")
         if isinstance(stored, list):
+            fallbacks = snapshot.get("regeneration_fallback_by_segment")
             # A reload during the wait: return what was written rather than
             # spending the model again on the same report, and rather than
             # handing the participant a second, different track.
             return {
                 "track": record_of(cues_of(stored, configuration.language), _language(person)),
-                "fallback": bool(snapshot.get("regeneration_fallback")),
+                "fallback": bool(
+                    fallbacks.get(segment)
+                    if isinstance(fallbacks, Mapping)
+                    else snapshot.get("regeneration_fallback")
+                ),
                 "cached": True,
+                **_flow_meta(snapshot),
             }
         gated = _gate(person, progress.REGENERATING)
         if isinstance(gated, JSONResponse):
             return gated
-        assignment = _assignment(person)
-        if isinstance(assignment, JSONResponse):
-            return assignment
-        segment = assignment.regenerated_segment
+        clip_error = _check_clip(gated, payload)
+        if clip_error is not None:
+            return clip_error
+        try:
+            segment = (
+                _active_segment(gated, assignment)
+                if progress.is_versioned(gated)
+                else assignment.regenerated_segment
+            )
+        except ProgressError as exc:
+            return _error(409, str(exc), step=progress.current(gated), **_flow_meta(gated))
+        visual_by_segment = gated.get("visual_by_segment")
+        auditory_by_segment = gated.get("auditory_by_segment")
+        visual_report = visual_by_segment.get(segment, {}) if isinstance(visual_by_segment, Mapping) else {}
+        auditory_report = (
+            auditory_by_segment.get(segment, {}) if isinstance(auditory_by_segment, Mapping) else {}
+        )
         report = Report(
-            visual_labels=tuple(snapshot.get("visual_labels") or ()),
-            auditory_labels=tuple(snapshot.get("auditory_labels") or ()),
-            auditory_ids=tuple(snapshot.get("auditory_ids") or ()),
+            visual_labels=tuple(visual_report.get("labels") or gated.get("visual_labels") or ()),
+            auditory_labels=tuple(auditory_report.get("labels") or gated.get("auditory_labels") or ()),
+            auditory_ids=tuple(auditory_report.get("ids") or gated.get("auditory_ids") or ()),
         )
         reading = _language(person)
         # The clip's sound, staged as a wav beside it. Handing the writer the
@@ -798,7 +1165,13 @@ def build_app(
                 report=report,
                 language=reading,
                 media=sound if isinstance(sound, Path) else None,
-                settings={"segment": segment, "config_hash": configuration.hash, "language": reading},
+                settings={
+                    "segment": segment,
+                    "config_hash": configuration.hash,
+                    "language": reading,
+                    "flow_version": _flow_meta(gated)["flow_version"],
+                    "clip_index": progress.clip_index(gated),
+                },
                 on_slot=_wrote,
             )
         finally:
@@ -812,16 +1185,36 @@ def build_app(
             {"index": cue.index, "start_ms": cue.start_ms, "end_ms": cue.end_ms, "text": dict(cue.text)}
             for cue in result.cues
         ]
+        previous_tracks = gated.get("regenerated_tracks")
+        updated_tracks = dict(previous_tracks) if isinstance(previous_tracks, Mapping) else {}
+        updated_tracks[segment] = track
+        previous_fallbacks = gated.get("regeneration_fallback_by_segment")
+        fallback_tracks = dict(previous_fallbacks) if isinstance(previous_fallbacks, Mapping) else {}
+        fallback_tracks[segment] = result.fallback
         advanced = {
-            **progress.advance(gated, progress.REGENERATING),
+            **progress.advance(gated, progress.REGENERATING, clip_count=_clip_count()),
             "regenerated": track,
+            "regenerated_tracks": updated_tracks,
             "regeneration_fallback": result.fallback,
+            "regeneration_fallback_by_segment": fallback_tracks,
         }
-        log.append(person, [{"type": "regeneration.written", **result.record()}], advanced)
+        log.append(
+            person,
+            [
+                {
+                    "type": "regeneration.written",
+                    "segment": segment,
+                    "clip_index": progress.clip_index(gated),
+                    **result.record(),
+                }
+            ],
+            advanced,
+        )
         return {
             "track": record_of(result.cues, reading),
             "fallback": result.fallback,
             "cached": False,
+            **_flow_meta(advanced),
         }
 
     @app.get("/api/regenerate/progress")
@@ -861,7 +1254,13 @@ def build_app(
         }
         assignment = _assignment(person)
         if not isinstance(assignment, JSONResponse):
-            report["next_segment"] = assignment.regenerated_segment
+            snapshot = log.snapshot(person)
+            with suppress(ProgressError):
+                if progress.is_versioned(snapshot) and snapshot is not None:
+                    report["next_segment"] = _active_segment(snapshot, assignment)
+                else:
+                    report["next_segment"] = assignment.regenerated_segment
+            report.update(_flow_meta(snapshot))
         return report
 
     @app.post("/api/events")
@@ -895,6 +1294,26 @@ def build_app(
         try:
             # The snapshot is the server's; a page cannot move its own step by
             # posting one, so only the events are taken from the payload.
+            if len(batch) > 100:
+                return _error(400, "Event batches contain at most 100 entries")
+            snapshot = log.snapshot(person) or {}
+            if snapshot.get("protocol_version") == 3:
+                for event in batch:
+                    if not isinstance(event, Mapping):
+                        raise RegenLogError("Every event must be an object")
+                    clip = event.get("clip_index")
+                    if clip is None and event.get("stage") in (progress.OVERALL, progress.DONE):
+                        clip = progress.clip_index(snapshot)
+                    if type(clip) is not int or not isinstance(event.get("stage"), str):
+                        raise RegenLogError("Event viewing context is required")
+                    expected = _event_context(snapshot, stage=event["stage"], clip=clip)
+                    if any(event.get(key) != value for key, value in expected.items()):
+                        raise RegenLogError("Event viewing context does not match its issued scope")
+            if snapshot.get("protocol_version") == 3 or all(
+                isinstance(event, Mapping) and event.get("event_id") for event in batch
+            ):
+                acknowledged = log.append_events(person, list(batch))
+                return {"acknowledged": acknowledged}
             written = log.append(person, list(batch), None)
         except RegenLogError as exc:
             return _error(400, str(exc))
@@ -906,7 +1325,7 @@ def build_app(
         if isinstance(person, JSONResponse):
             return person
         snapshot = log.snapshot(person)
-        return {"step": progress.current(snapshot), "participant": person}
+        return {"step": progress.current(snapshot), "participant": person, **_flow_meta(snapshot)}
 
     @app.get("/api/log")
     def download(request: Request, participant: str | None = None) -> Any:
@@ -999,6 +1418,9 @@ def build_app(
 
     if continuation is not None:
         continuation.mount(app)
+    from dpo.regen.sheet_protocol import mount_questionnaire
+
+    mount_questionnaire(app, document, media_dir, out_dir, cached, continuation, gate, questionnaire_config)
     return app
 
 
@@ -1032,10 +1454,19 @@ def run_regen_app(
     watch: Callable[[str, int, int], None] | None = None,
     gate: Gate | None = None,
     viewing: ViewingConfig | None = None,
+    questionnaire_config: Mapping[str, Any] | None = None,
 ) -> None:
     """Serve the instrument. Port 8779, one past the console's 8778."""
     app = build_app(
-        document, Path(media_dir), Path(out_dir), writer, items=items, watch=watch, gate=gate, viewing=viewing
+        document,
+        Path(media_dir),
+        Path(out_dir),
+        writer,
+        items=items,
+        watch=watch,
+        gate=gate,
+        viewing=viewing,
+        questionnaire_config=questionnaire_config,
     )
     stills, whole = warm_derivatives(document, Path(media_dir))
     print(f"web copies ready: {stills} stills", end="")

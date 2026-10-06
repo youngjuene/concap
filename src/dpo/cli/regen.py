@@ -39,7 +39,9 @@ from dpo.caption.writer import CacheMismatch, CaptionWriter, StimulusAdapter
 from dpo.cli._shared import _emit
 from dpo.regen.config import Calibration, ConfigError, Configuration
 from dpo.regen.document import (
+    ID_RE,
     REGEN_SCHEMA,
+    REGEN_SCHEMA_V4,
     RegenDocumentError,
     configuration_of,
     load_regen_document,
@@ -156,7 +158,23 @@ def _segment(
 def _regen_scaffold(arguments: argparse.Namespace) -> int:
     root = Path(arguments.media_dir)
     clips = list(arguments.clips or [])
-    if len(clips) != 2:
+    names = getattr(arguments, "segment_ids", None)
+    if names is not None and (
+        not names
+        or len(names) != len(clips)
+        or len(set(names)) != len(names)
+        or any(not ID_RE.fullmatch(name) for name in names)
+        or len(set(clips)) != len(clips)
+    ):
+        _emit(
+            {
+                "status": "error",
+                "command": "regen scaffold",
+                "error": "--segment-ids must be distinct safe IDs matching the distinct --clips",
+            }
+        )
+        return 2
+    if names is None and len(clips) != 2:
         _emit(
             {
                 "status": "error",
@@ -175,13 +193,14 @@ def _regen_scaffold(arguments: argparse.Namespace) -> int:
         )
         segments = {
             name: _segment(root, name, clip, calibration, int(arguments.duration_ms))
-            for name, clip in zip(SEGMENTS, clips, strict=True)
+            for name, clip in zip(names or SEGMENTS, clips, strict=True)
         }
     except (RegenUsageError, ConfigError) as exc:
         _emit({"status": "error", "command": "regen scaffold", "error": str(exc)})
         return 2
     document = {
-        "schema": REGEN_SCHEMA,
+        "schema": REGEN_SCHEMA_V4 if names is not None else REGEN_SCHEMA,
+        **({"clip_order": names} if names is not None else {}),
         "session_id": arguments.session_id,
         "config": configuration.artifact(),
         "segments": segments,
@@ -341,8 +360,14 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
     from dpo.regen.app import run_regen_app
     from dpo.regen.continuation import ViewingConfig
     from dpo.regen.regeneration import RegenTemplateWriter
+    from dpo.regen.study_schema import number
 
     gate = _regen_gate(arguments)
+    try:
+        startup_timeout = number(getattr(arguments, "model_startup_timeout", 180), 0.1, 600)
+    except ValueError as exc:
+        _emit({"status": "error", "command": "regen serve", "error": str(exc)})
+        return 2
     viewing = None
     engine = None
     supplied = [arguments.viewing_manifest, arguments.viewing_media, arguments.viewing_out]
@@ -377,13 +402,14 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
         if model:
             from dpo.regen.study_worker import InferenceProcess
 
-            engine = InferenceProcess(model)
+            engine = InferenceProcess(model, startup_timeout=startup_timeout)
         viewing = ViewingConfig(
             Path(arguments.viewing_manifest).resolve(),
             Path(arguments.viewing_media).resolve(),
             Path(arguments.viewing_out).resolve(),
             model,
             engine=engine,
+            startup_timeout=startup_timeout,
         )
 
     try:
@@ -431,6 +457,11 @@ def _regen_serve(arguments: argparse.Namespace) -> int:
             watch=_SlotBar(),
             gate=gate,
             viewing=viewing,
+            questionnaire_config=(
+                json.loads(Path(arguments.questionnaire_config).read_text(encoding="utf-8"))
+                if getattr(arguments, "questionnaire_config", None)
+                else None
+            ),
         )
     except CacheMismatch as exc:
         _emit({"status": "error", "command": "regen serve", "error": str(exc)})
@@ -444,12 +475,20 @@ def register(subparsers: Any) -> None:
     actions = regen.add_subparsers(dest="action", required=True)
 
     scaffold = actions.add_parser("scaffold", help="turn a staged media directory into a session document")
-    scaffold.add_argument("--media-dir", required=True, help="directory holding A/ and B/")
+    scaffold.add_argument("--media-dir", required=True, help="directory holding the segment subdirectories")
     scaffold.add_argument("--out", required=True)
     scaffold.add_argument("--session-id", required=True)
     scaffold.add_argument("--study-id", required=True)
     scaffold.add_argument("--corpus-id", required=True)
-    scaffold.add_argument("--clips", nargs=2, required=True, metavar=("A", "B"), help="clip ids, A then B")
+    scaffold.add_argument(
+        "--clips", nargs="+", required=True, metavar="CLIP", help="clip IDs in segment order"
+    )
+    scaffold.add_argument(
+        "--segment-ids",
+        nargs="+",
+        metavar="SEGMENT",
+        help="explicit segment directory IDs for a variable-count v4 document; default A B",
+    )
     scaffold.add_argument(
         "--duration-ms", type=int, default=10000, help="segment length; §10 matches the two"
     )
@@ -475,6 +514,15 @@ def register(subparsers: Any) -> None:
     serve.add_argument("--viewing-manifest", help="continue after page 6 into this two-axis viewing study")
     serve.add_argument("--viewing-media", help="media root for the long-video study manifest")
     serve.add_argument("--viewing-out", help="separate output directory for the viewing study")
+    serve.add_argument(
+        "--model-startup-timeout",
+        type=float,
+        default=180,
+        help="bounded model preparation before entry; caption inference keeps its separate 30-second limit",
+    )
+    serve.add_argument(
+        "--questionnaire-config", help="spreadsheet protocol consent, debrief and per-video options JSON"
+    )
     serve.add_argument("--items", help="items JSON; default: the placeholder set in dpo.regen")
     serve.add_argument("--writer", choices=("template", "gemma"), default="template")
     serve.add_argument("--backend-config", help="Gemma 4 backend config; required by --writer gemma")

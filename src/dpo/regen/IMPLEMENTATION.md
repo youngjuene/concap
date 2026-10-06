@@ -1,5 +1,19 @@
 # Implementation handoff
 
+The current new-session contract is the spreadsheet protocol in
+[QUESTIONNAIRE.md](QUESTIONNAIRE.md), with Phase 2 interaction logs and no viewing
+questionnaires. Runtime preparation and output contracts are documented in
+[STUDY.md](STUDY.md). The dated handoff below describes historical survey flows.
+
+The September 12 survey hierarchy replaces the original new-session order
+described in this historical handoff. The current contract is in [STUDY.md](STUDY.md)
+and [DESIGN.md](DESIGN.md): each short clip has original/updated-caption viewings
+with per-viewing questions, followed by one chapter-wide PRSS; each longer video
+has four questions, followed by overall questions and PRSS after all three videos.
+Existing sessions keep their assigned protocol.
+
+The subsequent September 9 readiness work is recorded in [READINESS.md](READINESS.md).
+
 Implemented 2026-09-08 against the two-stage clarification and `DESIGN.md`.
 
 ## Delivered

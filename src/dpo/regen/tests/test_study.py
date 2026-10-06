@@ -17,7 +17,15 @@ from PIL import Image
 
 from dpo.regen.config import SOUND_FAMILIES
 from dpo.regen.study_api import build_study_app
-from dpo.regen.study_schema import FINAL_ITEMS, PREFERENCES, answers, caption_instruction, compile_profile
+from dpo.regen.study_schema import (
+    FINAL_ITEMS,
+    PREFERENCES,
+    VIDEO_ITEMS,
+    answers,
+    caption_instruction,
+    compile_profile,
+    digest,
+)
 from dpo.regen.study_store import Conflict, StudyStore
 from dpo.regen.study_worker import excerpt
 
@@ -221,10 +229,25 @@ def test_multiclip_calibration_and_pending_handoff(session: Any) -> None:
     assert s.client.get("/study/media/watch/0", headers={"Range": "bytes=0-31"}).status_code == 206
 
 
-def test_three_videos_one_final_survey_and_completion_coverage(session: Any, monkeypatch: Any) -> None:
+def form_values(items: list[dict[str, Any]]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for item in items:
+        if item["type"] == "rating":
+            values[item["id"]] = "na" if item.get("na") else min(4, int(item.get("points", 5)))
+        elif item["type"] == "choice":
+            values[item["id"]] = item["options"][0]
+        elif item.get("optional"):
+            values[item["id"]] = ""
+        else:
+            values[item["id"]] = "ok"
+    return values
+
+
+def test_three_videos_require_per_video_surveys_then_one_final_prss(session: Any, monkeypatch: Any) -> None:
     s, store, _ = session
     s.calibrate()
     s.submit("start-viewing")
+    assert s.state["survey_flow"] == "long-video-surveys/v2"
     s.submit("final-survey", expected=409)
     now = [1000.0]
     monkeypatch.setattr("dpo.regen.study_api.time.time", lambda: now[0])
@@ -238,12 +261,23 @@ def test_three_videos_one_final_survey_and_completion_coverage(session: Any, mon
                 "playback", {"video_id": video_id, "position_ms": ms, "sequence": sequence, "playing": True}
             )
         s.submit("video-ended", {"video_id": video_id})
+        assert s.state["stage"] == "video-survey"
+        assert s.state["video"]["id"] == video_id
+        assert [item["id"] for item in s.state["items"]] == [item["id"] for item in VIDEO_ITEMS]
+        s.submit("continue", expected=409)
+        s.submit("draft", {"video_id": "wrong", "answers": {}}, expected=409)
+        video_answers = form_values(s.state["items"])
+        s.submit("draft", {"video_id": video_id, "answers": video_answers})
+        assert s.state["draft"] == {"video_id": video_id, "answers": video_answers}
+        s.submit("video-survey", {"video_id": video_id, "answers": video_answers})
         if index < 2:
             assert s.state["stage"] == "break"
             s.submit("continue")
     assert s.state["stage"] == "final"
-    response: dict[str, Any] = {item["id"]: 4 for item in FINAL_ITEMS if item["type"] == "rating"}
-    response.update(timing="Fast enough", control_texture="na")
+    prss = [item for item in s.state["items"] if item.get("block") == "prss"]
+    assert len(prss) == 8
+    assert all(item["points"] == 7 for item in prss)
+    response = form_values(s.state["items"])
     receipt = {"revision": s.state["revision"], "key": "final-once", "data": response}
     first = s.client.post("/api/study/final-survey", json=receipt)
     second = s.client.post("/api/study/final-survey", json=receipt)
@@ -252,7 +286,48 @@ def test_three_videos_one_final_survey_and_completion_coverage(session: Any, mon
     stored = store.state(s.token)
     assert stored["profile"]["hash"] == profile
     assert len(stored["completions"]) == 3
+    assert [record["video_id"] for record in stored["video_surveys"]] == ["long-0", "long-1", "long-2"]
+    assert stored["video_surveys"][0]["items_hash"] == digest(stored["instrument"]["items"]["video"])
+    assert stored["final_survey"]["items_hash"] == digest(stored["instrument"]["items"]["final"])
     assert stored["final_survey"]["answers"]["comments"] == ""
+
+
+def test_old_frozen_viewing_session_keeps_final_only_transition(session: Any, monkeypatch: Any) -> None:
+    s, store, _ = session
+    s.calibrate()
+    s.submit("start-viewing")
+
+    def old_frozen(state: dict[str, Any]) -> None:
+        state.pop("flow_version", None)
+        old_instrument = {
+            "schema": "dpo.caption-study-instrument/v1",
+            "provenance": "old-final-only",
+            "language": state["language"],
+            "items": {
+                "preferences": state["instrument"]["items"]["preferences"],
+                "final": FINAL_ITEMS,
+            },
+        }
+        state.update(
+            video_index=2,
+            completions=[{"video_id": "long-0", "coverage": []}, {"video_id": "long-1", "coverage": []}],
+            instrument={**old_instrument, "hash": digest(old_instrument)},
+        )
+
+    store.mutate(s.token, "fixture-old-flow", s.state["revision"], "fixture", old_frozen)
+    s.state = s.client.get("/api/study/state").json()
+    assert s.state["stage"] == "watch"
+    assert "survey_flow" not in s.state
+    now = [1000.0]
+    monkeypatch.setattr("dpo.regen.study_api.time.time", lambda: now[0])
+    for sequence, ms in enumerate(range(0, 300001, 5000)):
+        now[0] += 5
+        s.submit("playback", {"video_id": "long-2", "position_ms": ms, "sequence": sequence, "playing": True})
+    s.submit("video-ended", {"video_id": "long-2"})
+    assert s.state["stage"] == "final"
+    assert s.state["items"] == FINAL_ITEMS
+    assert not any(item.get("group") == "prss" or item["id"].startswith("prss_") for item in s.state["items"])
+    assert "video_surveys" not in store.state(s.token) or store.state(s.token)["video_surveys"] == []
 
 
 def test_stale_playback_and_nonfinite_controls(session: Any) -> None:
@@ -315,6 +390,19 @@ def test_lookahead_does_not_supersede_current_job(session: Any) -> None:
     token = s.token
     jobs = store.captions(token, store.state(token))
     assert [job["state"] for job in jobs] == ["queued", "queued"]
+
+
+def test_control_hint_schedules_visible_window_without_credit(session: Any) -> None:
+    s, store, _ = session
+    s.calibrate()
+    s.submit("start-viewing")
+    s.submit("settings", {"video_id": "long-0", "texture": 1, "context": 0, "position_hint_ms": 45000})
+    state = store.state(s.token)
+    assert state["position_ms"] == 0 and state["coverage"] == []
+    assert [job["cue"] for job in store.captions(s.token, state)] == [9, 10]
+    s.submit(
+        "settings", {"video_id": "long-0", "texture": 1, "context": 0, "position_hint_ms": True}, expected=400
+    )
 
 
 def test_excerpt_uses_correct_absolute_audio_window(tmp_path: Path) -> None:

@@ -69,6 +69,33 @@ STRINGS: dict[str, Any] = {
     # same street can rate the second clip's ART items as a re-rating of the
     # first, which is the one contrast the study rests on.
     "steps": ["Watch", "Questions", "What you saw", "What you heard", "Second clip", "Survey"],
+    "hierarchy": {
+        "clip": "Chapter 1 · Clip {number} of {count}",
+        "overall": "Chapter 1 · Overall experience",
+        "steps": [
+            "Watch",
+            "Clip questions",
+            "What you saw",
+            "What you heard",
+            "Updated captions",
+            "Clip questions",
+            "Overall PRSS",
+        ],
+        "repeat": "Watch this same clip with captions updated from your responses.",
+        "intro": "For each short clip, watch, answer the clip questions, then watch with updated captions "
+        "and answer again. After all clips, reflect on your overall soundscape experience.",
+        "clip_questions": "{count} questions about this viewing of the clip. "
+        "Overall soundscape questions come after all clips.",
+        "overall_questions": "Thinking about your overall experience across all the short clips "
+        "in Chapter 1, answer these {count} questions about the soundscapes (PRSS).",
+        "next_clip": "Save and continue to the next clip",
+        "next_overall": "Save and continue to overall PRSS",
+        "finish": "Save overall experience",
+        "ahead_heading": "Next: this clip with updated captions",
+        "ahead_body": "Watch the same clip again and answer the questions about that viewing. "
+        "Overall PRSS follows all short clips.",
+        "ready": "The captions are ready. Continuing to this clip with updated captions.",
+    },
     "actions": {
         "start": "Start",
         "next": "Next",
@@ -291,6 +318,25 @@ KOREAN: dict[str, Any] = {
     # collide on the same screen, so the heading told the participant to watch
     # again four lines above the line saying they cannot.
     "steps": ["시청", "질문", "본 것", "들은 것", "두 번째 영상", "설문"],
+    "hierarchy": {
+        "clip": "1장 · 짧은 영상 {count}개 중 {number}번째",
+        "overall": "1장 · 전반적인 경험",
+        "steps": ["시청", "영상별 질문", "본 것", "들은 것", "수정된 자막", "영상별 질문", "전체 PRSS"],
+        "repeat": "응답을 바탕으로 수정된 자막과 함께 같은 영상을 다시 시청합니다.",
+        "intro": "각 짧은 영상을 시청하고 영상별 질문에 답한 뒤, 수정된 자막과 함께 다시 시청하고 답합니다. "
+        "모든 영상이 끝나면 소리 환경에 대한 전반적인 경험을 돌아봅니다.",
+        "clip_questions": "방금 시청한 영상에 대한 질문 {count}개입니다. "
+        "소리 환경에 대한 전체 질문은 모든 영상이 끝난 뒤에 나옵니다.",
+        "overall_questions": "1장의 모든 짧은 영상에서 경험한 소리 환경을 전반적으로 돌아보며 "
+        "다음 PRSS 질문 {count}개에 답해 주십시오.",
+        "next_clip": "저장하고 다음 영상으로",
+        "next_overall": "저장하고 전체 PRSS로",
+        "finish": "전반적인 경험 저장",
+        "ahead_heading": "다음: 수정된 자막으로 같은 영상 시청",
+        "ahead_body": "같은 영상을 다시 시청한 뒤 해당 시청에 대한 질문에 답합니다. "
+        "전체 PRSS는 모든 짧은 영상이 끝난 뒤에 나옵니다.",
+        "ready": "자막이 준비되었습니다. 수정된 자막으로 같은 영상을 다시 시청합니다.",
+    },
     "actions": {
         "start": "시작",
         "next": "다음",
