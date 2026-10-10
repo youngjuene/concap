@@ -71,8 +71,11 @@ lint:
 typecheck:
 	uv run mypy
 
+# The diff generator's own lock (Dream needs transformers 4.46.2 / torch 2.5.1,
+# which the shared project cannot resolve; docs/v4-diff/plan.md §3.2).
 locks:
 	uv lock --check
+	uv lock --check --project envs/diff-generator
 
 golden:
 	uv run python scripts/regenerate_golden.py
