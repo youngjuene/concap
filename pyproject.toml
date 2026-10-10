@@ -52,7 +52,10 @@ torch = { index = "pytorch-cu126" }
 torchvision = { index = "pytorch-cu126" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dpo"]
+# `diff` (docs/v4-diff/plan.md) ships beside `dpo` until Stage 4 detaches it.
+# It is reached as `python -m diff`; a console script named `diff` would shadow
+# the system diff inside the venv, so there is deliberately none.
+packages = ["src/dpo", "src/diff"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
@@ -72,7 +75,7 @@ strict = true
 # scripts/ is on the pilot's critical path (docs/shared/study-runbook.md stages
 # the served renders with stage_media.py), so it is checked too. `files` rather
 # than `packages` because scripts/ is not one.
-files = ["src/dpo", "scripts"]
+files = ["src/dpo", "src/diff", "scripts"]
 
 # regenerate_golden.py imports the test fixtures to build the golden snapshot,
 # which would otherwise put tests/conftest.py alone under --strict while the

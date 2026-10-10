@@ -1,0 +1,480 @@
+{
+  "schema": "diff.caption-sources/v1",
+  "sources": [
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_a"
+      },
+      "cue_index": 0,
+      "start_ms": 0,
+      "end_ms": 2500,
+      "text": "버스가 오른쪽 차로로 지나간다.",
+      "properties": {
+        "audiovisual_congruence": "congruent",
+        "description_depth": "shallow"
+      },
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "버스",
+            "category": "things",
+            "count": "one",
+            "action": "지나간다",
+            "qualities": [
+              "loud",
+              "low_pitched"
+            ],
+            "location": "오른쪽 차로",
+            "relation": null,
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "note": "Synthetic fixture for tests and the M0 smoke run; it describes no real clip.",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_a"
+      },
+      "cue_index": 1,
+      "start_ms": 2500,
+      "end_ms": 5000,
+      "text": "멀리서 경적이 짧게 울린다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "경적",
+            "category": "things",
+            "count": "one",
+            "action": "짧게 울린다",
+            "qualities": [
+              "sharp"
+            ],
+            "location": "멀리",
+            "relation": null,
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_a"
+      },
+      "cue_index": 2,
+      "start_ms": 5000,
+      "end_ms": 7500,
+      "text": "사람들이 이야기하는 소리가 작게 들린다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "사람들",
+            "category": "human",
+            "count": "several",
+            "action": "이야기한다",
+            "qualities": [
+              "soft"
+            ],
+            "location": null,
+            "relation": "보도 위",
+            "certainty": "uncertain"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_a"
+      },
+      "cue_index": 3,
+      "start_ms": 7500,
+      "end_ms": 10000,
+      "text": "일정한 바람 소리",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "바람",
+            "category": "natural",
+            "count": "one",
+            "action": "",
+            "qualities": [
+              "steady"
+            ],
+            "location": null,
+            "relation": null,
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_b"
+      },
+      "cue_index": 0,
+      "start_ms": 0,
+      "end_ms": 2500,
+      "text": "자전거 벨이 두 번 울린다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "자전거 벨",
+            "category": "things",
+            "count": "one",
+            "action": "두 번 울린다",
+            "qualities": [
+              "metallic",
+              "intermittent"
+            ],
+            "location": null,
+            "relation": "자전거 위",
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_b"
+      },
+      "cue_index": 1,
+      "start_ms": 2500,
+      "end_ms": 5000,
+      "text": "새가 지저귄다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "새",
+            "category": "animal",
+            "count": "several",
+            "action": "지저귄다",
+            "qualities": [
+              "high_pitched"
+            ],
+            "location": "나무 위",
+            "relation": null,
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_b"
+      },
+      "cue_index": 2,
+      "start_ms": 5000,
+      "end_ms": 7500,
+      "text": "공사장 기계 소리가 불규칙하게 이어진다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "공사장 기계",
+            "category": "things",
+            "count": "unknown",
+            "action": "이어진다",
+            "qualities": [
+              "irregular",
+              "rough"
+            ],
+            "location": "길 건너",
+            "relation": null,
+            "certainty": "uncertain"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 1,
+      "unit": {
+        "kind": "clip",
+        "key": "smoke_clip_b"
+      },
+      "cue_index": 3,
+      "start_ms": 7500,
+      "end_ms": 10000,
+      "text": "발소리와 함께 문이 닫힌다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "발소리",
+            "category": "human",
+            "count": "one",
+            "action": "다가온다",
+            "qualities": [],
+            "location": null,
+            "relation": null,
+            "certainty": "clear"
+          },
+          {
+            "event_id": "e2",
+            "order": 1,
+            "source": "문",
+            "category": "things",
+            "count": "one",
+            "action": "닫힌다",
+            "qualities": [
+              "dull"
+            ],
+            "location": null,
+            "relation": "가게 입구",
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 2,
+      "unit": {
+        "kind": "video",
+        "key": "smoke_video"
+      },
+      "cue_index": 0,
+      "start_ms": 0,
+      "end_ms": 5000,
+      "text": "차들이 지나가는 소리가 계속 들린다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "차들",
+            "category": "things",
+            "count": "many",
+            "action": "지나간다",
+            "qualities": [
+              "steady",
+              "low_pitched"
+            ],
+            "location": "도로",
+            "relation": null,
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 2,
+      "unit": {
+        "kind": "video",
+        "key": "smoke_video"
+      },
+      "cue_index": 1,
+      "start_ms": 5000,
+      "end_ms": 10000,
+      "text": "오토바이가 큰 소리로 지나간다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "오토바이",
+            "category": "things",
+            "count": "one",
+            "action": "지나간다",
+            "qualities": [
+              "loud",
+              "rough",
+              "fading"
+            ],
+            "location": "왼쪽 차로",
+            "relation": "버스 뒤",
+            "certainty": "clear"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    },
+    {
+      "schema": "diff.caption-source/v1",
+      "phase": 2,
+      "unit": {
+        "kind": "video",
+        "key": "smoke_video"
+      },
+      "cue_index": 2,
+      "start_ms": 10000,
+      "end_ms": 15000,
+      "text": "가게 음악이 작게 흘러나온다.",
+      "evidence": {
+        "events": [
+          {
+            "event_id": "e1",
+            "order": 0,
+            "source": "가게 음악",
+            "category": "music",
+            "count": "one",
+            "action": "흘러나온다",
+            "qualities": [
+              "soft",
+              "rhythmic"
+            ],
+            "location": null,
+            "relation": "가게 안",
+            "certainty": "uncertain"
+          }
+        ]
+      },
+      "provenance": {
+        "text": "human",
+        "evidence": "human",
+        "reviewed_by": [
+          "synthetic"
+        ],
+        "reviewed_at": null,
+        "origin": "synthetic-smoke: not study material"
+      },
+      "status": "reviewed",
+      "material": "synthetic"
+    }
+  ]
+}
