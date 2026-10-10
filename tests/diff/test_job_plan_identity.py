@@ -47,8 +47,8 @@ def test_dream_jobs_carry_the_whole_call_contract(development_sources: SourceSet
     job = plan.jobs[0]
     assert job.profile_id == DREAM_7B.profile_id and job.runner == "dream"
     assert job.generate == {
-        "max_new_tokens": 128,
-        "steps": 64,
+        "max_new_tokens": 80,
+        "steps": 40,
         "temperature": 0.0,
         "top_p": None,
         "top_k": None,
@@ -59,7 +59,7 @@ def test_dream_jobs_carry_the_whole_call_contract(development_sources: SourceSet
         "output_history": True,
         "return_dict_in_generate": True,
     }
-    assert job.caps["expected_forward_calls"] == 64
+    assert job.caps["expected_forward_calls"] == 40 and job.caps["timeout_s"] == 60.0
     assert job.prompt.system_message == "You are a helpful assistant."
 
 
@@ -151,5 +151,5 @@ def test_lattice_generation_needs_a_passing_g0_ac20(
 def test_lattice_generation_with_a_passing_g0(development_sources: SourceSet) -> None:
     plan = build_phase2_plan(development_sources.sources, "dream_k1", "3x3", "development", g0_decision())
     assert len(plan.jobs) == 3 * 9
-    assert {job.generate["max_new_tokens"] for job in plan.jobs} == {192}
-    assert {job.generate["steps"] for job in plan.jobs} == {192}
+    assert {job.generate["max_new_tokens"] for job in plan.jobs} == {128}
+    assert {job.generate["steps"] for job in plan.jobs} == {128}

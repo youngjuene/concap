@@ -21,12 +21,12 @@ def valid_call(**changes: Any) -> dict[str, Any]:
 
 def test_settings_match_the_contract() -> None:
     assert qwen_call_settings(1) == {
-        "max_new_tokens": 128,
+        "max_new_tokens": 80,
         "do_sample": False,
         "repetition_penalty": 1.0,
         "eos_token_id": [151645, 151643],
     }
-    assert qwen_call_settings(2)["max_new_tokens"] == 192
+    assert qwen_call_settings(2)["max_new_tokens"] == 128
 
 
 @pytest.mark.parametrize("keyword", qwen_runner.REQUIRED_KEYWORDS)

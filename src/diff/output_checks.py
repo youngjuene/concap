@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from diff.caption_sources import QUALITIES, CaptionSource
-from diff.study_protocol import MAX_CHARS, MAX_LINES
+from diff.study_protocol import GATES, MAX_CHARS, MAX_LINES
 
 CHECKS_VERSION: Final = 2
 _PUNCTUATION: Final = ".,!?;:…·'\"“”‘’()[]{}「」『』<>~-—"
@@ -347,6 +347,9 @@ def check_output(
 
 
 def script_passes(result: CheckResult) -> bool:
-    """G0's script check: no foreign-script letters and, counting it as a failure, not incomplete."""
+    """G0's script check: no foreign-script letters, and output that can be shown as a caption.
+
+    The failing codes are protocol data (``GATES["G0"]["script_check_failures"]``).
+    """
     codes = {finding.code for finding in result.failures}
-    return not codes & {"non_korean_script", "undecodable_bytes", "incomplete", "empty_text", "leftover_mask"}
+    return not codes & set(GATES["G0"]["script_check_failures"])

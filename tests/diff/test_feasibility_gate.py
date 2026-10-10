@@ -62,7 +62,7 @@ def test_the_g0_plan_covers_four_conditions(development_sources: SourceSet) -> N
     assert {job.condition for job in plan.jobs} == set(gate.G0_CONDITIONS)
     cell_jobs = [job for job in plan.jobs if job.cell is not None]
     assert {job.phase for job in cell_jobs} == {2}
-    assert {job.generate["max_new_tokens"] for job in cell_jobs} == {192}
+    assert {job.generate["max_new_tokens"] for job in cell_jobs} == {128}
 
 
 def write_attempts(run_dir: Path, frozen: FrozenPlan, text: str, *, incomplete: bool = False) -> None:
@@ -162,6 +162,24 @@ def test_script_failures_fail_g0(tmp_path: Path, development_sources: SourceSet)
         built["report"], built["key"], ratings, built["manifest"], decided_by="tester", decided_at="now"
     )
     assert decision.evidence["criteria"]["script"] is False and decision.outcome == "fail"
+
+
+def test_a_timed_out_job_counts_against_the_script_share(
+    tmp_path: Path, development_sources: SourceSet
+) -> None:
+    # Decided 2026-10-10: the share is over every dream_k1 job, so a job without output fails it.
+    frozen = frozen_g0(development_sources)
+    write_attempts(tmp_path, frozen, "버스가 지나간다.")
+    path = tmp_path / "attempts.jsonl"
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    k1 = {entry.job.job_id for entry in frozen.jobs if entry.job.condition == "dream_k1"}
+    timed_out = next(line for line in lines if line["job_id"] in k1)
+    timed_out.update(status="timeout", output=None, trace=None, latency_ms=None)
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    report = gate.g0_report(frozen, gate.latest_attempts(tmp_path), development_sources.by_id())
+    k1_stats = report["conditions"]["dream_k1"]
+    assert k1_stats["terminal"] == k1_stats["jobs"] == 20 and k1_stats["technical_failures"] == 0
+    assert k1_stats["script_pass"] == 19 and k1_stats["script_pass_share"] == 19 / 20
 
 
 def test_a_smoke_run_is_never_decided(tmp_path: Path, smoke_sources: SourceSet) -> None:

@@ -136,6 +136,11 @@ def test_g0_script_check_counts_incomplete_as_failure(bus: CaptionSource) -> Non
     assert not script_passes(check_output(bus, output("バスが通る。")))
 
 
+def test_g0_script_check_counts_an_empty_caption_as_failure(bus: CaptionSource) -> None:
+    # Decided 2026-10-10: a canvas that is end-of-text from position 0 is not a caption.
+    assert not script_passes(check_output(bus, output("")))
+
+
 def test_helpers() -> None:
     assert non_hangul_runs("KTX가 3.5초 지난다") == ["KTX"]
     assert sentence_count("3.5초 동안 들린다.") == 1

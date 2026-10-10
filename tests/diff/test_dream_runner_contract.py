@@ -117,15 +117,15 @@ def test_run_job_records_caps_counts_and_the_terminator(development_sources: Sou
     assert result["output"]["terminator"] == "endoftext"
     assert result["output"]["completion"] == "terminated"
     assert result["output"]["postprocess"]["tail_token_ids"] == [ENDOFTEXT] * (
-        128 - len("버스가 지나간다.") - 1
+        80 - len("버스가 지나간다.") - 1
     )
-    assert result["caps"] == {"forward_calls": 128, "steps": 128, "canvas": 128}
+    assert result["caps"] == {"forward_calls": 80, "steps": 80, "canvas": 80}
     assert result["rng_unchanged"] is True
     counts = result["trace"]["summary"]["realized_per_step"]
-    assert len(counts) == 128 and sum(counts) == 128
+    assert len(counts) == 80 and sum(counts) == 80
     assert counts[0] == 0 and counts[-1] == 2 and set(counts[1:-1]) == {1}
     called = model.calls[0]
-    assert called["steps"] == 128 and called["max_new_tokens"] == 128 and called["top_k"] is None
+    assert called["steps"] == 80 and called["max_new_tokens"] == 80 and called["top_k"] is None
 
 
 def test_k4_commits_about_four_per_step(development_sources: SourceSet) -> None:
@@ -136,7 +136,7 @@ def test_k4_commits_about_four_per_step(development_sources: SourceSet) -> None:
     )
     assert result["status"] == "completed"
     counts = result["trace"]["summary"]["realized_per_step"]
-    assert len(counts) == 32 and sum(counts) == 128 and max(counts) <= 8
+    assert len(counts) == 20 and sum(counts) == 80 and max(counts) <= 8
 
 
 def test_im_end_is_a_terminator_too(development_sources: SourceSet) -> None:

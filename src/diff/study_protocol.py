@@ -45,7 +45,7 @@ def sha256_tokens(token_ids: Sequence[int]) -> str:
     return sha256_of([int(token) for token in token_ids])
 
 
-PROTOCOL_SCHEMA: Final = "diff.study-protocol/v2"
+PROTOCOL_SCHEMA: Final = "diff.study-protocol/v3"
 
 # CV-15: Dream's token IDs at 05334cb9, checked against the pinned tokenizer.
 # <|endoftext|> is both EOS and PAD; <|im_end|> ends a chat turn. BOS differs
@@ -74,10 +74,17 @@ EPS: Final = 1e-3
 TEMPERATURE: Final = 0.0
 SYSTEM_MESSAGE: Final = "You are a helpful assistant."
 
-# CV-08: the canvas starts at the former budgets and is set from measured token
-# counts at M0; it must be divisible by every k.
-CANVAS_TOKENS: Final[dict[int, int]] = {1: 128, 2: 192}
-TIMEOUT_SECONDS: Final = 30.0
+# CV-08, set at M0 on 2026-10-10 by the researcher. The canvas covers each
+# phase's character limit: 96 characters is about 72 tokens and 160 about 120,
+# at the roughly 0.75 tokens per character measured on the development
+# captions. At the former 128/192, two-thirds or more of every canvas had to
+# be end-of-text, and k1/k2 often filled all of it. It must be divisible by
+# every k.
+CANVAS_TOKENS: Final[dict[int, int]] = {1: 80, 2: 128}
+# Finalised at M0 on 2026-10-10: about twice the slowest job measured, which was
+# dream_k1 on the former 192 canvas at about 32 s on an RTX 3090. Generation is
+# offline, so the deadline only catches a stuck worker.
+TIMEOUT_SECONDS: Final = 60.0
 MAX_CHARS: Final[dict[int, int]] = {1: 96, 2: 160}
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
@@ -107,6 +114,18 @@ GATES: Final[dict[str, Any]] = {
         "terminal": "every job terminal with no unresolved technical failure",
         "min_script_pass_share": 0.95,
         "incomplete_counts_as_failure": True,
+        # Decided by the researcher on 2026-10-10. The brief's script check is
+        # Han/kana and stray Latin plus incomplete. Output that cannot be shown
+        # as a caption fails too, and the share is over every job, so a job with
+        # no output (a timeout) counts against it.
+        "script_check_failures": (
+            "non_korean_script",
+            "undecodable_bytes",
+            "incomplete",
+            "empty_text",
+            "leftover_mask",
+        ),
+        "script_share_denominator": "every dream_k1 job, including jobs without output",
         "min_naturalness": 3,
         "min_naturalness_share": 0.75,
         "minimum_phase2_cell_prompts": 12,
