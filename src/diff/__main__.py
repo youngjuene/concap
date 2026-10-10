@@ -10,6 +10,9 @@ Every other command runs in the repository's own environment
 ``--help`` and the server-side commands never import torch or transformers.
 There is deliberately no console script: a ``diff`` executable in the venv
 would shadow the system ``diff``.
+
+G0 comes first (follow-up §7): ``g0 plan`` → ``plan freeze`` → ``generate`` →
+``g0 report`` (stops at the blind packet) → a person rates → ``g0 decide``.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -35,6 +39,13 @@ def _write_json(path: Path, value: Any, *, force: bool = False) -> None:
         raise SystemExit(f"{path} exists; pass --force to replace it")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_text(path: Path, text: str, *, force: bool = False) -> None:
+    if path.exists() and not force:
+        raise SystemExit(f"{path} exists; pass --force to replace it")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _sources(path: Path) -> Any:
@@ -331,6 +342,76 @@ def checks_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def g0_plan(args: argparse.Namespace) -> int:
+    from diff.feasibility_gate import build_g0_plan
+    from diff.job_plan import PlanError
+
+    try:
+        plan = build_g0_plan(_sources(args.sources).sources, smoke=args.smoke)
+    except PlanError as exc:
+        raise SystemExit("cannot plan G0:\n  " + "\n  ".join(exc.problems)) from exc
+    _write_json(args.out, plan.record(), force=args.force)
+    print(f"{plan.plan_id} ({plan.purpose}): {len(plan.jobs)} jobs → {args.out}")
+    return 0
+
+
+def g0_report(args: argparse.Namespace) -> int:
+    """Automatic report and blind packet; stops there, because the rating needs a person."""
+    from diff import feasibility_gate as gate
+    from diff.job_plan import frozen_plan_from_record
+
+    frozen = frozen_plan_from_record(_read_json(args.plan))
+    source_set = _sources(args.sources)
+    latest = gate.latest_attempts(args.run_dir)
+    manifest = gate.run_manifest(frozen, args.run_dir, source_set.sources)
+    report = gate.g0_report(frozen, latest, source_set.by_id())
+    rows, key = gate.blind_packet(frozen, latest, source_set.by_id(), manifest["manifest_sha256"])
+    out: Path = args.out_dir
+    _write_json(out / "researcher" / "run-manifest.json", manifest, force=args.force)
+    _write_json(out / "researcher" / "report.json", report, force=args.force)
+    _write_json(out / "researcher" / "key.json", key, force=args.force)
+    _write_text(out / "rater" / "packet.csv", gate.packet_csv(rows), force=args.force)
+    _write_text(out / "rater" / "ratings.csv", gate.ratings_template(rows), force=args.force)
+    for condition, stats in report["conditions"].items():
+        print(
+            f"{condition}: {stats['completed']}/{stats['jobs']} completed, script pass "
+            f"{stats['script_pass_share']:.0%}, incomplete {stats['incomplete']}, "
+            f"technical {stats['technical_failures']}"
+        )
+    print(f"blind packet: {len(rows)} outputs → {out / 'rater'}; key and manifest → {out / 'researcher'}")
+    print(
+        "stop here: one fluent Korean reader rates naturalness 1–5 in rater/ratings.csv, "
+        "then run `g0 decide`."
+    )
+    return 0
+
+
+def g0_decide(args: argparse.Namespace) -> int:
+    from diff import feasibility_gate as gate
+
+    out: Path = args.out_dir
+    manifest = _read_json(out / "researcher" / "run-manifest.json")
+    report = _read_json(out / "researcher" / "report.json")
+    key = _read_json(out / "researcher" / "key.json")
+    try:
+        ratings = gate.read_ratings(args.ratings.read_text(encoding="utf-8"), key)
+        decision = gate.decide(
+            report,
+            key,
+            ratings,
+            manifest,
+            decided_by=args.decided_by,
+            decided_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            notes=args.notes,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"cannot decide G0: {exc}") from exc
+    path = out / "researcher" / f"decision-{decision.decision_id}.json"
+    _write_json(path, decision.record())
+    print(f"G0 {decision.outcome}: {json.dumps(decision.evidence['criteria'])} → {path}")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="python -m diff", description=__doc__.split("\n\n")[0])
     commands = root.add_subparsers(dest="command", required=True)
@@ -420,6 +501,30 @@ def parser() -> argparse.ArgumentParser:
     check.add_argument("--out", type=Path)
     check.set_defaults(handler=checks_run)
 
+    g0 = commands.add_parser("g0", help="G0 Korean feasibility gate").add_subparsers(
+        dest="action", required=True
+    )
+    g0_build = g0.add_parser("plan", help="G0 jobs from development material (dream_k1/k2/k4, qwen)")
+    g0_build.add_argument("--sources", type=Path, required=True)
+    g0_build.add_argument(
+        "--smoke", action="store_true", help="synthetic material: a pipeline smoke, never a G0"
+    )
+    g0_build.add_argument("--out", type=Path, required=True)
+    g0_build.add_argument("--force", action="store_true")
+    g0_build.set_defaults(handler=g0_plan)
+    g0_out = g0.add_parser("report", help="automatic report and blind packet (stops for the human rating)")
+    g0_out.add_argument("--plan", type=Path, required=True)
+    g0_out.add_argument("--run-dir", type=Path, required=True)
+    g0_out.add_argument("--sources", type=Path, required=True)
+    g0_out.add_argument("--out-dir", type=Path, required=True)
+    g0_out.add_argument("--force", action="store_true")
+    g0_out.set_defaults(handler=g0_report)
+    g0_rule = g0.add_parser("decide", help="apply the G0 rule to the returned ratings; record the decision")
+    g0_rule.add_argument("--out-dir", type=Path, required=True)
+    g0_rule.add_argument("--ratings", type=Path, required=True)
+    g0_rule.add_argument("--decided-by", required=True)
+    g0_rule.add_argument("--notes", default="")
+    g0_rule.set_defaults(handler=g0_decide)
     return root
 
 
