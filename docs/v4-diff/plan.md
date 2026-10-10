@@ -1,0 +1,1785 @@
+# v4-diff plan — Dream 7B captions behind the regen participant flow
+
+Phase A deliverable, revised 2026-10-09 for the model change below. Written
+against `main` at `3842302`. Where the brief and the PRD disagree, the brief
+wins; where the Dream follow-up and the brief disagree, the follow-up wins.
+
+## Model change — 2026-10-09: Trida-7B → Dream 7B (researcher's decision)
+
+The researcher replaced Trida-7B with Dream 7B mid-way through Stage 1. The
+follow-up message amends the brief.
+
+**The models.**
+- **Main:** `Dream-org/Dream-v0-Instruct-7B` @
+  `05334cb9faaf763692dcf9d8737c642be2b2a6ae`, loaded with `AutoModel`
+  (`DreamModel`), bfloat16, `trust_remote_code=True`. Like Trida it is
+  text-only, so the evidence stays the only grounding.
+- **Baseline:** `Qwen/Qwen2.5-7B-Instruct` @
+  `a09a35458c702b33eeacc393d103063234e8bc28`, in Tri-7B's former role (review
+  stage only by default).
+
+**The decoding factor.** Dream has no unmasking threshold, so τ becomes
+parallelism **k = canvas ÷ steps**. The phase-1 conditions are `original`,
+`dream_k1`, `dream_k2` and `dream_k4` (plus optional `qwen`). Wherever this plan
+below still says τ, Trida, Tri-7B, block, small block or threshold, read the
+decoding condition k, Dream, Qwen, canvas and steps as defined here.
+
+**What was verified against the pinned files.** All files were downloaded at
+the exact revisions, and their git blob IDs matched the Hub.
+- **Hashes:** SHA-256 for every file the follow-up lists is in
+  `src/diff/model_profile.py` (Appendix B).
+- **Token IDs:** `<|mask|>` 151666; `<|endoftext|>` 151643 (EOS and PAD);
+  `<|im_end|>` 151645. BOS is 151643 in `config.json` and `<|beginoftext|>`
+  151665 in the tokenizer; `add_bos_token` is false.
+- **Context:** `config.json` says `max_position_embeddings` 131,072; the GitHub
+  README at `31f94a6` gives a 2,048-token context, transformers 4.46.2, torch
+  2.5.1 and a GPU of at least 20 GB.
+- **Call behaviour in `generation_utils.py`:** every behaviour the follow-up's
+  §3 lists holds.
+  - Config built from `config.json` when no `generation_config` is passed (line 228).
+  - Unknown keys dropped silently by `.update()` (236).
+  - Mask padding to prompt + `max_new_tokens` (388).
+  - `steps` full forwards with no cache and no early exit, logits shifted by
+    one (409–412).
+  - `origin` ordering by `torch.rand` (424).
+  - top-p/top-k filtering before the confidence (62–65).
+  - `int(n_mask·(1−s/t))` per step and every remaining position at the last
+    step (437).
+  - The mask search covers the prompt (410).
+- **Legacy defaults:** in transformers 4.46.2, `PretrainedConfig.to_dict()`
+  carries `temperature` 1.0, `top_k` 50 and `top_p` 1.0. Checked by running
+  library code over `config.json`, with no remote code executed.
+- **Qwen's shipped defaults:** `generation_config.json` turns on sampling
+  (0.7 / 0.8 / 20) with `repetition_penalty` 1.05.
+
+**Gating.** G0 (Korean feasibility) now gates everything else in Stage 1 (§7 of
+the follow-up). AC-20: the bundle builder and the lattice generator refuse
+without a passing G0 decision for the current Dream profile.
+
+### Changelog entry — 2026-10-09, reason: researcher's decision
+
+**Kept** (model-agnostic):
+- `caption_sources` (schema, closed vocabulary, importers), plus a new
+  `material` field: development, participant or synthetic;
+- the job-plan structure (content-addressed jobs, plans, freeze);
+- `generation_worker` (supervisor, deadline, one retry);
+- the output-check rules other than token IDs;
+- the CLI skeleton and the synthetic fixture (relabelled `synthetic`);
+- the participant-flow, review, bundle, assignment and store designs (§5–§7).
+
+**Changed:**
+- `study_protocol` (Dream contract, canvas, k conditions, G0, open decisions);
+- `model_profile` (Dream and Qwen pins and hashes);
+- `rewrite_prompts` (explicit system message "You are a helpful assistant." for
+  both models, and `render_cell` for G0);
+- `job_plan` (k and Qwen settings, prompt guards for 2,048 / mask / BOS, AC-20);
+- `output_checks` (cut at the first `<|endoftext|>` or `<|im_end|>` with the
+  tail kept, `incomplete`, leftover masks, repetition and exact-copy measures);
+- the lattice axis renamed `quality_limit`, cell IDs now `t*`, so it is never
+  confused with decoding k;
+- the generator env, now `envs/diff-generator` with transformers 4.46.2 and
+  torch 2.5.1+cu124.
+
+**Redone:**
+- `trida_runner.py` → `dream_runner.py`;
+- `tri_runner.py` → `qwen_runner.py`;
+- new `model_runtime.py` (shared loaded-model, refusal, chat and RNG helpers),
+  `analysis_decisions.py` and `feasibility_gate.py` (G0).
+
+**Removed:**
+- the Trida decode trace (`decode_trace.py`); Dream's trace follows a passing G0;
+- `envs/trida-generator`.
+
+No Trida path, alias or switch remains, and a test enforces it.
+
+**Trida artifacts produced:**
+- no Trida outputs exist, because nothing was generated;
+- the Trida-7B snapshot, downloaded at 13:10–13:23 into
+  `artifacts/diff/models/trida-7b-c37755e8` (15 GB, gitignored), never entered
+  a bundle, fixture or test. It was deleted on 2026-10-09 at the researcher's
+  request, together with its download log (Q16).
+
+### GPU smoke, 2026-10-09 (synthetic prompts; not G0, not a quality result)
+
+8 jobs over the synthetic fixture, run on GPU 1 (RTX 3090) in
+`envs/diff-generator` (Python 3.11.15, torch 2.5.1+cu124, transformers
+4.46.2).
+
+**Outcomes:**
+- **Loading:** every pinned file and shard verified. All four remote-code
+  files Python imported matched their pins; so did the remote tokenizer at
+  freeze.
+- **Caps:** all 8 attempts completed. Forward calls equalled `steps` in all 5
+  Dream calls, new positions equalled the canvas, and no call changed an RNG
+  state. This is AC-07/AC-08 observed on real hardware for these calls, not the
+  full AC suites.
+- **Per-step commits:** exactly as predicted. k1 runs 0, 1, …, 1, 2 and k4 runs
+  3, 4, …, 4, 5.
+- **Latency:** Dream k1 took about 14 s on a 128-token canvas and 25 s on 192
+  (with about 210 prompt tokens); k4 took 3.5 s; Qwen 0.5–2.8 s. The 30 s
+  phase-2 timeout is close and is finalised at M0.
+
+**Findings:**
+- **Empty output:** one Dream k1 output was empty; it committed
+  `<|endoftext|>` at the first position.
+- **Exact copies:** two outputs copied the source exactly.
+- **Split character:** one Dream k4 output began with U+FFFD. Byte-level BPE
+  had committed the continuation byte of a Hangul syllable without its lead
+  byte. The checks missed this until a new fail rule, `undecodable_bytes`, was
+  added; it also counts against G0's script check.
+
+**What was exercised:** the G0 report and blind packet were run on this smoke
+run, with no identifier leaks in the packet, and `g0 decide` refused it.
+
+These observations come from 3 synthetic prompts and say nothing about Dream's
+Korean ability; that is G0's job.
+
+### First G0 run, 2026-10-09 (not rated, not decided)
+
+**Setup:**
+- 72 jobs: 6 development cues (Q15) with the phase-1 prompt and 12 corner
+  prompts, each under `dream_k1`, `dream_k2`, `dream_k4` and `qwen`.
+- Run on GPU 1 (RTX 3090). Prompts were 216–315 tokens.
+- Run directory: `artifacts/diff/g0-20261009`. The report and packet are in
+  `g0/`.
+- Every job was terminal, with no technical failures; caps and the RNG check
+  held.
+
+**Findings:**
+- **Timeouts:** all 12 `dream_k1` corner jobs timed out against the 30 s
+  placeholder. No other job did.
+  - `dream_k2` on the same 192 canvas took 15.3–16.2 s for 96 steps.
+  - Latency scales with steps (k1/k2 at 128 measured 1.97–1.98), so k1 needs
+    about 31–33 s.
+  - These 12 jobs produced nothing.
+- **Empty outputs:** the canvas was all `<|endoftext|>` from position 0.
+  - `dream_k1`: 4 of its 6 completed outputs.
+  - `dream_k2`: 9 of 18.
+  - `dream_k4`: never.
+  - The six 원문 measure 31 tokens at the median and 45 at most (Dream
+    tokenizer). Completed outputs stopped after 8–46 tokens. Most of each
+    128/192 canvas is therefore end-of-text, and the canvas has not yet been
+    set from measured counts (CV-08, M0).
+- **Script check:** `dream_k1` 2/18 under the implemented rule, `dream_k2`
+  9/18, `dream_k4` 18/18, `qwen` 15/18.
+  - The implemented rule counts empty output, U+FFFD, leftover masks and jobs
+    without output as failures, beyond the brief's Han/kana/Latin and
+    `incomplete`. The brief's literal reading gives `dream_k1` 6/18, or 6/6
+    over completed outputs only.
+- **Qwen:**
+  - It wrote Chinese once, behind a "-automatic" prefix that appears in three
+    `bangkok_209` corner outputs. The prompt renders as the template
+    specifies.
+  - It broke the phase-1 sentence-ending rule twice.
+
+**Status:** the packet exists, but it is not fit to rate. It holds 6 Dream
+outputs, 4 of them empty, against 18 from Qwen, and the k1 corner prompts
+produced nothing.
+
+**Decided by the researcher on 2026-10-10 (M0; protocol
+`diff.study-protocol/v3`):**
+- **Timeout:** 60 s.
+- **Canvas:** 80 tokens in phase 1 and 128 in phase 2, sized to the 96- and
+  160-character limits.
+- **Empty outputs:** an empty output, or a job with no output, fails the script
+  check. The share is over every `dream_k1` job.
+- **Evidence:** the six drafts are used as they are.
+
+The second G0 run, under v3, is in `artifacts/diff/g0-20261010`.
+
+### Second G0 run, 2026-10-10 (protocol v3; fails the automatic rule)
+
+**Setup:** the same six development cues and 72 jobs, on GPU 1, with a canvas
+of 80/128 and a 60 s timeout. All 72 jobs completed, with no timeouts and no
+technical failures. Latency medians: `dream_k1` 16.1 s, `k2` 8.1 s, `k4`
+4.0 s, Qwen 0.6 s.
+
+**Empty outputs and script pass:**
+
+| Condition | Empty | Script pass |
+|---|---|---|
+| `dream_k1` | 16/18: all 6 phase-1 cues and 10 of 12 corners | 2/18 |
+| `dream_k2` | 8/18 | 10/18 |
+| `dream_k4` | 0/18 | 17/18 (one U+FFFD) |
+| `qwen` | 0/18 | 15/18 (the same outputs as run 1) |
+
+**Findings:**
+- **The smaller canvas did not cure the end-of-text fill at k1; it made it
+  worse.** On the phase-1 cues, run 1 had 4/6 empty at canvas 128 and run 2
+  had 6/6 at canvas 80.
+- **The two non-empty `dream_k1` outputs** are "차가 울린니다" and "차량
+  울린다".
+
+**G0 outcome:** under the rule decided on 2026-10-10, `dream_k1`'s script
+share is 11 % against 95 %. G0 fails whatever the rating, so the packet
+(36 rows, 16 of them empty Dream outputs) is not worth a rater's time.
+
+**What remains for the researcher (brief §7):**
+- Choose between revised prompts on development material (a new protocol
+  version) and another model.
+- An untested observation: the contract differs from Dream's README call in
+  temperature 0.0 against 0.2 with `top_p` 0.95, and in canvas size (80/128
+  against 512).
+
+### G0 and AC-20 in the traceability
+
+| ID | Content (follow-up) | Modules | Tests |
+|---|---|---|---|
+| G0 | Korean feasibility before any other Dream work: development cues (phase-1 prompt) + ≥ 12 corner cell prompts; `dream_k1/k2/k4` + `qwen`; automatic report; blind packet (`dream_k1` + `qwen`) rated 1–5 by one fluent Korean reader; pass = all `dream_k1` jobs terminal with no unresolved technical failure, ≥ 95 % script pass (incomplete counts as failure), ≥ 3/4 naturalness ≥ 3; recorded as an `AnalysisDecision` with the run-manifest hash | `feasibility_gate`, `analysis_decisions`, `output_checks`, `dream_runner`, `qwen_runner`, `__main__ g0 …` | `test_feasibility_gate` |
+| AC-20 | the bundle builder and lattice generator refuse unless a passing G0 decision exists for a run manifest with the current model profile | `job_plan.build_phase2_plan` (lattice generator), `analysis_decisions.gate_problems`; bundle builder in Stage 2 | `test_job_plan_identity` (AC-20 cases) |
+| AC-01 | synthetic logits: recomputed confidences, counts and selected positions equal the pinned code's | after G0: vendored `dream_generation_utils.py` + decode trace | pending G0 |
+| AC-02 | the §3 refusal list, including each missing required keyword | `dream_runner.checked_call`, `qwen_runner.checked_call` | `test_dream_runner_contract`, `test_qwen_runner_contract` |
+| AC-03 | 3 inputs × 3 conditions: identical token IDs with and without hooks and history; hook selections = history unmasking + logged `selected_but_masked` | after G0 (decode trace) | pending G0 |
+| AC-05 | context and canvas edges: 2,047 and 2,048 accepted, 2,049 refused before the call; invalid steps refused; very short prompts | `dream_runner.context_problems`, `checked_call` | `test_dream_runner_contract` |
+| AC-07 | a call leaves the CPU and CUDA RNG states unchanged | `model_runtime.rng_snapshot`, checked on every call (`rng_consumed`) | `test_dream_runner_contract` (fake); GPU pending |
+| AC-08 | forward-hook count equals `steps` | read-only forward hook in `dream_runner.call_with_caps` (`count_mismatch`) | `test_dream_runner_contract` (fake); GPU pending |
+
+## 0. Read this first
+
+1. **The PRD is not in this workspace.** `trida-korean-hci-prd.md` is not on
+   this machine (full-disk search), not in git history on any branch, and not in
+   the connected Google Drive or Notion. Every PRD section, FR, AC, MC, CV and IV
+   cited below comes from the brief. §9 traces the brief's constraints in full
+   and gives every FR-01–FR-24 and AC-01–AC-19 a row, but rows whose wording
+   only the PRD holds say *pending PRD* rather than guess. Add the PRD
+   (suggested path `docs/v4-diff/trida-korean-hci-prd.md`) and complete §9
+   before Stage 1.
+2. **The allowed regen imports load Gemma code transitively.** Importing any
+   `dpo.regen.*` module runs `dpo/regen/__init__.py`, which imports
+   `dpo.regen.regeneration` and through it `dpo.caption.writer`, the module that
+   defines `GemmaWriter`. Measured at `3842302`: importing `sheet_instrument`,
+   `playback`, `points`, `study_media` and `study_store` loads
+   `dpo.caption.{writer,background}`, `dpo.core.atomic` and
+   `dpo.regen.{assignment,captions,config,document,items,regeneration,study_instrument,study_schema}`.
+   It does **not** load `torch`, `transformers`, `numpy`, `dpo.models`,
+   `dpo.candidates` or `dpo.contracts` (`dpo.models.gemma4` is imported inside a
+   method, never at module load). `src/dpo/` may not be edited, so diff cannot
+   avoid this before Stage 4. Default: accept it, pin it with an
+   import-boundary test, remove it at Stage 4. Alternative: detach the five
+   modules at Stage 1 (Q2).
+3. **Superseded by the model change.** This item recorded a defect in Trida's
+   native `generate` (a prompt of exactly one block skipped prefill). Trida is
+   no longer used. Dream's call contract, verified against its pinned
+   `generation_utils.py`, is in the Model change section at the top.
+4. **The stimulus materials do not yet have the shape diff needs.**
+   - **Phase 1:** the live regen document has one cue per clip
+     (`calibration.cue_slots: 1`). Diff needs four authored cues per clip with
+     structured evidence, for the two participant clips and for separate
+     development clips.
+   - **Phase 2:** each of the 180 windows' evidence is a free-text string, and
+     both the evidence and the fallbacks are unreviewed Gemma drafts
+     (`REAL_VIDEO_QA.md`).
+
+   Generation can be built and tested with fakes before the materials exist. G1
+   and G2 cannot be measured until they do.
+5. **The working tree is not the baseline.** Sixteen regen files are modified
+   and nine are untracked. The changes add an optional per-video "experience"
+   questionnaire policy, caption provenance on viewings and responses, and
+   job-execution timing. This plan targets `3842302`. The parity target is
+   regen's spreadsheet path under its default policy,
+   `interaction-only-sheet-v1`.
+
+## 1. Goal and scope
+
+A new top-level package `src/diff` reproduces the regen spreadsheet protocol's
+participant response order exactly and replaces only how caption text is
+produced:
+
+- **Offline generation:** Trida-7B, and optionally Tri-7B, writes caption text
+  under fixed, instrumented settings.
+- **Freeze:** outputs are checked, reviewed blind and frozen into a hashed
+  stimulus bundle.
+- **Serving:** the participant server reads the bundle and never calls a model.
+
+In scope: generator (M0–M1), blind review and freeze (M2), participant and
+review server (M3), detachment from `dpo` (Stage 4).
+
+Out of scope: regen's v3 A/B flow, protocol-3 v4 and the standalone `study_api`
+v2 entry. Also out of scope: any edit to `src/dpo/`, `data/` or `deploy/`, live
+services or participant records, and deleting the Gemma/DPO dependencies (Stage
+4 only proposes it).
+
+## 2. What was verified
+
+### 2.1 Code facts in the brief, re-checked at `3842302`
+
+Every line reference in the brief matches the baseline. The working tree shifts
+`sheet_protocol.py` by up to +66 lines; diff edits none of these files.
+
+| Fact | Where | Status |
+|---|---|---|
+| Transition never calls a model; returns the first track (`maintain`) or an authored track keyed `<object_id>\|<A1s>` (`opposite`) | `sheet_protocol.py` 611–665 | confirmed |
+| `writer` argument unused | `sheet_protocol.py` 60 | confirmed |
+| 2×2 condition and strategy fixed per clip; only clip order rotates (`segment_order(document, sequence)`, 195) | 132–141 | confirmed |
+| Whole instrument snapshot (91,787 bytes measured) and full config copied into every session; each response stores its item definitions | 196–197, 524; `study_store.py` 131–177 | confirmed |
+| Instrument/document hash change blocks running sessions | 244–247 | confirmed |
+| Real `clip_id` in every participant payload | 285 | confirmed |
+| No path to P12/P13 without phase 2 (`handoff` requires a continuation) | 547–549 | confirmed |
+| Export opens with the participant cookie from loopback | 694–698 | confirmed |
+| Registration sequence = `SELECT count(*) FROM sessions` | `study_store.py` 97 | confirmed |
+| Session created at page load | `sheet_questionnaire.js` 574 | confirmed |
+| Viewing manifest re-read at `start-viewing`, shown in manifest order | `study_api.py` 366, 473 | confirmed |
+| One repair retry on validation failure | `study_worker.py` 91–108 | confirmed |
+| `context < 0.34` switches to a JSON-template path | `caption_controls.py` 66–87, 98 | confirmed |
+| Two-decimal axes give a distinct prompt per 1 % step; 335 tells the model to listen to audio | `study_schema.py` 323–359 | confirmed |
+| Any Hangul character passes the language check | `captions.py` 121–130 | confirmed |
+| Page entry and client submit times never sent (`entered_at` stays in `sessionStorage`; server reads an absent `submitted_at`) | `sheet_questionnaire.js` 73; `sheet_protocol.py` 528 | confirmed |
+
+### 2.2 Further regen findings that shape diff
+
+- **Drafts:** the sheet client never sends server drafts. Drafts live in
+  `sessionStorage`, scoped by session, instrument, practice flag, clip index
+  and page. The server `draft` action exists but this client does not call it;
+  a server draft is used only by a fresh tab.
+- **Order and options:** P9 order is
+  `page_item_order("P9", session_id)` = sort by
+  `sha256([PROVENANCE, session_key, page, item_id])`. It is the same for every
+  clip in a session. R2 correctness flags live in the clip config and are
+  stripped from API options. Validation messages from `validate_answers` are
+  English, and the client shows them to participants.
+- **Phase-2 wording to drop:** `study-ko.json` tells participants that captions
+  are "shaped by your responses" and that "settings carry into the next
+  video". Neither is true in diff: phase-1 answers are not used, and every video
+  starts at the centre cell.
+- **Status codes differ by phase:** a missing `x-study-request` header is 401 in
+  the questionnaire app and 403 in the viewing app's middleware.
+- **Unused legacy state:** `StudyStore._initial_state` embeds the legacy
+  instrument snapshot in every session; the sheet path pops it.
+- **Workbook constants:** workbook hash
+  `b23eb462bfc6e3fd4a14c3616a0b7bd12e703fdda8fba418258b981f5a7fb2ce`;
+  instrument snapshot hash
+  `6c97d64a8796fa09e4fa3d82d4d2680d220cb15faeaa0774bc60a08cd176ad8b`.
+  P4 and P9 have 11 items each, with P9 IDs suffixed `_2`. Two clips give 34
+  answers per clip over nine submit pages; regen's own end-to-end test asserts
+  18 responses and 68 answers.
+- **Live materials:** clips A = `bangkok_034` and B = `singapore_286`, each
+  10,032 ms with one cue and five frames of 7–8 masks. Three long videos run
+  299,679 / 300,259 / 300,142 ms, with 60 cues each.
+- **Shared GPU:** GPU 0 holds a 15.5 GB python process; GPU 1 is free. Nothing
+  was run.
+
+### 2.3 Model facts (Hub API and the pinned files, read 2026-10-09)
+
+> **Superseded by the Model change section and Appendix B.** The Trida/Tri facts
+> below record what was verified before the switch; no code uses them.
+
+**Trida-7B @ `c37755e81222de0aff69ee481f5299a99928b105`** (Hub last-modified
+2026-01-29, not gated, Apache-2.0):
+
+- **Architecture:** `TridaForDLM`, custom code (`auto_map`), bf16 shards
+  totalling 15.05 GB.
+- **Config versus card:** `config.json` was saved with
+  `transformers_version` 4.57.3. It sets `max_position_embeddings` 4096,
+  `vocab_size` 128256 and `bd_size` 4 (`bd_size` is used only by training
+  paths). The model card states a context length of 8,192.
+- **Generation defaults are never read:** `generation_config.json` holds
+  `do_sample: true`, `temperature: 0.6` and `top_p: 0.9`. The custom `generate`
+  overrides `GenerationMixin.generate` and never reads it.
+- **`generate` signature:** `generate(input_ids, max_new_tokens, mask_id=128012,
+  threshold=1, small_block_size=8, block_size=32, stop_token=128001,
+  stopping_criteria=None, top_p=0.95, temperature=0, use_block_cache=False,
+  pad_token_id=128004, return_dict_in_generate=False, **kwargs)`.
+  `**kwargs` swallows anything unknown. The model card's own quickstart passes
+  `tokenizer=`, which is silently ignored. `stopping_criteria` and
+  `return_dict_in_generate` are accepted and unused.
+- **Block arithmetic:** `num_blocks = max_new_tokens // block_size`. A
+  `max_new_tokens` below 32 decodes no block; at most the post-prefill argmax
+  token below is appended. After every completed block one token is appended by
+  plain `argmax`; it is not subject to `threshold`. When the prompt length is a
+  multiple of 32 greater than 32, one argmax token is appended after prefill.
+- **Unmasking:** `threshold` unmasks every masked position whose top-1
+  probability exceeds it, plus the single most confident one. At
+  `threshold=1` that is exactly one position per step.
+- **`temperature=0`:** `sample_with_top_p` returns `softmax` + `argmax` before
+  any nucleus filtering, so `top_p` is not applied.
+- **Hard-coded IDs:** `sample_with_top_p` always suppresses IDs 128012 and
+  128004, whatever `mask_id` or `pad_token_id` was passed to `generate`. The
+  per-step `forward` calls inside `generate` do not pass `block_size`, so they
+  use the default 32. Any `block_size` other than 32, or token IDs other than
+  the defaults, are internally inconsistent in this revision.
+- **Output:** truncated after the first stop token; positions after it are set
+  to the pad ID.
+- **Runtime dependencies:** `fused_flex_attention` is
+  `torch.compile(fullgraph=True, mode="max-autotune-no-cudagraphs")`, so the
+  first call compiles. The module also imports `einops`, which is not a repo
+  dependency.
+- **Special tokens:** `<|endoftext|>` 0 (bos), `<|im_start|>` 128000,
+  `<|im_end|>` 128001 (stop), `<|pad|>` 128004, `<|mask|>` 128012.
+- **Chat template:** without a system message, the template inserts "You are
+  Trillion, created by TrillionLabs. You are a helpful assistant."
+
+**Tri-7B pin (proposed): `94e2cc881102428ab9be3df2366a09ac928c2c82`** (current
+`main`; Hub last-modified 2025-07-25, not gated, Apache-2.0):
+
+- **Architecture:** `LlamaForCausalLM`, no remote code. Shards are fp32
+  (30.1 GB) and load as bf16.
+- **Config:** saved with transformers 4.53.2; `max_position_embeddings` 32768.
+- **Tokens:** same special-token IDs as Trida, without `<|mask|>`.
+- **Chat template:** differs from Trida's in whitespace and `<|im_end|>`
+  placement, so Tri prompt token IDs are hashed separately.
+
+SHA-256 of the pinned text files (downloaded at the exact revision; git blob
+IDs matched the Hub's):
+
+| File | Trida-7B @ c37755e8 | Tri-7B @ 94e2cc88 |
+|---|---|---|
+| `modeling_trida.py` | `100558ff8e0e7d37e24bb8a3cdfcea508ed9db5c81eeb64a026ba76f4b8ec949` | — |
+| `configuration_trida.py` | `105a4722bc7fd3ed5f3b67e18cda91aae404135835f9e31037435d8c2f78ffe1` | — |
+| `tokenizer.json` | `87522bb349f1b34dc65b11fbc841cf6d6499da80c375f142ea4c4a7923011321` | `de39a11436696c5cb69359e688e3acf8ed4af3711ec78e5328ea17e4c77eea85` |
+| `tokenizer_config.json` | `e9477f4ef3120bc2b001c7b482207690c84cfc4a79a5ad557b114a7549769190` | `b2feed86404a118d02084149e794ddabf5c964df16ad5b615fc262efe582f031` |
+| `special_tokens_map.json` | `ea3dfcfe26148c30aa296b54083a66531a28c58a0f880625a59439fe1d67baa7` | `20909c4754098a276d107d8080a930ac0c9a713d3bb296b92444f473eedad3fa` |
+| `chat_template.jinja` | `8fe304e54dbef96520a19f0640ddf421c3a2188cf85352b09789c28f4c788238` | `c704db189c305fbc925629b77ce6fd437e42d9ccc65fcb7fc98268872461abe6` |
+| `config.json` | `ed7d5a45a81e50883e3a67651b3b8bd999715221238770011837744a893566e5` | `2ec149fc6aeedf90a870562bfa5bd11073b0dfd5d2a0a2f07696473db310537f` |
+| `generation_config.json` | `12603b65aab9b66affeafb91cbc5c0b3afe4e0c40c71492bce9aa564024efb86` | `4ed67772c746f5019b48337d838aaace2db308e23939d9eb657d3458d2a34b97` |
+
+Weight shard hashes, the LFS SHA-256 values reported by the Hub, are in Appendix A.
+
+## 3. Architecture
+
+### 3.1 Modules
+
+One flat package. Every basename was checked against `git ls-files` (no
+collision) and against `sys.stdlib_module_names` (no shadowing). `diff` itself
+is not a stdlib module; `difflib` is.
+
+| Module | Stage | Env | Responsibility |
+|---|---|---|---|
+| `__init__.py` | 1 | both | docstring only; imports nothing |
+| `__main__.py` | 1 | both | `python -m diff <command>`; lazy imports so the generator env never imports FastAPI and the server env never imports torch |
+| `study_protocol.py` | 1 | both | protocol data and its hash: page order, gates, budgets, caps, open-decision defaults (§12), CV/MC constants |
+| `caption_sources.py` | 1 | both | `CaptionSource` schema, the closed quality vocabulary (copied from `caption_controls.QUALITIES` at `3842302`, hash-pinned), provenance gate, read-only importers for the regen document and viewing manifest |
+| `rewrite_prompts.py` | 1 | both | versioned Korean templates, deterministic evidence rendering, template and text hashes |
+| `model_profile.py` | 1 | gen | Dream and Qwen pins, file SHA-256, token IDs, context limit, verification before `trust_remote_code`, post-load hash of imported remote code |
+| `job_plan.py` | 1 | both | content-addressed jobs (cue × condition, cue × cell), caps, plan freeze (token IDs added in the generator env) |
+| `generation_worker.py` | 1 | gen | *added*: subprocess isolation, the job's deadline (60 s since M0), transient-failure classification, the one identical retry |
+| `dream_runner.py` | 1 | gen | native `diffusion_generate`, batch 1, every keyword required; refusals before the call; caps (forward calls = steps, new positions = canvas, RNG unchanged); realized per-step counts from history |
+| `qwen_runner.py` | 1 | gen | greedy baseline, `repetition_penalty=1.0`, sampling knobs unset, resolved config recorded |
+| `model_runtime.py` | 1 | gen | *added*: loaded-model record, refusal error, chat rendering with the system message, token-ID check, RNG snapshots |
+| `analysis_decisions.py` | 1 | both | *added*: `AnalysisDecision` records and the gate check (AC-20) |
+| `feasibility_gate.py` | 1 | both | *added*: G0 inputs, report, blind packet, ratings, decision |
+| `decode_trace.py` | after G0 | gen | Dream decode trace (logits hook recomputing `sample_tokens` + `topk`; tokens hook); not built yet |
+| `output_checks.py` | 1 | both | fail/flag/measure rules; no repair, truncation or shortening |
+| `review_app.py` | 2 | server | blind double review and adjudication (researcher port) |
+| `freeze_gates.py` | 2 | server | *added*: G1/G2 computation and recorded hold decisions |
+| `stimulus_bundle.py` | 2 | server | bundle builder, verifier, `bundle_sha256`, version registry |
+| `assignment_schedule.py` | 3 | server | slot table generation, balance report, release policy |
+| `session_store.py` | 3 | server | transactional store: sessions, receipts, events, slots, responses, viewings, exposures, control events, page entries |
+| `phase1_flow.py` | 3 | server | P0–P11, practice, transition, handoff |
+| `phase2_viewing.py` | 3 | server | ready → watch / break → P12 → P13; lattice delivery; controls; exposures |
+| `participant_server.py` | 3 | server | *added*: app factory, opaque media tokens, security headers, static allowlist, blindness boundary |
+| `export_bundle.py` | 3 | server | researcher-authenticated export (CLI and researcher port) |
+
+Static assets, also collision-checked: `diff_participant.html`,
+`phase1_pages.js`, `phase2_player.js`, `participant_theme.css`,
+`review_console.html`, `review_console.js`. The participant assets are Korean
+only; the review console is researcher-facing.
+
+`pyproject.toml` (Stage 1, first commit): add `"src/diff"` to
+`[tool.hatch.build.targets.wheel] packages` and to `[tool.mypy] files`. Add no
+`[project.scripts]` entry; the system `diff` stays reachable inside the venv.
+`testpaths` already covers `tests/diff/`.
+
+### 3.2 Environments
+
+| | Server env (participant and review) | Generator env |
+|---|---|---|
+| Lives in | the shared `pyproject.toml` / `uv.lock` | `envs/diff-generator/pyproject.toml` + its own `uv.lock`, `package = false` |
+| Needs | FastAPI, uvicorn, Pillow, system ffmpeg/ffprobe (4.2.7 present) | `torch==2.5.1` (cu124), `transformers==4.46.2`, `safetensors`, `huggingface_hub` < 1.0 (Dream README pins); Python 3.11 |
+| Imports torch | never (asserted by test) | yes |
+| Runs diff via | `uv run python -m diff …` (diff is in the editable wheel) | `PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff …` from the repo root |
+| Accepted when | `make check` passes (see §10 on the pre-existing `.omx` lint) | AC-03 and AC-07 pass on a GPU with ≥ 20 GB in this env |
+
+The generator env cannot be a dependency group of the shared project:
+`transformers==5.13.1` and `torch==2.10.0` are main dependencies, and a group
+cannot downgrade them. diff is never installed there; it runs from the source
+tree. Both runners (Dream and Qwen) use it. `make locks` checks its lock too.
+Until Stage 4, torch stays a dependency of the shared project as the brief
+requires.
+
+### 3.3 Data flow and workspace
+
+```
+authored sources (human / reviewed drafts)
+  → caption_sources validate
+  → job_plan build (text prompts)
+  → job_plan freeze  [generator env: token IDs, lengths, guards]
+  → dream_runner / qwen_runner  [GPU]  → attempts (+ decode traces after G0)
+  → output_checks  → review_app (blind, 2 reviewers + adjudication)
+  → freeze_gates (G1 / G2 or a recorded hold)
+  → stimulus_bundle build + verify  → bundle registry (by hash)
+  → assignment_schedule  → slots for that bundle
+  → participant_server (no model)  → session_store
+  → export_bundle (researcher only)
+```
+
+Runs, attempts, traces, reviews, bundles and session databases live under a
+workspace given on the command line, default `artifacts/diff/` (already
+gitignored). Real media is referenced read-only from wherever it is staged,
+including `data/live/regen-media/`, and is never copied or modified. Protocol
+constants are versioned in `src/diff`.
+
+### 3.4 Import boundary
+
+- **Static check.** Until Stage 4, `src/diff` may import only
+  `dpo.regen.{sheet_instrument,playback,points,study_media,study_store}`. An AST
+  test enforces this.
+- **Runtime check.** A subprocess test imports `diff.participant_server` and
+  `diff.review_app` and asserts that `torch`, `transformers`, `dpo.models`,
+  `dpo.candidates`, `dpo.contracts` and `dpo.regen.caption_controls` are absent
+  from `sys.modules`.
+- **Known exception.** `dpo.caption.writer` is listed explicitly as a known
+  transitive load until Stage 4 (§0.2, Q2).
+- **Planned uses.** `sheet_instrument`: `page_spec`, `page_item_order`,
+  `validate_answers`, `snapshot`. `playback`: `record_playback`, `merged`.
+  `points`: `MaskObject`, `parse_points`, `measure_points`, `matched_labels`.
+  `study_media`: delivery copies and paced responses. `study_store`: `Conflict`
+  only, because `record_playback` raises it. Diff's store is its own.
+
+## 4. Generator (Stage 1, PRD M0–M1)
+
+### 4.1 Model profile and verification
+
+`model_profile.py` defines one frozen profile per model: repo, revision, every
+file's SHA-256 (§2.3 and Appendix A), dtype `bfloat16`, expected
+transformers / torch / einops versions, token IDs, the kwargs allowlist, and
+recorded facts. The facts include `max_position_embeddings` 4096 against the
+card's 8,192, the context guard, `top_p` not applied, and the prompt-length
+guard.
+
+Loading sequence:
+
+1. **Snapshot.** `snapshot_download(revision=<pin>)` into the workspace.
+2. **Verify before code runs.** SHA-256 every remote-code, tokenizer, config,
+   template and weight file against the profile. Any mismatch stops the load.
+3. **Load from the verified directory, offline.** Call
+   `from_pretrained(<verified local dir>, trust_remote_code=True)` with
+   `HF_HUB_OFFLINE=1` and a fresh per-run `HF_MODULES_CACHE`, so a stale module
+   cache cannot substitute code.
+4. **Verify after load.** Hash `inspect.getfile(type(model))` and the config
+   class's file, and require them to equal the pinned
+   `modeling_trida.py` / `configuration_trida.py`.
+5. **Record.** The attempt record carries the environment fingerprint: lock
+   hash, Python, torch, CUDA, GPU name and driver.
+
+### 4.2 Prompts (`rewrite_prompts.py`)
+
+The two Korean templates in the brief are stored verbatim as development
+drafts. Each template carries an id, a version and a template SHA-256. Every
+job records three hashes:
+
+- **Text hash:** the rendered text.
+- **Token hash:** the token IDs after the model's own
+  `apply_chat_template([{"role": "user", "content": text}],
+  add_generation_prompt=True)`, computed in the generator env at plan freeze.
+- **Chat-template hash:** the template file used for that tokenization.
+
+No system message is passed, so the template's built-in Trillion system prompt
+is part of the hashed input (Q9).
+
+`{cue_evidence}` is a deterministic, versioned Korean rendering of the
+structured evidence. Events appear in order, each with its source (category),
+count, action, qualities in their Korean final forms, location or relation, and
+certainty. "종류, 개수, 순서, 확실성" in the phase-1 instruction therefore each
+have a field to come from.
+
+Phase 2 renders three more slots:
+
+- **`{qualities}`:** the cue's evidence qualities, comma-joined.
+- **`{k}`:** the texture step's value.
+- **`{context_rule}`:** one of three draft sentences, to be approved (Q10):
+  - broad: "음원은 사람 소리, 동물 소리, 교통·기계 소리, 음악 소리, 자연 소리 같은 넓은 범주로만 쓰고 구체적인 음원 이름이나 위치는 쓰지 마세요."
+  - specific: "근거에 있는 음원 이름을 쓰되 위치나 다른 대상과의 관계는 쓰지 마세요."
+  - relation: "근거에 있는 음원 이름과 함께 근거에 있는 위치나 관계를 쓰세요."
+
+Two edge cases are left as open questions (Q10): `k = 0` renders "0개까지만",
+and evidence with no qualities renders an empty list.
+
+### 4.3 Job plan and caps
+
+- **Phase-1 job:** one cue × one second-track condition. `original` is not
+  generated; it is the source track repeated exactly.
+- **Phase-2 job:** one cue × one lattice cell, at the fixed phase-2 τ.
+- **Identity:** `job_id = sha256(canonical spec)`, and the plan id is the hash
+  of its sorted job IDs. Re-running a plan skips terminal jobs.
+- **Development jobs:** they share the schema but are flagged
+  `purpose: development`, and use development clips that are never participant
+  clips.
+- **Budgets (CV-08):** 128 tokens in phase 1 and 192 in phase 2 to start. At
+  M0, the budget is re-set from measured source token counts with the Trida
+  tokenizer and recorded in the protocol. Character limits live in the output
+  checks, not in the budget.
+- **Caps (§6.2):** `max_new_tokens = budget + 32` (160 or 224, both multiples of
+  32) and a 30 s timeout per cue, finalised after the M0 smoke test.
+  - **Recorded new positions:** the native loop's actual new positions depend on
+    the prompt length mod 32 and on the argmax tokens appended after each
+    block. Each attempt records the real count.
+  - **Guards at freeze:** `prompt_tokens + max_new_tokens + 1 ≤ 4096` (the
+    config value, not the card's), and `prompt_tokens ≠ 32`.
+- **Counts with the current materials:**
+
+  | Set | Formula | Jobs |
+  |---|---|---|
+  | Phase-1 Trida | 2 clips × 4 cues × 3 τ | 24 |
+  | Phase-1 Tri | 2 × 4 | 8 |
+  | Phase 2, 3×3 | 3 videos × 60 cues × 9 cells | 1,620 |
+  | Phase 2, 5×3 | 3 × 60 × 15 | 2,700 |
+  | G1 development, suggested 8 clips | 8 × 4 × 3, plus 32 Tri | 96 |
+
+### 4.4 Runners, isolation, retries
+
+> **Revised for Dream (2026-10-09).** The Trida call described below is gone.
+> `dream_runner.checked_call` requires every keyword of the follow-up's §3 call —
+> `attention_mask`, `max_new_tokens` (the canvas), `steps` (canvas ÷ k),
+> `temperature=0.0`, `top_p=None`, `top_k=None`, `alg="entropy"`,
+> `alg_temp=0.0`, `eps=1e-3`, `mask_token_id=151666`, `output_history=True` and
+> `return_dict_in_generate=True` — and allows only the two read-only hooks
+> besides.
+>
+> **Refused before the call:** a missing keyword; any other keyword; `alg="origin"`;
+> non-zero `temperature` or `alg_temp`; any `top_p` or `top_k`; `steps` larger
+> than the canvas or not dividing it; prompt plus canvas over 2,048; a prompt
+> containing 151666 or a BOS.
+>
+> **Every call** records the resolved generation config. It checks the caps:
+> forward calls equal `steps` (a read-only forward hook), new positions equal
+> the canvas, and the CPU and CUDA RNG states are unchanged. A violation is a
+> non-transient technical failure (`count_mismatch`, `rng_consumed`,
+> `leftover_mask`). Isolation, the deadline and the one retry are unchanged.
+>
+> **Qwen** (`qwen_runner`) is called with exactly `do_sample=False`,
+> `repetition_penalty=1.0`, `max_new_tokens` = the Dream canvas and
+> `eos_token_id=[151645, 151643]`. Both models get the system message "You are
+> a helpful assistant."
+
+**Trida call.** Exactly one call shape, with batch size 1 and no attention
+mask:
+
+```
+model.generate(input_ids, max_new_tokens=…, threshold=τ, block_size=32,
+               small_block_size=8, temperature=0, use_block_cache=False,
+               mask_id=128012, stop_token=128001, pad_token_id=128004)
+```
+
+- **Not passed:** `top_p`; the profile records it as `not_applied`.
+- **Allowlist check:** a pure function runs before every call. It compares the
+  argument dict against the allowlist and the protocol values, and refuses any
+  extra key (`steps`, `seed`, `do_sample`, `tokenizer`, `top_p`, `top_k`,
+  `stopping_criteria`, `return_dict_in_generate`, `generation_config`, …) or
+  any differing value.
+
+**Tri call.**
+
+```
+model.generate(input_ids, attention_mask, max_new_tokens=…, do_sample=False,
+               eos_token_id=128001, pad_token_id=128004,
+               output_scores=True, return_dict_in_generate=True)
+```
+
+The last two arguments are instrumentation, and AC-03-style equivalence
+covers them.
+
+**Isolation.** `generation_worker.py` runs the model in a subprocess. The parent
+enforces the job's deadline (`caps.timeout_s`, 60 s since M0) and kills the
+worker on expiry.
+
+**Warm-up.** A fixed non-study warm-up generation runs first and is logged but
+never recorded as an attempt, so that `torch.compile` time is not charged to a
+cue. Compile and recompile counts go into each attempt.
+
+**Outcomes.**
+- **Completed:** then checked.
+- **Cap outcomes**, terminal and excluded: `timeout`, `no_stop_within_cap`.
+- **Transient failures:** CUDA error or OOM, worker death, IPC loss. These get
+  exactly one identical retry with the same spec, a fresh worker and
+  `retry_of` set. A second transient failure is an unresolved technical
+  failure.
+
+No outcome triggers a quality-driven retry, a repair prompt, truncation or
+shortening.
+
+### 4.5 Decode trace and instrumentation equivalence
+
+> **Revised for Dream (2026-10-09); follows a passing G0.** The Trida walk below
+> was removed. Dream's trace (follow-up §4) works as follows.
+> - **Logits hook:** recomputes `sample_tokens` with the same arguments, then
+>   `torch.topk` over a full row of −inf outside the masked positions. It
+>   records `selected`, top-1, top-2, entropy and `selected_but_masked`, and
+>   returns the logits untouched.
+> - **Tokens hook:** records only.
+> - **Recorded per step:** `t` and `s`, the masked positions and, for each, its
+>   rank and selection.
+> - **Size limit:** `trace_level: selected` applies if full phase-2 traces would
+>   exceed 5 GB compressed.
+>
+> AC-01/AC-03-hooks/AC-04/AC-05 run on CPU against a vendored
+> `dream_generation_utils.py` whose SHA-256 the tests check. Before G0, only
+> realized per-step counts are recorded, from `output_history`.
+
+**Observers.** `decode_trace.py` replaces `model.forward` and
+`model.sample_with_top_p` on the instance with pass-through observers. Native
+`generate` calls `self.forward` / `self.sample_with_top_p`, so instance
+attributes take effect, and the observers change no argument and no return
+value. They record:
+
+- each forward's input IDs, which are at most one block, and whether it updates
+  the cache;
+- for each sampling call, the top-1 token and its probability per position.
+  The values are gathered on device and only small tensors are copied.
+
+**Reconstruction.** From successive forward inputs, the trace derives which
+positions were unmasked at each step and to what. It also records the argmax
+token appended at each block commit, the prefill length and whether prefill
+ran, and the stop position. It recomputes the expected unmask set
+(`p > threshold` plus forced argmax) and cross-checks it against what was
+observed.
+
+**Replay check.** Replaying the events must reproduce the native output exactly.
+A mismatch is an instrumentation defect: it halts the run and is not eligible
+for retry.
+
+**AC-03 (generator env acceptance).** For every development prompt, native
+`generate` with observers must equal native `generate` without them, token for
+token, on GPU. If GPU nondeterminism appears, deterministic mode
+(`torch.use_deterministic_algorithms`, `CUBLAS_WORKSPACE_CONFIG`) is tried, and
+whether it is required is recorded.
+
+**AC-05 boundary suite, with B = `block_size` = 32 (A3).** Synthetic token
+prompts of length 31, 32, 33, 63, 64 and 65 go through native `generate`, with
+and without observers. For each: trace replay equals output, and the observed
+branches are recorded (no prefill; prefill only; prefill plus appended
+argmax). At 32 the trace records the no-prefill branch. The study guard refuses
+such prompts.
+
+**Tests without a GPU.** A fake model reproduces the native loop's control flow
+on a tiny deterministic logit table. It is used for observer transparency,
+replay, kwargs refusal and branch coverage. A CPU smoke test of the real remote
+code with a tiny random config is attempted in the generator env at M0; flex
+attention may not compile on CPU, and the result is recorded either way.
+
+### 4.6 Output checks (`output_checks.py`)
+
+**Text extraction.** Take the new IDs up to, not including, the first stop
+token. Decode them without skipping special tokens to get `raw_text`. The only
+transformation is stripping leading and trailing whitespace to get `text`;
+both strings are stored.
+
+**Fail rules** exclude the output and record the reason. These are technical
+and format rules:
+
+- no stop token within the cap;
+- any special token (mask, pad, reserved, chat markers) inside the text;
+- empty text;
+- length: phase 1 > 96 characters or > 2 lines, phase 2 > 160 characters;
+- more than one sentence;
+- script: any letter that is not Hangul, unless it appears in that cue's
+  source or evidence. This is stricter than regen's "any Hangul passes".
+- CV-10 sentence-ending class differs from the source's, using a closed,
+  versioned set: declarative 다/ㄴ다/는다, nominal 음/ㅁ, noun-phrase ending,
+  polite 요.
+
+**Flag rules** send the output to double review. These are content rules:
+
+- a sound-source term absent from the evidence;
+- a quality term outside the cell's allowed list, or more than `k` of them;
+- a source name at context step 0;
+- a relation term below step 2;
+- phase-1 output identical to the source;
+- phase-2 text identical to a lattice neighbour.
+
+**Measures** (§5.3 additions):
+
+- character and token length;
+- quality-term count against the closed vocabulary's Korean forms;
+- specific-source count and relation count against the evidence's own surface
+  forms;
+- whether the text equals the source.
+
+Fidelity and length are recorded as outcomes of the condition, never as
+covariates.
+
+## 5. Review and freeze (Stage 2, PRD M2)
+
+### 5.1 Blind review (`review_app.py`)
+
+**Access.** A researcher-only app on loopback (default port 8783) with one
+token per reviewer.
+
+**What reviewers see.** Each item shows the source text (phase 1), the
+rendered evidence and one candidate text, under an opaque item ID and in
+randomised order. No τ, model, condition, cell or run identifier is shown.
+Identical texts for the same cue are reviewed once and mapped back.
+
+**Phase 1.** Every output, including Tri's if Tri is run, is rated by two
+independent reviewers on:
+
+- naturalness, 1–5 (scale A5);
+- sound-event fidelity: preserved, or changed kind / count / order /
+  certainty, or a sound added or dropped;
+- R2 mentions: which R2 options this track mentions. These become the
+  shown-track key; the source track gives the source key.
+
+**Phase 2.** Automated checks run on everything. Double review covers a
+stratified sample (default 10 % per video × cell, at least 2 per stratum) plus
+every flagged output, for naturalness and "adds a sound absent from the
+evidence".
+
+**Adjudication.** A reviewer cannot see the other reviewer's ratings. An
+adjudicator, still blind to condition, sees both and decides when:
+
+- naturalness differs by ≥ 2;
+- naturalness crosses a gate threshold (3 or 4);
+- the reviewers disagree on any categorical judgement.
+
+Otherwise the final naturalness is the lower of the two ratings (A6).
+Agreement is reported: weighted κ for naturalness, κ for the categorical
+judgements.
+
+### 5.2 Gates (`freeze_gates.py`)
+
+These are provisional operating thresholds, not validated cut-offs. Track
+naturalness is the minimum over its cues (A6).
+
+| Gate | Rule |
+|---|---|
+| G1 technical | every planned development job is terminal, with zero unresolved technical failures |
+| G1 readability | in ≥ 3/4 of development clips, every second-track condition has naturalness ≥ 3 |
+| G1 difference | in ≥ half of those complete clips, ≥ 2 τ tracks differ as strings, both with naturalness ≥ 4 and sound events preserved; otherwise τ leaves the participant conditions (option C) |
+| G2 monotonicity | ≥ 80 % of cues are non-decreasing in quality-term count along acoustic detail, and in specific-source + relation count along scene detail |
+| G2 distinctness | identical-neighbour rate reported per axis; an axis above 20 % has its steps reduced; a cell that adds a sound absent from the evidence is substituted, and the count is reported |
+
+A gate that is not met produces a recorded hold decision, with who decided,
+when, and what was decided. Nothing is silently relaxed. Phase-2 τ is chosen
+after G1 and recorded as protocol data.
+
+### 5.3 Phase-2 lattice
+
+- **Steps.** Texture `k ∈ {0, 2, 4}` (0–4 after G2). Context ∈ {broad,
+  specific, relation}.
+- **Generation path.** One template for every cell. Regen's JSON-template branch
+  is not reproduced.
+- **Missing or substituted cells.** By default the nearest-cell substitute is
+  used: nearest by L1 distance in step space, ties toward the same context step,
+  then toward lower texture. The bundle records both the requested and the
+  served cell. The alternative is excluding the video.
+- **5×3.** Moving to 5×3 is a new plan and a new bundle, made only after G2
+  passes.
+
+### 5.4 Bundle (`stimulus_bundle.py`)
+
+**Build.** Inputs: frozen plans, attempts, check results, reviews and
+adjudications, sources (which must have reviewed provenance), R2 options and
+keys, the lattice, τ, and gate decisions. Output: canonical JSON
+`diff.stimulus-bundle/v1` with `bundle_sha256` over everything else (§8.1).
+
+**Track completeness.** A condition track for a clip exists only if all N cues
+passed the checks and the review. Otherwise the condition is listed as an
+exclusion with its reasons, and slots cannot assign it.
+
+**Verifier checks.**
+- schema and hash;
+- media hashes;
+- each clip has a first track and a full track for every assigned condition;
+- R2 options are identical across a clip's conditions;
+- every shown track has both keys;
+- every cue × cell has a text or a recorded substitute (AC-16);
+- no unreviewed provenance;
+- option values are neutral slugs (no `correct`, `distractor` or condition
+  substrings).
+
+**Registry.** The registry holds many bundles by hash, with one active. Changing
+the active bundle never changes a bound session's bundle.
+
+## 6. Participant server (Stage 3, PRD M3)
+
+### 6.1 Session store (`session_store.py`)
+
+Kept from regen:
+
+- `BEGIN IMMEDIATE` transactions;
+- the revision check, where every accepted mutation increments `revision`;
+- idempotent receipts keyed `(session, key)`: the same request returns the
+  latest state, a different request with the same key is 409;
+- an append-only events table.
+
+Dropped: the `jobs` and `captions` tables.
+
+Added tables: `slots`, `responses`, `viewings`, `exposures`, `control_events`,
+`page_entries`, `instruments` (snapshot by hash, stored once) and `bundles`
+(registry).
+
+**Session state stays small.** It holds ids, the protocol hash, the instrument
+hash, `bundle_sha256`, `slot_id`, stage and page, clip index, video position,
+consent reference, the current view's playback checkpoint, and at most one
+draft, capped at 16 KiB. Responses and viewings move to their own rows written
+in the same transaction. That keeps a 1 s playback tick from rewriting tens of
+kilobytes (AC-18).
+
+### 6.2 Assignment (`assignment_schedule.py`)
+
+**Slot table.** A pre-generated table per bundle; each slot holds the clip
+order, the second-track condition per clip, and the long-video order. It
+replaces regen's `count(*)` sequence.
+
+**Design.**
+- **Latin square** when clips = conditions, using a Williams sequence for clip
+  order.
+- **BIB with orientation** when clips < conditions. Each participant gets
+  distinct conditions on their clips. With 2 clips and 4 conditions this is 12
+  ordered condition pairs × 2 clip orders = a 24-slot cycle. In it each
+  (clip, condition) appears 6 times, each condition 6 times per viewing
+  position, and each unordered pair 4 times (twice in each orientation).
+- **Video order** cycles through all 3! = 6 orders, a Williams design for
+  n = 3, 4 times per cycle.
+- **Five conditions** (with Tri) give a 40-slot phase-1 cycle. The cycle is
+  lcm(40, 6) = 120, or video-order balance is reported as partial (Q8).
+- **Clips > conditions** is refused.
+
+**Binding.** A slot binds in the same transaction as consent: the lowest free
+slot of the active bundle, released slots first. The cookie session created at
+page load holds no slot.
+
+**Abandoned slots (default).** A slot is reusable only after a researcher
+releases it with a reason. It is reissued only if its session had no formal
+response; otherwise it stays consumed and the imbalance is reported. A
+released session becomes `withdrawn` and cannot continue. The alternatives are
+in §12.
+
+**Status report.** `slots status` reports balance for every recruited prefix,
+so a study that stops mid-cycle knows its imbalance.
+
+### 6.3 Phase-1 flow (`phase1_flow.py`, `phase1_pages.js`)
+
+The participant sees the same pages, items, orders, validation and recovery
+behaviour as regen; §7 is the parity map. Changes:
+
+- **Payload.** No `clip_id`. Media and frame URLs are opaque per-session tokens
+  (`/m/<token>`). The response carries `consent_sha256` so that consent binds
+  to the text actually shown.
+- **Transition page.** Its id is `transition` instead of `generate`, with the
+  same title "두 번째 자막 준비" and the same button "다음 영상 준비". It looks up
+  the slot's condition and binds the bundle's track for P6, with no model
+  call.
+- **Handoff.** It moves to phase 2 inside the same app (no continuation mount,
+  no second cookie) and compiles no profile, because phase-1 answers are not
+  used.
+- **Responses.** Each stores page, view id, viewing (first/second),
+  `stimulus_id`, answers, presented order, instrument hash, server and client
+  timing, and the point matches for P2/P7. Item definitions are not copied into
+  each response; the instrument is stored once by hash.
+- **Errors.** Participants get Korean messages; the English validator detail
+  goes to the event log.
+
+### 6.4 Phase-2 viewing (`phase2_viewing.py`, `phase2_player.js`)
+
+**Video order** comes from the slot, not the manifest.
+
+**Lattice delivery.** On entering a video, the browser fetches that video's
+lattice once: cues, the cells with their step coordinates, and per cue × cell
+an opaque stimulus token and its text. That is about 540 texts for 3×3.
+
+**Controls.**
+- Two sliders snap to steps. The pad, presets (the four corners) and reset (the
+  centre) remain.
+- The overlay shows steps, not percentages.
+- Every video starts at the centre cell.
+- A control change sets the requested cell, and its text appears at the next
+  cue boundary.
+
+**Telemetry.** Control events (origin `slider:texture`, `slider:context`, `pad`,
+`preset:<corner>` or `reset`; from and to cell) and exposures (stimulus and
+cell, cue, displayed interval) are uploaded through append-only idempotent
+endpoints. Like regen, a durable outbox in `localStorage` and Web-Lock tab
+ownership keep them recoverable.
+
+**Unchanged from regen.**
+- **Playback gates.** Long videos need coverage ≥ duration − 1,500 ms and
+  position ≥ duration − 500 ms, through regen's `record_playback`.
+- **Pages.** Break between videos, then P12 (`interview-complete`
+  {researcher_confirmed}) and P13 (`debrief-complete` {researcher_confirmed,
+  participant_acknowledged}).
+
+**Wording changes.** The "ready" and "break" pages drop "shaped by your
+responses" and "settings carry into the next video" (Q11).
+
+### 6.5 Blindness boundary
+
+**Inventory.** Everything the browser can fetch is enumerable: one HTML shell,
+three static files, the participant API, media under `/m/<token>`, and the
+cookie.
+
+**What it never contains.**
+- **Opaque tokens:** `HMAC(server_secret, session_id ∥ internal_id)`. Item and
+  option values are neutral slugs, and option lists carry only
+  value/label/exclusive.
+- **Neutral strings:** the cookie name and every error message are neutral.
+- **Nothing that reveals a condition:** bundle hashes, condition names, cell
+  internal IDs, model names, τ and real clip IDs never leave the server. Even
+  the `original` condition is not detectable from P1/P6 tokens, because tokens
+  are view-scoped.
+
+**Exports.** These, and the researcher port, are a separate app that never
+reads the participant cookie.
+
+### 6.6 Timing
+
+- **Per page load.** The client creates a random `clock_session_id` per page
+  load and timestamps with `performance.now()`.
+- **Page entry.** Sent as an append-only beacon: page, view, clock id,
+  monotonic time and wall time. It does not bump `revision`, so it cannot
+  disturb response order.
+- **Submit.** Every submit carries `{entry_clock_session_id, entered_mono_ms,
+  clock_session_id, submitted_mono_ms, submitted_wall}`.
+- **Playback.** Ticks carry the clock id and a monotonic stamp.
+- **Validity.** An interval whose two endpoints have different clock ids is
+  stored with `timing_valid: false`, and no duration is computed for it (FR-19).
+
+### 6.7 Export (`export_bundle.py`)
+
+- **Access.** `python -m diff export` reads the store directly, so it requires
+  filesystem access. A kiosk export (FR-22) is also served on the researcher
+  port with a researcher token. The participant app has no export route, and
+  presenting the participant cookie anywhere on the researcher app is 401.
+- **Contents.** Exports resolve opaque IDs to bundle, condition, cell and real
+  clip IDs (FR-18). They carry long-format P4/P9 tables for the §9 primary
+  contrast. Fitting the models is not part of these modules (Q14).
+
+## 7. Response-order parity map (AC-19)
+
+Regen columns describe `3842302`: `sheet_protocol.py` and
+`sheet_questionnaire.js` before the handoff, `study_api.py` and `study.js`
+after it. "Same" means the same page id, kind, title, instruction, item IDs and
+order, options, validation and transition.
+
+| # | Regen page → action `data` | Regen stored | diff page → action `data` | diff stored | Parity rule |
+|---|---|---|---|---|---|
+| 0 | page load → `POST session {code?}`; clip order from `count(*)` | session + `sheet-enrollment` event | page load → `POST session {code?}`; no slot, no bundle | session row (pre-consent) | diff-only: no order is fixed at load |
+| 1 | P0 intro: consent text, `setup_missing` → `intro-complete {page:"P0", consented:true}` | `sheet_consent {accepted, at, text}`; page → practice | P0 same, + `consent_sha256` → `intro-complete {page, consented, consent_sha256, timing}` | consent row; slot and bundle bound in the same transaction; page → practice | same page and gate; 409 while setup is missing |
+| 2 | practice: `practice_rating` (0–6), `practice_sound`, `practice_visual` → `practice-complete {page, answers}` | `sheet_practice[] {answers, analysis_excluded:true, at}` | same | practice row, `analysis_excluded` | same; practice frames ≠ formal frames |
+| 3 | P1 view (first track, no seek UI) → `playback {page, position_ms, playing, hidden, sequence}` …, `view-ended {page}`; gate cov ≥ d − min(300, 5 %), pos ≥ d − 100 | checkpoint; `sheet_viewings[] {view_id, clip_index, clip_id, condition:"first", captions, coverage, started_at, ended_at, …}` | P1 same; ticks + `clock_session_id`, `mono_ms` | checkpoint in state; viewing row {view_id, clip, viewing:"first", stimulus_id, coverage, …} | same gate (shared `record_playback`), same 409 text class |
+| 4–7 | P2 V1 → P3 A1s → P4 (11) → P5 FA1–FA3, each `submit {page, answers}` | `sheet_responses[] {page, clip_index, clip_id, view_id, condition, caption_strategy, stimulus_assignment, answers, items, presented_order, instrument_hash, submitted_at, client_submitted_at:null, …}` (+ matches, labels, visual_metrics for P2) | same pages → `submit {page, answers, timing}` | response row {page, view_id, viewing, stimulus_id, answers, presented_order, instrument_hash, submitted_at, client timing, timing_valid} (+ matches, labels, visual_metrics) | same items, order, validation; diff stores items by instrument hash |
+| 8 | `generate` (kind `generating`, "두 번째 자막 준비", button "다음 영상 준비") → `generate {page:"generate"}` | `sheet_regenerations[seg] {track, writer, strategy, selection_key, condition, caption_hash}` | `transition` (same title and button) → `transition {page:"transition"}` | second-track binding {view P6 → stimulus_id from slot} | page-id map `generate ↔ transition`; no model in either |
+| 9 | P6 view (second track) | viewing, `condition:"second"` | P6 same | viewing row, `viewing:"second"` | same gate; caption text equal by construction (harness) |
+| 10–14 | P7 V2 → P8 A2s (A1s options) → P9 (11 `_2`, `page_item_order(P9, session_key)`) → P10 S1–S3 → P11 R1, R2 (+ exclusive 기억나지 않음) | as 4–7 | same | as 4–7 | same; P9 order is the same function of each system's session key |
+| 15 | after P11: next clip's P1, or `handoff` ("1스테이지 완료", button "2스테이지 시작") → `handoff {page:"handoff"}` → `next_url` | stage `ready`; profile, observations, `calibration_source` | same → `handoff {page}` | stage `phase2/ready`; no profile | same sequence; diff stays in one app |
+| 16 | ready: "사전 응답이 저장되었습니다" + interaction-only text, button "영상 시청 시작" → `start-viewing {}` (manifest re-read) | `viewing` (manifest order), `viewing_hash` | same → `start-viewing {}` | video order from slot | same page; order source differs by design |
+| 17 | watch: `settings {video_id, position_hint_ms, origin, texture, context}`, `playback {video_id, position_ms, sequence, playing, hidden, seek}`, `exposures {video_id, entries}`, then "영상 시청 완료" / "종료 후 인터뷰로" → `video-ended {video_id}`; gate cov ≥ d − 1,500, pos ≥ d − 500 | axes, `settings_revision`, jobs, exposures, `completions[]` | watch: lattice once; control events and exposures (append-only); `playback`; `video-ended {video}` | control_events, exposures, completions | same gate and transition; caption mechanics differ by design |
+| 18 | break "잠시 쉬어 가십시오" → `continue {}` | stage `watch` | same (text revised) | — | same position |
+| 19 | P12 interview prompts D1/D2 → `interview-complete {researcher_confirmed:true}` | `poststudy.interview_completion` | same | same | same |
+| 20 | P13 debrief text → `debrief-complete {researcher_confirmed, participant_acknowledged}` | `debrief_completion`; stage `done` | same | same; slot `completed` | same |
+| 21 | done: thanks + receipt (`session_id`) | — | same (opaque id) | — | same |
+
+**Errors that must match.**
+
+| Case | Status |
+|---|---|
+| Missing item (validator) | 400 |
+| Answer for another page | 409 |
+| Stale revision | 409 |
+| Replayed key, same input | 200, latest state |
+| Replayed key, different input | 409 |
+| `view-ended` before the gate | 409 |
+| Consent before setup | 409 |
+| No cookie | 401 |
+| Missing `x-study-request` | 401 in phase 1, 403 in phase 2 (kept per phase) |
+
+**Stored-field comparison.** Compared fields: page, `clip_index`, view-id
+pattern, first/second, answers, presented order, instrument hash,
+`analysis_excluded`, matches, labels and `visual_metrics`, and the reconstructed
+item definitions. Excluded as provenance: `caption_strategy`,
+`stimulus_assignment`, `caption_provenance`, writer, condition and cell IDs,
+`stimulus_id`, real `clip_id` versus diff's internal clip key (mapped), and
+diff-only timing.
+
+**Harness** (`tests/diff/test_response_order_parity.py`, the one test allowed
+to import `dpo.regen.app`).
+
+1. **Build both systems.** Construct regen with `build_app(…,
+   viewing=ViewingConfig(…, model={}), questionnaire_config=…)` over a 4-cue
+   fixture document. In regen, each clip's second track is filled from the
+   bundle's text for the scripted participant's condition: `maintain` for
+   `original`; otherwise `opposite`, with every `<object>|<sound>` key mapped
+   to that one track. Diff is built over the same media and the same option
+   values.
+2. **Run one script on both.** Valid submits; a missing item on P4; P5 answers
+   sent while on P4; a reload mid-P4 that restores the draft; a replayed key
+   with the same and with a different body; then both viewing phases through
+   P13.
+3. **Compare.** Page sequence, item IDs, presented order (structurally for P9,
+   and exactly given the same key), status codes, and the stored fields above.
+
+## 8. Schemas
+
+The examples show shape. Every record carries its `schema` id. Hashes are
+SHA-256 over canonical JSON (sorted keys, no NaN, UTF-8, compact separators).
+
+### 8.1 Stimulus bundle — `diff.stimulus-bundle/v1` (server-side only)
+
+```json
+{
+  "schema": "diff.stimulus-bundle/v1",
+  "bundle_sha256": "<sha256 of this object without this field>",
+  "protocol_sha256": "…",
+  "run_manifests": {"plan_ids": ["plan-…"], "attempt_set_sha256": "…",
+                    "review_set_sha256": "…", "model_profiles": ["trida-7b@c37755e8"]},
+  "phase1": {
+    "conditions": ["original", "trida_tau_070", "trida_tau_090", "trida_tau_100"],
+    "clips": {
+      "<clip_key>": {
+        "media": {"video": "rel/path.mp4", "video_sha256": "…", "duration_ms": 10032,
+                  "frames": [{"at_ms": 1000, "still": "…", "still_sha256": "…",
+                              "objects": [{"id": "…", "label": "…", "mask": "…", "mask_sha256": "…"}]}]},
+        "a1s_options": [{"value": "s1", "label": "…"}],
+        "first_track": {"stimulus_id": "st-…", "source_ids": ["src-…"],
+                        "cues": [{"index": 0, "start_ms": 0, "end_ms": 2508, "text": "…"}]},
+        "second_tracks": {
+          "original": {"stimulus_id": "st-…", "same_as_first": true},
+          "trida_tau_090": {"stimulus_id": "st-…",
+                            "cues": [{"index": 0, "start_ms": 0, "end_ms": 2508, "text": "…",
+                                      "attempt_id": "att-…"}]}},
+        "r2": {"options": [{"value": "r1", "label": "…"}],
+               "keys": {"st-…": {"source": ["r1", "r3"], "shown": ["r1"]}}}
+      }
+    }
+  },
+  "phase2": {
+    "tau": 0.9,
+    "lattice": {"texture_steps": [0, 2, 4], "context_steps": ["broad", "specific", "relation"],
+                "cells": [{"cell_id": "k2-specific", "texture_index": 1, "k": 2, "context_index": 1}],
+                "centre": "k2-specific",
+                "presets": {"both_brief": "k0-broad", "texture": "k4-broad",
+                            "context": "k0-relation", "both_detailed": "k4-relation"}},
+    "videos": {"<video_key>": {"media": {"video": "…", "video_sha256": "…", "duration_ms": 299679},
+               "cues": [{"index": 0, "start_ms": 0, "end_ms": 5000,
+                         "cells": {"k2-specific": {"stimulus_id": "st-…", "text": "…",
+                                                   "served_cell": "k2-specific", "attempt_id": "att-…"}}}]}}
+  },
+  "exclusions": [{"unit": "<clip_key>", "cue": 2, "condition": "trida_tau_070",
+                  "reason": "length_over_96", "attempt_id": "att-…"}],
+  "substitutions": [{"video": "<video_key>", "cue": 7, "requested_cell": "k4-relation",
+                     "served_cell": "k4-specific", "reason": "adds_sound_absent_from_evidence"}]
+}
+```
+
+### 8.2 CaptionSource — `diff.caption-source/v1`
+
+```json
+{"schema": "diff.caption-source/v1", "source_id": "src-<sha256[:16]>", "phase": 1,
+ "unit": {"kind": "clip", "key": "<clip_key>"}, "cue_index": 0, "start_ms": 0, "end_ms": 2508,
+ "text": "…",
+ "properties": {"audiovisual_congruence": "congruent", "description_depth": "shallow"},
+ "evidence": {"events": [{"event_id": "e1", "order": 0, "source": "버스", "category": "things",
+                          "count": "one", "action": "지나간다", "qualities": ["loud", "low_pitched"],
+                          "location": "오른쪽 차로", "relation": null, "certainty": "clear"}]},
+ "provenance": {"text": "human", "evidence": "human", "origin": "…",
+                "reviewed_by": ["R1"], "reviewed_at": "2026-…"},
+ "status": "reviewed"}
+```
+
+`provenance.text` / `.evidence` ∈ {`human`, `gemma-draft-reviewed`,
+`gemma-draft-unreviewed`, `assistant-draft-reviewed`, …}. A bundle refuses any
+`*-unreviewed` value. Qualities must come from the closed vocabulary.
+
+### 8.3 LatticeCell
+
+`{"cell_id": "k2-specific", "texture_index": 1, "k": 2, "context_index": 1,
+"context": "specific", "is_centre": true, "corner": null}`. The browser
+receives only an opaque token and the two indices.
+
+### 8.4 Job — `diff.job/v2` (revised for Dream)
+
+```json
+{"schema": "diff.job/v2", "job_id": "job-…", "phase": 1, "purpose": "development",
+ "source_id": "src-…", "source_sha256": "…", "unit_key": "…", "cue_index": 0,
+ "condition": "dream_k2", "cell": null,
+ "model": {"profile_id": "dream-v0-instruct-7b@05334cb9", "runner": "dream"},
+ "prompt": {"template_id": "rewrite-p1", "template_version": 1, "template_sha256": "…",
+            "evidence_renderer_version": 1, "context_rules_version": null,
+            "system_message": "You are a helpful assistant.", "text": "…", "text_sha256": "…"},
+ "generate": {"max_new_tokens": 128, "steps": 64, "temperature": 0.0, "top_p": null, "top_k": null,
+              "alg": "entropy", "alg_temp": 0.0, "eps": 0.001, "mask_token_id": 151666,
+              "output_history": true, "return_dict_in_generate": true},
+ "caps": {"canvas_tokens": 80, "steps": 40, "expected_forward_calls": 40, "timeout_s": 60},
+ "checks_profile": "p1-v2"}
+```
+
+A `qwen` job's `generate` is `{"max_new_tokens": 128, "do_sample": false,
+"repetition_penalty": 1.0, "eos_token_id": [151645, 151643]}`. A phase-2 cell
+carries `{"cell_id": "t2-specific", "quality_limit": 2, "context": "specific",
+…}`; `quality_limit` is the template's `{k}`, never the decoding k.
+
+`token_ids_sha256` and `token_count` are written at freeze; `job_id` excludes
+them so it can be computed before freeze.
+
+### 8.5 Attempt — `diff.attempt/v1`
+
+```json
+{"schema": "diff.attempt/v1", "attempt_id": "att-…", "job_id": "job-…", "attempt_number": 1,
+ "retry_of": null, "retry_reason": null,
+ "environment": {"lock_sha256": "…", "python": "…", "torch": "…", "transformers": "4.57.3",
+                 "cuda": "…", "gpu": "…", "driver": "…", "deterministic_mode": false},
+ "verified_files": {"modeling_trida.py": "100558ff…", "configuration_trida.py": "105a4722…"},
+ "warmup": {"done": true, "compile_events": 0},
+ "started_at": "…", "finished_at": "…", "wall_ms": 0,
+ "status": "completed",
+ "output": {"prompt_tokens": 0, "new_token_ids": [], "stop_index": 0, "new_positions": 0,
+            "raw_text": "…", "text": "…"},
+ "trace": {"path": "traces/att-….jsonl", "sha256": "…", "events": 0, "steps": 0,
+           "forward_calls": 0, "prefill": "prefill_only", "replay_matches": true},
+ "checks": {"profile": "p1-v1", "failures": [], "flags": [], "measures": {}},
+ "terminal": true, "excluded": false, "exclusion_reason": null}
+```
+
+`status` ∈ {`completed`, `timeout`, `refused`, `worker_lost`, `device_error`,
+`runner_error`, `trace_inconsistent`, `count_mismatch`, `rng_consumed`,
+`leftover_mask`}. Revised for Dream, attempts also carry `resolved_config`,
+`caps` (forward calls, steps, canvas), `rng_unchanged` and `latency_ms`. The
+output records `completion` (`terminated` or `incomplete`), `terminator`
+(`endoftext` or `im_end`), the trimmed tail as a `postprocess` record, and
+`leftover_mask_count`.
+
+### 8.6 Decode event — `diff.decode-event/v2` (Dream; built after G0)
+
+```json
+{"attempt_id": "att-…", "step_index": 3, "t": 0.977, "s": 0.969,
+ "masked": [{"position": 214, "token_id": 1234, "p_top1": 0.91, "p_top2": 0.04,
+             "neg_entropy": -0.41, "confidence": -0.41, "rank": 0, "selected": true}],
+ "selected_count": 1, "unmasked_count": 1, "selected_but_masked": [], "remaining_masks": 124}
+```
+
+Positions are absolute. A `postprocess` event records the cut and the trimmed
+tail. The block, small-block, boundary-argmax and fallback fields are gone.
+Before G0 only realized per-step counts are stored, from `output_history`
+(`trace.level: history-counts`).
+
+### 8.7 Assignment slot — `diff.slot/v1`
+
+```json
+{"schema": "diff.slot/v1", "slot_id": "slot-0007", "bundle_sha256": "…",
+ "design": "bib-oriented-v1", "cycle": 0, "index": 7,
+ "assignments": [
+   {"phase": 1, "position": 0, "clip": "<clip_key>", "role": "second-track", "condition": "trida_tau_090"},
+   {"phase": 1, "position": 1, "clip": "<clip_key>", "role": "second-track", "condition": "original"},
+   {"phase": 2, "position": 0, "clip": "<video_key>", "role": "long-video", "condition": null}],
+ "state": "free", "bound_session": null, "bound_at": null, "releases": []}
+```
+
+`state` ∈ {`free`, `bound`, `completed`, `released`, `consumed`}. The first
+track is implicit for every clip (`role: first-track`, the source).
+
+### 8.8 Response — `diff.response/v1`
+
+```json
+{"schema": "diff.response/v1", "response_id": "…", "session": "…", "phase": 1,
+ "page": "P4", "view_id": "<session>-0-P1", "clip_index": 0, "clip": "<clip_key>",
+ "viewing": "first", "stimulus_id": "st-…",
+ "answers": {"F1": 0}, "presented_order": ["F1", "F2"],
+ "instrument_hash": "6c97d64a…", "submitted_at": 0.0,
+ "client": {"entry_clock_session_id": "…", "entered_mono_ms": 0.0,
+            "clock_session_id": "…", "submitted_mono_ms": 0.0, "submitted_wall": "…"},
+ "timing_valid": true, "analysis_excluded": false,
+ "matches": [], "labels": [], "visual_metrics": []}
+```
+
+### 8.9 Exposure — `diff.exposure/v1`
+
+Phase 2, reported by the client:
+
+```json
+{"schema": "diff.exposure/v1", "exposure_id": "<client uuid>", "session": "…", "phase": 2,
+ "video_position": 0, "video": "<video_key>", "cue_index": 12, "cue_start_ms": 60000,
+ "cue_end_ms": 65000, "stimulus_id": "st-…", "cell_id": "k2-specific",
+ "start_ms": 60012.0, "end_ms": 65020.0, "incomplete": false,
+ "client": {"clock_session_id": "…", "start_mono_ms": 0.0, "end_mono_ms": 0.0},
+ "received_at": 0.0}
+```
+
+As in regen's display-interval v2, a displayed interval may run past
+`cue_end_ms` until the browser replaces the text. Phase-1 exposures are derived
+server-side as playback coverage ∩ cue spans of the view's fixed track, with
+`"source": "coverage"`; no extra client traffic.
+
+### 8.10 Control event — `diff.control-event/v1`
+
+```json
+{"schema": "diff.control-event/v1", "event_id": "<client uuid>", "session": "…",
+ "video_position": 0, "video": "<video_key>", "origin": "slider:texture",
+ "from_cell_id": "k2-specific", "requested_cell_id": "k4-specific", "position_ms": 61234.0,
+ "client": {"clock_session_id": "…", "mono_ms": 0.0}, "received_at": 0.0}
+```
+
+`origin` ∈ {`slider:texture`, `slider:context`, `pad`, `preset:both_brief`,
+`preset:texture`, `preset:context`, `preset:both_detailed`, `reset`}. Video
+start at the centre is recorded as `origin: initial`.
+
+### 8.11 PlaybackCoverage — `diff.playback-coverage/v1`
+
+```json
+{"schema": "diff.playback-coverage/v1", "session": "…", "phase": 1, "view_id": "…",
+ "duration_ms": 10032, "coverage": [[0, 10032]], "position_ms": 10032, "epochs": 0,
+ "gate": {"rule": "short", "coverage_min_ms": 9732, "position_min_ms": 9932, "passed_at": 0.0},
+ "clock_session_ids": ["…"], "timing_valid": true}
+```
+
+`rule: long` uses `d − 1500` and `d − 500`.
+
+## 9. Traceability
+
+### 9.1 The brief's constraints (B-IDs) → modules and tests
+
+All test files live in `tests/diff/`.
+
+| B | Constraint | Modules | Tests |
+|---|---|---|---|
+| B-01 | Response order P0 → practice → per clip P1…P11 with transition → handoff → long videos with controls and breaks → P12 → P13 | `phase1_flow`, `phase2_viewing`, `study_protocol` | `test_response_order_parity`, `test_phase1_flow_pages` |
+| B-02 | Item IDs, wording, workbook hash; 0–6 with zero valid; page validation; drafts; receipts; recovery; practice separation; setup gate | `phase1_flow`, `session_store` (imports `sheet_instrument`) | `test_phase1_flow_pages`, `test_session_store_receipts` |
+| B-03 | Playback gates (short and long) | `phase1_flow`, `phase2_viewing` (`record_playback`) | `test_phase1_flow_pages`, `test_phase2_viewing_lattice` |
+| B-04 | No model calls in the server; transition and controls are lookups | `participant_server`, `phase*` | `test_diff_import_boundary` |
+| B-05 | Blindness of everything browser-fetchable; opaque IDs | `participant_server`, `phase*`, `stimulus_bundle` | `test_participant_blindness_audit` |
+| B-06 | Export needs a researcher credential; never the participant cookie | `export_bundle`, `review_app` | `test_export_bundle_auth` |
+| B-07 | No quality retries, repair, truncation or shortening; one identical retry after a transient failure | `generation_worker`, `output_checks` | `test_generation_worker_retry`, `test_output_checks_rules` |
+| B-08 | Dream native `diffusion_generate`, batch 1, every keyword required and explicit; refusal before the call (follow-up §3) | `dream_runner`, `qwen_runner`, `model_profile` | `test_dream_runner_contract`, `test_qwen_runner_contract` |
+| B-09 | SHA-256 of remote code and tokenizer before `trust_remote_code` | `model_profile` | `test_model_profile_hashes` |
+| B-10 | No edits to `src/dpo` / `data` / `deploy` / live; only the five regen modules; never `dpo.candidates` / `contracts` / `models` or Gemma; run from the repo root | all | `test_diff_import_boundary`; review checklist |
+| B-11 | Unique basenames, no stdlib shadowing, `python -m diff`, no `diff` console script | all, `pyproject.toml` | `test_diff_import_boundary` |
+| B-12 | Separate locked generator env (transformers 4.46.2, torch 2.5.1), established by AC-03 and AC-07; server never imports torch | `envs/diff-generator`, `dream_runner` | `test_diff_import_boundary`; GPU AC-03/AC-07 pending |
+| B-13 | Participant text Korean only | static assets, `phase*` | `test_participant_blindness_audit` (script scan) |
+| B-14 | Phase-1 units, conditions, job = cue × condition | `caption_sources`, `job_plan` | `test_job_plan_identity` |
+| B-15 | Phase-2 units, job = cue × cell, fixed τ | `job_plan`, `stimulus_bundle` | `test_job_plan_identity` |
+| B-16 | Source = text + structured evidence + provenance; unreviewed drafts excluded | `caption_sources`, `stimulus_bundle` | `test_caption_sources_schema`, `test_stimulus_bundle_integrity` |
+| B-17 | Text-only; acoustic detail only from evidence | `rewrite_prompts`, `output_checks` | `test_rewrite_prompts_versions`, `test_output_checks_rules` |
+| B-18 | Lattice rules (steps, one path, snapping, step overlay, corner presets, centre start, deliver once, switch at boundary, IDs recorded) | `phase2_viewing`, `phase2_player.js`, `stimulus_bundle` | `test_phase2_viewing_lattice`, `phase2_player_vm.mjs` |
+| B-19 | Versioned prompts; token-ID hash after the chat template | `rewrite_prompts`, `job_plan` | `test_rewrite_prompts_versions` |
+| B-20 | Bundle contents; state holds bundle hash and slot; versions; finish on own version | `stimulus_bundle`, `session_store` | `test_stimulus_bundle_integrity`, `test_session_state_size` |
+| B-21 | Slot table, Latin square / BIB, bind at consent, abandoned-slot rule | `assignment_schedule` | `test_assignment_schedule_balance` |
+| B-22 | Store kept / dropped / added; client monotonic and `clock_session_id`; `timing_valid`; control events; exposures | `session_store`, `phase*` | `test_session_store_receipts`, `test_phase2_viewing_lattice` |
+| B-23 | Module layout, `tests/diff`, hatch and mypy entries | `pyproject.toml` | `make check` |
+| B-24 | Four stages; GPU code tested with fakes; nothing fabricated | all | fakes; reports state what ran |
+| B-25 | G1 / G2 provisional gates | `freeze_gates` | `test_freeze_gates_thresholds` |
+| B-26 | Open decisions as protocol data with defaults | `study_protocol` | `test_freeze_gates_thresholds`, `test_assignment_schedule_balance` |
+
+### 9.2 PRD IDs (as amended)
+
+"Brief" means the wording or scope is given by the brief. "Stage exit" means the
+brief places the ID in a stage's exit criterion but does not give its wording.
+
+| ID | Known from | Content | Maps to |
+|---|---|---|---|
+| FR-01 … FR-15 | — | *pending PRD* (presumably §6.1–6.3 generation, instrumentation, review) | provisionally Stages 1–2 |
+| FR-16 | brief §6.4 | single protocol with a slot table | B-21, `assignment_schedule` |
+| FR-17 | brief | exposure rule: each clip twice, P1 first track, P6 the one assigned second track; no other condition; reconnecting never changes it | B-21, `phase1_flow`; `test_phase1_flow_pages` |
+| FR-18 | brief | covers `clip_id` | records and exports carry the real clip key; payloads never (B-05) |
+| FR-19 | brief | covers page entry and submit times | §6.6, B-22 |
+| FR-20, FR-21 | — | *pending PRD* | — |
+| FR-22 | brief | covers kiosk export | §6.7, B-06 |
+| FR-23, FR-24 | — | *pending PRD* (possibly §7–§9 materials and analysis) | — |
+| AC-01, AC-02, AC-04, AC-06 … AC-09 | stage exit | *pending PRD*; Stage-1 exit on development clips | Stage 1 |
+| AC-03 | brief + follow-up | 3 inputs × 3 conditions: identical token IDs with and without hooks and history; hook selections = history unmasking + `selected_but_masked`; with AC-07 it establishes the env | §4.5 (after G0), B-12 |
+| AC-05 | follow-up | context and canvas edges replace block edges: 2,047 and 2,048 accepted, 2,049 refused; invalid steps refused; very short prompts | `dream_runner.context_problems` / `checked_call`; `test_dream_runner_contract` |
+| AC-01, AC-07, AC-08 | follow-up | synthetic-logit recomputation; RNG states unchanged; forward-hook count = steps | AC-07/08 checked on every call (`model_runtime`, `dream_runner`); AC-01 after G0 |
+| AC-20 | follow-up | bundle builder and lattice generator refuse without a passing G0 for the current profile | `analysis_decisions`, `job_plan.build_phase2_plan`; `test_job_plan_identity` |
+| G0 | follow-up | Korean feasibility gate (see the Model change section) | `feasibility_gate`; `test_feasibility_gate` |
+| AC-10, AC-12, AC-13, AC-14 | stage exit | *pending PRD*; Stage-3 exit | Stage 3 |
+| AC-11 | brief | balance of clip × condition and of video order | B-21 |
+| AC-15 | brief | blindness | B-05 |
+| AC-16 | brief | lattice completeness | §5.4 verifier |
+| AC-17 | brief | playback gates and recovery | B-03 |
+| AC-18 | brief | session-state size and bundle versioning | B-20; bound: state ≤ 8 KiB excluding the draft, draft ≤ 16 KiB (A7) |
+| AC-19 | brief | response-order parity | §7 |
+| MC-08 | brief + follow-up | text-only; evidence the only grounding; `config.json` 131,072 against the README's 2,048, and 2,048 is used; remote code hashed | B-09, B-17, `model_profile` |
+| MC-01 … MC-07 | — | *pending PRD* (§2 model contract) | `model_profile` |
+| CV-08 / CV-10 / CV-13 / CV-14 / CV-15 | brief + follow-up | the canvas (80 / 128, set at M0 on 2026-10-10); sentence ending; caption band; two viewings; token IDs 151666 / 151643 / 151645 (BOS 151643 and 151665 recorded, refused in prompts) | `study_protocol`, `output_checks`, `model_profile` |
+| CV-01 / CV-05 / CV-09 / CV-12 | follow-up | Dream pin; `top_p` and `top_k` None; ≤ 2,048 tokens; no RNG consumed (CV-02, CV-03, CV-06 deleted) | `model_profile`, `dream_runner` |
+| IV-01 … IV-05 | brief | see changelog §11 | `study_protocol`, `assignment_schedule` |
+
+## 10. Stages and exit criteria
+
+Each stage lands as one-concern commits with why-bodies, and `make check` passes
+on every intermediate tree.
+
+### Stage 1 — Generator (PRD M0–M1), G0 first
+
+**Built for G0 (follow-up §7 order):**
+- the profile and hashes;
+- prompt rendering with the system message;
+- both runners with the §3 contract and their AC-02 tests;
+- output checks;
+- `python -m diff g0 plan|report|decide`;
+- `envs/diff-generator` with its lock;
+- the importers.
+
+Tests run with fakes, never weights. The CPU tests against a vendored copy of
+`generation_utils.py` come after G0.
+
+**G0, in order:**
+1. **Development sources:** at least 3 development-clip cues, with evidence and
+   `material: development`. Six c2 clips, with their evidence as unreviewed
+   drafts (Q15).
+2. `g0 plan`, then `plan freeze` and `generate` in the generator env on a GPU
+   with ≥ 20 GB.
+3. `g0 report` writes the automatic report and the blind packet, and stops.
+4. One fluent Korean reader rates naturalness 1–5.
+5. `g0 decide` records the `AnalysisDecision`.
+
+If G0 fails, stop and report. The researcher chooses between revised prompts on
+development material (a new protocol version) and another model.
+
+**After a passing G0:**
+- the decode trace (logits and tokens hooks) and the vendored-loop CPU tests;
+- AC-01, AC-03, AC-04 and AC-09.
+
+M0's canvas and timeout were settled earlier than planned, on 2026-10-10,
+between the first and second G0 runs: the first run showed that both decide
+G0's outcome.
+
+**Exit:** a passing G0, then AC-01–AC-09 as amended on development clips.
+
+### Stage 2 — Review and freeze (PRD M2)
+
+**Build:** `review_app` and `review_console.*`, `freeze_gates`,
+`stimulus_bundle` (builder, verifier, registry), and phase-2 job plans.
+
+**Prerequisites:**
+- reviewers named;
+- phase-2 evidence structured and reviewed;
+- R2 options authored.
+
+**GPU:** development and participant phase-1 jobs; after G1 fixes τ, the phase-2
+lattice (1,620 jobs).
+
+**Exit:** G1 and G2 met, or a recorded hold decision.
+
+### Stage 3 — Participant server (PRD M3)
+
+**Build:** `session_store`, `assignment_schedule`, `phase1_flow`,
+`phase2_viewing`, `participant_server`, `export_bundle`, and the static assets.
+
+**Tests:**
+- the parity harness (§7);
+- the blindness crawler: scan every response, header, cookie and URL for τ
+  values, condition IDs, model names (`trida`, `tri-7b`, `trillion`, `gemma`),
+  answer-key fields and real clip and media stems;
+- AC-17 recovery: reload mid-view, lost reply, stale revision;
+- AC-18 state size across a full scripted session, and two-bundle versioning;
+- AC-16 completeness;
+- AC-11 balance;
+- export authentication;
+- a browser render audit that every bundle text fits the fixed caption band in
+  at most 2 rendered lines (CV-13);
+- a headless walk of both phases with webm media, because Playwright's Chromium
+  lacks H.264.
+
+**Exit:** parity test, AC-10–AC-19 and usability-pilot readiness. Readiness is a
+written checklist: Korean-only walk on the kiosk hardware, consent and debrief
+texts approved, slot table generated for the active bundle, and an export
+round-trip.
+
+### Stage 4 — Detach
+
+**Copy.** Copy the regen code diff still imports into `src/diff` under new
+unique basenames:
+
+| From | To |
+|---|---|
+| `sheet_instrument` + workbook JSON | `workbook_instrument.py` |
+| `playback` + `number` | `playback_coverage.py` |
+| `points` | `frame_points.py` |
+| `study_media` + `bound_media` / `fingerprint` | `video_delivery.py` |
+| `Conflict` | diff's own |
+
+`SCHEMA` and `PROVENANCE` are kept verbatim, so the workbook hash `b23eb462…` and
+the snapshot hash `6c97d64a…` are unchanged; a test asserts both.
+
+**Remove.** Remove every `dpo` import from `src/diff`. The parity test keeps
+importing regen and is skipped if `dpo` is absent.
+
+**Propose, do not perform.** Drop `peft`, `bitsandbytes`, `accelerate`, `torch`,
+`torchvision`, `librosa`, `av` and `transformers` from the shared project once
+`dpo` is retired, leaving diff's server needing FastAPI, uvicorn and Pillow.
+
+### Phase C — review
+
+- **Static checks:** `ruff check`, `ruff format --check`, strict `mypy`, and
+  `pytest tests/diff`.
+- **Regen unchanged:** the regen suites (`tests/regen`,
+  `src/dpo/regen/tests`) must pass with regen untouched.
+- **Parity and blindness:** the AC-19 parity run and the AC-15 audit.
+- **Independent review:** a reviewer who did not write the code checks the
+  change against the brief and the PRD.
+- **Report:** commands with test counts, what was not verified, and every
+  deviation.
+
+## 11. PRD v1.1 changelog (from the brief's amendments)
+
+**Amendments, by PRD section.**
+
+| PRD | Change |
+|---|---|
+| §1 | **Research question:** how do Trida rewrites under τ differ from the source caption, and how does the difference relate to the second viewing's change in restoration ratings (P4→P9), visual and auditory selections (V1→V2, A1s→A2s), caption ratings (S1–S3) and recall (R2)? How do participants move through the pre-generated lattice in phase 2? No directional hypothesis for τ. |
+| §2 | **MC-08 added:** text-only model; evidence text is the only grounding. Record `max_position_embeddings` 4096 (config) against 8,192 (model card). Hash the remote code. |
+| §3 | **Scope:** video stimulus validation and the participant server are in scope. The calibrated slider becomes a pre-generated prompt lattice, never τ. |
+| §5.1 | **Independent variables:** IV-01 τ becomes either the second-track condition (option A) or fixed (option C). IV-02 is the second-track condition, with `original` as the control. IV-03 is removed. IV-04 becomes a sound-event fidelity annotation. New IV-05 is the lattice cell, chosen by the participant, not assigned. The first-caption 2×2 condition becomes a source property. |
+| §5.2 | **Controlled variables:** CV-08 sets the budget from measured source token counts at M0 (initially 128 tokens in phase 1 and 192 in phase 2); character limits live in the output checks. CV-10 keeps the source caption's sentence ending. CV-13 is a caption band over the video, with fixed font and position. CV-14 is two fixed viewings per clip. |
+| §5.3 | **Measures:** human measures become the regen items. Sound-event fidelity, quality-term count and specific-source count join the text measures. |
+| §6.2 | **Per-cue caps:** new positions = budget + 32 and a 30 s timeout, finalised after the M0 smoke test. |
+| §6.3 | **Review:** phase 1 gets double review of every output. Phase 2 gets automated checks on all outputs, plus double review on a stratified sample and on everything flagged. |
+| §6.4 | **Server requirements:** FR-16 is a single protocol with a slot table. FR-17 is the exposure rule. FR-18 covers `clip_id`. FR-19 covers page entry and submit times. FR-22 covers kiosk export. |
+| §7 | **Materials:** caption sources, the two prompts, and R2 with two answer keys (source-based and shown-track-based). |
+| §8 | **Data contracts:** add CaptionSource, LatticeCell, Exposure, ControlEvent and PlaybackCoverage. Assignment gains phase, clip and role; Response gains page and view ID. |
+| §9 | **Analysis:** the primary contrast is the P9−P4 change by second-track condition against `original`, using ordinal models with participant and clip effects (clip fixed when there are only two). Fidelity and length are outcomes of the condition, not covariates. Phase 2 is descriptive. |
+| §10 | **Acceptance:** AC-11 balances clip × condition and video order. Add AC-15 blindness, AC-16 lattice completeness, AC-17 playback gates and recovery, AC-18 session-state size and bundle versioning, and AC-19 response-order parity. |
+| §11 | **Gates:** G1 is replaced by the caption gates (technical, readability, difference) and G2 is added (monotonicity, distinctness); the thresholds are provisional. |
+| §12 | **Risks added:** transformers version; loss of audio grounding; lattice review load; unreviewed phase-2 sources; fixed video order; incomplete disclosure and debrief. |
+
+**New items:**
+- **FR-17 text:** a participant sees each clip twice, at P1 with the first
+  track and at P6 with the one assigned second track. No other condition of
+  that clip is shown to them, and reconnecting never changes the assignment.
+- **§11 gate wording:** exactly as in §5.2 of this plan.
+- **Open decisions:** recorded as protocol data, as in §12 of this plan.
+
+**Engineering additions this plan proposes for v1.1** (not in the brief;
+confirm):
+- **§2 facts:** record the `generate` facts in §2.3 — `**kwargs` swallowing,
+  hard-coded suppression of 128012/128004, the per-step `block_size` default,
+  block flooring, the argmax tokens after prefill and after each block, and the
+  32-token prefill skip.
+- **§6.2 guards:** the prompt-length guard (`≠ block_size`), the context guard
+  against 4096, and a warm-up compile that is not charged to the timeout.
+- **§8 attempt statuses:** `refused` and `trace_inconsistent`.
+
+The three Trida-specific additions above lapse with the model change.
+
+**Follow-up amendments (Dream, 2026-10-09).** Each row merges into the
+same-section row above; where they conflict, this row wins.
+
+| PRD | Change |
+|---|---|
+| Header, §4, §13 | **Model:** `Dream-org/Dream-v0-Instruct-7B` @ `05334cb…`; baseline Qwen2.5-7B-Instruct @ `a09a354…`; remote-code and tokenizer SHA-256s (Appendix B); sources: the pinned HF files, the `HKUNLP/Dream` README at `31f94a6`, arXiv 2508.15487. |
+| §1, §9 | **Factor:** τ becomes the decoding condition k (parallelism); still no directional hypothesis. |
+| §2 | **Contract:** §2.1–2.2 are replaced by the follow-up's §3 (call contract) and §4 (instrumentation). MC-08: text-only; record `config.json`'s 131,072 against the README's 2,048, and use 2,048. |
+| §3 | **Scope:** decoding-condition generation replaces τ generation; the block-size and cache row is deleted; G0 is added as P0. |
+| §5.1 | **IVs:** IV-01 is the decoding condition k (option A) or fixed (option C); IV-02 levels are `original`, `dream_k1`, `dream_k2`, `dream_k4`. |
+| §5.2 | **CVs:** CV-01 is the Dream pin. CV-02, CV-03 and CV-06 (block, sub-block, block cache) are deleted. CV-08 becomes the canvas. `alg`, `alg_temp` and `eps` are added. CV-05: `top_p` and `top_k` None. CV-09: ≤ 2,048 tokens. CV-12: no RNG consumed. CV-15: 151666 / 151643 / 151645. |
+| §5.3 | **DVs:** DV-M01: `steps` is set, not measured. DV-M02: NFE = `steps`. DV-M03: realized per-step counts. DV-M04 is deleted. |
+| §6.1, §8 | **Requirements:** FR-03 to FR-06 and DecodeEvent as in the follow-up's §3–§4; the §8.1 manifest example is rewritten. |
+| §7 | **Prompts:** both models get the system message "You are a helpful assistant."; the prompt texts are unchanged. |
+| §10, §11 | **Acceptance:** the AC changes in the Model change section; G0 comes before G1; G1 difference reads "two or more decoding-condition tracks". |
+| §12 | **Risks added:** unverified Korean ability; the 2,048-token context; preprint status; an old pinned stack; canvas-size effects; a GPU of at least 20 GB. |
+
+**M0 decisions (researcher, 2026-10-10; protocol v3).** These follow the first
+G0 run, and each row wins over the rows above.
+
+| PRD | Change |
+|---|---|
+| §5.2 | **CV-08:** the canvas is 80 tokens in phase 1 and 128 in phase 2. It covers the 96- and 160-character limits at about 0.75 tokens per character, measured on the development captions. |
+| §6.2 | **Timeout:** 60 s per job, about twice the slowest measured job. Generation is offline, so the timeout only catches a stuck worker. |
+| §11 | **G0 script check:** besides Han/kana, stray Latin and `incomplete`, it fails on empty text, U+FFFD and leftover masks. The share is over every `dream_k1` job, so a job with no output counts as a failure. |
+
+## 12. Open decisions (protocol data; default unless you decide otherwise)
+
+| Decision | Default | Alternative |
+|---|---|---|
+| Phase-1 manipulation | A: `dream_k1`/`k2`/`k4` with `original` as the control | C: steering tracks at one decoding condition |
+| Decoding factor | parallelism k at `alg="entropy"` | remasking order (`entropy`, `topk_margin`, `maskgit_plus`) at k = 1 |
+| Phase-2 decoding | fixed, chosen after G1 (default `dream_k1`, the README's setting) | assigned per video |
+| Lattice | 3×3 | 5×3 after G2 |
+| Baseline | Qwen2.5-7B-Instruct, review stage only | participant condition (40-slot phase-1 cycle) |
+| Phase-2 sources | reviewed Gemma drafts with provenance | re-authored by people |
+| Missing lattice cell | nearest-cell substitute, recorded with the original cell | exclude the video |
+| Abandoned slot | reissue only after researcher release, and only if no formal response exists | reissue after release regardless; or auto-release after inactivity |
+
+## 13. Assumptions
+
+- **A1:** the parity target is regen at `3842302` with the default sheet policy.
+  The uncommitted experience policy is not reproduced.
+- **A2:** `top_p` is not passed to Trida and is recorded as `not_applied`.
+- **A3:** `B` in AC-05 is `block_size` = 32.
+- **A4:** a timeout or a missing stop within the cap is a terminal cap outcome,
+  not a transient failure, so it is not retried.
+- **A5:** naturalness uses a 1–5 scale, since the gates use 3 and 4.
+- **A6:** track naturalness is the minimum over its cues; the final rating is the
+  adjudicated value, or the lower of the two.
+- **A7:** the AC-18 bounds are state ≤ 8 KiB excluding the draft and the draft
+  ≤ 16 KiB, pending the PRD's numbers.
+- **A8:** the page id `transition` replaces `generate`; the parity harness maps
+  the two.
+- **A9:** drafts behave as in regen: `sessionStorage` first, server draft only
+  for a fresh tab, and the client does not post drafts.
+- **A10:** the instrument is the one at `3842302`. Until Stage 4 a workbook
+  change blocks running sessions, as in regen; after Stage 4, sessions render
+  from their stored snapshot.
+- **A11:** ports are 8782 (participant) and 8783 (researcher and review), both
+  bound to loopback. Public exposure is out of scope, and `deploy/` is not
+  touched.
+- **A12:** development clips come from the c2 pool minus the participant clips
+  (10 candidates); the suggestion is 8, so "3/4 of clips" is meaningful.
+
+## 14. Open questions
+
+1. **Q1 — PRD.** Please add `trida-korean-hci-prd.md`. §9.2 is completed against
+   it before Stage 1.
+2. **Q2 — transitive Gemma import.** Accept the transitive `dpo.caption.writer`
+   load until Stage 4 (default), or detach the five modules at Stage 1?
+3. **Q3 — generator env path.** *(Answered by default; renamed for the model change to
+   `envs/diff-generator/`.)* `envs/trida-generator/` with its own lock (new
+   top-level directory)?
+4. **Q4 — phase-1 source text.** The 원문 for each clip's four cues must be
+   authored. Is the Korean burnt-in caption, the English `orig_text` or new
+   copy the starting point? They disagree for at least three c2 clips.
+5. **Q5 — phase-2 evidence.** Who restructures and reviews the 180 windows'
+   evidence into events with source, action, qualities, location/relation and
+   certainty, and who reviews the fallbacks?
+6. **Q6 — R2.** Who authors the R2 options per clip (3–4 mentioned sounds plus
+   1–2 distractors) and confirms the two keys?
+7. **Q7 — reviewers.** Reviewer and adjudicator roster, and whether the
+   phase-2 sample fraction (10 %) is acceptable.
+8. **Q8 — Tri as a participant condition.** If Tri becomes one, accept a
+   120-slot full cycle, or partial video-order balance?
+9. **Q9 — system message.** Trida's template injects "You are Trillion…".
+   Keep it (default), or pass an explicit system message?
+10. **Q10 — phase-2 wording.** Approve the three `{context_rule}` drafts, the
+    `k = 0` wording, and the rendering of an empty quality list.
+11. **Q11 — participant wording.** Approve the revised "ready" and "break"
+    texts. Confirm that the debrief text discloses the automatic rewriting and
+    its conditions (§12 risk; IRB).
+12. **Q12 — GPU timing.** Resolved in practice: the smoke and both G0 runs
+    used GPU 1. GPU 0 holds the xart project's GPU API container
+    (`xart-gpu-api-1`, 15.5 GB), not regen. Stopping it, as the researcher
+    asked on 2026-10-10, needs `docker stop xart-gpu-api-1` run by the
+    researcher.
+13. **Q13 — first-caption 2×2.** The 2×2 becomes a source property. Must the
+    participant clips cover particular cells of it?
+14. **Q14 — analysis code.** Are the §9 analysis models part of this change, or
+    only the export tables?
+15. **Q15 — development evidence for G0.** G0 needs development-clip cues,
+    never participant clips. Each needs its 원문, structured evidence and
+    `material: development`; at least 3 cues give the 12 corner prompts. A cue
+    is one timed caption line, and regen's 10 s clips carry one each
+    (`cue_slots: 1`).
+
+    **Drafted 2026-10-09 from regen's prepared c2 material** (the earlier "none
+    exist" was wrong):
+    - **Participant material, never G0:** `bangkok_034` and `singapore_286`
+      (the live pair) and the three viewing videos.
+    - **Development set (6):** `amsterdam_181`, `amsterdam_202`,
+      `bangkok_209`, `bangkok_316`, `bangkok_328` and `singapore_134`.
+      - The 원문 is the Korean caption transcribed in
+        `scripts/c2-korean-captions.json`, copied verbatim.
+      - The evidence was drafted by the assistant from each clip's
+        `tidy_data.csv` AudioSet labels, its `orig_text` and the Korean
+        caption, not by listening. It is marked
+        `assistant-draft-from-annotations-unreviewed`, so G0 may read it but no
+        bundle ever can.
+      - Qualities appear only where a description states one (constant →
+        steady, faint → soft), so the texture corners have little to draw on.
+      - `bangkok_316` was in regen's live pair until 2026-09-07. It is not in
+        diff's flow.
+    - **Excluded:**
+      - `amsterdam_012` and `singapore_040`: the Korean caption names a
+        different sound from the labels (train against police siren;
+        motorcycle against car, wind and bird).
+      - `amsterdam_057`: the caption adds car horns the labels lack.
+      - `singapore_067`: three lines, against a two-line limit.
+    - **File:** `artifacts/diff/sources/c2-development-draft.json`
+      (gitignored).
+
+    Still open: the researcher reviews the evidence by listening, and any
+    change means a new G0 run before rating.
+16. **Q16 — the Trida snapshot.** Resolved 2026-10-09: the researcher had
+    `artifacts/diff/models/trida-7b-c37755e8` (15 GB, gitignored, unused
+    since the model change) deleted, along with its download log.
+
+## 15. Risks
+
+From the §12 amendments, plus what the reading found:
+
+- **Dream (follow-up §12).**
+  - **Korean is unverified:** the training data and reported evaluations are
+    mostly English and code; G0 exists for this.
+  - **Context:** 2,048 tokens.
+  - **Status:** preprint (arXiv 2508.15487).
+  - **Stack:** an old pinned transformers 4.46.2 / torch 2.5.1.
+  - **Canvas-size effects:** the model fills the whole canvas, so the canvas is
+    a protocol value, not a cap.
+  - **GPU:** at least 20 GB.
+  - **Timeout (resolved):** the first G0 run measured about 32 s for k = 1
+    on the 192 canvas, over the 30 s placeholder. M0 (2026-10-10) set 60 s and
+    a 128 phase-2 canvas.
+
+- **Transformers version.** Trida's config is from 4.57.3. Its remote code
+  imports helpers that moved in 5.x. The generator env pins 4.57.3 and is
+  accepted only through AC-03.
+- **Compile behaviour.** `max-autotune` compile and recompiles on new shapes
+  could exceed the 30 s cue timeout. Mitigations: warm-up, recording compile
+  counts, and a timeout finalised at M0.
+- **GPU nondeterminism.** It could fail AC-03 spuriously. Mitigation:
+  deterministic mode, recorded.
+- **Loss of audio grounding.** The model is text-only, so acoustic detail
+  exists only where the evidence has it. Evidence quality bounds caption
+  quality, and identical-neighbour rates will rise where qualities are sparse.
+- **Lattice review load.** 1,620 outputs; a 10 % sample plus flags, double
+  reviewed.
+- **Unreviewed phase-2 sources** block the phase-2 bundle entirely until
+  reviewed.
+- **Video order.** Regen fixes it in manifest order; the slot table removes
+  this.
+- **Incomplete disclosure and debrief** need approved text.
+- **Uncommitted regen work** landing could change the parity baseline; the
+  harness pins the default policy.
+
+## Appendix A — weight shard SHA-256 (LFS values reported by the Hub API)
+
+Trida-7B @ `c37755e8`:
+`model-00001-of-00004` `e5e9a4589f938a297ead260acedab905c6dc4dc84e190628c58bdc70a560192f`,
+`00002` `624ad919451158c5bc7229c6346dca79631abfedcd112f9bf128447ca92125c8`,
+`00003` `ae69bf99459c60fb06138805a4ed8cd8e4ad58a76e2d61220a15634947d23858`,
+`00004` `5f0a7f453efe5cea64bc17ef717b4177030167f0d724da0d8bda1fd2f89d4a29`;
+`model.safetensors.index.json`
+`0ecd88d572d5d263671d0a725369538b5d598e88c6523dc3ddee8f6becb3f461` (downloaded).
+
+Tri-7B @ `94e2cc88`:
+`model-00001-of-00007` `642ccdb85f37ea9da6a994ab69f5bf1161d175cdde1a5da1a9c18450735ca401`,
+`00002` `8911da53d5abc25fd16632e112d2eeae6847d8e8fa510a8174e7bc540c66d75d`,
+`00003` `c6736729000c393742c1ca66170f9a6814fa776a9d261bb3a0a9a27b23a68ff5`,
+`00004` `a6c1d7b2c07e3a2e95a203da0177e6ab859719fefff9084441964468a60cea52`,
+`00005` `9d401836b166724f99bfa3f4d5a7bb707f261957314bf73c49613fa5c4781e3b`,
+`00006` `38cdf11e0adca5ab9c1302400423d4b11bac24cb7e0d194d34da4ea2a333502c`,
+`00007` `b066ac2e2d862d570b6fddfa27306aa2597f2c8c06b7b7e2309e7291dba18532`.
+The shards were not downloaded. These hashes are the Hub's, and are re-verified
+locally at M0.
+
+## Appendix B — Dream and Qwen pins (SHA-256 of the pinned files)
+
+Dream-v0-Instruct-7B @ `05334cb9faaf763692dcf9d8737c642be2b2a6ae` (downloaded
+at the exact revision; git blob IDs matched the Hub):
+
+| File | SHA-256 |
+|---|---|
+| `configuration_dream.py` | `24d038962ccf16361595494461000ec0c1b043653c7494d7fc835c96f121f0b9` |
+| `modeling_dream.py` | `3166e789f0d69beb1f4fbdee2317953d1c1c3b9bc21479b109afc5dd059de5b3` |
+| `generation_utils.py` | `7f8ad01484898946b3c9c9d5ebc85e5ac726061d0fa7b4a522c4b8110c13a921` |
+| `tokenization_dream.py` | `1d7f04104fa673831f48256e3cd42cd0bbd1bddd801b4abea5c74cc47d98bdd2` |
+| `config.json` | `11afc7fe7a1881e73dcd70cca6868aaaf8eb89ad45ea5fc6426c3fb82dec9340` |
+| `generation_config.json` | `e4fa42a31ef22740804534395c7a18f335a3c1f9abd9db83a6941b1c8748b2ee` |
+| `tokenizer_config.json` | `b0e9c1a6299d8832a1362d6b24f007de8a2acfe0243d8a3a1d1b57aa8250f7ee` |
+| `special_tokens_map.json` | `fa14641fdc084244b0a530556b1d5bfcb9fa0ed9151a780ffec3b44ba96a0dfe` |
+| `added_tokens.json` | `32ad9d49fafda64e737853737fe3be3e33cce3f719a159ed73f04cbd81a690ce` |
+| `vocab.json` | `87a257b04b17642a0688c98cd1df89c398bda4fee532d6f88b38a659ecb4ac8d` |
+| `merges.txt` | `8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5` |
+| `model.safetensors.index.json` | `998a078123ffc97763690de7f2a677eb89168af5eaf8a5e12e6bc24d18e25bdb` |
+
+Dream weight shards (LFS SHA-256 from the Hub API): `3014d849…a3177aec993`,
+`78fc44a7…7222aa57`, `eac5afaf…92c378e48`, `398da65f…259712b3cb7` (in full in
+`model_profile.py`).
+
+Qwen2.5-7B-Instruct @ `a09a35458c702b33eeacc393d103063234e8bc28`:
+
+| File | SHA-256 |
+|---|---|
+| `config.json` | `7463bb0ea78315365e6c6b74de4e73bbcc8359dfb0c5a737584e077d42c0b03c` |
+| `generation_config.json` | `3a8f9087e486054c8a4a08dae2e5a3ba62e23da212b5b8c08bc42cb983c3459f` |
+| `tokenizer.json` | `c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539` |
+| `tokenizer_config.json` | `5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583` |
+| `vocab.json` | `ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910` |
+| `merges.txt` | `599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3` |
+| `model.safetensors.index.json` | `624bf7c47cd12468fdc16e38a47cf4f19e0415b859a223ba3c027eed2f0e1028` |

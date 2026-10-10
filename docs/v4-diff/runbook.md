@@ -1,0 +1,139 @@
+# v4-diff runbook — Stage 1 and G0
+
+How an operator runs what exists today: the Dream and Qwen generator, and G0
+(Korean feasibility). Nothing past G0 is built yet. The model change and its
+reasons are at the top of [`plan.md`](plan.md).
+
+Run every command from the repository root. Inside `src/dpo/regen`, regen's
+`copy.py` shadows the standard library. There are two environments:
+
+- `uv run python -m diff …` — the repository's environment. diff ships in its
+  editable wheel. Use it for sources, plans, checks and the G0 report.
+- `PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff …` —
+  the generator environment (transformers 4.46.2, torch 2.5.1+cu124). Use it
+  for model fetch, plan freeze, generation and the worker. Run `uv sync
+  --project envs/diff-generator --frozen` once.
+
+There is no `diff` console script. Use `python -m diff`, because a `diff`
+executable in the venv would shadow the system `diff`.
+
+## 1. Models
+
+```sh
+PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff \
+  model fetch --profile dream-v0-instruct-7b@05334cb9 --dest artifacts/diff/models/dream-v0-instruct-7b-05334cb9
+PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff \
+  model fetch --profile qwen2.5-7b-instruct@a09a3545 --dest artifacts/diff/models/qwen2.5-7b-instruct-a09a3545
+```
+
+`fetch` downloads the pinned revision, hashes every file against
+`src/diff/model_profile.py`, and writes `<dest>.verification.json`. Any
+mismatch stops it. `model verify --no-weights` re-checks the small files
+quickly. Each later load re-hashes the remote code before
+`trust_remote_code`, and the code Python actually imported after.
+
+## 2. Development sources (required before G0)
+
+G0 reads **development-clip material only**: never a participant clip, and
+never one of the three long videos. Write a `diff.caption-sources/v1` file;
+`tests/diff/fixtures/diff-smoke-sources.json` shows the shape. Each cue needs:
+
+- `"material": "development"`;
+- its 원문 (`text`, at most 96 characters and 2 lines);
+- structured `evidence.events`: source, category, count, action, qualities from
+  the closed vocabulary, location or relation, certainty;
+- `provenance`.
+
+A cue is one timed caption line; regen's 10 s clips carry one each. At least 3
+cues are needed, so the 12 corner-cell prompts exist.
+
+The current set is `artifacts/diff/sources/c2-development-draft.json`. It holds
+six of regen's twelve c2 clips, leaving out the live pair (`bangkok_034`,
+`singapore_286`) and the clips plan Q15 excludes. Its 원문 comes from
+`scripts/c2-korean-captions.json`. Its evidence is an unreviewed draft built
+from each clip's AudioSet labels and descriptions. Check a sources file with:
+
+```sh
+uv run python -m diff sources validate --sources path/to/development-sources.json
+```
+
+`sources import-regen --material development` can start a draft from a regen
+document, but the evidence must be authored. The live viewing manifest's
+evidence is visual context only and is never development material.
+
+## 3. G0
+
+```sh
+W=artifacts/diff/g0-$(date +%Y%m%d)
+uv run python -m diff g0 plan --sources path/to/development-sources.json --out $W/plan.json
+PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff plan freeze --plan $W/plan.json \
+  --dream-dir artifacts/diff/models/dream-v0-instruct-7b-05334cb9 \
+  --qwen-dir artifacts/diff/models/qwen2.5-7b-instruct-a09a3545 --out $W/frozen.json
+CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff generate \
+  --plan $W/frozen.json --run-dir $W/run --device cuda:0 \
+  --dream-dir artifacts/diff/models/dream-v0-instruct-7b-05334cb9 \
+  --qwen-dir artifacts/diff/models/qwen2.5-7b-instruct-a09a3545
+uv run python -m diff g0 report --plan $W/frozen.json --run-dir $W/run \
+  --sources path/to/development-sources.json --out-dir $W/g0
+```
+
+What each step does:
+
+- **`g0 plan`** writes every development cue with the phase-1 prompt, plus 12
+  corner-cell prompts, as `dream_k1`, `dream_k2`, `dream_k4` and `qwen`.
+- **`plan freeze`** hashes each prompt's token IDs with the model's own chat
+  template, and refuses prompts that break the 2,048-token context or contain a
+  mask token or BOS.
+- **`generate`** needs a GPU with at least 20 GB free, so check `nvidia-smi`
+  first. On this machine, GPU 0 has been held since 2026-09-03 by the xart
+  project's GPU API container (`xart-gpu-api-1`), not by regen. Each job:
+  - runs in a supervised worker with a 60 s deadline;
+  - records the resolved config, forward calls against `steps`, the RNG check
+    and realized per-step counts;
+  - gets one identical retry only after a transient worker or device failure.
+- **`g0 report`** writes the automatic report and stops there:
+  - `rater/packet.csv` and `rater/ratings.csv` go to the rater;
+  - `researcher/` holds the key, the report and the run manifest, and never
+    goes to the rater.
+
+**Rating.** One fluent Korean reader fills `naturalness` (1–5) for every row of
+`rater/ratings.csv`, seeing only the packet.
+
+**Decision.**
+
+```sh
+uv run python -m diff g0 decide --out-dir $W/g0 --ratings path/to/ratings.csv --decided-by "<name>"
+```
+
+This applies the provisional rule over `dream_k1` and writes
+`researcher/decision-<id>.json`, an `AnalysisDecision` naming the run
+manifest's hash. Qwen's numbers are reported beside it. The rule:
+
+- every job terminal, with no unresolved technical failure;
+- at least 95 % of all `dream_k1` jobs passing the script check; an
+  incomplete, empty or missing output counts as a failure (decided 2026-10-10);
+- at least 3/4 rated 3 or higher.
+
+**After the decision.**
+- **Fail:** stop. The researcher chooses between revised prompts on development
+  material (a new protocol version) and another model.
+- **Pass:** lattice generation (`plan build --phase 2 --g0-decision …`) and,
+  later, the bundle builder accept the decision (AC-20).
+
+## 4. Smoke runs
+
+`g0 plan --smoke` builds the same plan over **synthetic** material, such as the
+test fixture. Use it to exercise fetch → freeze → generate → report on real
+hardware. A smoke run is never G0, and `g0 decide` refuses it.
+
+## 5. Checks without a GPU
+
+```sh
+uv run pytest tests/diff
+uv run ruff check src/diff tests/diff && uv run ruff format --check src/diff tests/diff
+uv run mypy
+```
+
+`make check` also checks `envs/diff-generator/uv.lock`. Its lint and the regen
+detachment test currently trip over `src/dpo/regen/.omx/`, scratch copies
+excluded from git only by `.git/info/exclude`. That failure predates diff.
