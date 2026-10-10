@@ -164,6 +164,30 @@ def test_script_failures_fail_g0(tmp_path: Path, development_sources: SourceSet)
     assert decision.evidence["criteria"]["script"] is False and decision.outcome == "fail"
 
 
+def test_an_automatic_fail_is_recorded_without_ratings(
+    tmp_path: Path, development_sources: SourceSet
+) -> None:
+    built = packet_for(tmp_path, development_sources, text="")
+    decision = gate.decide(
+        built["report"], built["key"], None, built["manifest"], decided_by="tester", decided_at="now"
+    )
+    assert decision.outcome == "fail"
+    assert decision.evidence["criteria"] == {"terminal": True, "script": False, "naturalness": None}
+    assert decision.evidence["dream_k1"]["rated"] == 0
+    assert decision.evidence["dream_k1"]["naturalness_share"] is None  # unrated, not a share of 0
+    record = decision.record()
+    assert decision_from_record(record).decision_id == record["decision_id"]
+    assert gate_problems(record, gate="G0", model_profile_id=DREAM_7B.profile_id)
+
+
+def test_a_pass_always_needs_the_rating(tmp_path: Path, development_sources: SourceSet) -> None:
+    built = packet_for(tmp_path, development_sources)
+    with pytest.raises(ValueError, match="needs the human rating"):
+        gate.decide(
+            built["report"], built["key"], None, built["manifest"], decided_by="tester", decided_at="now"
+        )
+
+
 def test_a_timed_out_job_counts_against_the_script_share(
     tmp_path: Path, development_sources: SourceSet
 ) -> None:

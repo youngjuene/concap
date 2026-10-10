@@ -394,7 +394,7 @@ def g0_decide(args: argparse.Namespace) -> int:
     report = _read_json(out / "researcher" / "report.json")
     key = _read_json(out / "researcher" / "key.json")
     try:
-        ratings = gate.read_ratings(args.ratings.read_text(encoding="utf-8"), key)
+        ratings = gate.read_ratings(args.ratings.read_text(encoding="utf-8"), key) if args.ratings else None
         decision = gate.decide(
             report,
             key,
@@ -521,7 +521,9 @@ def parser() -> argparse.ArgumentParser:
     g0_out.set_defaults(handler=g0_report)
     g0_rule = g0.add_parser("decide", help="apply the G0 rule to the returned ratings; record the decision")
     g0_rule.add_argument("--out-dir", type=Path, required=True)
-    g0_rule.add_argument("--ratings", type=Path, required=True)
+    g0_rule.add_argument(
+        "--ratings", type=Path, help="omit only to record a fail the automatic criteria already decide"
+    )
     g0_rule.add_argument("--decided-by", required=True)
     g0_rule.add_argument("--notes", default="")
     g0_rule.set_defaults(handler=g0_decide)

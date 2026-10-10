@@ -114,6 +114,11 @@ manifest's hash. Qwen's numbers are reported beside it. The rule:
   incomplete, empty or missing output counts as a failure (decided 2026-10-10);
 - at least 3/4 rated 3 or higher.
 
+When the automatic criteria already fail, no rating can change the outcome:
+leave out `--ratings` and the fail is recorded with naturalness unrated
+(`null`). Without ratings, `decide` refuses a run whose automatic criteria
+pass, because a pass always needs the rating.
+
 **After the decision.**
 - **Fail:** stop. The researcher chooses between revised prompts on development
   material (a new protocol version) and another model.

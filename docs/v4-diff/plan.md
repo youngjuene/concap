@@ -212,7 +212,10 @@ technical failures. Latency medians: `dream_k1` 16.1 s, `k2` 8.1 s, `k4`
 
 **G0 outcome:** under the rule decided on 2026-10-10, `dream_k1`'s script
 share is 11 % against 95 %. G0 fails whatever the rating, so the packet
-(36 rows, 16 of them empty Dream outputs) is not worth a rater's time.
+(36 rows, 16 of them empty Dream outputs) is not worth a rater's time. The
+fail is recorded without a rating as
+`g0/researcher/decision-dec-95ec20c38bda25e5b83db947.json`, with naturalness
+`null` (unrated), on run manifest `9982c8c4…`.
 
 **What remains for the researcher (brief §7):**
 - Choose between revised prompts on development material (a new protocol

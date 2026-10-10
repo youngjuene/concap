@@ -19,7 +19,9 @@ IDs with cue text, evidence and output, the key written to a separate
 directory. One fluent Korean reader rates naturalness 1–5 and returns
 ``blind_id,naturalness``. :func:`decide` applies the provisional rule over
 ``dream_k1`` and writes an :class:`~diff.analysis_decisions.AnalysisDecision`
-naming the run manifest's hash; Qwen's numbers are reported beside it.
+naming the run manifest's hash; Qwen's numbers are reported beside it. When
+the automatic criteria already fail, the fail can be recorded without the
+rating.
 
 The rating needs a person, so the pipeline stops once the packet exists. A
 plan built from synthetic material is a smoke run: it can exercise every step
@@ -282,42 +284,58 @@ def read_ratings(text: str, key: Mapping[str, Any]) -> dict[str, int]:
 def decide(
     report: Mapping[str, Any],
     key: Mapping[str, Mapping[str, Any]],
-    ratings: Mapping[str, int],
+    ratings: Mapping[str, int] | None,
     manifest: Mapping[str, Any],
     *,
     decided_by: str,
     decided_at: str,
     notes: str = "",
 ) -> AnalysisDecision:
-    """The provisional G0 rule over ``dream_k1``, with Qwen's numbers beside it."""
+    """The provisional G0 rule over ``dream_k1``, with Qwen's numbers beside it.
+
+    ``ratings`` may be ``None`` only when the automatic criteria already fail:
+    the rating could not change the outcome, so the fail is recorded with
+    naturalness unrated (``None``, never a share of 0). A pass always needs
+    the human rating.
+    """
     if manifest.get("purpose") != "g0" or manifest.get("materials") != ["development"]:
         raise ValueError("only a G0 run over development material can be decided; smoke runs never can")
     rule = GATES["G0"]
     evidence: dict[str, Any] = {}
     for condition in RATED_CONDITIONS:
         stats = report["conditions"][condition]
-        rated = [score for blind_id, score in ratings.items() if key[blind_id]["condition"] == condition]
         evidence[condition] = {
             "jobs": stats["jobs"],
             "terminal": stats["terminal"],
             "technical_failures": stats["technical_failures"],
             "script_pass_share": stats["script_pass_share"],
-            "rated": len(rated),
-            "naturalness_share": (
+        }
+        if ratings is None:
+            evidence[condition].update(rated=0, naturalness_share=None, naturalness_median=None)
+            continue
+        rated = [score for blind_id, score in ratings.items() if key[blind_id]["condition"] == condition]
+        evidence[condition].update(
+            rated=len(rated),
+            naturalness_share=(
                 sum(1 for score in rated if score >= rule["min_naturalness"]) / len(rated) if rated else 0.0
             ),
-            "naturalness_median": statistics.median(rated) if rated else None,
-        }
+            naturalness_median=statistics.median(rated) if rated else None,
+        )
     k1 = evidence["dream_k1"]
-    checks = {
+    checks: dict[str, bool | None] = {
         "terminal": k1["terminal"] == k1["jobs"] and k1["technical_failures"] == 0,
         "script": k1["script_pass_share"] >= rule["min_script_pass_share"],
-        "naturalness": k1["naturalness_share"] >= rule["min_naturalness_share"],
+        "naturalness": None,
     }
+    if ratings is None:
+        if checks["terminal"] and checks["script"]:
+            raise ValueError("the automatic criteria pass, so G0 needs the human rating (--ratings)")
+    else:
+        checks["naturalness"] = k1["naturalness_share"] >= rule["min_naturalness_share"]
     evidence["criteria"] = checks
     return AnalysisDecision(
         gate="G0",
-        outcome="pass" if all(checks.values()) else "fail",
+        outcome="pass" if all(value is True for value in checks.values()) else "fail",
         rule=rule,
         evidence=evidence,
         run_manifest_sha256=str(manifest["manifest_sha256"]),
