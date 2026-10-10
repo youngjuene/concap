@@ -217,12 +217,79 @@ fail is recorded without a rating as
 `g0/researcher/decision-dec-95ec20c38bda25e5b83db947.json`, with naturalness
 `null` (unrated), on run manifest `9982c8c4…`.
 
-**What remains for the researcher (brief §7):**
-- Choose between revised prompts on development material (a new protocol
-  version) and another model.
-- An untested observation: the contract differs from Dream's README call in
-  temperature 0.0 against 0.2 with `top_p` 0.95, and in canvas size (80/128
-  against 512).
+**What remains for the researcher (brief §7):** choose between revised
+prompts on development material (a new protocol version) and another model.
+The diagnostic below was run first, at the researcher's request, to inform
+that choice.
+
+### k1 diagnostic, 2026-10-10 (out of protocol; never G0)
+
+**Setup.** The researcher approved this run. It used the six development cues,
+all at k1 (steps = canvas), and was never G0 evidence.
+- A scratch script, `artifacts/diff/diagnostic-20261010/k1_diagnostic.py`,
+  called `diffusion_generate` directly. It bypassed `checked_call`, so it could
+  try settings the protocol refuses.
+- The script is gitignored, like its results (`gpu0.jsonl`, `gpu1.jsonl` and
+  `summary.json`).
+- The prompts, the cut at the first terminator and the output checks are the
+  pipeline's own.
+
+| Variant | Settings | Empty | Exact copy of 원문 | Script pass | Median latency |
+|---|---|---|---|---|---|
+| control | greedy, canvas 80 (run 2's call) | 6/6 | 0 | 0/6 | 8.9 s |
+| greedy256 | greedy, canvas 256 | 5/6 | 1 | 1/6 | 49.6 s (max 66.6 s) |
+| english80 | greedy, canvas 80, the same task and evidence in English | 4/6 | — | — | 7.1 s |
+| readme80 | temperature 0.2, `top_p` 0.95, canvas 80, seeds 0, 1, 2 | 0/18 | 9/18 | 18/18 | 19.8 s |
+| readme512 | temperature 0.2, `top_p` 0.95, canvas 512, seed 0 (the README call) | 0/6 | 3/6 | 6/6 | 122 s |
+
+**Measured:**
+- **The harness matches the pipeline.** The control's output token IDs are
+  identical to run 2's on all six cues.
+- **The empty captions come from the greedy decoding order, not from
+  Korean.**
+  - Under greedy decoding, every token committed in the first quarter of the
+    steps is end-of-text.
+  - Position 0 is the last position committed: step 79 of 80, or 232–255 of
+    256.
+  - The English prompt shows the same pattern and comes back empty on 4 of 6
+    cues.
+- **A larger canvas does not help.** It was still empty on 5 of 6 cues at
+  256, at about 50 s a job.
+- **The README's sampling settings remove the empties.** Position 0 is
+  committed at step 1 or 2. At canvas 80, no end-of-text is committed in the
+  first quarter.
+- **What comes back is mostly the 원문.**
+  - Exact copies: 9 of 18 at canvas 80, and 3 of 6 at 512.
+  - The rest are near-copies, three of them prefixed "자막:".
+- **The seeds made no difference here, but the call still uses randomness.**
+  - The three seeds gave identical text for every cue.
+  - The call consumes RNG, so two protocol rules would have to change: the
+    no-RNG cap (AC-07) and the refusal of non-zero temperature.
+- **The README call is slow.** At canvas 512 it takes about 2 minutes a job,
+  twice the 60 s deadline.
+
+**Inferred from the pinned `sample_tokens`; not traced:**
+- Logits are divided by 0.2 and truncated at `top_p` 0.95 before the entropy
+  confidence is computed.
+- A position whose top token holds 95 % of the mass therefore becomes one-hot,
+  with confidence ≈ 0, the maximum.
+- Many positions then tie, and `torch.topk` breaks the tie. That fits position
+  0 being committed early, but the tie order on CUDA was not checked.
+- If it holds, tie-breaking rather than confidence decides much of the
+  unmasking order under these settings. That would change what k manipulates.
+
+**What this means for the choice:**
+- **Revised prompts under the fixed greedy call are unlikely to help on their
+  own.** The canvas fills with end-of-text before any content is committed,
+  and the same happens in English.
+- **A decoding change makes Dream write, with three costs:**
+  - it is a new protocol version;
+  - it gives up the no-RNG cap;
+  - k may stop meaning confidence-ordered parallelism.
+
+  The outputs then mostly copy the 원문, which a prompt revision would have to
+  address.
+- **Another model stays open.**
 
 ### G0 and AC-20 in the traceability
 
