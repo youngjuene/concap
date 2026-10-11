@@ -2,7 +2,11 @@
 
 Each model lives in a worker process (``python -m diff worker``) that speaks
 JSON lines: a ``ready`` or ``fatal`` message after loading and warm-up, then
-one ``result`` per ``job``. The parent enforces the per-cue deadline from the
+one ``result`` per ``job``. A ``live`` message (phase 2, since 2026-10-11)
+carries a job that was built during a session and never frozen: the worker
+tokenizes it with the model's own tokenizer, applies the same prompt guards,
+and returns the token hash with the result, so the server never loads a
+tokenizer. The parent enforces the per-cue deadline from the
 outside — native generate cannot be interrupted from inside — by killing a
 worker whose job overruns, recording ``timeout``, and starting a fresh worker
 (model load and warm-up included) for the next job.
@@ -33,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Final
 
-from diff.job_plan import FrozenJob, FrozenPlan, PlanError, job_from_record
+from diff.job_plan import FrozenJob, FrozenPlan, Job, PlanError, job_from_record
 from diff.model_profile import ProfileMismatch
 from diff.study_protocol import sha256_of
 
@@ -164,7 +168,10 @@ class Supervisor:
             self.worker.kill()
             self.worker = None
 
-    def attempt(self, payload: Mapping[str, Any], timeout: float) -> dict[str, Any]:
+    def attempt(self, payload: Mapping[str, Any], timeout: float, *, kind: str = "job") -> dict[str, Any]:
+        """Send one job (``kind="job"``, frozen) or one live job (``kind="live"``) and wait for its result."""
+        if kind not in ("job", "live"):
+            raise ValueError(f"unknown message kind {kind!r}")
         worker = self.worker or self._start()
         started_at, started = time.time(), time.monotonic()
 
@@ -176,7 +183,7 @@ class Supervisor:
                 "wall_ms": round((time.monotonic() - started) * 1000),
             }
 
-        if not worker.send({"type": "job", "job": payload}):
+        if not worker.send({"type": kind, "job": payload}):
             self.restart()
             return finish({"status": "worker_lost", "error": "the worker closed its input"})
         while True:
@@ -362,8 +369,14 @@ def serve(
     run_job: Callable[[Any, FrozenJob], dict[str, Any]],
     out: IO[str],
     stdin: IO[str],
+    *,
+    freeze: Callable[[Any, Job], FrozenJob] | None = None,
 ) -> int:
-    """The worker side: load once, then answer each job line with one result line."""
+    """The worker side: load once, then answer each job line with one result line.
+
+    ``freeze`` turns a live job into a frozen one inside the worker; without it,
+    live messages are refused.
+    """
 
     def emit(message: Mapping[str, Any]) -> None:
         out.write(json.dumps(message, ensure_ascii=False) + "\n")
@@ -389,10 +402,21 @@ def serve(
             break
         record = message["job"]
         try:
-            frozen = FrozenJob(
-                job_from_record(record), str(record["token_ids_sha256"]), int(record["token_count"])
-            )
+            if message.get("type") == "live":
+                if freeze is None:
+                    raise PlanError(["this worker does not take live jobs"])
+                frozen = freeze(loaded, job_from_record(record))
+            else:
+                frozen = FrozenJob(
+                    job_from_record(record), str(record["token_ids_sha256"]), int(record["token_count"])
+                )
             result = run_job(loaded, frozen)
+            if message.get("type") == "live":
+                result = {
+                    **result,
+                    "token_ids_sha256": frozen.token_ids_sha256,
+                    "token_count": frozen.token_count,
+                }
         except Exception as exc:  # noqa: BLE001 — every failure becomes a recorded attempt status
             result = {"status": classify(exc), "error": f"{type(exc).__name__}: {exc}"}
         emit({"type": "result", "job_id": record.get("job_id"), **result})

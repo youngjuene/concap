@@ -291,7 +291,7 @@ def worker(args: argparse.Namespace) -> int:
             loaded = dream_runner.load(args.model_dir, verification, device=args.device, lock_path=args.lock)
             return loaded, dream_runner.warm_up(loaded)
 
-        return serve(load_dream, dream_runner.run_job, protocol, sys.stdin)
+        return serve(load_dream, dream_runner.run_job, protocol, sys.stdin, freeze=dream_runner.freeze_live)
     from diff import qwen_runner
 
     def load_qwen() -> tuple[Any, dict[str, Any]]:

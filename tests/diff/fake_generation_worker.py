@@ -48,6 +48,7 @@ for line in sys.stdin:
             "prompt_tokens": 10,
             "output": {"text": "버스가 지나간다."},
             "latency_ms": 5,
+            "kind": message["type"],
             "trace": {
                 "events": [{"kind": "step", "seq": 0}],
                 "level": "history-counts",

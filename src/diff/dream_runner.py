@@ -30,7 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from diff.job_plan import FrozenJob, prompt_guard_problems
+from diff.job_plan import FrozenJob, Job, PlanError, prompt_guard_problems
 from diff.model_profile import (
     DREAM_7B,
     assert_weights_unchanged,
@@ -296,6 +296,15 @@ def call_with_caps(
         "latency_ms": latency_ms,
         "resolved_config": resolved,
     }
+
+
+def freeze_live(loaded: LoadedModel, job: Job) -> FrozenJob:
+    """A live (phase-2) job frozen inside the worker: Dream's own chat template, the same guards."""
+    ids = chat_token_ids(loaded.tokenizer, job.prompt)
+    problems = prompt_guard_problems(job, ids)
+    if problems:
+        raise PlanError(problems)
+    return FrozenJob(job, sha256_tokens(ids), len(ids))
 
 
 def run_job(loaded: LoadedModel, frozen: FrozenJob) -> dict[str, Any]:
