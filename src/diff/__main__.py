@@ -28,6 +28,9 @@ from pathlib import Path
 from typing import Any
 
 GENERATOR_LOCK = Path("envs/diff-generator/uv.lock")
+GENERATOR_PYTHON = Path("envs/diff-generator/.venv/bin/python")
+# Dream's bf16 weights take about 15.2 GB; a card needs this much free to host a live worker.
+LIVE_MIN_FREE_MIB = 17408
 
 
 def _read_json(path: Path) -> Any:
@@ -435,6 +438,125 @@ def g0_waive(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gpu_free_mib() -> dict[str, int]:
+    import subprocess
+
+    query = ["nvidia-smi", "--query-gpu=index,memory.used,memory.total", "--format=csv,noheader,nounits"]
+    rows = subprocess.run(query, capture_output=True, text=True, check=True).stdout.splitlines()
+    return {
+        index.strip(): int(total) - int(used)
+        for index, used, total in (row.split(",") for row in rows if row.strip())
+    }
+
+
+def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
+    """[--fake-worker] A stand-in for Dream, to walk the interface without a GPU; never research data."""
+    import re
+
+    time.sleep(1.5)
+    match = re.search(r"「(.*?)」", str(payload["prompt"]["text"]))
+    cell = payload.get("cell") or {}
+    marker = f"시험용 · 질감 {cell.get('quality_limit')} · {cell.get('context')}"
+    text = f"{match.group(1) if match else ''} ({marker})"
+    return {"status": "completed", "output": {"text": text}, "latency_ms": 1500, "seed": None}
+
+
+def live_serve(args: argparse.Namespace) -> int:
+    """[repository env + GPU] The live phase-2 app, one supervised Dream worker per GPU."""
+    import functools
+
+    import uvicorn
+
+    from diff.generation_worker import Supervisor, WorkerCommand
+    from diff.job_plan import live_job
+    from diff.live_calibration import calibrate
+    from diff.live_generation import LiveService, LiveStream
+    from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
+    from diff.model_profile import DREAM_7B, verify_snapshot
+    from diff.output_checks import check_output, output_from_record
+
+    sources = _sources(args.sources).sources
+    videos = []
+    for entry in args.video:
+        video_id, _, path = entry.partition("=")
+        if not path:
+            raise SystemExit(f"--video takes ID=PATH, got {entry!r}")
+        videos.append(LiveVideo(video_id, Path(path), LiveStream.from_sources(sources, video_id)))
+    items = rating_items(_read_json(args.items))
+    observations = _read_json(args.observations) if args.observations else {}
+    log_dir: Path = args.log_dir
+
+    def calibrate_for(code: str | None) -> Any:
+        return calibrate(observations.get(code or "", []))
+
+    def job_for(source: Any, spec: Any) -> Any:
+        return live_job(source, spec.texture, spec.context, spec.guidance, args.purpose)
+
+    def check(source: Any, job: Any, result: Any) -> Any:
+        output = output_from_record(result["output"])
+        return check_output(source, output, template_phase=2, cell=job.cell).record()
+
+    services = []
+    if args.fake_worker:
+        print("FAKE WORKER: captions are placeholders for walking the interface, never research data")
+        services.append(LiveService(_fake_live_attempt, log_dir / "fake-worker", check=None))
+    else:
+        if args.dream_dir is None:
+            raise SystemExit("pass --dream-dir (or --fake-worker to walk the interface)")
+        free = _gpu_free_mib()
+        print("verifying the Dream snapshot (hashing every weight shard) …", flush=True)
+        record_path = log_dir / "verification-dream.json"
+        _write_json(record_path, verify_snapshot(args.dream_dir, DREAM_7B, weights=True), force=True)
+        for gpu in args.gpus.split(","):
+            if free.get(gpu, 0) < LIVE_MIN_FREE_MIB:
+                raise SystemExit(
+                    f"GPU {gpu} has {free.get(gpu, 0)} MiB free; a live worker needs {LIVE_MIN_FREE_MIB}"
+                )
+            env = {
+                **os.environ,
+                "CUDA_VISIBLE_DEVICES": gpu,
+                "PYTHONPATH": str(Path("src").resolve()),
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+                "HF_MODULES_CACHE": str((log_dir / "hf-modules" / uuid.uuid4().hex).resolve()),
+                "TOKENIZERS_PARALLELISM": "false",
+            }
+            command = WorkerCommand(
+                argv=(
+                    str(GENERATOR_PYTHON.absolute()),  # not resolve(): the venv's python is a symlink
+                    "-m",
+                    "diff",
+                    "worker",
+                    "--profile",
+                    DREAM_7B.profile_id,
+                    "--model-dir",
+                    str(args.dream_dir),
+                    "--verification",
+                    str(record_path),
+                    "--device",
+                    "cuda:0",
+                    "--lock",
+                    str(GENERATOR_LOCK),
+                ),
+                env=env,
+                cwd=Path.cwd(),
+                log_path=log_dir / f"worker-gpu{gpu}.log",
+            )
+            supervisor = Supervisor(command, startup_timeout=1800.0)
+            print(f"loading Dream on GPU {gpu} …", flush=True)
+            supervisor.ensure_started()
+            attempt = functools.partial(supervisor.attempt, kind="live")
+            services.append(LiveService(attempt, log_dir / "sessions", check=check))
+    for service in services:
+        service.start()
+    app = build_live_app(
+        videos, items, LivePool(services), log_dir / "sessions", job_for=job_for, calibrate=calibrate_for
+    )
+    print(f"live phase 2 on http://{args.host}:{args.port}/ with {len(services)} worker(s)", flush=True)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="python -m diff", description=__doc__.split("\n\n")[0])
     commands = root.add_subparsers(dest="command", required=True)
@@ -555,6 +677,29 @@ def parser() -> argparse.ArgumentParser:
     g0_skip.add_argument("--decided-by", required=True)
     g0_skip.add_argument("--notes", required=True, help="the reason for the waiver")
     g0_skip.set_defaults(handler=g0_waive)
+    live = commands.add_parser(
+        "live", help="live phase 2: Dream rewrites captions while a participant watches"
+    )
+    live_commands = live.add_subparsers(dest="action", required=True)
+    serve_live = live_commands.add_parser("serve", help="[repository env + GPU] run the live participant app")
+    serve_live.add_argument("--sources", type=Path, required=True, help="phase-2 cues with starting captions")
+    serve_live.add_argument("--video", action="append", required=True, help="ID=PATH, in watch order")
+    serve_live.add_argument(
+        "--items", type=Path, required=True, help="the researcher's post-watch items (JSON)"
+    )
+    serve_live.add_argument(
+        "--observations", type=Path, help="{code: [phase-1 observations]} for calibration"
+    )
+    serve_live.add_argument("--dream-dir", type=Path)
+    serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")
+    serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
+    serve_live.add_argument("--log-dir", type=Path, required=True)
+    serve_live.add_argument("--host", default="127.0.0.1")
+    serve_live.add_argument("--port", type=int, default=8782)
+    serve_live.add_argument(
+        "--fake-worker", action="store_true", help="placeholder captions, no GPU (interface walk)"
+    )
+    serve_live.set_defaults(handler=live_serve)
     return root
 
 

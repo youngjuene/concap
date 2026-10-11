@@ -163,6 +163,11 @@ class Supervisor:
         self.worker, self.ready = worker, message
         return worker
 
+    def ensure_started(self) -> None:
+        """Load and warm up now rather than on the first job (a live session should not wait)."""
+        if self.worker is None:
+            self._start()
+
     def restart(self) -> None:
         if self.worker is not None:
             self.worker.kill()

@@ -31,7 +31,7 @@ from diff.analysis_decisions import gate_problems
 from diff.caption_sources import CaptionSource, bundle_problems
 from diff.model_profile import DREAM_7B, QWEN_7B, ModelProfile, profile
 from diff.output_checks import CHECKS_VERSION
-from diff.rewrite_prompts import RenderedPrompt, render_phase1, render_phase2
+from diff.rewrite_prompts import RenderedPrompt, render_live, render_phase1, render_phase2
 from diff.study_protocol import (
     ALG,
     ALG_TEMP,
@@ -319,6 +319,30 @@ def make_job(
         runner=model.runner,
         prompt=prompt,
         generate=dict(generate),
+    )
+
+
+LIVE_CONDITION: Final = "dream_k2"  # researcher, 2026-10-11: about 8 s per caption at canvas 128
+
+
+def live_job(source: CaptionSource, texture: int, context: str, guidance: str, purpose: str) -> Job:
+    """One live phase-2 job: the cue's starting caption under the snapped steps and the guidance.
+
+    The guidance is in the prompt, so it is part of the job's identity and its seed.
+    """
+    if purpose not in ("participant", "smoke"):
+        raise PlanError([f"a live job serves a participant session or a smoke run, not {purpose!r}"])
+    model, generate = condition_settings(2, LIVE_CONDITION)
+    cell = {"cell_id": f"t{texture}-{context}", "quality_limit": texture, "context": context}
+    return make_job(
+        source,
+        purpose,
+        LIVE_CONDITION,
+        cell,
+        model,
+        render_live(source, texture, context, guidance),
+        generate,
+        phase=2,
     )
 
 
