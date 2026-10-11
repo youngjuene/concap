@@ -120,6 +120,15 @@ leave out `--ratings` and the fail is recorded with naturalness unrated
 (`null`). Without ratings, `decide` refuses a run whose automatic criteria
 pass, because a pass always needs the rating.
 
+To record a waiver instead of a rating, as on 2026-10-11:
+
+```sh
+uv run python -m diff g0 waive --out-dir $W/g0 --decided-by "<name>" --notes "<reason>"
+```
+
+The record's outcome is `waived`, never `pass`. Only a step that names it in
+`accept` takes it.
+
 **After the decision.**
 - **Fail:** stop. The researcher chooses between revised prompts on development
   material (a new protocol version) and another model.
@@ -143,3 +152,4 @@ uv run mypy
 `make check` also checks `envs/diff-generator/uv.lock`. Its lint and the regen
 detachment test currently trip over `src/dpo/regen/.omx/`, scratch copies
 excluded from git only by `.git/info/exclude`. That failure predates diff.
+

@@ -412,6 +412,29 @@ def g0_decide(args: argparse.Namespace) -> int:
     return 0
 
 
+def g0_waive(args: argparse.Namespace) -> int:
+    """Record the researcher's waiver of G0's human rating (never a pass)."""
+    from diff import feasibility_gate as gate
+
+    out: Path = args.out_dir
+    manifest = _read_json(out / "researcher" / "run-manifest.json")
+    report = _read_json(out / "researcher" / "report.json")
+    try:
+        decision = gate.waive(
+            report,
+            manifest,
+            decided_by=args.decided_by,
+            decided_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            notes=args.notes,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"cannot waive G0: {exc}") from exc
+    path = out / "researcher" / f"decision-{decision.decision_id}.json"
+    _write_json(path, decision.record())
+    print(f"G0 waived: {json.dumps(decision.evidence['criteria'])} → {path}")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="python -m diff", description=__doc__.split("\n\n")[0])
     commands = root.add_subparsers(dest="command", required=True)
@@ -527,6 +550,11 @@ def parser() -> argparse.ArgumentParser:
     g0_rule.add_argument("--decided-by", required=True)
     g0_rule.add_argument("--notes", default="")
     g0_rule.set_defaults(handler=g0_decide)
+    g0_skip = g0.add_parser("waive", help="record the researcher's waiver of the human rating (never a pass)")
+    g0_skip.add_argument("--out-dir", type=Path, required=True)
+    g0_skip.add_argument("--decided-by", required=True)
+    g0_skip.add_argument("--notes", required=True, help="the reason for the waiver")
+    g0_skip.set_defaults(handler=g0_waive)
     return root
 
 

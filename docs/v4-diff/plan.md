@@ -404,8 +404,11 @@ midsentence render had freed it, and warm-up's seeded calls agreed.
   three of the four corners gave the identical sentence. That matters for G2,
   not for G0.
 
-**Next:** one fluent Korean reader rates the 36-row blind packet in
-`g0/rater/` (`dream_k1` and Qwen mixed), then `g0 decide` runs.
+**Outcome:** the researcher waived the human rating on 2026-10-11, because
+participants rate live captions instead. The waiver
+is recorded as `g0/researcher/decision-dec-c48cd5efa9c2ec1e87522dec.json`:
+outcome `waived`, naturalness `null`. A waiver is never a pass, and only a step
+that says so accepts it.
 
 ### G0 and AC-20 in the traceability
 

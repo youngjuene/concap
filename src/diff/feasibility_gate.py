@@ -281,6 +281,56 @@ def read_ratings(text: str, key: Mapping[str, Any]) -> dict[str, int]:
     return ratings
 
 
+def waive(
+    report: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    *,
+    decided_by: str,
+    decided_at: str,
+    notes: str,
+) -> AnalysisDecision:
+    """Record the researcher's waiver of G0's human rating; it is never a pass.
+
+    The automatic numbers stay in the evidence, so what was checked and what
+    was skipped can both be read back from the record.
+    """
+    if manifest.get("purpose") != "g0" or manifest.get("materials") != ["development"]:
+        raise ValueError("only a G0 run over development material can be waived; smoke runs never can")
+    if not notes.strip():
+        raise ValueError("a waiver needs its reason in --notes")
+    rule = GATES["G0"]
+    evidence: dict[str, Any] = {}
+    for condition in RATED_CONDITIONS:
+        stats = report["conditions"][condition]
+        evidence[condition] = {
+            "jobs": stats["jobs"],
+            "terminal": stats["terminal"],
+            "technical_failures": stats["technical_failures"],
+            "script_pass_share": stats["script_pass_share"],
+            "rated": 0,
+            "naturalness_share": None,
+            "naturalness_median": None,
+        }
+    k1 = evidence["dream_k1"]
+    evidence["criteria"] = {
+        "terminal": k1["terminal"] == k1["jobs"] and k1["technical_failures"] == 0,
+        "script": k1["script_pass_share"] >= rule["min_script_pass_share"],
+        "naturalness": None,
+    }
+    evidence["waived"] = "the human naturalness rating"
+    return AnalysisDecision(
+        gate="G0",
+        outcome="waived",
+        rule=rule,
+        evidence=evidence,
+        run_manifest_sha256=str(manifest["manifest_sha256"]),
+        model_profile_id=DREAM_7B.profile_id,
+        decided_by=decided_by,
+        decided_at=decided_at,
+        notes=notes,
+    )
+
+
 def decide(
     report: Mapping[str, Any],
     key: Mapping[str, Mapping[str, Any]],

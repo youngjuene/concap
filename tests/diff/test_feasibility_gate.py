@@ -13,7 +13,7 @@ from diff_fixtures import relabelled
 from fake_dream_model import FakeTokenizer
 
 from diff import feasibility_gate as gate
-from diff.analysis_decisions import decision_from_record, gate_problems
+from diff.analysis_decisions import G0_PASS_OR_WAIVER, decision_from_record, gate_problems
 from diff.caption_sources import SourceSet, parse_sources
 from diff.job_plan import FrozenPlan, PlanError, freeze_plan
 from diff.model_profile import DREAM_7B, QWEN_7B
@@ -205,6 +205,25 @@ def test_copies_of_the_source_count_against_the_script_share(
     report = gate.g0_report(frozen, gate.latest_attempts(tmp_path), by_id)
     k1 = report["conditions"]["dream_k1"]
     assert k1["terminal"] == k1["jobs"] == 20 and k1["script_pass"] == 0
+
+
+def test_a_waiver_is_recorded_and_never_passes_as_a_pass(
+    tmp_path: Path, development_sources: SourceSet
+) -> None:
+    # Decided 2026-10-11: participants rate live captions, so G0's human rating is waived.
+    built = packet_for(tmp_path, development_sources)
+    decision = gate.waive(
+        built["report"], built["manifest"], decided_by="tester", decided_at="now", notes="participants rate"
+    )
+    assert decision.outcome == "waived" and decision.evidence["criteria"]["naturalness"] is None
+    record = decision.record()
+    assert decision_from_record(record).decision_id == record["decision_id"]
+    profile_id = DREAM_7B.profile_id
+    refusals = gate_problems(record, gate="G0", model_profile_id=profile_id)
+    assert any("'waived', not 'pass'" in refusal for refusal in refusals)
+    assert gate_problems(record, gate="G0", model_profile_id=profile_id, accept=G0_PASS_OR_WAIVER) == []
+    with pytest.raises(ValueError, match="reason"):
+        gate.waive(built["report"], built["manifest"], decided_by="t", decided_at="now", notes=" ")
 
 
 def test_a_timed_out_job_counts_against_the_script_share(

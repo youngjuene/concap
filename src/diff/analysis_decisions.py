@@ -1,10 +1,15 @@
 """Recorded gate outcomes that later stages look up (PRD §8 ``AnalysisDecision``).
 
-A gate outcome is a record, not a mood: which gate, pass, fail or hold, under
+A gate outcome is a record, not a mood: which gate, pass, fail, hold or waived, under
 which rule, on which run manifest and model profile, decided by whom and when.
 Steps that depend on a gate find the record and refuse without it. AC-20: the
 lattice generator and the bundle builder refuse to run unless a passing G0
 decision exists for a run manifest with the current model profile.
+
+``waived`` (2026-10-11) records that the researcher skipped a gate's human
+step on purpose. It is never a pass: a step accepts it only when its caller
+says so explicitly (``accept``), so the record of what was and was not
+checked survives.
 
 The PRD's own §8 field list was not available when this was written. The fields
 here follow the brief (gate, outcome, run-manifest hash) and the schema is
@@ -20,7 +25,9 @@ from typing import Any, Final
 from diff.study_protocol import sha256_of
 
 DECISION_SCHEMA: Final = "diff.analysis-decision/v1"
-OUTCOMES: Final = ("pass", "fail", "hold")
+OUTCOMES: Final = ("pass", "fail", "hold", "waived")
+# What the live phase-2 path and the phase-1 bundle accept from G0 (researcher, 2026-10-11).
+G0_PASS_OR_WAIVER: Final = ("pass", "waived")
 
 
 @dataclass(frozen=True)
@@ -81,8 +88,18 @@ def decision_from_record(record: Mapping[str, Any]) -> AnalysisDecision:
     return decision
 
 
-def gate_problems(record: Mapping[str, Any] | None, *, gate: str, model_profile_id: str) -> list[str]:
-    """Why ``record`` does not license a step that needs a passing ``gate`` (empty when it does)."""
+def gate_problems(
+    record: Mapping[str, Any] | None,
+    *,
+    gate: str,
+    model_profile_id: str,
+    accept: tuple[str, ...] = ("pass",),
+) -> list[str]:
+    """Why ``record`` does not license a step that needs ``gate`` (empty when it does).
+
+    ``accept`` lists the outcomes the step takes; only "pass" unless the caller
+    names more, such as a recorded waiver.
+    """
     if record is None:
         return [f"no {gate} decision was supplied; a passing {gate} decision is required"]
     try:
@@ -92,8 +109,9 @@ def gate_problems(record: Mapping[str, Any] | None, *, gate: str, model_profile_
     problems = []
     if decision.gate != gate:
         problems.append(f"the decision is for {decision.gate}, not {gate}")
-    if decision.outcome != "pass":
-        problems.append(f"the {gate} decision is {decision.outcome!r}, not 'pass'")
+    if decision.outcome not in accept:
+        wanted = " or ".join(repr(outcome) for outcome in accept)
+        problems.append(f"the {gate} decision is {decision.outcome!r}, not {wanted}")
     if decision.model_profile_id != model_profile_id:
         problems.append(
             f"the {gate} decision covers {decision.model_profile_id}, "
