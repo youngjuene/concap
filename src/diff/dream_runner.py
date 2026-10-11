@@ -13,8 +13,11 @@ object is ever passed: with one, missing special tokens are filled from the
 shipped ``generation_config.json``, whose ``mask_token_id`` is null.
 
 Each call is also held to the §6.2 caps: forward calls must equal ``steps``
-(a read-only forward hook counts them, AC-08), new positions must equal the
-canvas, and the call must leave the CPU and CUDA RNG states unchanged (AC-07).
+(a read-only forward hook counts them, AC-08) and new positions must equal the
+canvas. Since protocol v4 (2026-10-11) Dream samples at the README's
+temperature 0.2 and ``top_p`` 0.95, so a call does consume randomness: it is
+seeded with its job's seed immediately before it runs, and the worker refuses
+to start on a device where two seeded calls differ (AC-07, revised).
 Realized per-step commit counts come from ``output_history``. The full decode
 trace — the logits hook that recomputes confidences and selections — follows a
 passing G0 (follow-up §7) and is not part of this module yet.
@@ -40,8 +43,6 @@ from diff.model_runtime import (
     RefusedCall,
     chat_token_ids,
     checked_token_ids,
-    rng_snapshot,
-    rng_unchanged,
 )
 from diff.output_checks import extract_output
 from diff.study_protocol import (
@@ -49,7 +50,10 @@ from diff.study_protocol import (
     CONTEXT_LIMIT,
     EPS,
     MASK_ID,
+    TEMPERATURE,
     TERMINATOR_IDS,
+    TOP_P,
+    WARMUP_SEED,
     sha256_tokens,
 )
 
@@ -110,14 +114,16 @@ def checked_call(arguments: Mapping[str, Any]) -> dict[str, Any]:
         problems.append("alg='origin' is refused: it orders unmasking by torch.rand")
     elif "alg" in arguments and alg not in ALGORITHMS:
         problems.append(f"alg must be one of {list(ALGORITHMS)}, got {alg!r}")
-    for keyword in ("temperature", "alg_temp"):
-        if keyword in arguments and not _is_zero(arguments[keyword]):
-            problems.append(f"{keyword} must be 0, got {arguments[keyword]!r}")
-    for keyword in ("top_p", "top_k"):
-        if keyword in arguments and arguments[keyword] is not None:
-            problems.append(
-                f"{keyword} must be None (filtering runs before the confidence), got {arguments[keyword]!r}"
-            )
+    for keyword, wanted in (("temperature", TEMPERATURE), ("top_p", TOP_P)):
+        value = arguments.get(keyword)
+        if keyword in arguments and (isinstance(value, bool) or value != wanted):
+            problems.append(f"{keyword} must be {wanted} (protocol v4), got {value!r}")
+    if "alg_temp" in arguments and not _is_zero(arguments["alg_temp"]):
+        problems.append(f"alg_temp must be 0, got {arguments['alg_temp']!r}")
+    if "top_k" in arguments and arguments["top_k"] is not None:
+        problems.append(
+            f"top_k must be None (filtering runs before the confidence), got {arguments['top_k']!r}"
+        )
     if "eps" in arguments and arguments["eps"] != EPS:
         problems.append(f"eps must be {EPS}, got {arguments['eps']!r}")
     if "mask_token_id" in arguments and arguments["mask_token_id"] != MASK_ID:
@@ -197,8 +203,18 @@ def realized_counts(
     return counts
 
 
+def seed_all(seed: int) -> None:
+    """Seed the CPU and every CUDA generator; called immediately before each Dream call."""
+    import torch
+
+    torch.manual_seed(seed)
+
+
 def warm_up(loaded: LoadedModel) -> dict[str, Any]:
-    """One tiny untimed call so CUDA initialisation is not charged to a cue's 30 s."""
+    """Two tiny untimed calls with the same seed, which must agree; refuses the device otherwise.
+
+    They also keep CUDA initialisation out of the first cue's deadline.
+    """
     import torch
 
     rendered = loaded.tokenizer.apply_chat_template(
@@ -210,8 +226,8 @@ def warm_up(loaded: LoadedModel) -> dict[str, Any]:
             "attention_mask": torch.ones_like(input_ids),
             "max_new_tokens": 8,
             "steps": 8,
-            "temperature": 0.0,
-            "top_p": None,
+            "temperature": TEMPERATURE,
+            "top_p": TOP_P,
             "top_k": None,
             "alg": "entropy",
             "alg_temp": 0.0,
@@ -222,17 +238,30 @@ def warm_up(loaded: LoadedModel) -> dict[str, Any]:
         }
     )
     started = time.monotonic()
-    loaded.model.diffusion_generate(input_ids, **arguments)
-    return {"wall_ms": round((time.monotonic() - started) * 1000)}
+    sequences = []
+    for _ in range(2):
+        seed_all(WARMUP_SEED)
+        output = loaded.model.diffusion_generate(input_ids, **arguments)
+        sequences.append([int(token) for token in output.sequences[0].tolist()])
+    if sequences[0] != sequences[1]:
+        raise RuntimeError(
+            "two calls with the same seed differ on this device; seeded sampling is not reproducible"
+        )
+    return {
+        "wall_ms": round((time.monotonic() - started) * 1000),
+        "seed": WARMUP_SEED,
+        "seeded_calls_identical": True,
+    }
 
 
 def call_with_caps(
     loaded: LoadedModel,
     prompt_ids: Sequence[int],
     generate: Mapping[str, Any],
+    seed: int,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One diffusion_generate call with its caps measured; raises RefusedCall before the call."""
+    """One seeded diffusion_generate call with its caps measured; raises RefusedCall before the call."""
     import torch
 
     canvas = int(generate["max_new_tokens"])
@@ -248,14 +277,13 @@ def call_with_caps(
         forward_calls.append(1)
 
     handle = loaded.model.register_forward_hook(count_forward)
-    before = rng_snapshot(loaded.device)
+    seed_all(seed)
     started = time.monotonic()
     try:
         output = loaded.model.diffusion_generate(input_ids, **arguments)
     finally:
         handle.remove()
     latency_ms = round((time.monotonic() - started) * 1000)
-    unchanged = rng_unchanged(before, rng_snapshot(loaded.device))
     sequence = [int(token) for token in output.sequences[0].tolist()]
     history = [[int(token) for token in state[0].tolist()] for state in output.history]
     initial = [*prompt_ids, *([MASK_ID] * canvas)]
@@ -264,7 +292,7 @@ def call_with_caps(
         "history_steps": len(history),
         "realized_per_step": realized_counts(initial, history, len(prompt_ids)),
         "forward_calls": len(forward_calls),
-        "rng_unchanged": unchanged,
+        "seed": seed,
         "latency_ms": latency_ms,
         "resolved_config": resolved,
     }
@@ -279,7 +307,10 @@ def run_job(loaded: LoadedModel, frozen: FrozenJob) -> dict[str, Any]:
     guards = prompt_guard_problems(job, ids)
     if guards:
         return {"status": "refused", "error": "; ".join(guards)}
-    call = call_with_caps(loaded, ids, job.generate)
+    seed = job.seed
+    if seed is None:
+        return {"status": "refused", "error": "a Dream job has no seed"}
+    call = call_with_caps(loaded, ids, job.generate, seed)
     canvas, steps = int(job.generate["max_new_tokens"]), int(job.generate["steps"])
     output = extract_output(
         call["sequence"], len(ids), loaded.decode, loaded.special_ids, TERMINATOR_IDS, mask_id=MASK_ID
@@ -294,8 +325,6 @@ def run_job(loaded: LoadedModel, frozen: FrozenJob) -> dict[str, Any]:
     status = "completed"
     if problems:
         status = "count_mismatch"
-    elif not call["rng_unchanged"]:
-        status, problems = "rng_consumed", ["the call changed the CPU or CUDA RNG state"]
     elif output.leftover_mask_count:
         status, problems = "leftover_mask", [f"{output.leftover_mask_count} mask tokens left in the canvas"]
     counts = call["realized_per_step"]
@@ -307,7 +336,7 @@ def run_job(loaded: LoadedModel, frozen: FrozenJob) -> dict[str, Any]:
         "output_token_ids_sha256": sha256_tokens(call["sequence"]),
         "resolved_config": call["resolved_config"],
         "caps": {"forward_calls": call["forward_calls"], "steps": steps, "canvas": canvas},
-        "rng_unchanged": call["rng_unchanged"],
+        "seed": call["seed"],
         "latency_ms": call["latency_ms"],
         "trace": {
             "events": [],

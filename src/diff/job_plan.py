@@ -46,6 +46,7 @@ from diff.study_protocol import (
     QWEN_CONDITION,
     TEMPERATURE,
     TIMEOUT_SECONDS,
+    TOP_P,
     canvas_tokens,
     lattice_cells,
     sha256_of,
@@ -78,7 +79,7 @@ def dream_call_settings(phase: int, k: int) -> dict[str, Any]:
         "max_new_tokens": canvas,
         "steps": steps_for(phase, k),
         "temperature": TEMPERATURE,
-        "top_p": None,
+        "top_p": TOP_P,
         "top_k": None,
         "alg": ALG,
         "alg_temp": ALG_TEMP,
@@ -157,6 +158,11 @@ class Job:
     @property
     def job_id(self) -> str:
         return "job-" + sha256_of(self.spec())[:32]
+
+    @property
+    def seed(self) -> int | None:
+        """Dream's sampling seed: derived from the job's identity, so a retry is identical (v4)."""
+        return int(self.job_id[4:12], 16) if self.runner == "dream" else None
 
     def record(self) -> dict[str, Any]:
         return {"job_id": self.job_id, **self.spec()}

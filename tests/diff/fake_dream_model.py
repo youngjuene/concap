@@ -3,8 +3,10 @@
 ``FakeDream.diffusion_generate`` keeps Dream's schedule — linear timesteps
 from 1 to eps, ``int(n_mask × (1 − s/t))`` positions per step and every
 remaining one at the last step, one forward per step — and fills a scripted
-text left to right. It is not the pinned ``generation_utils.py``: the CPU
-tests against a vendored copy of that file follow a passing G0.
+text left to right. Like the real sampler at temperature > 0 it draws from the
+torch RNG once per step; ``draws`` keeps each call's first draw, so a test can
+see whether the call was seeded. It is not the pinned ``generation_utils.py``:
+the CPU tests against a vendored copy of that file follow a passing G0.
 """
 
 from __future__ import annotations
@@ -71,12 +73,13 @@ class FakeDream(torch.nn.Module):
         terminator: int = ENDOFTEXT,
         leave_mask: bool = False,
         extra_forward: bool = False,
-        use_rng: bool = False,
+        unreproducible: bool = False,
     ) -> None:
         super().__init__()
         self.text_ids = [*tokenizer.encode(text), terminator]
-        self.leave_mask, self.extra_forward, self.use_rng = leave_mask, extra_forward, use_rng
+        self.leave_mask, self.extra_forward, self.unreproducible = leave_mask, extra_forward, unreproducible
         self.calls: list[dict[str, Any]] = []
+        self.draws: list[float] = []
 
     def forward(self, x: torch.Tensor, *args: Any) -> SimpleNamespace:
         return SimpleNamespace(logits=None)
@@ -93,9 +96,13 @@ class FakeDream(torch.nn.Module):
         x = torch.cat([inputs, torch.full((1, canvas), MASK, dtype=torch.long)], dim=1)
         target = (self.text_ids + [ENDOFTEXT] * canvas)[:canvas]
         timesteps = torch.linspace(1, eps, steps + 1)
-        history = []
+        history, sampling = [], float(kwargs["temperature"]) > 0
         for index in range(steps):
             self(x)
+            if sampling:
+                draw = float(torch.rand(1))
+                if index == 0:
+                    self.draws.append(draw)
             masked = [p for p in range(prompt, x.shape[1]) if int(x[0, p]) == MASK]
             t, s = timesteps[index], timesteps[index + 1]
             number = int(len(masked) * (1 - s / t)) if index < steps - 1 else len(masked)
@@ -106,8 +113,8 @@ class FakeDream(torch.nn.Module):
             history.append(x.clone())
         if self.extra_forward:
             self(x)
-        if self.use_rng:
-            torch.rand(1)
+        if self.unreproducible:  # a device whose seeded output still varies
+            x[0, -1] = 1000 + len(self.calls)
         return SimpleNamespace(sequences=x, history=history)
 
 

@@ -317,17 +317,42 @@ per variant).
     the gate on copies.
 - **Another model stays open.**
 
+### Protocol v4, 2026-10-11 (researcher's decision)
+
+The researcher chose seeded sampling plus a revised rewrite prompt, and ruled
+that copies count against Dream. Protocol v4 (`diff.study-protocol/v4`,
+`c3688aeb3765…`; prompt templates are hashed per job, not in the protocol)
+implements the parts that do not depend on the prompt:
+
+- **Decoding.** Dream samples at the README's temperature 0.2 with `top_p`
+  0.95. `checked_call` requires exactly these two values and still refuses
+  `top_k` and a non-zero `alg_temp`.
+- **Seed.** Each Dream job's seed is the first 8 hex digits of its job ID, as
+  an integer. `torch.manual_seed(seed)` runs immediately before the call, so a
+  job is reproducible and its one allowed retry is identical. Every attempt
+  records its seed.
+- **Reproducibility replaces the no-RNG cap for Dream (AC-07, revised).**
+  - The worker's warm-up makes two calls with seed 0, and the worker refuses
+    to start if they differ.
+  - It passed on the RTX 3090 on 2026-10-11.
+  - Qwen stays greedy and keeps the no-RNG check.
+- **Copies.** An output identical to its cue's 원문 fails G0's script check,
+  like an empty one (`script_check_failing_flags`). Near-copies stay flags.
+- **Prompt.** A new `rewrite-p1` version, aimed at Dream copying the 원문,
+  lands as its own change. The corner-cell prompt (`lattice-p2`) shows no 원문
+  and is unchanged.
+
 ### G0 and AC-20 in the traceability
 
 | ID | Content (follow-up) | Modules | Tests |
 |---|---|---|---|
-| G0 | Korean feasibility before any other Dream work: development cues (phase-1 prompt) + ≥ 12 corner cell prompts; `dream_k1/k2/k4` + `qwen`; automatic report; blind packet (`dream_k1` + `qwen`) rated 1–5 by one fluent Korean reader; pass = all `dream_k1` jobs terminal with no unresolved technical failure, ≥ 95 % script pass (incomplete counts as failure), ≥ 3/4 naturalness ≥ 3; recorded as an `AnalysisDecision` with the run-manifest hash | `feasibility_gate`, `analysis_decisions`, `output_checks`, `dream_runner`, `qwen_runner`, `__main__ g0 …` | `test_feasibility_gate` |
+| G0 | Korean feasibility before any other Dream work: development cues (phase-1 prompt) + ≥ 12 corner cell prompts; `dream_k1/k2/k4` + `qwen`; automatic report; blind packet (`dream_k1` + `qwen`) rated 1–5 by one fluent Korean reader; pass = all `dream_k1` jobs terminal with no unresolved technical failure, ≥ 95 % script pass over every `dream_k1` job (incomplete, empty, missing and, since v4, exact copies of the 원문 count as failures), ≥ 3/4 naturalness ≥ 3; recorded as an `AnalysisDecision` with the run-manifest hash | `feasibility_gate`, `analysis_decisions`, `output_checks`, `dream_runner`, `qwen_runner`, `__main__ g0 …` | `test_feasibility_gate` |
 | AC-20 | the bundle builder and lattice generator refuse unless a passing G0 decision exists for a run manifest with the current model profile | `job_plan.build_phase2_plan` (lattice generator), `analysis_decisions.gate_problems`; bundle builder in Stage 2 | `test_job_plan_identity` (AC-20 cases) |
 | AC-01 | synthetic logits: recomputed confidences, counts and selected positions equal the pinned code's | after G0: vendored `dream_generation_utils.py` + decode trace | pending G0 |
 | AC-02 | the §3 refusal list, including each missing required keyword | `dream_runner.checked_call`, `qwen_runner.checked_call` | `test_dream_runner_contract`, `test_qwen_runner_contract` |
 | AC-03 | 3 inputs × 3 conditions: identical token IDs with and without hooks and history; hook selections = history unmasking + logged `selected_but_masked` | after G0 (decode trace) | pending G0 |
 | AC-05 | context and canvas edges: 2,047 and 2,048 accepted, 2,049 refused before the call; invalid steps refused; very short prompts | `dream_runner.context_problems`, `checked_call` | `test_dream_runner_contract` |
-| AC-07 | a call leaves the CPU and CUDA RNG states unchanged | `model_runtime.rng_snapshot`, checked on every call (`rng_consumed`) | `test_dream_runner_contract` (fake); GPU pending |
+| AC-07 | revised in v4 (2026-10-11): each Dream call is seeded from its job ID immediately before it runs, and the worker's warm-up refuses a device where two seeded calls differ; Qwen calls still leave the RNG states unchanged (`rng_consumed`) | `dream_runner.seed_all`, `dream_runner.warm_up`; `model_runtime.rng_snapshot` for Qwen | `test_dream_runner_contract` (fake); warm-up passed on an RTX 3090 on 2026-10-11 |
 | AC-08 | forward-hook count equals `steps` | read-only forward hook in `dream_runner.call_with_caps` (`count_mismatch`) | `test_dream_runner_contract` (fake); GPU pending |
 
 ## 0. Read this first
@@ -548,7 +573,7 @@ is not a stdlib module; `difflib` is.
 | `model_profile.py` | 1 | gen | Dream and Qwen pins, file SHA-256, token IDs, context limit, verification before `trust_remote_code`, post-load hash of imported remote code |
 | `job_plan.py` | 1 | both | content-addressed jobs (cue × condition, cue × cell), caps, plan freeze (token IDs added in the generator env) |
 | `generation_worker.py` | 1 | gen | *added*: subprocess isolation, the job's deadline (60 s since M0), transient-failure classification, the one identical retry |
-| `dream_runner.py` | 1 | gen | native `diffusion_generate`, batch 1, every keyword required; refusals before the call; caps (forward calls = steps, new positions = canvas, RNG unchanged); realized per-step counts from history |
+| `dream_runner.py` | 1 | gen | native `diffusion_generate`, batch 1, every keyword required; refusals before the call; caps (forward calls = steps, new positions = canvas); each call seeded from its job ID (v4) and a reproducibility check at warm-up; realized per-step counts from history |
 | `qwen_runner.py` | 1 | gen | greedy baseline, `repetition_penalty=1.0`, sampling knobs unset, resolved config recorded |
 | `model_runtime.py` | 1 | gen | *added*: loaded-model record, refusal error, chat rendering with the system message, token-ID check, RNG snapshots |
 | `analysis_decisions.py` | 1 | both | *added*: `AnalysisDecision` records and the gate check (AC-20) |
@@ -723,6 +748,11 @@ and evidence with no qualities renders an empty list.
 
 ### 4.4 Runners, isolation, retries
 
+> **Protocol v4 (2026-10-11) supersedes the values in this box:**
+> `temperature=0.2` and `top_p=0.95` are required, not refused. Each call is
+> seeded from its job ID, and the worker's warm-up checks that two seeded calls
+> agree, instead of the RNG-unchanged cap. See "Protocol v4" near the top.
+>
 > **Revised for Dream (2026-10-09).** The Trida call described below is gone.
 > `dream_runner.checked_call` requires every keyword of the follow-up's §3 call —
 > `attention_mask`, `max_new_tokens` (the canvas), `steps` (canvas ÷ k),
@@ -1328,7 +1358,7 @@ them so it can be computed before freeze.
 `status` ∈ {`completed`, `timeout`, `refused`, `worker_lost`, `device_error`,
 `runner_error`, `trace_inconsistent`, `count_mismatch`, `rng_consumed`,
 `leftover_mask`}. Revised for Dream, attempts also carry `resolved_config`,
-`caps` (forward calls, steps, canvas), `rng_unchanged` and `latency_ms`. The
+`caps` (forward calls, steps, canvas), `rng_unchanged` (Qwen), `seed` (Dream, since v4) and `latency_ms`. The
 output records `completion` (`terminated` or `incomplete`), `terminator`
 (`endoftext` or `im_end`), the trimmed tail as a `postprocess` record, and
 `leftover_mask_count`.
@@ -1670,6 +1700,14 @@ G0 run, and each row wins over the rows above.
 | §5.2 | **CV-08:** the canvas is 80 tokens in phase 1 and 128 in phase 2. It covers the 96- and 160-character limits at about 0.75 tokens per character, measured on the development captions. |
 | §6.2 | **Timeout:** 60 s per job, about twice the slowest measured job. Generation is offline, so the timeout only catches a stuck worker. |
 | §11 | **G0 script check:** besides Han/kana, stray Latin and `incomplete`, it fails on empty text, U+FFFD and leftover masks. The share is over every `dream_k1` job, so a job with no output counts as a failure. |
+
+**Protocol v4 decisions (researcher, 2026-10-11).** These follow the second
+G0 run and the k1 diagnostic, and each row wins over the rows above.
+
+| PRD | Change |
+|---|---|
+| §5.2 | **CV-05 / CV-12:** Dream samples at temperature 0.2 with `top_p` 0.95, the README's settings, because greedy decoding returned empty captions. Each call is seeded from its job ID, and the warm-up refuses a device where two seeded calls differ. Qwen stays greedy. |
+| §11 | **G0 script check:** an exact copy of the cue's 원문 fails it. Near-copies stay flags. |
 
 ## 12. Open decisions (protocol data; default unless you decide otherwise)
 

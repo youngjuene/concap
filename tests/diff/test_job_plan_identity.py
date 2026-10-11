@@ -49,8 +49,8 @@ def test_dream_jobs_carry_the_whole_call_contract(development_sources: SourceSet
     assert job.generate == {
         "max_new_tokens": 80,
         "steps": 40,
-        "temperature": 0.0,
-        "top_p": None,
+        "temperature": 0.2,
+        "top_p": 0.95,
         "top_k": None,
         "alg": "entropy",
         "alg_temp": 0.0,
@@ -61,6 +61,9 @@ def test_dream_jobs_carry_the_whole_call_contract(development_sources: SourceSet
     }
     assert job.caps["expected_forward_calls"] == 40 and job.caps["timeout_s"] == 60.0
     assert job.prompt.system_message == "You are a helpful assistant."
+    assert job.seed == int(job.job_id[4:12], 16)  # v4: sampling, seeded from the job's identity
+    qwen = build_phase1_plan(development_sources.sources, ("qwen",), "development").jobs[0]
+    assert qwen.seed is None
 
 
 def test_identity_is_stable_and_round_trips(development_sources: SourceSet) -> None:

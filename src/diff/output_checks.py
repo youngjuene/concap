@@ -347,9 +347,15 @@ def check_output(
 
 
 def script_passes(result: CheckResult) -> bool:
-    """G0's script check: no foreign-script letters, and output that can be shown as a caption.
+    """G0's script check: no foreign-script letters, output that can be shown as a caption, no copy.
 
-    The failing codes are protocol data (``GATES["G0"]["script_check_failures"]``).
+    The failing codes are protocol data: ``GATES["G0"]["script_check_failures"]``
+    among the failures and ``script_check_failing_flags`` among the flags (an
+    exact copy of the source, since protocol v4).
     """
-    codes = {finding.code for finding in result.failures}
-    return not codes & set(GATES["G0"]["script_check_failures"])
+    failures = {finding.code for finding in result.failures}
+    flags = {finding.code for finding in result.flags}
+    gate = GATES["G0"]
+    return not failures & set(gate["script_check_failures"]) and not flags & set(
+        gate["script_check_failing_flags"]
+    )

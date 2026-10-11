@@ -41,7 +41,7 @@ ATTEMPT_SCHEMA: Final = "diff.attempt/v1"
 DECODE_EVENT_SCHEMA: Final = "diff.decode-event/v2"
 TRANSIENT: Final = frozenset({"worker_lost", "device_error"})
 # count_mismatch: forward calls or new positions differ from steps/canvas (§6.2);
-# rng_consumed: the call changed an RNG state (AC-07); leftover_mask: a mask
+# rng_consumed: a greedy (Qwen) call changed an RNG state (AC-07); leftover_mask: a mask
 # token survived in the canvas. None of these is transient, so none is retried.
 TECHNICAL_FAILURES: Final = frozenset(
     {
@@ -286,6 +286,7 @@ def attempt_record(
         "resolved_config": result.get("resolved_config"),
         "caps": result.get("caps"),
         "rng_unchanged": result.get("rng_unchanged"),
+        "seed": result.get("seed"),
         "latency_ms": result.get("latency_ms"),
         "trace": trace or None,
         "terminal": status not in TRANSIENT or number >= 2,

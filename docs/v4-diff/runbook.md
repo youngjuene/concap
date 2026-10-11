@@ -88,8 +88,8 @@ What each step does:
   first. On this machine, GPU 0 has been held since 2026-09-03 by the xart
   project's GPU API container (`xart-gpu-api-1`), not by regen. Each job:
   - runs in a supervised worker with a 60 s deadline;
-  - records the resolved config, forward calls against `steps`, the RNG check
-    and realized per-step counts;
+  - records the resolved config, forward calls against `steps`, realized
+    per-step counts, and the seed (Dream, protocol v4) or the RNG check (Qwen);
   - gets one identical retry only after a transient worker or device failure.
 - **`g0 report`** writes the automatic report and stops there:
   - `rater/packet.csv` and `rater/ratings.csv` go to the rater;
@@ -111,7 +111,8 @@ manifest's hash. Qwen's numbers are reported beside it. The rule:
 
 - every job terminal, with no unresolved technical failure;
 - at least 95 % of all `dream_k1` jobs passing the script check; an
-  incomplete, empty or missing output counts as a failure (decided 2026-10-10);
+  incomplete, empty or missing output counts as a failure (decided 2026-10-10),
+  and so does an exact copy of the cue's 원문 (decided 2026-10-11);
 - at least 3/4 rated 3 or higher.
 
 When the automatic criteria already fail, no rating can change the outcome:

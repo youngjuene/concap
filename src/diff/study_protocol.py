@@ -45,7 +45,7 @@ def sha256_tokens(token_ids: Sequence[int]) -> str:
     return sha256_of([int(token) for token in token_ids])
 
 
-PROTOCOL_SCHEMA: Final = "diff.study-protocol/v3"
+PROTOCOL_SCHEMA: Final = "diff.study-protocol/v4"
 
 # CV-15: Dream's token IDs at 05334cb9, checked against the pinned tokenizer.
 # <|endoftext|> is both EOS and PAD; <|im_end|> ends a chat turn. BOS differs
@@ -65,13 +65,22 @@ BOS_IDS: Final = (CONFIG_BOS_ID, TOKENIZER_BOS_ID)
 CONTEXT_LIMIT: Final = 2048
 CONFIG_MAX_POSITION_EMBEDDINGS: Final = 131072
 
-# The Dream call contract (CV-05, CV-10–CV-12): deterministic confidence order,
-# no filtering before the confidence, no RNG consumed.
+# The Dream call contract (CV-05, CV-10–CV-12). Set by the researcher on
+# 2026-10-11 (protocol v4), after the k1 diagnostic: under greedy decoding
+# Dream commits end-of-text first and returns empty captions (in English too),
+# and no deterministic setting tried avoided that. Only the README's sampling
+# settings did, so Dream samples at temperature 0.2 with top_p 0.95. Each call
+# is seeded from its job's identity immediately before it runs, which keeps a
+# job reproducible and a retry identical. alg_temp stays 0: the positions
+# committed at each step are still chosen by topk, not sampled.
 ALG: Final = "entropy"
 ALGORITHMS: Final = ("entropy", "topk_margin", "maskgit_plus")
 ALG_TEMP: Final = 0.0
 EPS: Final = 1e-3
-TEMPERATURE: Final = 0.0
+TEMPERATURE: Final = 0.2
+TOP_P: Final = 0.95
+# The worker's start-up check calls twice with this seed and needs identical output.
+WARMUP_SEED: Final = 0
 SYSTEM_MESSAGE: Final = "You are a helpful assistant."
 
 # CV-08, set at M0 on 2026-10-10 by the researcher. The canvas covers each
@@ -126,6 +135,11 @@ GATES: Final[dict[str, Any]] = {
             "leftover_mask",
         ),
         "script_share_denominator": "every dream_k1 job, including jobs without output",
+        # Decided by the researcher on 2026-10-11: Dream copied the source caption
+        # under every setting that produced text, and a rater shown a human
+        # caption copied back could pass the gate on copies. An exact copy fails
+        # the check; near-copies stay flags.
+        "script_check_failing_flags": ("identical_to_source",),
         "min_naturalness": 3,
         "min_naturalness_share": 0.75,
         "minimum_phase2_cell_prompts": 12,
@@ -177,7 +191,7 @@ GENERATION: Final[dict[str, Any]] = {
         "call": "diffusion_generate",
         "batch_size": 1,
         "temperature": TEMPERATURE,
-        "top_p": None,
+        "top_p": TOP_P,
         "top_k": None,
         "alg": ALG,
         "alg_temp": ALG_TEMP,
@@ -186,7 +200,10 @@ GENERATION: Final[dict[str, Any]] = {
         "output_history": True,
         "return_dict_in_generate": True,
         "generation_config": "never passed",
-        "rng": "none consumed",
+        "rng": "torch.manual_seed(job seed) immediately before each call",
+        "seed": "the first 8 hex digits of the job ID, as an integer",
+        "warmup_seed": WARMUP_SEED,
+        "reproducibility": "worker start-up refuses a device where two seeded calls differ",
     },
     "qwen": {
         "call": "generate",

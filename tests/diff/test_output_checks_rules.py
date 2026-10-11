@@ -141,6 +141,12 @@ def test_g0_script_check_counts_an_empty_caption_as_failure(bus: CaptionSource) 
     assert not script_passes(check_output(bus, output("")))
 
 
+def test_g0_script_check_counts_an_exact_copy_as_failure(bus: CaptionSource) -> None:
+    # Decided 2026-10-11: a copy of the source says nothing about writing Korean.
+    assert not script_passes(check_output(bus, output(bus.text)))
+    assert script_passes(check_output(bus, output(bus.text.replace("지나간다", "지나가요"))))
+
+
 def test_helpers() -> None:
     assert non_hangul_runs("KTX가 3.5초 지난다") == ["KTX"]
     assert sentence_count("3.5초 동안 들린다.") == 1

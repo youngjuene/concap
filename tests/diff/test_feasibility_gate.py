@@ -188,6 +188,25 @@ def test_a_pass_always_needs_the_rating(tmp_path: Path, development_sources: Sou
         )
 
 
+def test_copies_of_the_source_count_against_the_script_share(
+    tmp_path: Path, development_sources: SourceSet
+) -> None:
+    # Decided 2026-10-11: every output here repeats its cue's 원문, so none passes.
+    frozen = frozen_g0(development_sources)
+    write_attempts(tmp_path, frozen, "버스가 지나간다.")
+    path = tmp_path / "attempts.jsonl"
+    by_id = development_sources.by_id()
+    source_of = {entry.job.job_id: by_id[entry.job.source_id] for entry in frozen.jobs}
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for line in lines:
+        text = source_of[line["job_id"]].text
+        line["output"].update(raw_text=text, text=text)
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    report = gate.g0_report(frozen, gate.latest_attempts(tmp_path), by_id)
+    k1 = report["conditions"]["dream_k1"]
+    assert k1["terminal"] == k1["jobs"] == 20 and k1["script_pass"] == 0
+
+
 def test_a_timed_out_job_counts_against_the_script_share(
     tmp_path: Path, development_sources: SourceSet
 ) -> None:

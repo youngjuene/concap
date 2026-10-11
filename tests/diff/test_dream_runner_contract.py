@@ -51,12 +51,13 @@ def test_unknown_keywords_are_refused_because_update_would_drop_them(keyword: st
     [
         ({"alg": "origin"}, "torch.rand"),
         ({"alg": "random"}, "alg must be one of"),
-        ({"temperature": 0.2}, "temperature must be 0"),
-        ({"temperature": False}, "temperature must be 0"),
+        ({"temperature": 0.0}, r"temperature must be 0\.2"),
+        ({"temperature": 1.0}, r"temperature must be 0\.2"),
+        ({"temperature": False}, r"temperature must be 0\.2"),
         ({"alg_temp": None}, "alg_temp must be 0"),
         ({"alg_temp": 0.1}, "alg_temp must be 0"),
-        ({"top_p": 0.95}, "top_p must be None"),
-        ({"top_p": 1.0}, "top_p must be None"),
+        ({"top_p": None}, r"top_p must be 0\.95"),
+        ({"top_p": 1.0}, r"top_p must be 0\.95"),
         ({"top_k": 50}, "top_k must be None"),
         ({"eps": 1e-2}, "eps must be"),
         ({"mask_token_id": 151643}, "mask_token_id must be"),
@@ -111,7 +112,8 @@ def frozen_job(sources: SourceSet, tokenizer: FakeTokenizer, condition: str = "d
 def test_run_job_records_caps_counts_and_the_terminator(development_sources: SourceSet) -> None:
     tokenizer = FakeTokenizer()
     model = FakeDream("버스가 지나간다.", tokenizer=tokenizer)
-    result = dream_runner.run_job(loaded(model, tokenizer), frozen_job(development_sources, tokenizer))
+    job = frozen_job(development_sources, tokenizer)
+    result = dream_runner.run_job(loaded(model, tokenizer), job)
     assert result["status"] == "completed", result["error"]
     assert result["output"]["text"] == "버스가 지나간다."
     assert result["output"]["terminator"] == "endoftext"
@@ -120,12 +122,33 @@ def test_run_job_records_caps_counts_and_the_terminator(development_sources: Sou
         80 - len("버스가 지나간다.") - 1
     )
     assert result["caps"] == {"forward_calls": 80, "steps": 80, "canvas": 80}
-    assert result["rng_unchanged"] is True
+    assert result["seed"] == job.job.seed == int(job.job.job_id[4:12], 16)
     counts = result["trace"]["summary"]["realized_per_step"]
     assert len(counts) == 80 and sum(counts) == 80
     assert counts[0] == 0 and counts[-1] == 2 and set(counts[1:-1]) == {1}
     called = model.calls[0]
     assert called["steps"] == 80 and called["max_new_tokens"] == 80 and called["top_k"] is None
+    assert called["temperature"] == 0.2 and called["top_p"] == 0.95
+
+
+def test_each_call_is_seeded_with_its_job_seed(development_sources: SourceSet) -> None:
+    tokenizer = FakeTokenizer()
+    model = FakeDream("버스가 지나간다.", tokenizer=tokenizer)
+    job = frozen_job(development_sources, tokenizer)
+    torch.manual_seed(12345)  # whatever ran before must not matter
+    first = dream_runner.run_job(loaded(model, tokenizer), job)
+    second = dream_runner.run_job(loaded(model, tokenizer), job)
+    assert first["output_token_ids_sha256"] == second["output_token_ids_sha256"]
+    torch.manual_seed(job.job.seed)
+    assert model.draws == [float(torch.rand(1))] * 2
+
+
+def test_warm_up_needs_two_identical_seeded_calls() -> None:
+    tokenizer = FakeTokenizer()
+    warm = dream_runner.warm_up(loaded(FakeDream("네.", tokenizer=tokenizer), tokenizer))
+    assert warm["seeded_calls_identical"] is True and warm["seed"] == 0
+    with pytest.raises(RuntimeError, match="not reproducible"):
+        dream_runner.warm_up(loaded(FakeDream("네.", tokenizer=tokenizer, unreproducible=True), tokenizer))
 
 
 def test_k4_commits_about_four_per_step(development_sources: SourceSet) -> None:
@@ -151,7 +174,6 @@ def test_im_end_is_a_terminator_too(development_sources: SourceSet) -> None:
     [
         ({"leave_mask": True}, "leftover_mask"),
         ({"extra_forward": True}, "count_mismatch"),
-        ({"use_rng": True}, "rng_consumed"),
     ],
 )
 def test_cap_violations_are_technical_failures(
