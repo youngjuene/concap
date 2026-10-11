@@ -338,9 +338,74 @@ implements the parts that do not depend on the prompt:
   - Qwen stays greedy and keeps the no-RNG check.
 - **Copies.** An output identical to its cue's 원문 fails G0's script check,
   like an empty one (`script_check_failing_flags`). Near-copies stay flags.
-- **Prompt.** A new `rewrite-p1` version, aimed at Dream copying the 원문,
-  lands as its own change. The corner-cell prompt (`lattice-p2`) shows no 원문
-  and is unchanged.
+- **Prompt.** `rewrite-p1` is now version 2. The brief's text stays in code as
+  `PHASE1_REWRITE_V1`. The corner-cell prompt (`lattice-p2`) shows no 원문 and
+  is unchanged.
+
+**How version 2 was chosen (2026-10-11, out of protocol; never G0).** The
+researcher asked the assistant to prepare the prompt from the captions on
+hand.
+- **Drafts:** two, written from the c2 captions' styles.
+  - `v2a` asks for a new sentence with the same meaning, forbids repeating the
+    original sentence, and asks for new words and word order.
+  - `v2b` is `v2a` plus one invented worked example (a distant dog barking).
+- **Test set:** the drafts and version 1 ran at k1 under protocol v4 on 11
+  held-out captions, never G0's six cues:
+  - three c2 clips excluded from G0 (`amsterdam_012`, `amsterdam_057`,
+    `singapore_040`), with evidence drafted from their Korean captions;
+  - the eight synthetic phase-1 test cues.
+- **Rule, fixed beforehand:** the most passes of G0's script check, where an
+  empty output or an exact copy fails.
+
+| Draft | Script pass | Empty | Exact copies | Copies apart from spacing |
+|---|---|---|---|---|
+| v1 (brief) | 9/11 | 0 | 1 | 2 |
+| v2a | 8/11 | 0 | 0 | 0 |
+| v2b | **10/11** | 0 | 0 | 1 |
+
+`v2b` became version 2. The script check misses most of what is wrong with
+these outputs, under every draft:
+- echoed evidence lines (`소리 1 — 음원: …`);
+- echoed labels (`자막:`, and under `v2b` four of 11 start with
+  `바꿔 쓴 자막:`);
+- broken characters (U+FFFD) and stray Latin letters ("지저 the다").
+
+Output is never trimmed (brief), so the naturalness rating has to catch
+these. Script and results: `artifacts/diff/prompt-precheck-20261011/`
+(gitignored). The run started at 17:05 on GPU 0, once the researcher's
+midsentence render had freed it, and warm-up's seeded calls agreed.
+
+### Third G0 run, 2026-10-11 (protocol v4, `rewrite-p1` v2; passes the automatic rule, awaits the rating)
+
+**Setup:**
+- The same six development cues and 72 jobs, in `artifacts/diff/g0-20261011`.
+- Frozen protocol `c3688aeb3765`; plan `plan-3194424c…`.
+- GPU 0, 17:13–17:24. Every Dream attempt records its seed.
+- All 72 jobs completed, with no timeouts and no technical failures.
+- Latency medians: `dream_k1` 15.6 s, `k2` 7.8 s, `k4` 3.9 s, Qwen 0.7 s.
+
+| Condition | Script pass | Empty | Exact copies | Starts with a prompt label (`바꿔 쓴 자막:` / `자막:`) | U+FFFD |
+|---|---|---|---|---|---|
+| `dream_k1` | 18/18 | 0 | 0 | 10/18 | 0 |
+| `dream_k2` | 18/18 | 0 | 0 | 10/18 | 0 |
+| `dream_k4` | 12/18 | 0 | 0 | 4/18 | 5 |
+| `qwen` | 15/18 | 0 | 0 | 0 | 0 |
+
+**Findings:**
+- **The empties and the copies are gone.** `dream_k1` passes the script check
+  on every job, so G0's automatic criteria are met for the first time.
+- **The rating decides G0.** It needs ≥ 3/4 of `dream_k1` rated 3 or higher.
+- **Visible defects, in the output as written (never trimmed):**
+  - 10 of 18 `dream_k1` outputs start with a label echoed from the prompt;
+  - a dropped first syllable ("동차 엔진", for 자동차);
+  - misspelt endings ("분니다");
+  - 3 sentence-ending mismatches.
+- **The corner cells barely respond to their cell.** For `amsterdam_181`,
+  three of the four corners gave the identical sentence. That matters for G2,
+  not for G0.
+
+**Next:** one fluent Korean reader rates the 36-row blind packet in
+`g0/rater/` (`dream_k1` and Qwen mixed), then `g0 decide` runs.
 
 ### G0 and AC-20 in the traceability
 
@@ -1707,6 +1772,7 @@ G0 run and the k1 diagnostic, and each row wins over the rows above.
 | PRD | Change |
 |---|---|
 | §5.2 | **CV-05 / CV-12:** Dream samples at temperature 0.2 with `top_p` 0.95, the README's settings, because greedy decoding returned empty captions. Each call is seeded from its job ID, and the warm-up refuses a device where two seeded calls differ. Qwen stays greedy. |
+| §7 | **Prompts:** `rewrite-p1` version 2, aimed at Dream copying the 원문. The assistant drafted it at the researcher's request and chose it on held-out captions by a rule fixed beforehand (see "Protocol v4"). |
 | §11 | **G0 script check:** an exact copy of the cue's 원문 fails it. Near-copies stay flags. |
 
 ## 12. Open decisions (protocol data; default unless you decide otherwise)

@@ -1,4 +1,4 @@
-"""The prompt drafts are the brief's text verbatim, versioned, and rendered deterministically."""
+"""The prompt drafts are versioned and rendered deterministically; the brief's text is kept verbatim."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import pytest
 from diff.caption_sources import SourceSet
 from diff.rewrite_prompts import (
     PHASE1_REWRITE,
+    PHASE1_REWRITE_V1,
     PHASE2_CELL,
     render_cell,
     render_evidence,
@@ -35,14 +36,24 @@ BRIEF_PHASE2 = (
 
 
 def test_templates_are_the_brief_verbatim() -> None:
-    assert PHASE1_REWRITE.text == BRIEF_PHASE1
+    assert PHASE1_REWRITE_V1.text == BRIEF_PHASE1 and PHASE1_REWRITE_V1.version == 1
     assert PHASE2_CELL.text == BRIEF_PHASE2
+
+
+def test_rewrite_v2_asks_for_new_wording_and_keeps_both_slots() -> None:
+    # Protocol v4, 2026-10-11: version 1 came back as copies of the source caption.
+    assert (PHASE1_REWRITE.template_id, PHASE1_REWRITE.version) == ("rewrite-p1", 2)
+    assert PHASE1_REWRITE.sha256 != PHASE1_REWRITE_V1.sha256
+    assert "그대로 옮기지 말고" in PHASE1_REWRITE.text
+    assert PHASE1_REWRITE.text.endswith("자막: {cue_text}\n근거: {cue_evidence}")
+    assert PHASE1_REWRITE.text.count("{") == 2  # the worked example adds no slot
 
 
 def test_phase1_rendering(development_sources: SourceSet) -> None:
     source = development_sources.phase(1)[0]
     prompt = render_phase1(source)
-    assert prompt.text.startswith("다음 소리 자막을 다시 써 주세요.")
+    assert prompt.text.startswith("다음 소리 자막을 같은 뜻의 새 문장으로 바꿔 쓰세요.")
+    assert prompt.template_version == 2
     assert "자막: 버스가 오른쪽 차로로 지나간다." in prompt.text
     assert "소리 1 — 음원: 버스(교통·기계 소리) / 개수: 하나 / 동작: 지나간다" in prompt.text
     assert prompt.messages() == [

@@ -1,6 +1,14 @@
 """Versioned Korean generation prompts and the evidence rendering they embed.
 
-Both templates are the brief's development drafts, stored verbatim. A rendered
+``PHASE2_CELL`` and ``PHASE1_REWRITE_V1`` are the brief's development drafts,
+stored verbatim. ``PHASE1_REWRITE`` is version 2 (protocol v4, 2026-10-11):
+under every Dream setting that produced text, version 1 came back as a copy of
+the source caption. At the researcher's request the assistant drafted two
+rewrites. They were compared with version 1 at k1 on held-out captions only:
+three c2 clips excluded from G0 and the eight synthetic test cues, never G0's
+cues. Version 2 won by a rule fixed beforehand, the most passes of G0's script
+check. Its worked example is invented (a distant dog), so it names no study
+clip. A rendered
 prompt carries three identities: the template's hash, the rendered text's
 hash, and — added at plan freeze in the generator environment — the hash of the
 token IDs after the model's own chat template (:mod:`diff.job_plan`).
@@ -42,13 +50,30 @@ class PromptTemplate:
         return sha256_text(self.text)
 
 
-PHASE1_REWRITE: Final = PromptTemplate(
+PHASE1_REWRITE_V1: Final = PromptTemplate(
     template_id="rewrite-p1",
     version=1,
     text=(
         "다음 소리 자막을 다시 써 주세요. 들리는 소리의 종류, 개수, 순서, 확실성의 정도를 바꾸지 말고 "
         "새로운 소리를 더하지 마세요. 근거에 없는 음원을 화면 속 대상과 잇지 마세요. "
         "원래 자막처럼 끝맺고, 96자 이내의 한 문장으로 쓰세요. 다시 쓴 자막만 출력하세요.\n"
+        "자막: {cue_text}\n"
+        "근거: {cue_evidence}"
+    ),
+)
+PHASE1_REWRITE: Final = PromptTemplate(
+    template_id="rewrite-p1",
+    version=2,
+    text=(
+        "다음 소리 자막을 같은 뜻의 새 문장으로 바꿔 쓰세요. 원래 자막의 문장을 그대로 옮기지 말고 "
+        "단어와 어순을 바꾸세요. 들리는 소리의 종류, 개수, 순서, 확실성의 정도는 그대로 두고 새로운 소리를 "
+        "더하지 마세요. 근거에 없는 음원을 화면 속 대상과 잇지 마세요. 끝맺는 방식은 원래 자막과 같게 하고, "
+        "96자 이내의 한 문장으로 쓰세요. 바꿔 쓴 자막만 출력하세요.\n"
+        "예시)\n"
+        "자막: 멀리서 개 한 마리가 짖는 소리\n"
+        "근거: 소리 1 — 음원: 개(동물 소리) / 개수: 하나 / 동작: 짖는다 / 위치: 멀리 / 확실성: 분명함\n"
+        "바꿔 쓴 자막: 먼 곳에서 들려오는 개 한 마리의 짖는 소리\n"
+        "이제 아래 자막을 바꿔 쓰세요.\n"
         "자막: {cue_text}\n"
         "근거: {cue_evidence}"
     ),
