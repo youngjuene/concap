@@ -278,17 +278,43 @@ all at k1 (steps = canvas), and was never G0 evidence.
 - If it holds, tie-breaking rather than confidence decides much of the
   unmasking order under these settings. That would change what k manipulates.
 
+**RNG-free follow-up, 2026-10-11.** The researcher asked whether a
+deterministic setting could do what the README's settings did. The run used
+the same six cues at k1 and canvas 80, with the same script
+(`rngfree.jsonl`). Every call left the CPU and CUDA RNG state unchanged (6/6
+per variant).
+
+| Variant | Settings | Empty | Copies of 원문 | Script pass | Median latency |
+|---|---|---|---|---|---|
+| control, rerun | run 2's call | 6/6 | 0 | 0/6 | 8.9 s |
+| greedytopp80 | temperature 0, `top_p` 0.95, `entropy` | 4/6 | 1 exact, plus a fragment ("오디오 클립에 담긴 주요 소리는") | 2/6 | 9.5 s |
+| maskgit80 | temperature 0, `alg="maskgit_plus"` | 4/6 | 1 exact, 1 near | 2/6 | 10.1 s |
+| margin80 | temperature 0, `alg="topk_margin"` | 2/6 | 2 exact, 2 near (one with U+FFFD) | 3/6 | 11.0 s |
+
+- **The rerun of run 2's call is token-identical to run 2 again.**
+- **No deterministic setting removes the empties.**
+  - `top_p` does apply at temperature 0. In the pinned code it is not gated on
+    sampling.
+  - Without the division by 0.2, too few positions become one-hot, and
+    end-of-text still dominates the first quarter.
+- **Every non-empty output across these variants copies the 원문, nearly
+  copies it, or is a fragment of it.** Copying is not specific to the
+  sampling settings.
+
 **What this means for the choice:**
 - **Revised prompts under the fixed greedy call are unlikely to help on their
-  own.** The canvas fills with end-of-text before any content is committed,
-  and the same happens in English.
-- **A decoding change makes Dream write, with three costs:**
-  - it is a new protocol version;
-  - it gives up the no-RNG cap;
-  - k may stop meaning confidence-ordered parallelism.
-
-  The outputs then mostly copy the 원문, which a prompt revision would have to
-  address.
+  own.** The canvas fills with end-of-text before any content is committed.
+  The same happens in English, and with every deterministic setting tried.
+- **Only the README's sampling settings made Dream write at k1.** They cost:
+  - a new protocol version;
+  - the no-RNG cap, which would become a recorded seed per job; the three
+    seeds gave identical text for every cue;
+  - possibly the meaning of k as confidence-ordered parallelism.
+- **Dream copies the 원문 under every setting that produces text.**
+  - Any Dream path would need a revised prompt.
+  - G0's rule does not count copies against Dream: `identical_to_source` is a
+    flag, not a script failure. A rater shown human 원문 could therefore pass
+    the gate on copies.
 - **Another model stays open.**
 
 ### G0 and AC-20 in the traceability
