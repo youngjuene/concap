@@ -1,8 +1,11 @@
-# v4-diff runbook — Stage 1 and G0
+# v4-diff runbook — Stage 1, G0 and live phase 2
 
-How an operator runs what exists today: the Dream and Qwen generator, and G0
-(Korean feasibility). Nothing past G0 is built yet. The model change and its
-reasons are at the top of [`plan.md`](plan.md).
+How an operator runs what exists today:
+- the Dream and Qwen generator;
+- G0, Korean feasibility (its human rating was waived on 2026-10-11);
+- the live phase-2 app (§6).
+
+The model change and the live redesign are at the top of [`plan.md`](plan.md).
 
 Run every command from the repository root. Inside `src/dpo/regen`, regen's
 `copy.py` shadows the standard library. There are two environments:
@@ -153,3 +156,60 @@ uv run mypy
 detachment test currently trip over `src/dpo/regen/.omx/`, scratch copies
 excluded from git only by `.git/info/exclude`. That failure predates diff.
 
+## 6. Live phase 2
+
+The participant app runs in the repository environment. It starts one Dream
+worker per GPU in the generator environment, so `uv sync --project
+envs/diff-generator --frozen` must have run.
+
+```sh
+uv run python -m diff live serve \
+  --sources path/to/phase2-sources.json \
+  --video <video_id>=path/to/video.mp4 \
+  --items path/to/items.json \
+  --observations path/to/observations.json \
+  --dream-dir artifacts/diff/models/dream-v0-instruct-7b-05334cb9 \
+  --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
+```
+
+**The inputs:**
+- `--sources` is a `diff.caption-sources/v1` file with phase-2 cues (unit kind
+  `video`). Each cue holds its starting caption (`text`) and its `start_ms` and
+  `end_ms`. No evidence is needed.
+- `--video` gives one `ID=PATH` per video, in watch order. Settings carry over
+  between videos.
+- `--items` holds the post-watch items:
+  `{"items": [{"id", "text", "min", "max", "anchors": [low, high]}]}`.
+  The text is Korean.
+- `--observations` (optional) is `{code: [{"heard": {family: true}, "labels":
+  [...]}]}`, the phase-1 observations for calibration. With none, a session
+  gets midpoint sliders and no guidance.
+
+**GPUs:**
+- Each GPU in `--gpus` must have 17 GB free at start, or `serve` refuses.
+  Dream takes about 15.2 GB.
+- One GPU serves one session; a further participant sees a "try again later"
+  page.
+- The researcher's midsentence renders share these cards, so check
+  `nvidia-smi` first.
+
+**Logs, under `--log-dir/sessions/`:**
+- `session-<id>.jsonl`: settings, playback, exposures (each with the job it
+  showed), video ends and ratings;
+- `live-<id>.jsonl`: every Dream call, with its job, seed, token hash,
+  latency, `L`, target, output and checks.
+
+`verification-dream.json` and `worker-gpu<N>.log` sit beside them.
+
+**Behaviour to expect:**
+- At k2 a caption takes about 9 s on an RTX 3090.
+- A tweak appears at the first cue boundary after about `L`. If the worker is
+  busy, it appears one call later; a Dream call cannot be cancelled.
+- A worker that overruns 30 s is restarted, which reloads the model, and
+  captions stay as they are meanwhile.
+
+**Walking the interface without a GPU:** add `--fake-worker --purpose smoke`
+and leave out `--dream-dir`. The captions are placeholders marked "시험용",
+never research data. A headless walk with Playwright passed on 2026-10-11:
+Start waits for cue 0, captions change only at boundaries, and the ratings
+appear after the video.

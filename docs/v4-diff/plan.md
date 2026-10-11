@@ -405,10 +405,104 @@ midsentence render had freed it, and warm-up's seeded calls agreed.
   not for G0.
 
 **Outcome:** the researcher waived the human rating on 2026-10-11, because
-participants rate live captions instead. The waiver
+participants rate the live captions instead (see "Live phase 2"). The waiver
 is recorded as `g0/researcher/decision-dec-c48cd5efa9c2ec1e87522dec.json`:
 outcome `waived`, naturalness `null`. A waiver is never a pass, and only a step
 that says so accepts it.
+
+### Live phase 2 (researcher's redesign, 2026-10-11)
+
+**What changed.** Phase 2 no longer looks captions up in a pre-generated
+lattice.
+- During the watch, Dream rewrites each cue's starting caption live, as the
+  participant moves the texture and context sliders.
+- There is no Gemma anywhere and no separate rater: G0's rating is waived.
+- Participants answer the researcher's items after the watch.
+- Phase 1 stays pre-generated.
+
+The approved plan, with every decision: `~/.claude/plans/sunny-brewing-haven.md`.
+
+**Decisions:**
+- **Decoding:** `dream_k2`.
+- **Timing:**
+  - A tweak can be sent at any time.
+  - It is written first for the first cue that starts at or after
+    `position + L`, the earliest boundary where it can appear. `L` is the
+    90th percentile of the worker's last 20 latencies, floor 6 s, start 7 s.
+  - Captions change only at cue boundaries, and the previous caption stays
+    when nothing new is ready.
+- **Opening:** each video opens with Dream's rewrite at the calibrated
+  settings, and Start waits for cue 0.
+- **Calibration:** regen's sheet-handoff rule (`live_calibration`, policy
+  `diff.live-calibration/v1`).
+  - The sliders start at the midpoint.
+  - The heard sound families from phase 1 become a Korean guidance sentence
+    in the prompt.
+  - Visual labels stay out of the prompt, because Dream echoes Latin letters.
+- **Failures:** shown as written, never retried for quality. One identical
+  retry is allowed after a transient worker failure.
+- **Material:** long videos that the researcher re-prepares, with per-cue
+  Korean starting captions. Regen's are in `data/live/regen-media/viewing/`.
+
+**Built:**
+- `live_generation`: the scheduler, latency estimator, cache, retry rule,
+  service thread and attempt log `diff.live-attempt/v1`.
+- `generation_worker`: a `live` message; the worker freezes the job with
+  Dream's tokenizer.
+- `dream_runner.freeze_live`.
+- `job_plan.live_job`.
+- `rewrite_prompts.render_live` (`live-p2` v1).
+- `live_calibration`.
+- `live_server` and `live_static/`: the participant app, event log
+  `diff.live-event/v1`, opaque tokens, one session per GPU.
+- `python -m diff live serve`.
+- `python -m diff g0 waive`.
+- `output_checks` v3, which adds the `label_echo` and `format_echo` measures.
+
+**Prompt choice (held-out pre-check, `artifacts/diff/prompt-precheck-live-20261011/`).**
+- **Material:** k2 at canvas 128 for live and k1 at canvas 80 for phase 1, on
+  the 11 held-out cues: three excluded c2 clips and eight synthetic cues.
+- **Rule, fixed beforehand:** the fewest outputs with a failure or a prompt
+  leak.
+- **`rewrite-p1` v3** (p3b) had 5/11 bad, against 10/11 for v2. Label echo
+  went from 4 to 0.
+- **`live-p2` v1** (lc) had 19/55 bad, against 20/55 for la.
+
+**Live quality is the open problem.**
+
+| Texture step | Exact copies | Broken characters (U+FFFD) |
+|---|---|---|
+| 0 | 6–9 of 22 | 1–2 of 22 |
+| 2 (with guidance) | — | 5 of 22 |
+| 4 | — | 5–6 of 22 |
+
+- At texture 4 many outputs that pass the checks are still unusable. Dream
+  dumps the quality list or loops ("소, 소, 소, …", "기기기기…").
+- The prompt cannot remove broken characters, because they come from
+  decoding.
+
+**GPU smoke (2026-10-11, RTX 3090, synthetic 60 s stream, headless walk).**
+The machinery held up:
+- Start waited for cue 0, and captions changed only at boundaries.
+- Ratings, then done, with no console errors.
+- RNG reproducibility held at warm-up.
+
+Measured:
+- **Latency:** k2 at canvas 128 took 8.9 s per caption.
+- **A tweak at 1.8 s first showed at the 20 s boundary.** The worker was
+  still writing cue 1 under the opening settings (a call cannot be
+  cancelled). Then `position + L` = 17.5 s, so the first boundary was 20 s.
+  The reveal delay therefore runs from `L` (about 9 s) to `L` plus one cue
+  plus one in-flight call, about 23 s at worst.
+- **The captions after the tweak (texture 4, relation) were mostly broken,**
+  as in the pre-check.
+
+**Open for the researcher:**
+- the reveal delay (about 9–23 s, against the 6–7 s asked for);
+- the texture-slider quality;
+- the slider labels and page wording (drafts);
+- the post-watch items;
+- the long videos with their starting captions.
 
 ### G0 and AC-20 in the traceability
 
@@ -1047,6 +1141,10 @@ after G1 and recorded as protocol data.
 
 ### 5.3 Phase-2 lattice
 
+> **Superseded for participants by "Live phase 2" (2026-10-11).** Phase-2
+> captions are written live, so no lattice is pre-generated or reviewed for
+> sessions. The lattice generator stays for development use and keeps AC-20.
+
 - **Steps.** Texture `k ∈ {0, 2, 4}` (0–4 after G2). Context ∈ {broad,
   specific, relation}.
 - **Generation path.** One template for every cell. Regen's JSON-template branch
@@ -1164,6 +1262,11 @@ behaviour as regen; §7 is the parity map. Changes:
   goes to the event log.
 
 ### 6.4 Phase-2 viewing (`phase2_viewing.py`, `phase2_player.js`)
+
+> **Superseded by "Live phase 2" (2026-10-11).** The built app is
+> `live_server.py` with `live_static/`: the browser polls captions written
+> live instead of fetching a lattice. The controls, telemetry and playback
+> gates below are the starting point it follows.
 
 **Video order** comes from the slot, not the manifest.
 
@@ -1777,6 +1880,16 @@ G0 run and the k1 diagnostic, and each row wins over the rows above.
 | §5.2 | **CV-05 / CV-12:** Dream samples at temperature 0.2 with `top_p` 0.95, the README's settings, because greedy decoding returned empty captions. Each call is seeded from its job ID, and the warm-up refuses a device where two seeded calls differ. Qwen stays greedy. |
 | §7 | **Prompts:** `rewrite-p1` version 2, aimed at Dream copying the 원문. The assistant drafted it at the researcher's request and chose it on held-out captions by a rule fixed beforehand (see "Protocol v4"). |
 | §11 | **G0 script check:** an exact copy of the cue's 원문 fails it. Near-copies stay flags. |
+
+**Live phase 2 decisions (researcher, 2026-10-11).** These follow G0 run 3,
+and each row wins over the rows above.
+
+| PRD | Change |
+|---|---|
+| §4, §6 | **Phase 2 is live:** Dream (`dream_k2`) rewrites each cue's starting caption during the watch, following the participant's sliders. No Gemma, no pre-generated phase-2 lattice or bundle. The participant server still imports no torch; one Dream worker per GPU runs in the generator environment. |
+| §6.2 | **Timing:** a tweak targets the first boundary after `position + L` (adaptive latency); the previous caption stays until a new one is ready; each video opens with Dream's rewrite. |
+| §7 | **Prompts:** `live-p2` v1 for live rewrites and `rewrite-p1` v3 for phase 1, both chosen on held-out captions by a rule fixed beforehand. |
+| §9, §11 | **G0:** the human rating is waived (recorded as `waived`). Participants answer the researcher's post-watch items. |
 
 ## 12. Open decisions (protocol data; default unless you decide otherwise)
 

@@ -13,7 +13,7 @@ archived.
 | [`v1-session/`](v1-session/) | the **skeleton** instrument: the ordered list of what a caption could mention is the only control surface | `dpo.session`, `dpo session …`, port 8777 |
 | [`v2-console/`](v2-console/) | the **console** instrument: three controls drive a read-only numbered skeleton | `dpo.console`, `dpo console …`, port 8778 |
 | [`v3-regen/`](v3-regen/) | the **regeneration** instrument: a participant's report of what they saw and heard writes the captions of a second viewing | `dpo.regen`, `dpo regen …`, port 8779 |
-| [`v4-diff/`](v4-diff/) | the **diff** pipeline (Stage 1, G0 first): Dream 7B writes caption text offline into a hashed stimulus bundle that a model-free server replays behind regen's spreadsheet flow | `diff`, `python -m diff …`, ports 8782/8783 (planned) |
+| [`v4-diff/`](v4-diff/) | the **diff** pipeline: Dream 7B writes phase-1 caption text offline into a hashed stimulus bundle, and in phase 2 rewrites cue captions live while the participant moves two sliders (redesign of 2026-10-11) | `diff`, `python -m diff …`, `python -m diff live serve` (port 8782) |
 
 Within a version directory the filename says the role:
 
@@ -61,7 +61,7 @@ Within a version directory the filename says the role:
 
 | File | What it is |
 |---|---|
-| [`runbook.md`](v4-diff/runbook.md) | operator steps for `python -m diff`: model fetch, development sources, G0 (plan → freeze → generate → report → rating → decide), smoke runs |
+| [`runbook.md`](v4-diff/runbook.md) | operator steps for `python -m diff`: model fetch, development sources, G0 (plan → freeze → generate → report → decide or waive), smoke runs, the live phase-2 app |
 | [`plan.md`](v4-diff/plan.md) | the plan, revised for the Trida → Dream model change: verified code and model facts, architecture, the response-order parity map against regen, schemas, traceability (incl. G0 and AC-20), the four stages and their exits, the PRD v1.1 changelog, and open questions |
 
 ## The two console/session specifications contradict each other
