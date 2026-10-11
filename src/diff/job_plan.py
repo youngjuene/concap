@@ -30,6 +30,7 @@ from typing import Any, Final
 from diff.analysis_decisions import gate_problems
 from diff.caption_sources import CaptionSource, bundle_problems
 from diff.model_profile import DREAM_7B, QWEN_7B, ModelProfile, profile
+from diff.output_checks import CHECKS_VERSION
 from diff.rewrite_prompts import RenderedPrompt, render_phase1, render_phase2
 from diff.study_protocol import (
     ALG,
@@ -135,7 +136,7 @@ class Job:
 
     @property
     def checks_profile(self) -> str:
-        return f"p{self.phase}-v2"
+        return f"p{self.phase}-v{CHECKS_VERSION}"
 
     def spec(self) -> dict[str, Any]:
         return {

@@ -11,6 +11,7 @@ from diff.rewrite_prompts import (
     PHASE2_CELL,
     render_cell,
     render_evidence,
+    render_live,
     render_phase1,
     render_phase2,
 )
@@ -40,21 +41,38 @@ def test_templates_are_the_brief_verbatim() -> None:
     assert PHASE2_CELL.text == BRIEF_PHASE2
 
 
-def test_rewrite_v2_asks_for_new_wording_and_keeps_both_slots() -> None:
-    # Protocol v4, 2026-10-11: version 1 came back as copies of the source caption.
-    assert (PHASE1_REWRITE.template_id, PHASE1_REWRITE.version) == ("rewrite-p1", 2)
+def test_rewrite_v3_asks_for_new_wording_without_label_lines() -> None:
+    # 2026-10-11: version 1 was copied back; version 2's label lines were echoed back.
+    assert (PHASE1_REWRITE.template_id, PHASE1_REWRITE.version) == ("rewrite-p1", 3)
     assert PHASE1_REWRITE.sha256 != PHASE1_REWRITE_V1.sha256
-    assert "그대로 옮기지 말고" in PHASE1_REWRITE.text
-    assert PHASE1_REWRITE.text.endswith("자막: {cue_text}\n근거: {cue_evidence}")
+    assert "그대로 옮기지 말고" in PHASE1_REWRITE.text and "「{cue_text}」" in PHASE1_REWRITE.text
+    assert "자막:" not in PHASE1_REWRITE.text and "근거:" not in PHASE1_REWRITE.text
+    assert PHASE1_REWRITE.text.endswith("앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요.")
     assert PHASE1_REWRITE.text.count("{") == 2  # the worked example adds no slot
+
+
+def test_live_prompt_renders_the_steps_and_the_guidance(development_sources: SourceSet) -> None:
+    source = development_sources.phase(1)[0]
+    plain = render_live(source, 0, "broad")
+    assert plain.template_id == "live-p2" and f"「{source.text}」" in plain.text
+    assert "질감을 나타내는 표현(크기" in plain.text and "넓은 범주로만" in plain.text
+    guided = render_live(
+        source, 4, "relation", "참고로, 이 시청자는 앞 단계에서 사람 소리 1번에 가장 주의를 기울였습니다."
+    )
+    assert "4개 골라 넣으세요" in guided.text and "참고로, 이 시청자는" in guided.text
+    assert guided.text_sha256 != plain.text_sha256 and guided.context_rules_version == 1
+    with pytest.raises(ValueError, match="texture"):
+        render_live(source, 5, "broad")
+    with pytest.raises(ValueError, match="context"):
+        render_live(source, 2, "nearby")
 
 
 def test_phase1_rendering(development_sources: SourceSet) -> None:
     source = development_sources.phase(1)[0]
     prompt = render_phase1(source)
-    assert prompt.text.startswith("다음 소리 자막을 같은 뜻의 새 문장으로 바꿔 쓰세요.")
-    assert prompt.template_version == 2
-    assert "자막: 버스가 오른쪽 차로로 지나간다." in prompt.text
+    assert prompt.text.startswith("다음은 영상에서 들리는 소리를 설명한 자막입니다: 「")
+    assert prompt.template_version == 3
+    assert "「버스가 오른쪽 차로로 지나간다.」" in prompt.text
     assert "소리 1 — 음원: 버스(교통·기계 소리) / 개수: 하나 / 동작: 지나간다" in prompt.text
     assert prompt.messages() == [
         {"role": "system", "content": "You are a helpful assistant."},

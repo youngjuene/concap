@@ -147,6 +147,27 @@ def test_g0_script_check_counts_an_exact_copy_as_failure(bus: CaptionSource) -> 
     assert script_passes(check_output(bus, output(bus.text.replace("지나간다", "지나가요"))))
 
 
+@pytest.mark.parametrize(
+    ("text", "code"),
+    [
+        ("바꿔 쓴 자막: 버스가 오른쪽 차로로 천천히 지나간다.", "label_echo"),
+        ("자막: 버스가 오른쪽 차로로 천천히 지나간다.", "label_echo"),
+        ("소리 1 — 음원: 버스(교통·기계 소리) / 개수: 하나", "format_echo"),
+    ],
+)
+def test_prompt_leaks_are_flagged_not_failed(bus: CaptionSource, text: str, code: str) -> None:
+    # Version 3 (2026-10-11): live captions are shown as written, so leaks are measured.
+    result = check_output(bus, output(text))
+    assert code in codes(result, "flags") and result.measures[code] is True
+    assert code not in codes(result)
+
+
+def test_a_clean_rewrite_leaks_nothing(bus: CaptionSource) -> None:
+    result = check_output(bus, output("큰 버스가 오른쪽 차로로 천천히 지나간다."))
+    assert not {"label_echo", "format_echo"} & codes(result, "flags")
+    assert result.profile == "p1-v3"
+
+
 def test_helpers() -> None:
     assert non_hangul_runs("KTX가 3.5초 지난다") == ["KTX"]
     assert sentence_count("3.5초 동안 들린다.") == 1

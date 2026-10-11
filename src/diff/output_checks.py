@@ -28,7 +28,23 @@ from typing import Any, Final
 from diff.caption_sources import QUALITIES, CaptionSource
 from diff.study_protocol import GATES, MAX_CHARS, MAX_LINES
 
-CHECKS_VERSION: Final = 2
+CHECKS_VERSION: Final = 3
+# Version 3 (2026-10-11): live captions are shown as written, so the ways a
+# prompt leaks into the output are measured. Dream echoed prompt labels on 10 of
+# 18 G0 outputs and sometimes repeated the evidence format.
+LABEL_PREFIXES: Final = (
+    "바꿔 쓴 자막",
+    "고쳐 쓴 자막",
+    "다시 쓴 자막",
+    "자막:",
+    "자막 :",
+    "근거:",
+    "예시",
+    "답:",
+    "출력:",
+)
+FORMAT_MARKERS: Final = ("음원:", "개수:", "확실성:", "음향 특성:")
+_EVIDENCE_LINE: Final = re.compile(r"소리 \d+\s*—")
 _PUNCTUATION: Final = ".,!?;:…·'\"“”‘’()[]{}「」『』<>~-—"
 _HANGUL_RANGES: Final = (
     (0xAC00, 0xD7A3),
@@ -314,6 +330,12 @@ def check_output(
         flags.append(Finding("quality_outside_evidence", ", ".join(outside)))
     if text and text == source.text:
         flags.append(Finding("identical_to_source", "the output repeats the source text"))
+    label = next((prefix for prefix in LABEL_PREFIXES if text.startswith(prefix)), None)
+    if label:
+        flags.append(Finding("label_echo", label))
+    echoed = [marker for marker in FORMAT_MARKERS if marker in text] + _EVIDENCE_LINE.findall(text)
+    if echoed:
+        flags.append(Finding("format_echo", ", ".join(echoed)))
     repeated = repeated_word_ngrams(text)
     if repeated or consecutive_repeats(text):
         flags.append(Finding("repetition", ", ".join(repeated) or "consecutive repeated words"))
@@ -339,6 +361,8 @@ def check_output(
         "relation_terms": relations_used,
         "relation_count": len(relations_used),
         "exact_copy_of_source": bool(text) and text == source.text,
+        "label_echo": label is not None,
+        "format_echo": bool(echoed),
         "repeated_word_trigrams": repeated,
         "consecutive_repeats": consecutive_repeats(text),
         "ending_class": list(ending_class(text)) if text else None,
