@@ -56,10 +56,10 @@ def test_live_prompt_renders_the_steps_and_the_guidance(development_sources: Sou
     plain = render_live(source, 0, "broad")
     assert plain.template_id == "live-p2" and f"「{source.text}」" in plain.text
     assert "질감을 나타내는 표현(크기" in plain.text and "넓은 범주로만" in plain.text
-    guided = render_live(
-        source, 4, "relation", "참고로, 이 시청자는 앞 단계에서 사람 소리 1번에 가장 주의를 기울였습니다."
-    )
+    guidance = "참고로, 이 시청자는 앞 단계에서 사람 소리 1번에 가장 주의를 기울였습니다."
+    guided = render_live(source, 4, "relation", guidance)
     assert "4개 골라 넣으세요" in guided.text and "참고로, 이 시청자는" in guided.text
+    assert "96자 이내의 한 문장" in guided.text and guided.template_version == 2
     assert guided.text_sha256 != plain.text_sha256 and guided.context_rules_version == 1
     with pytest.raises(ValueError, match="texture"):
         render_live(source, 5, "broad")

@@ -174,8 +174,8 @@ uv run python -m diff live serve \
 
 **The inputs:**
 - `--sources` is a `diff.caption-sources/v1` file with phase-2 cues (unit kind
-  `video`). Each cue holds its starting caption (`text`) and its `start_ms` and
-  `end_ms`. No evidence is needed.
+  `video`). Each cue holds its starting caption (`text`, at most 96 characters,
+  or `serve` refuses it) and its `start_ms` and `end_ms`. No evidence is needed.
 - `--video` gives one `ID=PATH` per video, in watch order. Settings carry over
   between videos.
 - `--items` holds the post-watch items:
@@ -202,7 +202,8 @@ uv run python -m diff live serve \
 `verification-dream.json` and `worker-gpu<N>.log` sit beside them.
 
 **Behaviour to expect:**
-- At k2 a caption takes about 9 s on an RTX 3090.
+- At k2 on the 80-token live canvas (protocol v5), a caption takes about 6 s on
+  an RTX 3090.
 - A tweak appears at the first cue boundary after about `L`. If the worker is
   busy, it appears one call later; a Dream call cannot be cancelled.
 - A worker that overruns 30 s is restarted, which reloads the model, and

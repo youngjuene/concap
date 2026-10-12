@@ -470,10 +470,11 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.generation_worker import Supervisor, WorkerCommand
     from diff.job_plan import live_job
     from diff.live_calibration import calibrate
-    from diff.live_generation import LiveService, LiveStream
+    from diff.live_generation import LiveService, LiveStream, starting_caption_problems
     from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
     from diff.model_profile import DREAM_7B, verify_snapshot
     from diff.output_checks import check_output, output_from_record
+    from diff.study_protocol import LIVE_MAX_CHARS
 
     sources = _sources(args.sources).sources
     videos = []
@@ -482,6 +483,11 @@ def live_serve(args: argparse.Namespace) -> int:
         if not path:
             raise SystemExit(f"--video takes ID=PATH, got {entry!r}")
         videos.append(LiveVideo(video_id, Path(path), LiveStream.from_sources(sources, video_id)))
+    too_long = [
+        problem for video in videos for problem in starting_caption_problems(video.stream, LIVE_MAX_CHARS)
+    ]
+    if too_long:
+        raise SystemExit("starting captions must fit the live canvas:\n  " + "\n  ".join(too_long))
     items = rating_items(_read_json(args.items))
     observations = _read_json(args.observations) if args.observations else {}
     log_dir: Path = args.log_dir
@@ -494,7 +500,9 @@ def live_serve(args: argparse.Namespace) -> int:
 
     def check(source: Any, job: Any, result: Any) -> Any:
         output = output_from_record(result["output"])
-        return check_output(source, output, template_phase=2, cell=job.cell).record()
+        return check_output(
+            source, output, template_phase=2, cell=job.cell, max_chars=LIVE_MAX_CHARS
+        ).record()
 
     services = []
     if args.fake_worker:

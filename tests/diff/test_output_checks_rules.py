@@ -168,6 +168,14 @@ def test_a_clean_rewrite_leaks_nothing(bus: CaptionSource) -> None:
     assert result.profile == "p1-v3"
 
 
+def test_a_live_check_can_hold_a_shorter_length_limit(development_sources: SourceSet) -> None:
+    source = development_sources.phase(2)[0]
+    cell = {"quality_limit": 2, "context": "specific"}
+    text = "가" * 120
+    assert "length_over_limit" not in codes(check_output(source, output(text), cell=cell))
+    assert "length_over_limit" in codes(check_output(source, output(text), cell=cell, max_chars=96))
+
+
 def test_helpers() -> None:
     assert non_hangul_runs("KTX가 3.5초 지난다") == ["KTX"]
     assert sentence_count("3.5초 동안 들린다.") == 1

@@ -45,7 +45,7 @@ def sha256_tokens(token_ids: Sequence[int]) -> str:
     return sha256_of([int(token) for token in token_ids])
 
 
-PROTOCOL_SCHEMA: Final = "diff.study-protocol/v4"
+PROTOCOL_SCHEMA: Final = "diff.study-protocol/v5"
 
 # CV-15: Dream's token IDs at 05334cb9, checked against the pinned tokenizer.
 # <|endoftext|> is both EOS and PAD; <|im_end|> ends a chat turn. BOS differs
@@ -95,6 +95,13 @@ CANVAS_TOKENS: Final[dict[int, int]] = {1: 80, 2: 128}
 # offline, so the deadline only catches a stuck worker.
 TIMEOUT_SECONDS: Final = 60.0
 MAX_CHARS: Final[dict[int, int]] = {1: 96, 2: 160}
+# Live phase 2 (researcher, 2026-10-12): live captions are written on an
+# 80-token canvas, about 5.7 s at k2 on an RTX 3090 against 8.9 s at 128, so a
+# tweak shows sooner. A starting caption, and the rewrite, must therefore fit
+# phase 1's 96 characters.
+LIVE_CONDITION: Final = "dream_k2"
+LIVE_CANVAS_TOKENS: Final = 80
+LIVE_MAX_CHARS: Final = 96
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
 PHASE2_CUE_MS: Final = 5000
@@ -212,6 +219,11 @@ GENERATION: Final[dict[str, Any]] = {
         "repetition_penalty": 1.0,
         "eos_token_id": [IM_END_ID, ENDOFTEXT_ID],
         "unset": ["temperature", "top_p", "top_k"],
+    },
+    "live": {
+        "condition": LIVE_CONDITION,
+        "canvas_tokens": LIVE_CANVAS_TOKENS,
+        "max_chars": LIVE_MAX_CHARS,
     },
     "system_message": SYSTEM_MESSAGE,
     "canvas_tokens": CANVAS_TOKENS,

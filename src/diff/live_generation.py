@@ -132,6 +132,15 @@ class LiveStream:
         return bisect.bisect_left([cue.start_ms for cue in self.cues], position_ms)
 
 
+def starting_caption_problems(stream: LiveStream, max_chars: int) -> list[str]:
+    """Starting captions a live rewrite on the protocol's canvas cannot hold."""
+    return [
+        f"{stream.video_id} cue {cue.cue_index}: {len(cue.text)} characters, over {max_chars}"
+        for cue in stream.cues
+        if len(cue.text) > max_chars
+    ]
+
+
 @dataclass(frozen=True)
 class LiveRequest:
     cue: int

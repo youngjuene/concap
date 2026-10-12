@@ -497,10 +497,19 @@ Measured:
 - **The captions after the tweak (texture 4, relation) were mostly broken,**
   as in the pre-check.
 
-**Open for the researcher:**
-- the reveal delay (about 9–23 s, against the 6–7 s asked for);
-- the texture-slider quality;
-- the slider labels and page wording (drafts);
+
+**Decided by the researcher on 2026-10-12 (protocol v5):**
+- **Live canvas: 80 tokens** (`LIVE_CANVAS_TOKENS`), at k2 with 40 steps.
+  - That takes about 5.7 s per caption against 8.9 s at 128, so `L` settles
+    near its 6 s floor.
+  - Starting captions and rewrites must fit 96 characters (`LIVE_MAX_CHARS`).
+    `live serve` refuses a starting caption that does not.
+- **Wording approved:** the slider labels and the page text, as drafted.
+  - Texture slider: "소리의 질감 표현: 적게 ↔ 많이".
+  - Source slider: "음원 설명: 넓은 범주로 ↔ 위치와 관계까지".
+- **Texture quality:** to be tested on held-out captions before any change.
+
+**Still open for the researcher:**
 - the post-watch items;
 - the long videos with their starting captions.
 

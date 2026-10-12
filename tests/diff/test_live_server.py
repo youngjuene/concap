@@ -162,16 +162,12 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert kinds == ["session_started", "watch_started", "settings", "exposures", "video_ended", "ratings"]
     assert events[0]["calibration"]["heard_observations"] == {"human": 1}
     assert next(e for e in events if e["event"] == "exposures")["entries"][0]["job_id"].startswith("job-")
-    assert next(e for e in events if e["event"] == "settings")["steps"] == {
-        "texture": 4,
-        "context": "relation",
-    }
+    settings_event = next(e for e in events if e["event"] == "settings")
+    assert settings_event["steps"] == {"texture": 4, "context": "relation"}
     live_log = next(app_parts["logs"].glob("live-*.jsonl"))
     attempts = [json.loads(line) for line in live_log.read_text(encoding="utf-8").splitlines()]
-    assert attempts[0]["guidance"].startswith("참고로") and attempts[-1]["spec"] == {
-        "texture": 4,
-        "context": "relation",
-    }
+    assert attempts[0]["guidance"].startswith("참고로")
+    assert attempts[-1]["spec"] == {"texture": 4, "context": "relation"}
 
 
 def test_a_second_participant_is_refused_while_the_gpu_is_taken(app_parts: dict[str, Any]) -> None:

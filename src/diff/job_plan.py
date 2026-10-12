@@ -41,6 +41,8 @@ from diff.study_protocol import (
     EPS,
     IM_END_ID,
     K_CONDITIONS,
+    LIVE_CANVAS_TOKENS,
+    LIVE_CONDITION,
     MASK_ID,
     PHASE1_CONDITIONS,
     PROTOCOL_SHA256,
@@ -322,7 +324,16 @@ def make_job(
     )
 
 
-LIVE_CONDITION: Final = "dream_k2"  # researcher, 2026-10-11: about 8 s per caption at canvas 128
+def live_call_settings() -> dict[str, Any]:
+    """Dream's call for a live caption: the protocol's live canvas (80 tokens since 2026-10-12) at k2."""
+    k = K_CONDITIONS[LIVE_CONDITION]
+    if LIVE_CANVAS_TOKENS % k:
+        raise ValueError(f"the live canvas {LIVE_CANVAS_TOKENS} is not divisible by k={k}")
+    return {
+        **dream_call_settings(2, k),
+        "max_new_tokens": LIVE_CANVAS_TOKENS,
+        "steps": LIVE_CANVAS_TOKENS // k,
+    }
 
 
 def live_job(source: CaptionSource, texture: int, context: str, guidance: str, purpose: str) -> Job:
@@ -332,7 +343,7 @@ def live_job(source: CaptionSource, texture: int, context: str, guidance: str, p
     """
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a live job serves a participant session or a smoke run, not {purpose!r}"])
-    model, generate = condition_settings(2, LIVE_CONDITION)
+    model, generate = DREAM_7B, live_call_settings()
     cell = {"cell_id": f"t{texture}-{context}", "quality_limit": texture, "context": context}
     return make_job(
         source,

@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from diff.caption_sources import CaptionSource, parse_sources
-from diff.job_plan import Job, dream_call_settings, make_job
+from diff.job_plan import Job, dream_call_settings, live_job, make_job
 from diff.live_generation import (
     LatencyEstimator,
     LiveScheduler,
@@ -19,6 +19,7 @@ from diff.live_generation import (
     Spec,
     opaque_token,
     slider_steps,
+    starting_caption_problems,
 )
 from diff.model_profile import DREAM_7B
 from diff.rewrite_prompts import RenderedPrompt
@@ -202,3 +203,20 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
     assert lines[0]["latency_estimate_ms"] == 7000 and lines[2]["latency_estimate_ms"] == 9000
     service.detach("session-a")
     assert service.free
+
+
+def test_live_jobs_use_the_80_token_canvas_at_k2() -> None:
+    # Researcher, 2026-10-12: about 5.7 s per caption instead of 8.9 s at 128.
+    job = live_job(stream().cues[0], 2, "specific", "", "smoke")
+    assert job.generate["max_new_tokens"] == 80 and job.generate["steps"] == 40
+    assert job.condition == "dream_k2" and job.caps["expected_forward_calls"] == 40
+    assert job.generate["temperature"] == 0.2 and job.generate["top_p"] == 0.95
+
+
+def test_starting_captions_longer_than_the_live_limit_are_named() -> None:
+    long_stream = stream(cues=2)
+    assert starting_caption_problems(long_stream, 96) == []
+    assert starting_caption_problems(long_stream, 5) == [
+        f"{VIDEO} cue 0: 10 characters, over 5",
+        f"{VIDEO} cue 1: 10 characters, over 5",
+    ]

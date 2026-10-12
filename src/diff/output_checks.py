@@ -273,6 +273,7 @@ def check_output(
     template_phase: int | None = None,
     cell: Mapping[str, Any] | None = None,
     lexicon: Iterable[str] = (),
+    max_chars: int | None = None,
 ) -> CheckResult:
     """Every rule for one output against its source.
 
@@ -297,8 +298,9 @@ def check_output(
     if not text:
         failures.append(Finding("empty_text", "nothing before the terminator"))
     else:
-        if len(text) > MAX_CHARS[phase]:
-            failures.append(Finding("length_over_limit", f"{len(text)} > {MAX_CHARS[phase]} characters"))
+        limit = MAX_CHARS[phase] if max_chars is None else max_chars
+        if len(text) > limit:
+            failures.append(Finding("length_over_limit", f"{len(text)} > {limit} characters"))
         if phase in MAX_LINES and len(text.split("\n")) > MAX_LINES[phase]:
             failures.append(Finding("too_many_lines", f"more than {MAX_LINES[phase]} lines"))
         if sentence_count(text) > 1:

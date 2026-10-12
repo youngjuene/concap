@@ -127,9 +127,10 @@ LIVE_CONTEXT_RULES: Final[dict[str, str]] = {
     "specific": "원래 자막에 나온 음원 이름을 쓰되, 위치나 다른 대상과의 관계는 쓰지 마세요.",
     "relation": "원래 자막에 나온 음원 이름과 함께, 원래 자막에 나온 위치나 관계도 쓰세요.",
 }
+# Version 2 (2026-10-12): at most 96 characters, to fit the 80-token live canvas.
 LIVE_REWRITE: Final = PromptTemplate(
     template_id="live-p2",
-    version=1,
+    version=2,
     text=(
         "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{cue_text}」\n"
         "이 자막을 같은 내용의 새 문장으로 고쳐 쓰세요. "
@@ -137,7 +138,7 @@ LIVE_REWRITE: Final = PromptTemplate(
         "원래 자막에 없는 소리를 더하지 마세요. {texture_rule} {context_rule}{guidance}\n"
         "예를 들어 「멀리서 개 한 마리가 짖는 소리」에 질감 표현을 하나 넣으면 "
         "「멀리서 개 한 마리가 날카롭게 짖는 소리」처럼 쓸 수 있습니다.\n"
-        "160자 이내의 한 문장으로 쓰고, 고쳐 쓴 문장만 출력하세요. "
+        "96자 이내의 한 문장으로 쓰고, 고쳐 쓴 문장만 출력하세요. "
         "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
     ),
 )
