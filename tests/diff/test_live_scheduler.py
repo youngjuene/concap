@@ -74,9 +74,9 @@ def completed(text: str, latency_ms: int = 8000) -> dict[str, Any]:
     ("values", "steps"),
     [
         ((0.0, 0.0), (0, "broad")),
-        ((0.5, 0.5), (2, "specific")),
-        ((1.0, 1.0), (4, "relation")),
-        ((0.62, 0.34), (2, "specific")),
+        ((0.5, 0.5), (1, "specific")),
+        ((1.0, 1.0), (2, "relation")),
+        ((0.62, 0.34), (1, "specific")),
     ],
 )
 def test_sliders_snap_to_prompt_steps(values: tuple[float, float], steps: tuple[int, str]) -> None:

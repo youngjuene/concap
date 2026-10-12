@@ -102,6 +102,10 @@ MAX_CHARS: Final[dict[int, int]] = {1: 96, 2: 160}
 LIVE_CONDITION: Final = "dream_k2"
 LIVE_CANVAS_TOKENS: Final = 80
 LIVE_MAX_CHARS: Final = 96
+# The texture slider spans steps 0-2 (researcher, 2026-10-12). On held-out
+# captions at the live canvas, the 0-4 range gave 25-30 broken, looping or
+# copied captions in 55, against 22 with the cap.
+LIVE_TEXTURE_MAX: Final = 2
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
 PHASE2_CUE_MS: Final = 5000
@@ -224,6 +228,7 @@ GENERATION: Final[dict[str, Any]] = {
         "condition": LIVE_CONDITION,
         "canvas_tokens": LIVE_CANVAS_TOKENS,
         "max_chars": LIVE_MAX_CHARS,
+        "texture_max_step": LIVE_TEXTURE_MAX,
     },
     "system_message": SYSTEM_MESSAGE,
     "canvas_tokens": CANVAS_TOKENS,

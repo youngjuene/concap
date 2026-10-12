@@ -204,6 +204,7 @@ uv run python -m diff live serve \
 **Behaviour to expect:**
 - At k2 on the 80-token live canvas (protocol v5), a caption takes about 6 s on
   an RTX 3090.
+- The texture slider has three steps (0–2), and the context slider has three.
 - A tweak appears at the first cue boundary after about `L`. If the worker is
   busy, it appears one call later; a Dream call cannot be cancelled.
 - A worker that overruns 30 s is restarted, which reloads the model, and

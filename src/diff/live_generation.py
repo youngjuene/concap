@@ -3,7 +3,7 @@
 Researcher's design of 2026-10-11 (plan "Live phase 2"):
 
 * The participant moves two sliders at any time. A move is snapped to steps
-  (texture 0–4, context broad/specific/relation) and becomes the session's
+  (texture 0–2, context broad/specific/relation) and becomes the session's
   current *spec*, together with the participant's guidance sentence.
 * Generation takes about ``L`` seconds, and a caption may only change at a cue
   boundary, so a tweak at playback position ``p`` is written first for the
@@ -48,7 +48,7 @@ from typing import Any, Final
 from diff.caption_sources import CaptionSource
 from diff.generation_worker import TRANSIENT
 from diff.job_plan import Job
-from diff.study_protocol import CONTEXT_STEPS
+from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 
 LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v1"
 LATENCY_WINDOW: Final = 20
@@ -57,11 +57,11 @@ LATENCY_FLOOR_MS: Final = 6000
 LATENCY_START_MS: Final = 7000
 LOOKAHEAD_CUES: Final = 3
 LIVE_DEADLINE_S: Final = 30.0
-TEXTURE_STEPS: Final = 4
+TEXTURE_STEPS: Final = LIVE_TEXTURE_MAX
 
 
 def slider_steps(texture: float, context: float) -> tuple[int, str]:
-    """Continuous slider values (0–1) as the prompt's steps: texture 0–4, context in thirds."""
+    """Continuous slider values (0–1) as the prompt's steps: texture 0–2, context in thirds."""
     for name, value in (("texture", texture), ("context", context)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
             raise ValueError(f"{name} must be a number from 0 to 1, got {value!r}")

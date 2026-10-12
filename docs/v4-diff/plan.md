@@ -497,6 +497,16 @@ Measured:
 - **The captions after the tweak (texture 4, relation) were mostly broken,**
   as in the pre-check.
 
+**Re-measured on 2026-10-12 with protocol v5** (canvas 80, texture capped at
+step 2), on the same walk:
+- **Latency:** 5.4 s per caption, so the worker writes almost every cue
+  fresh.
+- **A tweak at 1.9 s first showed at the 15 s boundary, 13 s later.** That
+  was about 3 s waiting for the call in flight, then `L` = 6 s, then the
+  boundary.
+- **Expected range:** about 6–17 s.
+- **Quality is still the weak point:** for example "기�기기 기�기기", "지
+  good을".
 
 **Decided by the researcher on 2026-10-12 (protocol v5):**
 - **Live canvas: 80 tokens** (`LIVE_CANVAS_TOKENS`), at k2 with 40 steps.
@@ -507,7 +517,26 @@ Measured:
 - **Wording approved:** the slider labels and the page text, as drafted.
   - Texture slider: "소리의 질감 표현: 적게 ↔ 많이".
   - Source slider: "음원 설명: 넓은 범주로 ↔ 위치와 관계까지".
-- **Texture quality:** to be tested on held-out captions before any change.
+- **Texture quality:** fixes were tested on held-out captions first.
+  - Material: `artifacts/diff/prompt-precheck-texture-20261012/`, at canvas
+    80, the same 11 held-out cues, 55 outputs per variant.
+  - Rule, fixed beforehand: among the k2 variants, the fewest outputs with a
+    failure, a prompt leak, an exact copy or a repetition loop. Ties go to the
+    full range, then to keeping the vocabulary list.
+
+  | Variant | Bad of 55 | Broken characters | Loops | Copies | Median latency |
+  |---|---|---|---|---|---|
+  | texture 0–4, vocabulary list, k2 | 25 | 14 | 6 | 7 | 5.5 s |
+  | texture 0–4, no list, k2 | 30 | 19 | 9 | 7 | 4.9 s |
+  | **texture 0–2, vocabulary list, k2 (chosen)** | **22** | 11 | 2 | 8 | 5.8 s |
+  | texture 0–2, no list, k2 | 22 | 10 | 2 | 10 | 5.4 s |
+  | texture 0–4, vocabulary list, k1 (not eligible) | 19 | 6 | 3 | 8 | 17.0 s |
+
+  - **Adopted:** the texture slider spans steps 0–2 (`LIVE_TEXTURE_MAX`, live
+    rules version 2), and `live-p2` v2 asks for at most 96 characters.
+  - **Still broken:** about 2 in 5 live captions are broken, looping or copied
+    on this material (U+FFFD in 1 in 5). k1 was best but too slow for the
+    reveal delay.
 
 **Still open for the researcher:**
 - the post-watch items;

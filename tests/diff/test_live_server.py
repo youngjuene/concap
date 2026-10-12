@@ -163,11 +163,11 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert events[0]["calibration"]["heard_observations"] == {"human": 1}
     assert next(e for e in events if e["event"] == "exposures")["entries"][0]["job_id"].startswith("job-")
     settings_event = next(e for e in events if e["event"] == "settings")
-    assert settings_event["steps"] == {"texture": 4, "context": "relation"}
+    assert settings_event["steps"] == {"texture": 2, "context": "relation"}  # texture capped at step 2
     live_log = next(app_parts["logs"].glob("live-*.jsonl"))
     attempts = [json.loads(line) for line in live_log.read_text(encoding="utf-8").splitlines()]
     assert attempts[0]["guidance"].startswith("참고로")
-    assert attempts[-1]["spec"] == {"texture": 4, "context": "relation"}
+    assert attempts[-1]["spec"] == {"texture": 2, "context": "relation"}
 
 
 def test_a_second_participant_is_refused_while_the_gpu_is_taken(app_parts: dict[str, Any]) -> None:

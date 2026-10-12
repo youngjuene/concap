@@ -110,13 +110,15 @@ EMPTY_QUALITIES: Final = "없음"
 # words come from the closed vocabulary and the context rules speak of the
 # original caption. The 「」 quoting and the closing no-prefix sentence answer
 # the label echo that G0 run 3 showed (10 of 18 outputs).
-LIVE_RULES_VERSION: Final = 1
+# Version 2 (2026-10-12): texture steps 0-2 only (LIVE_TEXTURE_MAX); steps 3-4 broke
+# Dream's Korean most often on the held-out pre-check.
+LIVE_RULES_VERSION: Final = 2
 LIVE_QUALITY_WORDS: Final = ", ".join(forms[0] for forms in QUALITIES.values())
 LIVE_TEXTURE_RULES: Final[dict[int, str]] = {
     0: "소리의 질감을 나타내는 표현(크기, 높낮이, 규칙성, 거칠기 같은 것)은 쓰지 마세요.",
     **{
         count: f"소리의 질감을 나타내는 표현을 다음 목록에서 {count}개 골라 넣으세요: {LIVE_QUALITY_WORDS}."
-        for count in (1, 2, 3, 4)
+        for count in (1, 2)
     },
 }
 LIVE_CONTEXT_RULES: Final[dict[str, str]] = {
@@ -256,7 +258,7 @@ def render_live(source: CaptionSource, texture: int, context: str, guidance: str
     if context not in LIVE_CONTEXT_RULES:
         raise ValueError(f"Unknown context step: {context}")
     if type(texture) is not int or texture not in LIVE_TEXTURE_RULES:
-        raise ValueError("texture must be an integer step from 0 to 4")
+        raise ValueError("texture must be an integer step from 0 to 2")
     text = LIVE_REWRITE.text.format(
         cue_text=source.text,
         texture_rule=LIVE_TEXTURE_RULES[texture],
