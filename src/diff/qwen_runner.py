@@ -1,16 +1,15 @@
 """Qwen2.5-7B-Instruct, the autoregressive baseline, through transformers' ``generate``.
 
-Review stage only by default (plan §12). Dream was initialized from Qwen2.5-7B
-and uses its tokenizer plus added tokens, but the comparison supports no
-architecture claim. The pinned ``generation_config.json`` turns on sampling
+Review stage only by default (plan §12), reported beside Trida-7B. The pinned
+``generation_config.json`` turns on sampling
 (temperature 0.7, top_p 0.8, top_k 20) and sets ``repetition_penalty=1.05``,
 which would still apply under greedy decoding. So the call passes
 ``do_sample=False`` and ``repetition_penalty=1.0``, leaves temperature, top_p and
 top_k unset, stops at either terminator, and records the resolved config.
-Nothing of Dream's contract is ever passed here, and nothing else is accepted.
+Nothing of Trida's contract is ever passed here, and nothing else is accepted.
 
-``max_new_tokens`` is the Dream canvas of the same phase, so both models get
-the same room; the output may stop earlier.
+``max_new_tokens`` is Trida's canvas of the same phase, so both models get the
+same room; the output may stop earlier.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from diff.model_runtime import (
     rng_unchanged,
 )
 from diff.output_checks import extract_output
-from diff.study_protocol import ENDOFTEXT_ID, IM_END_ID, TERMINATOR_IDS, sha256_tokens
+from diff.study_protocol import QWEN_ENDOFTEXT_ID, QWEN_IM_END_ID, QWEN_TERMINATOR_IDS, sha256_tokens
 
 REQUIRED_KEYWORDS: Final = (
     "attention_mask",
@@ -66,8 +65,8 @@ def checked_call(arguments: Mapping[str, Any]) -> dict[str, Any]:
         isinstance(arguments["repetition_penalty"], bool) or arguments["repetition_penalty"] != 1.0
     ):
         problems.append(f"repetition_penalty must be 1.0, got {arguments['repetition_penalty']!r}")
-    if "eos_token_id" in arguments and list(arguments["eos_token_id"]) != [IM_END_ID, ENDOFTEXT_ID]:
-        problems.append(f"eos_token_id must be [{IM_END_ID}, {ENDOFTEXT_ID}]")
+    if "eos_token_id" in arguments and list(arguments["eos_token_id"]) != [QWEN_IM_END_ID, QWEN_ENDOFTEXT_ID]:
+        problems.append(f"eos_token_id must be [{QWEN_IM_END_ID}, {QWEN_ENDOFTEXT_ID}]")
     limit = arguments.get("max_new_tokens")
     if "max_new_tokens" in arguments and (type(limit) is not int or limit < 1):
         problems.append(f"max_new_tokens must be a positive integer, got {limit!r}")
@@ -125,7 +124,7 @@ def run_job(loaded: LoadedModel, frozen: FrozenJob) -> dict[str, Any]:
     latency_ms = round((time.monotonic() - started) * 1000)
     unchanged = rng_unchanged(before, rng_snapshot(loaded.device))
     sequence = [int(token) for token in output_ids[0].tolist()]
-    output = extract_output(sequence, len(ids), loaded.decode, loaded.special_ids, TERMINATOR_IDS)
+    output = extract_output(sequence, len(ids), loaded.decode, loaded.special_ids, QWEN_TERMINATOR_IDS)
     status, error = ("completed", None) if unchanged else ("rng_consumed", "the call changed an RNG state")
     return {
         "status": status,

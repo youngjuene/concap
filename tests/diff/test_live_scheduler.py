@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from diff.caption_sources import CaptionSource, parse_sources
-from diff.job_plan import Job, dream_call_settings, live_job, make_job
+from diff.job_plan import Job, live_job, make_job, trida_call_settings
 from diff.live_generation import (
     LatencyEstimator,
     LiveScheduler,
@@ -21,7 +21,7 @@ from diff.live_generation import (
     slider_steps,
     starting_caption_problems,
 )
-from diff.model_profile import DREAM_7B
+from diff.model_profile import TRIDA_7B
 from diff.rewrite_prompts import RenderedPrompt
 
 VIDEO = "live_test_video"
@@ -63,7 +63,7 @@ def job_for(source: CaptionSource, spec: Spec) -> Job:
         "quality_limit": spec.texture,
         "context": spec.context,
     }
-    return make_job(source, "smoke", "dream_k2", cell, DREAM_7B, prompt, dream_call_settings(2, 2))
+    return make_job(source, "smoke", "trida_tau_090", cell, TRIDA_7B, prompt, trida_call_settings(96, 0.9))
 
 
 def completed(text: str, latency_ms: int = 8000) -> dict[str, Any]:
@@ -89,12 +89,14 @@ def test_slider_values_outside_0_to_1_are_refused(bad: Any) -> None:
         slider_steps(bad, 0.5)
 
 
-def test_latency_estimate_starts_at_7s_floors_at_6s_and_follows_load() -> None:
+def test_latency_estimate_starts_at_1s_and_follows_the_device() -> None:
+    # Researcher, 2026-10-12: no floor, so a fast model shows a tweak at the next boundary.
     estimator = LatencyEstimator()
-    assert estimator.estimate_ms() == 7000
+    assert estimator.estimate_ms() == 1000
     for _ in range(5):
         estimator.observe(4000)
-    assert estimator.estimate_ms() == 6000
+    assert estimator.estimate_ms() == 4000
+    assert LatencyEstimator(floor_ms=6000).estimate_ms() == 6000  # a floor still applies when asked for
     for latency in [8000] * 9 + [12000]:
         estimator.observe(latency)
     assert estimator.estimate_ms() == 8000  # p90 of the last 20: 5 × 4 s, 9 × 8 s, 1 × 12 s
@@ -117,12 +119,12 @@ def test_a_tweak_targets_the_first_boundary_one_latency_later() -> None:
     scheduler.set_playback(10_000, True, 100.0)
     scheduler.set_spec(Spec(4, "relation"), 10_000, 100.0)
     request = scheduler.next_request(100.0)
-    # 10 s + L (7 s) = 17 s; the first boundary from there is cue 4 at 20 s
-    assert request is not None and request.target_ms == 17_000 and request.cue == 4
+    # 10 s + L (1 s) = 11 s; the first boundary from there is cue 3 at 15 s
+    assert request is not None and request.target_ms == 11_000 and request.cue == 3
     assert request.revision == 2 and request.spec == Spec(4, "relation")
-    # 4 s later the playhead is at 14 s: 21 s gives cue 5, and cue 4 is already being written
+    # 4 s later the playhead is at 14 s: 15 s gives cue 3, already being written, so cue 4
     later = scheduler.next_request(104.0)
-    assert later is not None and later.cue == 5
+    assert later is not None and later.cue == 4
 
 
 def test_an_older_spec_is_never_shown_but_comes_back_from_the_cache() -> None:
@@ -200,17 +202,17 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
     ]
     assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v1"
     assert lines[0]["cue"] == 0 and lines[0]["guidance"] == "참고 문장" and lines[0]["checks"] == {"ok": True}
-    assert lines[0]["latency_estimate_ms"] == 7000 and lines[2]["latency_estimate_ms"] == 9000
+    assert lines[0]["latency_estimate_ms"] == 1000 and lines[2]["latency_estimate_ms"] == 9000
     service.detach("session-a")
     assert service.free
 
 
-def test_live_jobs_use_the_80_token_canvas_at_k2() -> None:
-    # Researcher, 2026-10-12: about 5.7 s per caption instead of 8.9 s at 128.
+def test_live_jobs_run_trida_at_tau_09_on_three_blocks() -> None:
+    # Researcher, 2026-10-12: Trida at its README setting; 96 tokens fit the 96-character limit.
     job = live_job(stream().cues[0], 2, "specific", "", "smoke")
-    assert job.generate["max_new_tokens"] == 80 and job.generate["steps"] == 40
-    assert job.condition == "dream_k2" and job.caps["expected_forward_calls"] == 40
-    assert job.generate["temperature"] == 0.2 and job.generate["top_p"] == 0.95
+    assert job.profile_id == TRIDA_7B.profile_id and job.condition == "trida_tau_090"
+    assert job.generate["max_new_tokens"] == 96 and job.generate["threshold"] == 0.9
+    assert job.generate["temperature"] == 0 and job.caps == {"canvas_tokens": 96, "timeout_s": 60.0}
 
 
 def test_starting_captions_longer_than_the_live_limit_are_named() -> None:

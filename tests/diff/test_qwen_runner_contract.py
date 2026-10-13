@@ -1,4 +1,4 @@
-"""The Qwen baseline call: greedy, repetition penalty neutralised, nothing of Dream's passed."""
+"""The Qwen baseline call: greedy, repetition penalty neutralised, nothing of Trida's passed."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 import torch
-from fake_dream_model import IM_END, FakeQwen, FakeTokenizer
+from fake_trida_model import QWEN_IM_END, FakeQwen, FakeTokenizer
 
 from diff import qwen_runner
 from diff.caption_sources import SourceSet
@@ -21,7 +21,7 @@ def valid_call(**changes: Any) -> dict[str, Any]:
 
 def test_settings_match_the_contract() -> None:
     assert qwen_call_settings(1) == {
-        "max_new_tokens": 80,
+        "max_new_tokens": 96,
         "do_sample": False,
         "repetition_penalty": 1.0,
         "eos_token_id": [151645, 151643],
@@ -38,9 +38,9 @@ def test_required_keywords(keyword: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "keyword", ["temperature", "top_p", "top_k", "steps", "alg", "mask_token_id", "generation_config"]
+    "keyword", ["temperature", "top_p", "top_k", "threshold", "block_size", "mask_id", "generation_config"]
 )
-def test_sampling_and_dream_keywords_are_refused(keyword: str) -> None:
+def test_sampling_and_trida_keywords_are_refused(keyword: str) -> None:
     with pytest.raises(RefusedCall, match="refused keywords"):
         qwen_runner.checked_call(valid_call(**{keyword: 0}))
 
@@ -76,4 +76,4 @@ def test_run_job_records_the_resolved_config(development_sources: SourceSet) -> 
         "repetition_penalty",
         "eos_token_id",
     }
-    assert IM_END in model.calls[0]["eos_token_id"]
+    assert QWEN_IM_END in model.calls[0]["eos_token_id"]

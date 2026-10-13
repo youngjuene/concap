@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fake_dream_model import FakeTokenizer
+from fake_trida_model import FakeTokenizer
 
 from diff.caption_sources import SourceSet
 from diff.generation_worker import (
@@ -19,7 +19,7 @@ from diff.generation_worker import (
     run_plan,
 )
 from diff.job_plan import FrozenPlan, build_phase1_plan, freeze_plan
-from diff.model_profile import DREAM_7B
+from diff.model_profile import TRIDA_7B
 from diff.model_runtime import chat_token_ids
 
 SCRIPT = Path(__file__).parent / "fake_generation_worker.py"
@@ -38,9 +38,9 @@ def command(tmp_path: Path, behaviour: str) -> WorkerCommand:
 
 def frozen(sources: SourceSet, count: int = 2) -> FrozenPlan:
     tokenizer = FakeTokenizer()
-    plan = build_phase1_plan(sources.sources, ("dream_k1",), "development")
+    plan = build_phase1_plan(sources.sources, ("trida_tau_090",), "development")
     trimmed = type(plan)(phase=plan.phase, purpose=plan.purpose, jobs=plan.jobs[:count])
-    return freeze_plan(trimmed, lambda job: chat_token_ids(tokenizer, job.prompt), {DREAM_7B.profile_id: {}})
+    return freeze_plan(trimmed, lambda job: chat_token_ids(tokenizer, job.prompt), {TRIDA_7B.profile_id: {}})
 
 
 def run(tmp_path: Path, sources: SourceSet, behaviour: str, count: int = 1) -> list[dict[str, object]]:
@@ -48,8 +48,8 @@ def run(tmp_path: Path, sources: SourceSet, behaviour: str, count: int = 1) -> l
     run_plan(
         plan,
         tmp_path / "run",
-        {DREAM_7B.profile_id: command(tmp_path, behaviour)},
-        {DREAM_7B.profile_id: {"files": {}, "weights": {}}},
+        {TRIDA_7B.profile_id: command(tmp_path, behaviour)},
+        {TRIDA_7B.profile_id: {"files": {}, "weights": {}}},
         startup_timeout=30,
         log=lambda line: None,
     )

@@ -1,27 +1,27 @@
-"""G0: Korean feasibility of Dream, checked before any other Dream work (follow-up §7).
+"""G0: Korean feasibility of the diffusion model, checked before any other work on it (follow-up §7).
 
-Dream's continued pretraining and instruction data are mostly English and code
-and its reported evaluations are English, so its Korean captions are unknown.
-G0 asks whether it can write them at all, on development material only — never
-a participant clip or video:
+Trida-7B (the researcher's model since 2026-10-12) is trained on English,
+Korean and Japanese, but how it writes these captions is still unknown. G0 asks
+whether it can write them at all, on development material only — never a
+participant clip or video:
 
 * every development-clip cue with the phase-1 rewrite prompt, and
 * at least 12 phase-2 cell prompts over development-clip evidence, covering the
   lattice's four corners,
 
-each generated as ``dream_k1``, ``dream_k2``, ``dream_k4`` and ``qwen``.
+each generated under every ``trida_tau_*`` condition and as ``qwen``.
 
 From the run come an automatic report per model and condition (technical
 status, terminator inside the canvas, leftover masks, the script check, exact
 copies, repetition, character limits, realized per-step counts, latency) and a
-blind packet: ``dream_k1`` and ``qwen`` outputs mixed and shuffled under opaque
+blind packet: the rated Trida condition and ``qwen`` mixed and shuffled under opaque
 IDs with cue text, evidence and output, the key written to a separate
 directory. One fluent Korean reader rates naturalness 1–5 and returns
 ``blind_id,naturalness``. :func:`decide` applies the provisional rule over
-``dream_k1`` and writes an :class:`~diff.analysis_decisions.AnalysisDecision`
-naming the run manifest's hash; Qwen's numbers are reported beside it. When
-the automatic criteria already fail, the fail can be recorded without the
-rating.
+the rated condition (``GATES['G0']['condition']``) and writes an
+:class:`~diff.analysis_decisions.AnalysisDecision` naming the run manifest's
+hash; Qwen's numbers are reported beside it. When the automatic criteria
+already fail, the fail can be recorded without the rating.
 
 The rating needs a person, so the pipeline stops once the packet exists. A
 plan built from synthetic material is a smoke run: it can exercise every step
@@ -42,13 +42,14 @@ from diff.analysis_decisions import AnalysisDecision
 from diff.caption_sources import CaptionSource
 from diff.generation_worker import read_attempts
 from diff.job_plan import FrozenPlan, Plan, PlanError, condition_settings, make_job
-from diff.model_profile import DREAM_7B
+from diff.model_profile import TRIDA_7B
 from diff.output_checks import check_output, output_from_record, script_passes
 from diff.rewrite_prompts import render_cell, render_evidence, render_phase1
-from diff.study_protocol import GATES, lattice_corners, sha256_of
+from diff.study_protocol import GATES, TAU_CONDITIONS, lattice_corners, sha256_of
 
-G0_CONDITIONS: Final = ("dream_k1", "dream_k2", "dream_k4", "qwen")
-RATED_CONDITIONS: Final = ("dream_k1", "qwen")
+G0_CONDITIONS: Final = (*TAU_CONDITIONS, "qwen")
+RATED: Final = str(GATES["G0"]["condition"])  # the middle τ, as k1 was Dream's reference
+RATED_CONDITIONS: Final = (RATED, "qwen")
 RUN_SCHEMA: Final = "diff.g0-run/v1"
 PACKET_COLUMNS: Final = ("blind_id", "cue_text", "evidence", "output")
 
@@ -216,7 +217,7 @@ def blind_packet(
     sources: Mapping[str, CaptionSource],
     manifest_sha256: str,
 ) -> tuple[list[dict[str, str]], dict[str, dict[str, Any]]]:
-    """``dream_k1`` and ``qwen`` outputs under opaque IDs, shuffled; the key separately."""
+    """The rated condition's and ``qwen`` outputs under opaque IDs, shuffled; the key separately."""
     rows, key = [], {}
     for entry in frozen.jobs:
         job, attempt = entry.job, latest.get(entry.job.job_id)
@@ -311,10 +312,10 @@ def waive(
             "naturalness_share": None,
             "naturalness_median": None,
         }
-    k1 = evidence["dream_k1"]
+    rated = evidence[RATED]
     evidence["criteria"] = {
-        "terminal": k1["terminal"] == k1["jobs"] and k1["technical_failures"] == 0,
-        "script": k1["script_pass_share"] >= rule["min_script_pass_share"],
+        "terminal": rated["terminal"] == rated["jobs"] and rated["technical_failures"] == 0,
+        "script": rated["script_pass_share"] >= rule["min_script_pass_share"],
         "naturalness": None,
     }
     evidence["waived"] = "the human naturalness rating"
@@ -324,7 +325,7 @@ def waive(
         rule=rule,
         evidence=evidence,
         run_manifest_sha256=str(manifest["manifest_sha256"]),
-        model_profile_id=DREAM_7B.profile_id,
+        model_profile_id=TRIDA_7B.profile_id,
         decided_by=decided_by,
         decided_at=decided_at,
         notes=notes,
@@ -341,7 +342,7 @@ def decide(
     decided_at: str,
     notes: str = "",
 ) -> AnalysisDecision:
-    """The provisional G0 rule over ``dream_k1``, with Qwen's numbers beside it.
+    """The provisional G0 rule over the rated Trida condition, with Qwen's numbers beside it.
 
     ``ratings`` may be ``None`` only when the automatic criteria already fail:
     the rating could not change the outcome, so the fail is recorded with
@@ -371,17 +372,17 @@ def decide(
             ),
             naturalness_median=statistics.median(rated) if rated else None,
         )
-    k1 = evidence["dream_k1"]
+    rated = evidence[RATED]
     checks: dict[str, bool | None] = {
-        "terminal": k1["terminal"] == k1["jobs"] and k1["technical_failures"] == 0,
-        "script": k1["script_pass_share"] >= rule["min_script_pass_share"],
+        "terminal": rated["terminal"] == rated["jobs"] and rated["technical_failures"] == 0,
+        "script": rated["script_pass_share"] >= rule["min_script_pass_share"],
         "naturalness": None,
     }
     if ratings is None:
         if checks["terminal"] and checks["script"]:
             raise ValueError("the automatic criteria pass, so G0 needs the human rating (--ratings)")
     else:
-        checks["naturalness"] = k1["naturalness_share"] >= rule["min_naturalness_share"]
+        checks["naturalness"] = rated["naturalness_share"] >= rule["min_naturalness_share"]
     evidence["criteria"] = checks
     return AnalysisDecision(
         gate="G0",
@@ -389,7 +390,7 @@ def decide(
         rule=rule,
         evidence=evidence,
         run_manifest_sha256=str(manifest["manifest_sha256"]),
-        model_profile_id=DREAM_7B.profile_id,
+        model_profile_id=TRIDA_7B.profile_id,
         decided_by=decided_by,
         decided_at=decided_at,
         notes=notes,

@@ -1,4 +1,4 @@
-"""Live phase-2 captions: Dream rewrites the cue captions while a participant watches.
+"""Live phase-2 captions: Trida rewrites the cue captions while a participant watches.
 
 Researcher's design of 2026-10-11 (plan "Live phase 2"):
 
@@ -9,24 +9,26 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
   boundary, so a tweak at playback position ``p`` is written first for the
   first cue that starts at or after ``p + L``: the earliest boundary at which
   it can be ready. The delay the participant sees is therefore between ``L``
-  and ``L`` plus one cue. ``L`` follows the device's load: the 90th percentile
-  of the last 20 live latencies, never below 6 s, starting at 7 s.
+  and ``L`` plus one cue. ``L`` follows the device's load (researcher,
+  2026-10-12, no floor): the 90th percentile of the last 20 live latencies,
+  starting at 1 s. With Trida at about 0.4 s a caption, a tweak shows at the
+  next cue boundary.
 * While the worker is idle it keeps filling later cues under the current spec,
   up to three cues ahead. A cue that would end before its caption could be
   ready is skipped.
 * At a cue boundary with nothing new ready, the previous caption stays (the
   browser does this). A finished caption for an older spec is kept in the
   cache, never shown for the newer one, and served again if the participant
-  returns to that spec. A Dream call cannot be cancelled without killing the
+  returns to that spec. A model call cannot be cancelled without killing the
   worker.
 * Before playback, the first cues are written at the calibrated settings, so a
-  video opens with Dream's rewrite.
-* A caption is shown as Dream wrote it. A call that fails is logged and not
+  video opens with Trida's rewrite.
+* A caption is shown as Trida wrote it. A call that fails is logged and not
   asked again, except for one identical retry after a transient worker or
   device failure (the brief's rule).
 
 The scheduler is pure (time is passed in), so it is tested without threads or
-a model. :class:`LiveService` adds the worker thread, the supervised Dream
+a model. :class:`LiveService` adds the worker thread, the supervised Trida
 worker (:mod:`diff.generation_worker`, ``kind="live"``) and the attempt log.
 Nothing here imports torch: the worker renders, tokenizes and runs the job.
 """
@@ -53,8 +55,8 @@ from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v1"
 LATENCY_WINDOW: Final = 20
 LATENCY_QUANTILE: Final = 0.9
-LATENCY_FLOOR_MS: Final = 6000
-LATENCY_START_MS: Final = 7000
+LATENCY_FLOOR_MS: Final = 0
+LATENCY_START_MS: Final = 1000
 LOOKAHEAD_CUES: Final = 3
 LIVE_DEADLINE_S: Final = 30.0
 TEXTURE_STEPS: Final = LIVE_TEXTURE_MAX
@@ -78,7 +80,7 @@ class Spec:
 
 
 class LatencyEstimator:
-    """``L``: the 90th percentile of recent completed latencies, floored, with a starting value."""
+    """``L``: the 90th percentile of recent completed latencies, with a starting value (and any floor)."""
 
     def __init__(
         self,
@@ -246,7 +248,7 @@ Attempt = Callable[[Mapping[str, Any], float], dict[str, Any]]
 
 
 class LiveService:
-    """One Dream worker (one GPU) serving one session at a time, on its own thread.
+    """One Trida worker (one GPU) serving one session at a time, on its own thread.
 
     ``attempt`` is ``Supervisor.attempt`` bound to ``kind="live"`` in production
     and a fake in tests. ``check`` turns a result into the check record logged

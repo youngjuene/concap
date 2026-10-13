@@ -1,8 +1,7 @@
 """Pinned model profiles and the verification that runs before any remote code.
 
-``trust_remote_code`` executes Dream's ``configuration_dream.py``,
-``modeling_dream.py``, ``generation_utils.py`` and ``tokenization_dream.py``
-from the model directory. A profile lists the SHA-256 of those files, the
+``trust_remote_code`` executes Trida's ``configuration_trida.py`` and
+``modeling_trida.py`` from the model directory. A profile lists the SHA-256 of those files, the
 tokenizer files, the configs and every weight shard at the pinned revision;
 :func:`verify_snapshot` refuses to hand a directory to ``from_pretrained``
 unless every one matches, and loading then happens offline from that verified
@@ -30,13 +29,10 @@ from pathlib import Path
 from typing import Any, Final
 
 from diff.study_protocol import (
-    CONFIG_BOS_ID,
-    CONFIG_MAX_POSITION_EMBEDDINGS,
-    CONTEXT_LIMIT,
-    ENDOFTEXT_ID,
-    IM_END_ID,
-    MASK_ID,
-    TOKENIZER_BOS_ID,
+    QWEN_CONFIG_BOS_ID,
+    QWEN_CONTEXT_LIMIT,
+    QWEN_ENDOFTEXT_ID,
+    QWEN_IM_END_ID,
     TRIDA_BOS_ID,
     TRIDA_CONTEXT_LIMIT,
     TRIDA_IM_END_ID,
@@ -45,7 +41,6 @@ from diff.study_protocol import (
     TRIDA_PAD_ID,
 )
 
-DREAM_REVISION: Final = "05334cb9faaf763692dcf9d8737c642be2b2a6ae"
 QWEN_REVISION: Final = "a09a35458c702b33eeacc393d103063234e8bc28"
 TRIDA_REVISION: Final = "c37755e81222de0aff69ee481f5299a99928b105"
 
@@ -90,74 +85,6 @@ class ModelProfile:
         }
 
 
-DREAM_7B: Final = ModelProfile(
-    profile_id="dream-v0-instruct-7b@05334cb9",
-    runner="dream",
-    repo_id="Dream-org/Dream-v0-Instruct-7B",
-    revision=DREAM_REVISION,
-    files={
-        "configuration_dream.py": "24d038962ccf16361595494461000ec0c1b043653c7494d7fc835c96f121f0b9",
-        "modeling_dream.py": "3166e789f0d69beb1f4fbdee2317953d1c1c3b9bc21479b109afc5dd059de5b3",
-        "generation_utils.py": "7f8ad01484898946b3c9c9d5ebc85e5ac726061d0fa7b4a522c4b8110c13a921",
-        "tokenization_dream.py": "1d7f04104fa673831f48256e3cd42cd0bbd1bddd801b4abea5c74cc47d98bdd2",
-        "config.json": "11afc7fe7a1881e73dcd70cca6868aaaf8eb89ad45ea5fc6426c3fb82dec9340",
-        "generation_config.json": "e4fa42a31ef22740804534395c7a18f335a3c1f9abd9db83a6941b1c8748b2ee",
-        "tokenizer_config.json": "b0e9c1a6299d8832a1362d6b24f007de8a2acfe0243d8a3a1d1b57aa8250f7ee",
-        "special_tokens_map.json": "fa14641fdc084244b0a530556b1d5bfcb9fa0ed9151a780ffec3b44ba96a0dfe",
-        "added_tokens.json": "32ad9d49fafda64e737853737fe3be3e33cce3f719a159ed73f04cbd81a690ce",
-        "vocab.json": "87a257b04b17642a0688c98cd1df89c398bda4fee532d6f88b38a659ecb4ac8d",
-        "merges.txt": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
-        "model.safetensors.index.json": "998a078123ffc97763690de7f2a677eb89168af5eaf8a5e12e6bc24d18e25bdb",
-    },
-    weights=_shards(
-        4,
-        "3014d84950f2f3afcce622508b6625e9cd911b9c340f4206e35e6a3177aec993",
-        "78fc44a7eae29c3d13bba010ca12584f4220798d41c9e617579a33c47222aa57",
-        "eac5afaf9a0e0b4a23c7ac1dbe5f538ccdf9fac5c0db7919fd9625a92c378e48",
-        "398da65f1f599ca8d594a9d7a077a3b7c4eb0ddfdff8e7e004c3d259712b3cb7",
-    ),
-    remote_code=(
-        "configuration_dream.py",
-        "modeling_dream.py",
-        "generation_utils.py",
-        "tokenization_dream.py",
-    ),
-    tokenizer_files=(
-        "tokenization_dream.py",
-        "tokenizer_config.json",
-        "special_tokens_map.json",
-        "added_tokens.json",
-        "vocab.json",
-        "merges.txt",
-    ),
-    transformers_version="4.46.2",
-    token_ids={
-        "mask": MASK_ID,
-        "endoftext": ENDOFTEXT_ID,
-        "im_end": IM_END_ID,
-        "config_bos": CONFIG_BOS_ID,
-        "tokenizer_bos": TOKENIZER_BOS_ID,
-    },
-    context_limit=CONTEXT_LIMIT,
-    facts=(
-        "MC-08: text-only; evidence text is the only grounding",
-        "config.json max_position_embeddings 131,072 against the README's 2,048 context; 2,048 is used",
-        "loaded with AutoModel (DreamModel), bfloat16, trust_remote_code=True;"
-        " the tokenizer is remote code too",
-        "without a generation_config the base config comes from config.json, whose legacy"
-        " generation defaults (transformers 4.46.2) override Dream's class defaults:"
-        " every call keyword is therefore required",
-        "the shipped generation_config.json has mask_token_id null, so no generation_config object is passed",
-        "generation_config.update drops unknown keys silently,"
-        " so any other keyword is refused before the call",
-        "the canvas starts as all mask; every step is one full forward with no cache and no early exit",
-        "each step commits int(n_mask x (1 - s/t)) positions on linear timesteps from 1 to eps,"
-        " all the rest at the last step",
-        "predictions are not barred from the mask ID, so a selected position can stay masked",
-        "the mask search covers the prompt, so a prompt containing 151666 would be generated into",
-    ),
-)
-
 QWEN_7B: Final = ModelProfile(
     profile_id="qwen2.5-7b-instruct@a09a3545",
     runner="qwen",
@@ -181,18 +108,18 @@ QWEN_7B: Final = ModelProfile(
     ),
     remote_code=(),
     tokenizer_files=("tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt"),
-    transformers_version="4.46.2",
-    token_ids={"endoftext": ENDOFTEXT_ID, "im_end": IM_END_ID, "config_bos": CONFIG_BOS_ID},
-    context_limit=CONTEXT_LIMIT,
+    transformers_version="4.57.3",
+    token_ids={"endoftext": QWEN_ENDOFTEXT_ID, "im_end": QWEN_IM_END_ID, "config_bos": QWEN_CONFIG_BOS_ID},
+    context_limit=QWEN_CONTEXT_LIMIT,
     facts=(
-        "Qwen2ForCausalLM, no remote code; Dream was initialized from Qwen2.5-7B and uses its tokenizer plus "
-        "added tokens, but the comparison supports no architecture claim",
+        "Qwen2ForCausalLM, no remote code;"
+        " the baseline beside Trida, never a participant condition by default",
         "generation_config.json turns on sampling (temperature 0.7, top_p 0.8, top_k 20) and "
         "repetition_penalty 1.05, which would still apply under greedy decoding, so repetition_penalty=1.0 "
         "is passed and temperature/top_p/top_k are left unset",
         "the chat template's default system line adds an identity,"
         " so the system message is passed explicitly",
-        "the same 2,048-token context limit as Dream keeps the two models' inputs comparable",
+        "a conservative 2,048-token prompt-plus-output limit, far above any prompt here",
     ),
 )
 
@@ -253,7 +180,7 @@ TRIDA_7B: Final = ModelProfile(
     ),
 )
 
-PROFILES: Final[dict[str, ModelProfile]] = {item.profile_id: item for item in (DREAM_7B, QWEN_7B, TRIDA_7B)}
+PROFILES: Final[dict[str, ModelProfile]] = {item.profile_id: item for item in (TRIDA_7B, QWEN_7B)}
 
 
 def profile(profile_id: str) -> ModelProfile:
@@ -336,8 +263,7 @@ def verify_loaded_code(objects: list[Any], model: ModelProfile) -> dict[str, str
 
     ``objects`` are the loaded model, its config and its tokenizer; every class
     in their method resolution order that came from a remote-code module is
-    checked, so ``generation_utils.py`` (the mixin) is covered as well as
-    ``modeling_dream.py``.
+    checked, so a mixin in its own file is covered as well as the model class.
     """
     if not model.remote_code:
         return {}
@@ -370,7 +296,6 @@ def environment_fingerprint(lock_path: Path | None = None) -> dict[str, Any]:
         "platform": platform.platform(),
         "lock_sha256": file_sha256(lock_path) if lock_path and lock_path.is_file() else None,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
-        "config_max_position_embeddings": CONFIG_MAX_POSITION_EMBEDDINGS,
     }
     try:
         import torch

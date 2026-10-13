@@ -113,8 +113,8 @@ def extract_output(
 ) -> GeneratedOutput:
     """Cut at the first terminator, decoding without skipping specials; never shorten.
 
-    The new region is everything after the prompt (for Dream, exactly the
-    canvas). No terminator inside it means ``incomplete``. Mask IDs left
+    The new region is everything after the prompt (for Trida, up to its stop
+    and the padding after it). No terminator inside it means ``incomplete``. Mask IDs left
     anywhere in it are counted; the runner treats any as a technical failure.
     """
     new = [int(token) for token in sequence[prompt_tokens:]]

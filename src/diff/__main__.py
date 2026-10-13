@@ -29,7 +29,7 @@ from typing import Any
 
 GENERATOR_LOCK = Path("envs/diff-generator/uv.lock")
 GENERATOR_PYTHON = Path("envs/diff-generator/.venv/bin/python")
-# Dream's bf16 weights take about 15.2 GB; a card needs this much free to host a live worker.
+# Trida's bf16 weights take about 15 GB; a card needs this much free to host a live worker.
 LIVE_MIN_FREE_MIB = 17408
 
 
@@ -61,9 +61,9 @@ def _sources(path: Path) -> Any:
 
 
 def _model_dirs(args: argparse.Namespace) -> dict[str, Path]:
-    from diff.model_profile import DREAM_7B, QWEN_7B
+    from diff.model_profile import QWEN_7B, TRIDA_7B
 
-    dirs = {DREAM_7B.profile_id: args.dream_dir, QWEN_7B.profile_id: args.qwen_dir}
+    dirs = {TRIDA_7B.profile_id: args.trida_dir, QWEN_7B.profile_id: args.qwen_dir}
     return {key: value for key, value in dirs.items() if value is not None}
 
 
@@ -173,9 +173,9 @@ def plan_freeze(args: argparse.Namespace) -> int:
 
 def plan_tokens(args: argparse.Namespace) -> int:
     from diff.job_plan import source_token_report
-    from diff.model_profile import DREAM_7B
+    from diff.model_profile import TRIDA_7B
 
-    tokenizer, _ = _tokenizer(args.dream_dir, DREAM_7B.profile_id)
+    tokenizer, _ = _tokenizer(args.trida_dir, TRIDA_7B.profile_id)
     report = source_token_report(
         _sources(args.sources).sources, lambda text: len(tokenizer.encode(text, add_special_tokens=False))
     )
@@ -287,14 +287,14 @@ def worker(args: argparse.Namespace) -> int:
 
     model = profile(args.profile)
     verification = _read_json(args.verification)
-    if model.runner == "dream":
-        from diff import dream_runner
+    if model.runner == "trida":
+        from diff import trida_runner
 
-        def load_dream() -> tuple[Any, dict[str, Any]]:
-            loaded = dream_runner.load(args.model_dir, verification, device=args.device, lock_path=args.lock)
-            return loaded, dream_runner.warm_up(loaded)
+        def load_trida() -> tuple[Any, dict[str, Any]]:
+            loaded = trida_runner.load(args.model_dir, verification, device=args.device, lock_path=args.lock)
+            return loaded, trida_runner.warm_up(loaded)
 
-        return serve(load_dream, dream_runner.run_job, protocol, sys.stdin, freeze=dream_runner.freeze_live)
+        return serve(load_trida, trida_runner.run_job, protocol, sys.stdin, freeze=trida_runner.freeze_live)
     from diff import qwen_runner
 
     def load_qwen() -> tuple[Any, dict[str, Any]]:
@@ -450,7 +450,7 @@ def _gpu_free_mib() -> dict[str, int]:
 
 
 def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
-    """[--fake-worker] A stand-in for Dream, to walk the interface without a GPU; never research data."""
+    """[--fake-worker] A stand-in for Trida, to walk the interface without a GPU; never research data."""
     import re
 
     time.sleep(1.5)
@@ -462,7 +462,7 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
 
 
 def live_serve(args: argparse.Namespace) -> int:
-    """[repository env + GPU] The live phase-2 app, one supervised Dream worker per GPU."""
+    """[repository env + GPU] The live phase-2 app, one supervised Trida worker per GPU."""
     import functools
 
     import uvicorn
@@ -472,7 +472,7 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.live_calibration import calibrate
     from diff.live_generation import LiveService, LiveStream, starting_caption_problems
     from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
-    from diff.model_profile import DREAM_7B, verify_snapshot
+    from diff.model_profile import TRIDA_7B, verify_snapshot
     from diff.output_checks import check_output, output_from_record
     from diff.study_protocol import LIVE_MAX_CHARS
 
@@ -509,12 +509,12 @@ def live_serve(args: argparse.Namespace) -> int:
         print("FAKE WORKER: captions are placeholders for walking the interface, never research data")
         services.append(LiveService(_fake_live_attempt, log_dir / "fake-worker", check=None))
     else:
-        if args.dream_dir is None:
-            raise SystemExit("pass --dream-dir (or --fake-worker to walk the interface)")
+        if args.trida_dir is None:
+            raise SystemExit("pass --trida-dir (or --fake-worker to walk the interface)")
         free = _gpu_free_mib()
-        print("verifying the Dream snapshot (hashing every weight shard) …", flush=True)
-        record_path = log_dir / "verification-dream.json"
-        _write_json(record_path, verify_snapshot(args.dream_dir, DREAM_7B, weights=True), force=True)
+        print("verifying the Trida snapshot (hashing every weight shard) …", flush=True)
+        record_path = log_dir / "verification-trida.json"
+        _write_json(record_path, verify_snapshot(args.trida_dir, TRIDA_7B, weights=True), force=True)
         for gpu in args.gpus.split(","):
             if free.get(gpu, 0) < LIVE_MIN_FREE_MIB:
                 raise SystemExit(
@@ -536,9 +536,9 @@ def live_serve(args: argparse.Namespace) -> int:
                     "diff",
                     "worker",
                     "--profile",
-                    DREAM_7B.profile_id,
+                    TRIDA_7B.profile_id,
                     "--model-dir",
-                    str(args.dream_dir),
+                    str(args.trida_dir),
                     "--verification",
                     str(record_path),
                     "--device",
@@ -551,7 +551,7 @@ def live_serve(args: argparse.Namespace) -> int:
                 log_path=log_dir / f"worker-gpu{gpu}.log",
             )
             supervisor = Supervisor(command, startup_timeout=1800.0)
-            print(f"loading Dream on GPU {gpu} …", flush=True)
+            print(f"loading Trida on GPU {gpu} …", flush=True)
             supervisor.ensure_started()
             attempt = functools.partial(supervisor.attempt, kind="live")
             services.append(LiveService(attempt, log_dir / "sessions", check=check))
@@ -594,8 +594,8 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--phase", type=int, choices=(1, 2), required=True)
     build.add_argument("--sources", type=Path, required=True)
     build.add_argument("--purpose", choices=("development", "participant"), required=True)
-    build.add_argument("--conditions", default="original,dream_k1,dream_k2,dream_k4")
-    build.add_argument("--condition", default="dream_k1", help="phase 2: the one decoding condition")
+    build.add_argument("--conditions", default="original,trida_tau_070,trida_tau_090,trida_tau_100")
+    build.add_argument("--condition", default="trida_tau_090", help="phase 2: the one decoding condition")
     build.add_argument("--lattice", default="3x3")
     build.add_argument("--g0-decision", type=Path, help="phase 2: a passing G0 decision record (AC-20)")
     build.add_argument("--out", type=Path, required=True)
@@ -603,14 +603,14 @@ def parser() -> argparse.ArgumentParser:
     build.set_defaults(handler=plan_build)
     freeze = plans.add_parser("freeze", help="[generator] add prompt token hashes and apply the guards")
     freeze.add_argument("--plan", type=Path, required=True)
-    freeze.add_argument("--dream-dir", type=Path)
+    freeze.add_argument("--trida-dir", type=Path)
     freeze.add_argument("--qwen-dir", type=Path)
     freeze.add_argument("--out", type=Path, required=True)
     freeze.add_argument("--force", action="store_true")
     freeze.set_defaults(handler=plan_freeze)
     tokens = plans.add_parser("tokens", help="[generator] CV-08 source token counts against the canvas")
     tokens.add_argument("--sources", type=Path, required=True)
-    tokens.add_argument("--dream-dir", type=Path, required=True)
+    tokens.add_argument("--trida-dir", type=Path, required=True)
     tokens.set_defaults(handler=plan_tokens)
 
     models = commands.add_parser("model", help="fetch or verify pinned model snapshots").add_subparsers(
@@ -630,7 +630,7 @@ def parser() -> argparse.ArgumentParser:
     run = commands.add_parser("generate", help="[generator, GPU] run a frozen plan under supervision")
     run.add_argument("--plan", type=Path, required=True)
     run.add_argument("--run-dir", type=Path, required=True)
-    run.add_argument("--dream-dir", type=Path)
+    run.add_argument("--trida-dir", type=Path)
     run.add_argument("--qwen-dir", type=Path)
     run.add_argument("--device", default="cuda:0")
     run.add_argument("--startup-timeout", type=float, default=1800.0)
@@ -657,7 +657,7 @@ def parser() -> argparse.ArgumentParser:
     g0 = commands.add_parser("g0", help="G0 Korean feasibility gate").add_subparsers(
         dest="action", required=True
     )
-    g0_build = g0.add_parser("plan", help="G0 jobs from development material (dream_k1/k2/k4, qwen)")
+    g0_build = g0.add_parser("plan", help="G0 jobs from development material (trida_tau_*, qwen)")
     g0_build.add_argument("--sources", type=Path, required=True)
     g0_build.add_argument(
         "--smoke", action="store_true", help="synthetic material: a pipeline smoke, never a G0"
@@ -686,7 +686,7 @@ def parser() -> argparse.ArgumentParser:
     g0_skip.add_argument("--notes", required=True, help="the reason for the waiver")
     g0_skip.set_defaults(handler=g0_waive)
     live = commands.add_parser(
-        "live", help="live phase 2: Dream rewrites captions while a participant watches"
+        "live", help="live phase 2: Trida rewrites captions while a participant watches"
     )
     live_commands = live.add_subparsers(dest="action", required=True)
     serve_live = live_commands.add_parser("serve", help="[repository env + GPU] run the live participant app")
@@ -698,7 +698,7 @@ def parser() -> argparse.ArgumentParser:
     serve_live.add_argument(
         "--observations", type=Path, help="{code: [phase-1 observations]} for calibration"
     )
-    serve_live.add_argument("--dream-dir", type=Path)
+    serve_live.add_argument("--trida-dir", type=Path)
     serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")
     serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     serve_live.add_argument("--log-dir", type=Path, required=True)

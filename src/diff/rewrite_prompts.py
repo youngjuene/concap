@@ -27,8 +27,10 @@ optional fields are omitted rather than written as "없음", which a model could
 copy into a caption.
 
 Both models receive the same explicit system message, "You are a helpful
-assistant." — Dream's template default; Qwen's own default adds an identity
-line — so the rendered token IDs differ only by tokenizer and template.
+assistant.", because each chat template's own default adds an identity line
+("You are Trillion…", Qwen's) — so the rendered token IDs differ only by
+tokenizer and template. Live phase-2 jobs carry the session's tuner system
+message instead.
 
 The three ``CONTEXT_RULES`` sentences, the ``k = 0`` wording and the rendering
 of an empty quality list are drafts awaiting the researcher's approval (plan
@@ -105,13 +107,13 @@ CONTEXT_RULES: Final[dict[str, str]] = {
 }
 EMPTY_QUALITIES: Final = "없음"
 
-# Live phase 2 (researcher, 2026-10-11): Dream rewrites a cue's starting caption
+# Live phase 2 (researcher, 2026-10-11): the model rewrites a cue's starting caption
 # while the participant watches. There is no evidence list, so the texture
 # words come from the closed vocabulary and the context rules speak of the
 # original caption. The 「」 quoting and the closing no-prefix sentence answer
 # the label echo that G0 run 3 showed (10 of 18 outputs).
 # Version 2 (2026-10-12): texture steps 0-2 only (LIVE_TEXTURE_MAX); steps 3-4 broke
-# Dream's Korean most often on the held-out pre-check.
+# Dream's Korean most often on the held-out pre-check (kept for Trida).
 LIVE_RULES_VERSION: Final = 2
 LIVE_QUALITY_WORDS: Final = ", ".join(forms[0] for forms in QUALITIES.values())
 LIVE_TEXTURE_RULES: Final[dict[int, str]] = {

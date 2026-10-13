@@ -15,7 +15,7 @@ from diff.job_plan import Job, live_job
 from diff.live_calibration import calibrate
 from diff.live_generation import LiveService, LiveStream, Spec
 from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
-from diff.model_profile import DREAM_7B
+from diff.model_profile import TRIDA_7B
 
 VIDEO = "live_test_video"
 ITEMS = {
@@ -144,8 +144,8 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     everything = "\n".join(bodies)
     for secret in (
         "job-",
-        "dream",
-        DREAM_7B.profile_id,
+        "trida",
+        TRIDA_7B.profile_id,
         "seed",
         "k2",
         "smoke",

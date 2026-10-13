@@ -11,7 +11,6 @@ import pytest
 
 from diff.__main__ import verification_record_path
 from diff.model_profile import (
-    DREAM_7B,
     PROFILES,
     QWEN_7B,
     TRIDA_7B,
@@ -23,38 +22,14 @@ from diff.model_profile import (
     verify_snapshot,
 )
 
-DREAM_FILES = {
-    "configuration_dream.py",
-    "modeling_dream.py",
-    "generation_utils.py",
-    "tokenization_dream.py",
-    "config.json",
-    "generation_config.json",
-    "tokenizer_config.json",
-    "special_tokens_map.json",
-    "added_tokens.json",
-    "vocab.json",
-    "merges.txt",
-}
 
-
-def test_the_pins_and_token_ids() -> None:
-    assert DREAM_7B.revision == "05334cb9faaf763692dcf9d8737c642be2b2a6ae"
+def test_the_pins_and_hash_shapes() -> None:
     assert QWEN_7B.revision == "a09a35458c702b33eeacc393d103063234e8bc28"
-    assert set(DREAM_7B.files) >= DREAM_FILES  # every file the follow-up names is pinned
-    assert set(DREAM_7B.remote_code) == {f for f in DREAM_FILES if f.endswith(".py")}
-    assert DREAM_7B.token_ids == {
-        "mask": 151666,
-        "endoftext": 151643,
-        "im_end": 151645,
-        "config_bos": 151643,
-        "tokenizer_bos": 151665,
-    }
-    assert DREAM_7B.context_limit == 2048 and len(DREAM_7B.weights) == 4
+    assert QWEN_7B.token_ids == {"endoftext": 151643, "im_end": 151645, "config_bos": 151643}
     assert all(
         len(value) == 64 for p in PROFILES.values() for value in [*p.files.values(), *p.weights.values()]
     )
-    assert set(PROFILES) == {DREAM_7B.profile_id, QWEN_7B.profile_id, TRIDA_7B.profile_id}
+    assert set(PROFILES) == {TRIDA_7B.profile_id, QWEN_7B.profile_id}  # Dream was removed on 2026-10-12
 
 
 def test_the_trida_pin_and_token_ids() -> None:
@@ -78,7 +53,7 @@ def synthetic_profile(directory: Path) -> ModelProfile:
     (directory / "model-00001-of-00001.safetensors").write_bytes(b"weights")
     return ModelProfile(
         profile_id="synthetic@0",
-        runner="dream",
+        runner="trida",
         repo_id="synthetic/model",
         revision="0" * 40,
         files={name: file_sha256(directory / name) for name in ("config.json", "remote_thing.py")},
@@ -144,18 +119,6 @@ def test_loaded_code_must_be_the_verified_file(tmp_path: Path) -> None:
             verify_loaded_code([module.Thing()], profile)
     finally:
         del sys.modules["remote_thing"]
-
-
-LOCAL_DREAM = Path(__file__).resolve().parents[2] / "artifacts/diff/models/dream-v0-instruct-7b-05334cb9"
-
-
-# `model fetch` writes the record only after a complete, verified download.
-@pytest.mark.skipif(
-    not verification_record_path(LOCAL_DREAM).is_file(), reason="no verified local Dream snapshot"
-)
-def test_the_local_dream_snapshot_matches_its_pins() -> None:
-    record = verify_snapshot(LOCAL_DREAM, DREAM_7B, weights=False)
-    assert set(record["files"]) == set(DREAM_7B.files)
 
 
 LOCAL_TRIDA = Path(__file__).resolve().parents[2] / "artifacts/diff/models/trida-7b-c37755e8"

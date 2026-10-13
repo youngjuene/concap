@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from fake_dream_model import ENDOFTEXT, IM_END, MASK, FakeTokenizer
+from fake_trida_model import IM_END, MASK, PAD, QWEN_ENDOFTEXT, QWEN_IM_END, FakeTokenizer
 
 from diff.caption_sources import CaptionSource, SourceSet
 from diff.output_checks import (
@@ -19,7 +19,7 @@ from diff.output_checks import (
     script_passes,
     sentence_count,
 )
-from diff.study_protocol import TERMINATOR_IDS
+from diff.study_protocol import QWEN_TERMINATOR_IDS, TRIDA_TERMINATOR_IDS
 
 TOKENIZER = FakeTokenizer()
 SPECIAL = frozenset(TOKENIZER.added_tokens_decoder)
@@ -50,8 +50,8 @@ def bus(development_sources: SourceSet) -> CaptionSource:
 
 def test_cut_at_the_first_terminator_keeps_the_tail() -> None:
     prompt = [1, 2, 3]
-    new = [*TOKENIZER.encode("버스"), IM_END, *TOKENIZER.encode("꼬리"), ENDOFTEXT]
-    result = extract_output([*prompt, *new], 3, TOKENIZER.decode, SPECIAL, TERMINATOR_IDS, mask_id=MASK)
+    new = [*TOKENIZER.encode("버스"), IM_END, *TOKENIZER.encode("꼬리"), PAD]
+    result = extract_output([*prompt, *new], 3, TOKENIZER.decode, SPECIAL, TRIDA_TERMINATOR_IDS, mask_id=MASK)
     assert result.text == "버스" and result.terminator == "im_end" and result.terminator_index == 2
     assert result.tail_text.startswith("꼬리") and result.completion == "terminated"
     assert output_from_record(result.record()) == result
@@ -59,14 +59,14 @@ def test_cut_at_the_first_terminator_keeps_the_tail() -> None:
 
 def test_no_terminator_is_incomplete_and_masks_are_counted() -> None:
     new = [*TOKENIZER.encode("버스"), MASK, MASK]
-    result = extract_output(new, 0, TOKENIZER.decode, SPECIAL, TERMINATOR_IDS, mask_id=MASK)
+    result = extract_output(new, 0, TOKENIZER.decode, SPECIAL, TRIDA_TERMINATOR_IDS, mask_id=MASK)
     assert result.completion == "incomplete" and result.leftover_mask_count == 2
     assert result.special_ids_in_text == (MASK, MASK)
 
 
-def test_endoftext_before_im_end_wins() -> None:
-    new = [*TOKENIZER.encode("가"), ENDOFTEXT, IM_END]
-    assert extract_output(new, 0, TOKENIZER.decode, SPECIAL, TERMINATOR_IDS).terminator == "endoftext"
+def test_qwen_endoftext_before_im_end_wins() -> None:
+    new = [*TOKENIZER.encode("가"), QWEN_ENDOFTEXT, QWEN_IM_END]
+    assert extract_output(new, 0, TOKENIZER.decode, SPECIAL, QWEN_TERMINATOR_IDS).terminator == "endoftext"
 
 
 def test_a_clean_rewrite_passes(bus: CaptionSource) -> None:

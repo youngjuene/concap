@@ -1,7 +1,7 @@
 """The live phase-2 participant app (plan "Live phase 2", researcher's design of 2026-10-11).
 
 Pages, in order:
-1. ready: the calibrated settings are written as Dream's rewrite of the first
+1. ready: the calibrated settings are written as Trida's rewrite of the first
    cues before playback, and Start waits for cue 0's caption;
 2. watch: the video plays, the two sliders can be moved at any time, and the
    caption changes only at cue boundaries (the previous caption stays when

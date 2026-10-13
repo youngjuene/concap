@@ -1,18 +1,18 @@
 """The diff study's protocol as hashed data (plan §3.1, §4.3, §12).
 
 Everything that makes two runs "the same study" is a plain value here: the
-Dream call contract, the canvas per phase, the decoding conditions, the
+Trida call contract, the canvas per phase, the decoding conditions, the
 lattice, output limits, gate thresholds and the open-decision defaults.
 ``PROTOCOL_SHA256`` names the whole. Job identity deliberately covers only the
 values a job actually uses (see :mod:`diff.job_plan`), so editing, say, a gate
 threshold never renames a generation job.
 
-The decoding factor is parallelism k = canvas ÷ steps, the nominal number of
-tokens Dream commits per step at a fixed canvas and ``alg``. Dream has no
-unmasking threshold; emulating one with hooks would be a different sampler,
-not the native path. The canvas is the block of mask positions appended after
-the prompt: Dream fills all of it, so its size changes the output and is a
-fixed protocol value per phase, the same for every condition, never a cap.
+The decoding factor is Trida's unmasking threshold τ (the researcher switched
+back from Dream to Trida-7B on 2026-10-12). Within each 32-token block Trida
+commits every masked position whose confidence exceeds τ, and at least the
+most confident one per step, so a lower τ commits more tokens in parallel. The
+canvas is ``max_new_tokens``: a whole number of 32-token blocks. Generation
+stops at ``<|im_end|>``, so the canvas caps the output rather than being filled.
 
 The canonical hashing helpers live here because every other module already
 depends on this one: canonical JSON is sorted, compact, UTF-8 and refuses NaN.
@@ -45,20 +45,19 @@ def sha256_tokens(token_ids: Sequence[int]) -> str:
     return sha256_of([int(token) for token in token_ids])
 
 
-PROTOCOL_SCHEMA: Final = "diff.study-protocol/v5"
+PROTOCOL_SCHEMA: Final = "diff.study-protocol/v6"
 
-# CV-15: Dream's token IDs at 05334cb9, checked against the pinned tokenizer.
-# <|endoftext|> is both EOS and PAD; <|im_end|> ends a chat turn. BOS differs
-# between config.json (151643) and the tokenizer (<|beginoftext|>, 151665);
-# neither is used (add_bos_token is false and the chat template has no BOS), so
-# both are recorded and a rendered prompt containing either is refused.
-MASK_ID: Final = 151666
-ENDOFTEXT_ID: Final = 151643
-IM_END_ID: Final = 151645
-CONFIG_BOS_ID: Final = 151643
-TOKENIZER_BOS_ID: Final = 151665
-TERMINATOR_IDS: Final[dict[int, str]] = {ENDOFTEXT_ID: "endoftext", IM_END_ID: "im_end"}
-BOS_IDS: Final = (CONFIG_BOS_ID, TOKENIZER_BOS_ID)
+# Qwen2.5-7B-Instruct's token IDs at a09a3545 (the baseline), checked against the
+# pinned tokenizer: <|endoftext|> is EOS and PAD, <|im_end|> ends a chat turn.
+# config.json's BOS (151643) is never used (the chat template has none), so a
+# rendered prompt containing it is refused.
+QWEN_ENDOFTEXT_ID: Final = 151643
+QWEN_IM_END_ID: Final = 151645
+QWEN_CONFIG_BOS_ID: Final = 151643
+QWEN_TERMINATOR_IDS: Final[dict[int, str]] = {QWEN_ENDOFTEXT_ID: "endoftext", QWEN_IM_END_ID: "im_end"}
+QWEN_BOS_IDS: Final = (QWEN_CONFIG_BOS_ID,)
+# A conservative prompt-plus-output limit for the baseline, far above any prompt here.
+QWEN_CONTEXT_LIMIT: Final = 2048
 
 # Trida-7B's token IDs at c37755e8 (researcher's model since 2026-10-12), checked
 # against the pinned tokenizer: <|im_end|> ends a turn and is generate's stop
@@ -69,54 +68,38 @@ TRIDA_IM_START_ID: Final = 128000
 TRIDA_IM_END_ID: Final = 128001
 TRIDA_PAD_ID: Final = 128004
 TRIDA_BOS_ID: Final = 0
+TRIDA_TERMINATOR_IDS: Final[dict[int, str]] = {TRIDA_IM_END_ID: "im_end"}
+TRIDA_BOS_IDS: Final = (TRIDA_BOS_ID,)
 # config.json max_position_embeddings (the model card says 8,192; the config is what runs).
 TRIDA_CONTEXT_LIMIT: Final = 4096
 
-# CV-09 / MC-08: prompt plus canvas must fit Dream's 2,048-token context (README).
-# config.json's max_position_embeddings of 131,072 is not a usable limit.
-CONTEXT_LIMIT: Final = 2048
-CONFIG_MAX_POSITION_EMBEDDINGS: Final = 131072
-
-# The Dream call contract (CV-05, CV-10–CV-12). Set by the researcher on
-# 2026-10-11 (protocol v4), after the k1 diagnostic: under greedy decoding
-# Dream commits end-of-text first and returns empty captions (in English too),
-# and no deterministic setting tried avoided that. Only the README's sampling
-# settings did, so Dream samples at temperature 0.2 with top_p 0.95. Each call
-# is seeded from its job's identity immediately before it runs, which keeps a
-# job reproducible and a retry identical. alg_temp stays 0: the positions
-# committed at each step are still chosen by topk, not sampled.
-ALG: Final = "entropy"
-ALGORITHMS: Final = ("entropy", "topk_margin", "maskgit_plus")
-ALG_TEMP: Final = 0.0
-EPS: Final = 1e-3
-TEMPERATURE: Final = 0.2
-TOP_P: Final = 0.95
-# The worker's start-up check calls twice with this seed and needs identical output.
-WARMUP_SEED: Final = 0
+# The Trida call contract (plan §4.4): batch 1, no attention mask, temperature 0
+# (argmax; top_p is then never applied, so it is not passed), no block cache,
+# the pinned block sizes and token IDs. Nothing in a call consumes randomness.
+TRIDA_BLOCK_SIZE: Final = 32
+TRIDA_SMALL_BLOCK_SIZE: Final = 8
+TRIDA_TEMPERATURE: Final = 0
+TRIDA_USE_BLOCK_CACHE: Final = False
 SYSTEM_MESSAGE: Final = "You are a helpful assistant."
 
-# CV-08, set at M0 on 2026-10-10 by the researcher. The canvas covers each
-# phase's character limit: 96 characters is about 72 tokens and 160 about 120,
-# at the roughly 0.75 tokens per character measured on the development
-# captions. At the former 128/192, two-thirds or more of every canvas had to
-# be end-of-text, and k1/k2 often filled all of it. It must be divisible by
-# every k.
-CANVAS_TOKENS: Final[dict[int, int]] = {1: 80, 2: 128}
-# Finalised at M0 on 2026-10-10: about twice the slowest job measured, which was
-# dream_k1 on the former 192 canvas at about 32 s on an RTX 3090. Generation is
-# offline, so the deadline only catches a stuck worker.
+# CV-08 for Trida (2026-10-12): whole 32-token blocks covering each phase's
+# character limit. Trida's tokenizer takes 0.43 tokens per Korean character on
+# average and 0.75 at most on the c2, development and synthetic captions, so 96
+# characters need at most about 72 tokens (three blocks) and 160 about 120 (four).
+CANVAS_TOKENS: Final[dict[int, int]] = {1: 96, 2: 128}
+# Set at M0 on 2026-10-10 (then for Dream); Trida takes about 0.4 s a caption,
+# so the deadline only catches a stuck worker.
 TIMEOUT_SECONDS: Final = 60.0
 MAX_CHARS: Final[dict[int, int]] = {1: 96, 2: 160}
-# Live phase 2 (researcher, 2026-10-12): live captions are written on an
-# 80-token canvas, about 5.7 s at k2 on an RTX 3090 against 8.9 s at 128, so a
-# tweak shows sooner. A starting caption, and the rewrite, must therefore fit
-# phase 1's 96 characters.
-LIVE_CONDITION: Final = "dream_k2"
-LIVE_CANVAS_TOKENS: Final = 80
+# Live phase 2: a starting caption and its rewrite fit phase 1's 96 characters
+# (researcher, 2026-10-12), so live captions use phase 1's three-block canvas.
+# Trida writes one in about 0.4 s at τ 0.9, its README setting.
+LIVE_CONDITION: Final = "trida_tau_090"
+LIVE_CANVAS_TOKENS: Final = 96
 LIVE_MAX_CHARS: Final = 96
 # The texture slider spans steps 0-2 (researcher, 2026-10-12). On held-out
-# captions at the live canvas, the 0-4 range gave 25-30 broken, looping or
-# copied captions in 55, against 22 with the cap.
+# captions with Dream, the 0-4 range gave 25-30 broken, looping or copied
+# captions in 55, against 22 with the cap; the cap stays for Trida.
 LIVE_TEXTURE_MAX: Final = 2
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
@@ -124,15 +107,16 @@ PHASE2_CUE_MS: Final = 5000
 
 CONTROL_CONDITION: Final = "original"
 QWEN_CONDITION: Final = "qwen"
-K_CONDITIONS: Final[dict[str, int]] = {"dream_k1": 1, "dream_k2": 2, "dream_k4": 4}
-DEFAULT_PHASE1_CONDITIONS: Final = ("original", "dream_k1", "dream_k2", "dream_k4")
+# The brief's original decoding conditions, restored with Trida on 2026-10-12.
+TAU_CONDITIONS: Final[dict[str, float]] = {"trida_tau_070": 0.7, "trida_tau_090": 0.9, "trida_tau_100": 1.0}
+DEFAULT_PHASE1_CONDITIONS: Final = (CONTROL_CONDITION, *TAU_CONDITIONS)
 PHASE1_CONDITIONS: Final = (*DEFAULT_PHASE1_CONDITIONS, QWEN_CONDITION)
-DEFAULT_PHASE2_CONDITION: Final = "dream_k1"
+DEFAULT_PHASE2_CONDITION: Final = "trida_tau_090"
 
 CONTEXT_STEPS: Final = ("broad", "specific", "relation")
 # The texture axis is the template's {k}: how many closed-vocabulary qualities a
-# cell may use. It is called quality_limit here so it is never confused with
-# the decoding factor k (parallelism), and cell IDs use t, not k.
+# cell may use. It is called quality_limit here so it is never confused with a
+# decoding setting, and cell IDs use t, not k.
 LATTICES: Final[dict[str, dict[str, tuple[Any, ...]]]] = {
     "3x3": {"quality_limit": (0, 2, 4), "context": CONTEXT_STEPS},
     "5x3": {"quality_limit": (0, 1, 2, 3, 4), "context": CONTEXT_STEPS},
@@ -142,7 +126,7 @@ DEFAULT_LATTICE: Final = "3x3"
 GATES: Final[dict[str, Any]] = {
     "status": "provisional operating thresholds, not validated cut-offs",
     "G0": {
-        "condition": "dream_k1",
+        "condition": DEFAULT_PHASE2_CONDITION,
         "terminal": "every job terminal with no unresolved technical failure",
         "min_script_pass_share": 0.95,
         "incomplete_counts_as_failure": True,
@@ -157,11 +141,11 @@ GATES: Final[dict[str, Any]] = {
             "empty_text",
             "leftover_mask",
         ),
-        "script_share_denominator": "every dream_k1 job, including jobs without output",
-        # Decided by the researcher on 2026-10-11: Dream copied the source caption
-        # under every setting that produced text, and a rater shown a human
-        # caption copied back could pass the gate on copies. An exact copy fails
-        # the check; near-copies stay flags.
+        "script_share_denominator": "every job of the rated condition, including jobs without output",
+        # Decided by the researcher on 2026-10-11 (then for Dream, which copied the
+        # source caption under every setting): a rater shown a human caption
+        # copied back could pass the gate on copies. An exact copy fails the
+        # check; near-copies stay flags.
         "script_check_failing_flags": ("identical_to_source",),
         "min_naturalness": 3,
         "min_naturalness_share": 0.75,
@@ -179,15 +163,15 @@ GATES: Final[dict[str, Any]] = {
 
 OPEN_DECISIONS: Final[dict[str, dict[str, Any]]] = {
     "phase1_manipulation": {
-        "default": "A: dream_k1/k2/k4 with original as the control",
+        "default": "A: trida_tau_070/090/100 with original as the control",
         "alternatives": ["C: steering tracks at one decoding condition"],
     },
     "decoding_factor": {
-        "default": "parallelism k at alg=entropy",
-        "alternatives": ["remasking order (entropy, topk_margin, maskgit_plus) at k = 1"],
+        "default": "Trida's unmasking threshold τ in {0.7, 0.9, 1.0}",
+        "alternatives": ["one τ with steering tracks (option C)"],
     },
     "phase2_decoding": {
-        "default": "fixed, chosen after G1 (dream_k1, the README's setting)",
+        "default": "live, fixed at τ 0.9 (the README's setting)",
         "alternatives": ["assigned per video"],
     },
     "lattice": {"default": "3x3", "alternatives": ["5x3 after G2"]},
@@ -210,31 +194,28 @@ OPEN_DECISIONS: Final[dict[str, dict[str, Any]]] = {
 }
 
 GENERATION: Final[dict[str, Any]] = {
-    "dream": {
-        "call": "diffusion_generate",
+    "trida": {
+        "call": "generate (remote code, block diffusion)",
         "batch_size": 1,
-        "temperature": TEMPERATURE,
-        "top_p": TOP_P,
-        "top_k": None,
-        "alg": ALG,
-        "alg_temp": ALG_TEMP,
-        "eps": EPS,
-        "mask_token_id": MASK_ID,
-        "output_history": True,
-        "return_dict_in_generate": True,
-        "generation_config": "never passed",
-        "rng": "torch.manual_seed(job seed) immediately before each call",
-        "seed": "the first 8 hex digits of the job ID, as an integer",
-        "warmup_seed": WARMUP_SEED,
-        "reproducibility": "worker start-up refuses a device where two seeded calls differ",
+        "block_size": TRIDA_BLOCK_SIZE,
+        "small_block_size": TRIDA_SMALL_BLOCK_SIZE,
+        "temperature": TRIDA_TEMPERATURE,
+        "top_p": "not passed: temperature 0 never applies it",
+        "use_block_cache": TRIDA_USE_BLOCK_CACHE,
+        "mask_id": TRIDA_MASK_ID,
+        "stop_token": TRIDA_IM_END_ID,
+        "pad_token_id": TRIDA_PAD_ID,
+        "rng": "none consumed",
+        "context_limit": TRIDA_CONTEXT_LIMIT,
     },
     "qwen": {
         "call": "generate",
         "batch_size": 1,
         "do_sample": False,
         "repetition_penalty": 1.0,
-        "eos_token_id": [IM_END_ID, ENDOFTEXT_ID],
+        "eos_token_id": [QWEN_IM_END_ID, QWEN_ENDOFTEXT_ID],
         "unset": ["temperature", "top_p", "top_k"],
+        "context_limit": QWEN_CONTEXT_LIMIT,
     },
     "live": {
         "condition": LIVE_CONDITION,
@@ -244,11 +225,9 @@ GENERATION: Final[dict[str, Any]] = {
     },
     "system_message": SYSTEM_MESSAGE,
     "canvas_tokens": CANVAS_TOKENS,
-    "k_conditions": K_CONDITIONS,
+    "tau_conditions": TAU_CONDITIONS,
     "timeout_seconds": TIMEOUT_SECONDS,
-    "context_limit": CONTEXT_LIMIT,
-    "config_max_position_embeddings": CONFIG_MAX_POSITION_EMBEDDINGS,
-    "caps": "forward calls must equal steps and new positions must equal the canvas",
+    "caps": "a canvas of whole 32-token blocks; no call may consume randomness",
     "retry": "one identical retry only after a transient runner or device failure",
 }
 
@@ -256,11 +235,14 @@ PROTOCOL: Final[dict[str, Any]] = {
     "schema": PROTOCOL_SCHEMA,
     "generation": GENERATION,
     "token_ids": {
-        "mask": MASK_ID,
-        "endoftext": ENDOFTEXT_ID,
-        "im_end": IM_END_ID,
-        "config_bos": CONFIG_BOS_ID,
-        "tokenizer_bos": TOKENIZER_BOS_ID,
+        "trida": {
+            "mask": TRIDA_MASK_ID,
+            "im_start": TRIDA_IM_START_ID,
+            "im_end": TRIDA_IM_END_ID,
+            "pad": TRIDA_PAD_ID,
+            "bos": TRIDA_BOS_ID,
+        },
+        "qwen": {"endoftext": QWEN_ENDOFTEXT_ID, "im_end": QWEN_IM_END_ID, "config_bos": QWEN_CONFIG_BOS_ID},
     },
     "phase1": {
         "cues_per_clip": CUES_PER_CLIP,
@@ -286,17 +268,11 @@ def canvas_tokens(phase: int) -> int:
     if phase not in CANVAS_TOKENS:
         raise ValueError(f"Unknown phase: {phase}")
     canvas = CANVAS_TOKENS[phase]
-    if any(canvas % k for k in K_CONDITIONS.values()):
-        raise ValueError(f"The phase-{phase} canvas {canvas} is not divisible by every k")
+    if canvas < TRIDA_BLOCK_SIZE or canvas % TRIDA_BLOCK_SIZE:
+        raise ValueError(
+            f"The phase-{phase} canvas {canvas} is not a whole number of {TRIDA_BLOCK_SIZE}-token blocks"
+        )
     return canvas
-
-
-def steps_for(phase: int, k: int) -> int:
-    """Dream's ``steps`` for parallelism k: canvas ÷ k, which must divide exactly."""
-    canvas = canvas_tokens(phase)
-    if type(k) is not int or k < 1 or canvas % k:
-        raise ValueError(f"k must be a positive integer dividing the canvas {canvas}, got {k!r}")
-    return canvas // k
 
 
 def lattice_cells(name: str = DEFAULT_LATTICE) -> list[dict[str, Any]]:

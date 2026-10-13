@@ -1,6 +1,6 @@
 """What both runners share: the loaded-model record, refusals, chat rendering, RNG.
 
-Kept apart so the Qwen baseline never imports the Dream runner (or the reverse)
+Kept apart so the Qwen baseline never imports the Trida runner (or the reverse)
 and so these pieces can be tested without a model. torch is imported inside the
 functions that need it, so importing this module costs nothing outside the
 generator environment.

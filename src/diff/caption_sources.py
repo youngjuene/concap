@@ -1,7 +1,7 @@
 """Caption sources: one cue's authored text, structured evidence and provenance.
 
 A source is what a phase-1 rewrite is measured against (the cue's 원문) and the
-only grounding a phase-2 lattice cell may use. Dream is text-only (MC-08), so a
+only grounding a phase-2 lattice cell may use. Trida is text-only (MC-08), so a
 sound that is not an event here cannot legitimately appear in an output; the
 evidence is therefore structured — source, category, count, action,
 closed-vocabulary qualities, location or relation, certainty — rather than free
