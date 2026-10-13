@@ -37,12 +37,6 @@ def test_dpo_imports_stay_inside_the_allowed_regen_modules() -> None:
                 assert name in ALLOWED_REGEN, f"{path.name} imports {name}"
 
 
-def test_no_trida_path_alias_or_switch_remains() -> None:
-    for path in PACKAGE.glob("*.py"):
-        text = path.read_text(encoding="utf-8").lower()
-        assert "trida" not in text and "tri-7b" not in text and "tri_runner" not in text, path.name
-
-
 def test_importing_every_module_pulls_in_no_model_or_web_stack() -> None:
     modules = sorted(f"diff.{path.stem}" for path in PACKAGE.glob("*.py") if path.stem != "__init__")
     probe = (

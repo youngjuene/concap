@@ -37,10 +37,17 @@ from diff.study_protocol import (
     IM_END_ID,
     MASK_ID,
     TOKENIZER_BOS_ID,
+    TRIDA_BOS_ID,
+    TRIDA_CONTEXT_LIMIT,
+    TRIDA_IM_END_ID,
+    TRIDA_IM_START_ID,
+    TRIDA_MASK_ID,
+    TRIDA_PAD_ID,
 )
 
 DREAM_REVISION: Final = "05334cb9faaf763692dcf9d8737c642be2b2a6ae"
 QWEN_REVISION: Final = "a09a35458c702b33eeacc393d103063234e8bc28"
+TRIDA_REVISION: Final = "c37755e81222de0aff69ee481f5299a99928b105"
 
 
 def _shards(total: int, *hashes: str) -> dict[str, str]:
@@ -189,7 +196,64 @@ QWEN_7B: Final = ModelProfile(
     ),
 )
 
-PROFILES: Final[dict[str, ModelProfile]] = {item.profile_id: item for item in (DREAM_7B, QWEN_7B)}
+# The researcher's diffusion model since 2026-10-12 (plan "Model change — 2026-10-12").
+# Text-file hashes match plan §2.3; weight hashes are the Hub's LFS SHA-256 at the revision.
+TRIDA_7B: Final = ModelProfile(
+    profile_id="trida-7b@c37755e8",
+    runner="trida",
+    repo_id="trillionlabs/Trida-7B",
+    revision=TRIDA_REVISION,
+    files={
+        "configuration_trida.py": "105a4722bc7fd3ed5f3b67e18cda91aae404135835f9e31037435d8c2f78ffe1",
+        "modeling_trida.py": "100558ff8e0e7d37e24bb8a3cdfcea508ed9db5c81eeb64a026ba76f4b8ec949",
+        "config.json": "ed7d5a45a81e50883e3a67651b3b8bd999715221238770011837744a893566e5",
+        "generation_config.json": "12603b65aab9b66affeafb91cbc5c0b3afe4e0c40c71492bce9aa564024efb86",
+        "tokenizer.json": "87522bb349f1b34dc65b11fbc841cf6d6499da80c375f142ea4c4a7923011321",
+        "tokenizer_config.json": "e9477f4ef3120bc2b001c7b482207690c84cfc4a79a5ad557b114a7549769190",
+        "special_tokens_map.json": "ea3dfcfe26148c30aa296b54083a66531a28c58a0f880625a59439fe1d67baa7",
+        "chat_template.jinja": "8fe304e54dbef96520a19f0640ddf421c3a2188cf85352b09789c28f4c788238",
+        "model.safetensors.index.json": "0ecd88d572d5d263671d0a725369538b5d598e88c6523dc3ddee8f6becb3f461",
+    },
+    weights=_shards(
+        4,
+        "e5e9a4589f938a297ead260acedab905c6dc4dc84e190628c58bdc70a560192f",
+        "624ad919451158c5bc7229c6346dca79631abfedcd112f9bf128447ca92125c8",
+        "ae69bf99459c60fb06138805a4ed8cd8e4ad58a76e2d61220a15634947d23858",
+        "5f0a7f453efe5cea64bc17ef717b4177030167f0d724da0d8bda1fd2f89d4a29",
+    ),
+    remote_code=("configuration_trida.py", "modeling_trida.py"),
+    tokenizer_files=(
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "chat_template.jinja",
+    ),
+    transformers_version="4.57.3",
+    token_ids={
+        "mask": TRIDA_MASK_ID,
+        "im_start": TRIDA_IM_START_ID,
+        "im_end": TRIDA_IM_END_ID,
+        "pad": TRIDA_PAD_ID,
+        "bos": TRIDA_BOS_ID,
+    },
+    context_limit=TRIDA_CONTEXT_LIMIT,
+    facts=(
+        "text-only; the evidence or starting caption is the only grounding",
+        "TridaForDLM, remote code, bfloat16, loaded with AutoModelForCausalLM;"
+        " the tokenizer is not remote code",
+        "generate decodes num_blocks = max_new_tokens // 32 blocks of 32 in small blocks of 8,"
+        " committing every masked position above the threshold and at least the most confident one per step",
+        "temperature 0 takes the argmax and never applies top_p, so a call consumes no randomness",
+        "generation stops at <|im_end|> (128001) and pads after it with <|pad|> (128004)",
+        "imports einops and transformers modules added after 4.46; saved with transformers 4.57.3",
+        "the chat template inserts 'You are Trillion, created by TrillionLabs…'"
+        " when no system message is given",
+        "transformers 4.57.3 warns about a Mistral regex on loading the tokenizer; its fix cannot apply to"
+        " Trida's ByteLevel pre-tokenizer, so the warning is a false positive",
+    ),
+)
+
+PROFILES: Final[dict[str, ModelProfile]] = {item.profile_id: item for item in (DREAM_7B, QWEN_7B, TRIDA_7B)}
 
 
 def profile(profile_id: str) -> ModelProfile:

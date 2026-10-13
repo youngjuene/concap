@@ -60,6 +60,18 @@ TOKENIZER_BOS_ID: Final = 151665
 TERMINATOR_IDS: Final[dict[int, str]] = {ENDOFTEXT_ID: "endoftext", IM_END_ID: "im_end"}
 BOS_IDS: Final = (CONFIG_BOS_ID, TOKENIZER_BOS_ID)
 
+# Trida-7B's token IDs at c37755e8 (researcher's model since 2026-10-12), checked
+# against the pinned tokenizer: <|im_end|> ends a turn and is generate's stop
+# token; <|endoftext|> is BOS/unk; <|pad|> fills after the stop; <|mask|> is the
+# diffusion mask. There is no separate end-of-turn token.
+TRIDA_MASK_ID: Final = 128012
+TRIDA_IM_START_ID: Final = 128000
+TRIDA_IM_END_ID: Final = 128001
+TRIDA_PAD_ID: Final = 128004
+TRIDA_BOS_ID: Final = 0
+# config.json max_position_embeddings (the model card says 8,192; the config is what runs).
+TRIDA_CONTEXT_LIMIT: Final = 4096
+
 # CV-09 / MC-08: prompt plus canvas must fit Dream's 2,048-token context (README).
 # config.json's max_position_embeddings of 131,072 is not a usable limit.
 CONTEXT_LIMIT: Final = 2048

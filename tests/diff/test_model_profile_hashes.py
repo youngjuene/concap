@@ -14,6 +14,7 @@ from diff.model_profile import (
     DREAM_7B,
     PROFILES,
     QWEN_7B,
+    TRIDA_7B,
     ModelProfile,
     ProfileMismatch,
     assert_weights_unchanged,
@@ -53,7 +54,22 @@ def test_the_pins_and_token_ids() -> None:
     assert all(
         len(value) == 64 for p in PROFILES.values() for value in [*p.files.values(), *p.weights.values()]
     )
-    assert set(PROFILES) == {DREAM_7B.profile_id, QWEN_7B.profile_id}
+    assert set(PROFILES) == {DREAM_7B.profile_id, QWEN_7B.profile_id, TRIDA_7B.profile_id}
+
+
+def test_the_trida_pin_and_token_ids() -> None:
+    # The researcher's model since 2026-10-12; text hashes as in plan §2.3.
+    assert TRIDA_7B.revision == "c37755e81222de0aff69ee481f5299a99928b105"
+    assert set(TRIDA_7B.remote_code) == {"configuration_trida.py", "modeling_trida.py"}
+    assert TRIDA_7B.files["modeling_trida.py"].startswith("100558ff8e0e")
+    assert TRIDA_7B.token_ids == {
+        "mask": 128012,
+        "im_start": 128000,
+        "im_end": 128001,
+        "pad": 128004,
+        "bos": 0,
+    }
+    assert TRIDA_7B.context_limit == 4096 and len(TRIDA_7B.weights) == 4
 
 
 def synthetic_profile(directory: Path) -> ModelProfile:
@@ -140,6 +156,17 @@ LOCAL_DREAM = Path(__file__).resolve().parents[2] / "artifacts/diff/models/dream
 def test_the_local_dream_snapshot_matches_its_pins() -> None:
     record = verify_snapshot(LOCAL_DREAM, DREAM_7B, weights=False)
     assert set(record["files"]) == set(DREAM_7B.files)
+
+
+LOCAL_TRIDA = Path(__file__).resolve().parents[2] / "artifacts/diff/models/trida-7b-c37755e8"
+
+
+@pytest.mark.skipif(
+    not verification_record_path(LOCAL_TRIDA).is_file(), reason="no verified local Trida snapshot"
+)
+def test_the_local_trida_snapshot_matches_its_pins() -> None:
+    record = verify_snapshot(LOCAL_TRIDA, TRIDA_7B, weights=False)
+    assert set(record["files"]) == set(TRIDA_7B.files)
 
 
 def test_the_record_path_survives_dots_in_the_name() -> None:

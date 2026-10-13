@@ -1,19 +1,16 @@
 # The locked environment the diff generator runs in (docs/v4-diff/plan.md §3.2).
 #
-# Both runners use it: Dream-v0-Instruct-7B through its remote-code
-# diffusion_generate, and the Qwen2.5-7B-Instruct baseline through
-# transformers' greedy generate. Dream's README pins transformers 4.46.2 and
-# torch 2.5.1 ("other versions … are not fully tested"; it relies on torch's
-# SDPA attention), while the repository pins transformers 5.13.1 and torch
-# 2.10.0 as main dependencies. A dependency group cannot downgrade those, so
-# this is a separate project that never resolves the repository's
-# dependencies: diff is not installed here, it runs from the source tree.
+# Both runners use it: Trida-7B through its remote-code block-diffusion
+# generate (researcher's decision of 2026-10-12, replacing Dream), and the
+# Qwen2.5-7B-Instruct baseline through transformers' greedy generate. Trida's
+# code imports transformers modules added after 4.46 (modeling_layers,
+# use_kernel_forward_from_hub) and einops, and was saved with transformers
+# 4.57.3; torch stays 2.5.1. The repository pins transformers 5.13.1 and torch
+# 2.10.0 as main dependencies, which a dependency group cannot downgrade, so
+# this is a separate project that never resolves the repository's dependencies:
+# diff is not installed here, it runs from the source tree.
 #
 #   PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff …
-#
-# The environment counts as established only once AC-03 (instrumentation
-# equivalence) and AC-07 (no RNG consumed) pass inside it on a GPU with at
-# least 20 GB, as Dream's README requires.
 
 [project]
 name = "diff-generator-env"
@@ -22,8 +19,9 @@ requires-python = "==3.11.*"
 dependencies = [
   "huggingface-hub>=0.23.2,<1.0",
   "safetensors>=0.4.1",
+  "einops>=0.8",
   "torch==2.5.1",
-  "transformers==4.46.2",
+  "transformers==4.57.3",
 ]
 
 [tool.uv]
