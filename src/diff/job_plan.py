@@ -316,10 +316,10 @@ def live_call_settings() -> dict[str, Any]:
     return trida_call_settings(LIVE_CANVAS_TOKENS, TAU_CONDITIONS[LIVE_CONDITION])
 
 
-def live_job(source: CaptionSource, texture: int, context: str, guidance: str, purpose: str) -> Job:
-    """One live phase-2 job: the cue's starting caption under the snapped steps and the guidance.
+def live_job(source: CaptionSource, texture: int, context: str, system_message: str, purpose: str) -> Job:
+    """One live phase-2 job: the cue's starting caption under the snapped steps and the session's tuner.
 
-    The guidance is in the prompt, so it is part of the job's identity.
+    The tuner system message is part of the prompt record, so it is part of the job's identity.
     """
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a live job serves a participant session or a smoke run, not {purpose!r}"])
@@ -331,7 +331,7 @@ def live_job(source: CaptionSource, texture: int, context: str, guidance: str, p
         LIVE_CONDITION,
         cell,
         model,
-        render_live(source, texture, context, guidance),
+        render_live(source, texture, context, system_message),
         generate,
         phase=2,
     )

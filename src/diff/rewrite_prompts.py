@@ -39,7 +39,7 @@ Q10); changing any of them bumps its version and therefore every job hash.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -131,21 +131,43 @@ LIVE_CONTEXT_RULES: Final[dict[str, str]] = {
     "specific": "원래 자막에 나온 음원 이름을 쓰되, 위치나 다른 대상과의 관계는 쓰지 마세요.",
     "relation": "원래 자막에 나온 음원 이름과 함께, 원래 자막에 나온 위치나 관계도 쓰세요.",
 }
-# Version 2 (2026-10-12): at most 96 characters, to fit the 80-token live canvas.
+# Version 2 (2026-10-12): at most 96 characters, to fit the live canvas.
+# Version 3 (2026-10-12): no guidance slot; the participant's profile is in the
+# session's tuner system message (TUNER_SYSTEM) instead.
 LIVE_REWRITE: Final = PromptTemplate(
     template_id="live-p2",
-    version=2,
+    version=3,
     text=(
         "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{cue_text}」\n"
         "이 자막을 같은 내용의 새 문장으로 고쳐 쓰세요. "
         "들리는 소리의 종류, 개수, 순서, 확실성은 바꾸지 말고, "
-        "원래 자막에 없는 소리를 더하지 마세요. {texture_rule} {context_rule}{guidance}\n"
+        "원래 자막에 없는 소리를 더하지 마세요. {texture_rule} {context_rule}\n"
         "예를 들어 「멀리서 개 한 마리가 짖는 소리」에 질감 표현을 하나 넣으면 "
         "「멀리서 개 한 마리가 날카롭게 짖는 소리」처럼 쓸 수 있습니다.\n"
         "96자 이내의 한 문장으로 쓰고, 고쳐 쓴 문장만 출력하세요. "
         "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
     ),
 )
+
+
+# The live session's system message: our own "audio caption tuner" role, built
+# once per session from the participant's phase-1 ratings and answers (researcher,
+# 2026-10-12). The researcher writes the role text; the slots are
+# {heard_families} (the sound families most attended to in phase 1, in Korean,
+# or "없음") and {s1}, {s2}, {s3} (the phase-1 caption-rating means on 0-6, or
+# "없음"). Until the researcher's text lands, the wording below is provisional
+# and participant sessions are refused.
+TUNER_PROVISIONAL: Final = True
+TUNER_SYSTEM: Final = PromptTemplate(
+    template_id="tuner-system",
+    version=0,
+    text=(
+        "당신은 영상의 소리 자막을 시청자에게 맞게 다듬는 오디오 자막 조정기입니다. "
+        "이 시청자가 앞 단계에서 가장 주의를 기울인 소리: {heard_families}. "
+        "앞 단계 자막 평가(0-6점): 소리 표현 {s1}, 장면과의 일치 {s2}, 이해에 준 도움 {s3}."
+    ),
+)
+TUNER_SLOTS: Final = ("heard_families", "s1", "s2", "s3")
 
 
 @dataclass(frozen=True)
@@ -255,17 +277,25 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
     return render_cell(source, quality_limit, context)
 
 
-def render_live(source: CaptionSource, texture: int, context: str, guidance: str = "") -> RenderedPrompt:
-    """The live phase-2 prompt: a cue's starting caption, the snapped slider steps, the guidance."""
+def render_tuner_system(slots: Mapping[str, str]) -> str:
+    """The session's system message: the tuner template with every slot filled."""
+    if set(slots) != set(TUNER_SLOTS):
+        raise ValueError(f"the tuner needs exactly the slots {list(TUNER_SLOTS)}")
+    return TUNER_SYSTEM.text.format(**slots)
+
+
+def render_live(source: CaptionSource, texture: int, context: str, system_message: str) -> RenderedPrompt:
+    """The live phase-2 prompt: a cue's starting caption and the snapped steps, under the session's tuner."""
     if context not in LIVE_CONTEXT_RULES:
         raise ValueError(f"Unknown context step: {context}")
     if type(texture) is not int or texture not in LIVE_TEXTURE_RULES:
         raise ValueError("texture must be an integer step from 0 to 2")
+    if not system_message:
+        raise ValueError("a live prompt needs the session's tuner system message")
     text = LIVE_REWRITE.text.format(
         cue_text=source.text,
         texture_rule=LIVE_TEXTURE_RULES[texture],
         context_rule=LIVE_CONTEXT_RULES[context],
-        guidance=f" {guidance}" if guidance else "",
     )
     return RenderedPrompt(
         LIVE_REWRITE.template_id,
@@ -274,4 +304,5 @@ def render_live(source: CaptionSource, texture: int, context: str, guidance: str
         0,  # no evidence is rendered into a live prompt
         LIVE_RULES_VERSION,
         text,
+        system_message=system_message,
     )

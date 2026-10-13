@@ -201,7 +201,11 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
         for line in (tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v1"
-    assert lines[0]["cue"] == 0 and lines[0]["guidance"] == "참고 문장" and lines[0]["checks"] == {"ok": True}
+    assert (
+        lines[0]["cue"] == 0
+        and lines[0]["system_message"] == "참고 문장"
+        and lines[0]["checks"] == {"ok": True}
+    )
     assert lines[0]["latency_estimate_ms"] == 1000 and lines[2]["latency_estimate_ms"] == 9000
     service.detach("session-a")
     assert service.free
@@ -209,7 +213,7 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
 
 def test_live_jobs_run_trida_at_tau_09_on_three_blocks() -> None:
     # Researcher, 2026-10-12: Trida at its README setting; 96 tokens fit the 96-character limit.
-    job = live_job(stream().cues[0], 2, "specific", "", "smoke")
+    job = live_job(stream().cues[0], 2, "specific", "당신은 오디오 자막 조정기입니다.", "smoke")
     assert job.profile_id == TRIDA_7B.profile_id and job.condition == "trida_tau_090"
     assert job.generate["max_new_tokens"] == 96 and job.generate["threshold"] == 0.9
     assert job.generate["temperature"] == 0 and job.caps == {"canvas_tokens": 96, "timeout_s": 60.0}

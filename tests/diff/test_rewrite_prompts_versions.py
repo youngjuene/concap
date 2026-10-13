@@ -14,6 +14,7 @@ from diff.rewrite_prompts import (
     render_live,
     render_phase1,
     render_phase2,
+    render_tuner_system,
 )
 
 BRIEF_PHASE1 = (
@@ -51,20 +52,27 @@ def test_rewrite_v3_asks_for_new_wording_without_label_lines() -> None:
     assert PHASE1_REWRITE.text.count("{") == 2  # the worked example adds no slot
 
 
-def test_live_prompt_renders_the_steps_and_the_guidance(development_sources: SourceSet) -> None:
+def test_live_prompt_renders_the_steps_under_the_session_tuner(development_sources: SourceSet) -> None:
     source = development_sources.phase(1)[0]
-    plain = render_live(source, 0, "broad")
-    assert plain.template_id == "live-p2" and f"「{source.text}」" in plain.text
+    tuner = render_tuner_system({"heard_families": "사람 소리 1번", "s1": "4", "s2": "3", "s3": "5"})
+    plain = render_live(source, 0, "broad", tuner)
+    assert (
+        plain.template_id == "live-p2" and plain.template_version == 3 and f"「{source.text}」" in plain.text
+    )
     assert "질감을 나타내는 표현(크기" in plain.text and "넓은 범주로만" in plain.text
-    guidance = "참고로, 이 시청자는 앞 단계에서 사람 소리 1번에 가장 주의를 기울였습니다."
-    guided = render_live(source, 2, "relation", guidance)
-    assert "2개 골라 넣으세요" in guided.text and "참고로, 이 시청자는" in guided.text
-    assert "96자 이내의 한 문장" in guided.text and guided.template_version == 2
-    assert guided.text_sha256 != plain.text_sha256 and guided.context_rules_version == 2
+    assert plain.system_message == tuner and "사람 소리 1번" in tuner and "{" not in tuner
+    textured = render_live(source, 2, "relation", tuner)
+    assert "2개 골라 넣으세요" in textured.text and "96자 이내의 한 문장" in textured.text
+    assert textured.text_sha256 != plain.text_sha256 and textured.context_rules_version == 2
+    assert "참고로" not in textured.text  # the guidance sentence moved into the system message
     with pytest.raises(ValueError, match="texture"):
-        render_live(source, 3, "broad")  # capped at step 2 since 2026-10-12
+        render_live(source, 3, "broad", tuner)  # capped at step 2 since 2026-10-12
     with pytest.raises(ValueError, match="context"):
-        render_live(source, 2, "nearby")
+        render_live(source, 2, "nearby", tuner)
+    with pytest.raises(ValueError, match="tuner"):
+        render_live(source, 2, "broad", "")
+    with pytest.raises(ValueError, match="slots"):
+        render_tuner_system({"heard_families": "없음"})
 
 
 def test_phase1_rendering(development_sources: SourceSet) -> None:

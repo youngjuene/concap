@@ -4,7 +4,7 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
 
 * The participant moves two sliders at any time. A move is snapped to steps
   (texture 0–2, context broad/specific/relation) and becomes the session's
-  current *spec*, together with the participant's guidance sentence.
+  current *spec*, together with the session's tuner system message.
 * Generation takes about ``L`` seconds, and a caption may only change at a cue
   boundary, so a tweak at playback position ``p`` is written first for the
   first cue that starts at or after ``p + L``: the earliest boundary at which
@@ -72,11 +72,11 @@ def slider_steps(texture: float, context: float) -> tuple[int, str]:
 
 @dataclass(frozen=True)
 class Spec:
-    """What a caption is written under: the snapped steps and the participant's guidance."""
+    """What a caption is written under: the snapped steps and the session's tuner system message."""
 
     texture: int
     context: str
-    guidance: str = ""
+    system_message: str = ""
 
 
 class LatencyEstimator:
@@ -177,7 +177,7 @@ class LiveScheduler:
         return min(self.stream.duration_ms, self.position_ms + round((now - self.reported_at) * 1000))
 
     def set_spec(self, spec: Spec, position_ms: int, now: float) -> bool:
-        """A snapped settings change; ``False`` when the steps and guidance did not change."""
+        """A snapped settings change; ``False`` when the steps and system message did not change."""
         self.position_ms, self.reported_at = int(position_ms), now
         if spec == self.spec:
             return False
@@ -350,7 +350,7 @@ class LiveService:
             "cue": request.cue,
             "job": request.job.record(),
             "spec": {"texture": request.spec.texture, "context": request.spec.context},
-            "guidance": request.spec.guidance,
+            "system_message": request.spec.system_message,
             "settings_revision": request.revision,
             "current_revision_at_finish": scheduler.revision,
             "latency_estimate_ms": request.latency_estimate_ms,

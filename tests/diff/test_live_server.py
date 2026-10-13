@@ -61,7 +61,7 @@ def stream(cues: int = 3) -> LiveStream:
 
 
 def job_for(source: CaptionSource, spec: Spec) -> Job:
-    return live_job(source, spec.texture, spec.context, spec.guidance, "smoke")
+    return live_job(source, spec.texture, spec.context, spec.system_message, "smoke")
 
 
 class FakeAttempt:
@@ -166,7 +166,10 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert settings_event["steps"] == {"texture": 2, "context": "relation"}  # texture capped at step 2
     live_log = next(app_parts["logs"].glob("live-*.jsonl"))
     attempts = [json.loads(line) for line in live_log.read_text(encoding="utf-8").splitlines()]
-    assert attempts[0]["guidance"].startswith("참고로")
+    assert (
+        attempts[0]["system_message"].startswith("당신은")
+        and "사람 소리 1번" in attempts[0]["system_message"]
+    )
     assert attempts[-1]["spec"] == {"texture": 2, "context": "relation"}
 
 
@@ -202,3 +205,19 @@ def test_rating_items_are_validated() -> None:
     ):
         with pytest.raises(ValueError):
             rating_items(bad)
+
+
+def test_participant_sessions_wait_for_the_researcher_s_tuner_text(tmp_path: Path) -> None:
+    from diff.__main__ import main
+
+    sources = tmp_path / "sources.json"
+    document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
+    sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    items = tmp_path / "items.json"
+    items.write_text(json.dumps(ITEMS, ensure_ascii=False), encoding="utf-8")
+    media = tmp_path / "v.webm"
+    media.write_bytes(b"x")
+    argv = ["live", "serve", "--sources", str(sources), "--video", f"{VIDEO}={media}", "--items", str(items)]
+    argv += ["--log-dir", str(tmp_path / "logs"), "--fake-worker", "--purpose", "participant"]
+    with pytest.raises(SystemExit, match="provisional"):
+        main(argv)

@@ -167,7 +167,7 @@ def build_live_app(
 
     def spec_of(session: LiveSession) -> Spec:
         texture, context = slider_steps(session.texture, session.context)
-        return Spec(texture, context, session.calibration.guidance)
+        return Spec(texture, context, session.calibration.system_message)
 
     def open_video(session: LiveSession) -> None:
         """Attach the video's scheduler and write its first cues at the current settings."""

@@ -474,6 +474,7 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
     from diff.model_profile import TRIDA_7B, verify_snapshot
     from diff.output_checks import check_output, output_from_record
+    from diff.rewrite_prompts import TUNER_PROVISIONAL
     from diff.study_protocol import LIVE_MAX_CHARS
 
     sources = _sources(args.sources).sources
@@ -489,14 +490,20 @@ def live_serve(args: argparse.Namespace) -> int:
     if too_long:
         raise SystemExit("starting captions must fit the live canvas:\n  " + "\n  ".join(too_long))
     items = rating_items(_read_json(args.items))
-    observations = _read_json(args.observations) if args.observations else {}
+    profiles = _read_json(args.observations) if args.observations else {}
+    if args.purpose == "participant" and TUNER_PROVISIONAL:
+        raise SystemExit(
+            "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "
+            "participant sessions wait for the researcher's role text (use --purpose smoke to test)"
+        )
     log_dir: Path = args.log_dir
 
     def calibrate_for(code: str | None) -> Any:
-        return calibrate(observations.get(code or "", []))
+        profile = profiles.get(code or "", {})
+        return calibrate(profile.get("observations", []), profile.get("caption_ratings", []))
 
     def job_for(source: Any, spec: Any) -> Any:
-        return live_job(source, spec.texture, spec.context, spec.guidance, args.purpose)
+        return live_job(source, spec.texture, spec.context, spec.system_message, args.purpose)
 
     def check(source: Any, job: Any, result: Any) -> Any:
         output = output_from_record(result["output"])
@@ -696,7 +703,9 @@ def parser() -> argparse.ArgumentParser:
         "--items", type=Path, required=True, help="the researcher's post-watch items (JSON)"
     )
     serve_live.add_argument(
-        "--observations", type=Path, help="{code: [phase-1 observations]} for calibration"
+        "--observations",
+        type=Path,
+        help='{code: {"observations": [...], "caption_ratings": [{"S1", "S2", "S3"}...]}} from phase 1',
     )
     serve_live.add_argument("--trida-dir", type=Path)
     serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")
