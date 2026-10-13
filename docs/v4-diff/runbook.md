@@ -1,7 +1,7 @@
 # v4-diff runbook — Stage 1, G0 and live phase 2
 
 How an operator runs what exists today:
-- the Dream and Qwen generator;
+- the Trida-7B and Qwen generator (Trida replaced Dream on 2026-10-12);
 - G0, Korean feasibility (its human rating was waived on 2026-10-11);
 - the live phase-2 app (§6).
 
@@ -13,7 +13,7 @@ Run every command from the repository root. Inside `src/dpo/regen`, regen's
 - `uv run python -m diff …` — the repository's environment. diff ships in its
   editable wheel. Use it for sources, plans, checks and the G0 report.
 - `PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff …` —
-  the generator environment (transformers 4.46.2, torch 2.5.1+cu124). Use it
+  the generator environment (transformers 4.57.3, einops, torch 2.5.1+cu124). Use it
   for model fetch, plan freeze, generation and the worker. Run `uv sync
   --project envs/diff-generator --frozen` once.
 
@@ -24,7 +24,7 @@ executable in the venv would shadow the system `diff`.
 
 ```sh
 PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff \
-  model fetch --profile dream-v0-instruct-7b@05334cb9 --dest artifacts/diff/models/dream-v0-instruct-7b-05334cb9
+  model fetch --profile trida-7b@c37755e8 --dest artifacts/diff/models/trida-7b-c37755e8
 PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff \
   model fetch --profile qwen2.5-7b-instruct@a09a3545 --dest artifacts/diff/models/qwen2.5-7b-instruct-a09a3545
 ```
@@ -70,11 +70,11 @@ evidence is visual context only and is never development material.
 W=artifacts/diff/g0-$(date +%Y%m%d)
 uv run python -m diff g0 plan --sources path/to/development-sources.json --out $W/plan.json
 PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff plan freeze --plan $W/plan.json \
-  --dream-dir artifacts/diff/models/dream-v0-instruct-7b-05334cb9 \
+  --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
   --qwen-dir artifacts/diff/models/qwen2.5-7b-instruct-a09a3545 --out $W/frozen.json
 CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src uv run --project envs/diff-generator --frozen python -m diff generate \
   --plan $W/frozen.json --run-dir $W/run --device cuda:0 \
-  --dream-dir artifacts/diff/models/dream-v0-instruct-7b-05334cb9 \
+  --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
   --qwen-dir artifacts/diff/models/qwen2.5-7b-instruct-a09a3545
 uv run python -m diff g0 report --plan $W/frozen.json --run-dir $W/run \
   --sources path/to/development-sources.json --out-dir $W/g0
@@ -83,7 +83,7 @@ uv run python -m diff g0 report --plan $W/frozen.json --run-dir $W/run \
 What each step does:
 
 - **`g0 plan`** writes every development cue with the phase-1 prompt, plus 12
-  corner-cell prompts, as `dream_k1`, `dream_k2`, `dream_k4` and `qwen`.
+  corner-cell prompts, as `trida_tau_070`, `trida_tau_090`, `trida_tau_100` and `qwen`.
 - **`plan freeze`** hashes each prompt's token IDs with the model's own chat
   template, and refuses prompts that break the 2,048-token context or contain a
   mask token or BOS.
@@ -92,7 +92,7 @@ What each step does:
   project's GPU API container (`xart-gpu-api-1`), not by regen. Each job:
   - runs in a supervised worker with a 60 s deadline;
   - records the resolved config, forward calls against `steps`, realized
-    per-step counts, and the seed (Dream, protocol v4) or the RNG check (Qwen);
+    forward calls, and the RNG check (no call may consume randomness);
   - gets one identical retry only after a transient worker or device failure.
 - **`g0 report`** writes the automatic report and stops there:
   - `rater/packet.csv` and `rater/ratings.csv` go to the rater;
@@ -108,12 +108,12 @@ What each step does:
 uv run python -m diff g0 decide --out-dir $W/g0 --ratings path/to/ratings.csv --decided-by "<name>"
 ```
 
-This applies the provisional rule over `dream_k1` and writes
+This applies the provisional rule over the rated condition (`trida_tau_090`) and writes
 `researcher/decision-<id>.json`, an `AnalysisDecision` naming the run
 manifest's hash. Qwen's numbers are reported beside it. The rule:
 
 - every job terminal, with no unresolved technical failure;
-- at least 95 % of all `dream_k1` jobs passing the script check; an
+- at least 95 % of all rated-condition jobs passing the script check; an
   incomplete, empty or missing output counts as a failure (decided 2026-10-10),
   and so does an exact copy of the cue's 원문 (decided 2026-10-11);
 - at least 3/4 rated 3 or higher.
@@ -158,7 +158,7 @@ excluded from git only by `.git/info/exclude`. That failure predates diff.
 
 ## 6. Live phase 2
 
-The participant app runs in the repository environment. It starts one Dream
+The participant app runs in the repository environment. It starts one Trida
 worker per GPU in the generator environment, so `uv sync --project
 envs/diff-generator --frozen` must have run.
 
@@ -168,7 +168,7 @@ uv run python -m diff live serve \
   --video <video_id>=path/to/video.mp4 \
   --items path/to/items.json \
   --observations path/to/observations.json \
-  --dream-dir artifacts/diff/models/dream-v0-instruct-7b-05334cb9 \
+  --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
   --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
@@ -181,13 +181,18 @@ uv run python -m diff live serve \
 - `--items` holds the post-watch items:
   `{"items": [{"id", "text", "min", "max", "anchors": [low, high]}]}`.
   The text is Korean.
-- `--observations` (optional) is `{code: [{"heard": {family: true}, "labels":
-  [...]}]}`, the phase-1 observations for calibration. With none, a session
-  gets midpoint sliders and no guidance.
+- `--observations` (optional) holds each participant's phase-1 profile:
+  `{code: {"observations": [{"heard": {family: true}, "labels": [...]}],
+  "caption_ratings": [{"S1": 0-6, "S2": 0-6, "S3": 0-6}]}}`. It fills the tuner
+  system message's slots. With none, a session gets midpoint sliders and slots
+  reading "없음".
+- `--purpose participant` is refused while the tuner role text is provisional
+  (`rewrite_prompts.TUNER_SYSTEM`); use `--purpose smoke` until the researcher's
+  text lands.
 
 **GPUs:**
 - Each GPU in `--gpus` must have 17 GB free at start, or `serve` refuses.
-  Dream takes about 15.2 GB.
+  Trida takes about 15 GB.
 - One GPU serves one session; a further participant sees a "try again later"
   page.
 - The researcher's midsentence renders share these cards, so check
@@ -196,22 +201,23 @@ uv run python -m diff live serve \
 **Logs, under `--log-dir/sessions/`:**
 - `session-<id>.jsonl`: settings, playback, exposures (each with the job it
   showed), video ends and ratings;
-- `live-<id>.jsonl`: every Dream call, with its job, seed, token hash,
-  latency, `L`, target, output and checks.
+- `live-<id>.jsonl`: every Trida call, with its job, system message, token
+  hash, latency, `L`, target, output and checks.
 
-`verification-dream.json` and `worker-gpu<N>.log` sit beside them.
+`verification-trida.json` and `worker-gpu<N>.log` sit beside them.
 
 **Behaviour to expect:**
-- At k2 on the 80-token live canvas (protocol v5), a caption takes about 6 s on
-  an RTX 3090.
+- Trida at τ 0.9 on the 96-token live canvas (protocol v6) takes about 0.4 s a
+  caption on an RTX 3090.
 - The texture slider has three steps (0–2), and the context slider has three.
-- A tweak appears at the first cue boundary after about `L`. If the worker is
-  busy, it appears one call later; a Dream call cannot be cancelled.
+- `L` follows the device with no floor, so a tweak appears at the next cue
+  boundary (at most about 5 s later). If the worker is busy, it appears one call
+  later; a model call cannot be cancelled.
 - A worker that overruns 30 s is restarted, which reloads the model, and
   captions stay as they are meanwhile.
 
 **Walking the interface without a GPU:** add `--fake-worker --purpose smoke`
-and leave out `--dream-dir`. The captions are placeholders marked "시험용",
+and leave out `--trida-dir`. The captions are placeholders marked "시험용",
 never research data. A headless walk with Playwright passed on 2026-10-11:
 Start waits for cue 0, captions change only at boundaries, and the ratings
 appear after the video.

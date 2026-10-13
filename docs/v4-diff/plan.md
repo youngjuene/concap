@@ -1,10 +1,108 @@
-# v4-diff plan — Dream 7B captions behind the regen participant flow
+# v4-diff plan — Trida-7B captions behind the regen participant flow
 
-Phase A deliverable, revised 2026-10-09 for the model change below. Written
-against `main` at `3842302`. Where the brief and the PRD disagree, the brief
-wins; where the Dream follow-up and the brief disagree, the follow-up wins.
+Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
+to Trida-7B (both model changes below). Written against `main` at `3842302`.
+Where the brief and the PRD disagree, the brief wins.
+
+## Model change — 2026-10-12: Dream 7B → Trida-7B (researcher's decision)
+
+**Why.** Live phase 2 worked on Dream, but its Korean broke: about 2 in 5 live
+captions on held-out material were broken (U+FFFD), looping or copied. At the
+researcher's request, three other diffusion LMs ran the same comparison
+(`artifacts/diff/candidate-compare-20261012/`):
+- the same 11 held-out cues;
+- the same live prompt, live-p2 v2 cells;
+- the same checks.
+
+| Model | Bad / 55 live | Median latency | Broken characters | Loops | Copies |
+|---|---|---|---|---|---|
+| Fast-dLLM v2 7B | 20 | 0.8 s | 18 | 2 | 0 |
+| Dream (then current) | 22 | 5.8 s | 11 | 2 | 8 |
+| Trida-7B, README system message (diagnostic) | 23 | 0.36 s | **0** | 10 | 13 |
+| Trida-7B, generic system message | 32 | 0.36 s | 0 | 12 | 18 |
+| LLaDA-8B-Instruct | 44 | 11.1 s (ineligible) | 16 | 10 | 13 |
+
+The researcher chose **Trida-7B** (`trillionlabs/Trida-7B` @ `c37755e8…`). It
+has a Korean-native tokenizer (no broken characters) and is about 15× faster
+than Dream, and it is the brief's original model.
+
+**Decisions (researcher, 2026-10-12):**
+- **Dream's code is removed.** One diffusion path; git keeps Dream's code and
+  runs. A guard test forbids any Dream module, profile, condition or call.
+- **Decoding factor:** back to the brief's original threshold τ, with
+  `trida_tau_070`, `trida_tau_090` and `trida_tau_100`. Live phase 2 runs at
+  τ 0.9, the README setting.
+- **Live delay follows the device:** no 6 s floor, and `L` starts at 1 s.
+- **System message:** our own "audio caption tuner" role. It is built once per
+  session at handoff from the participant's phase-1 answers (heard sound
+  families) and caption ratings (S1–S3 means), and stays fixed through the
+  watch. **The researcher writes the role text.** Until then the wording is
+  provisional (`rewrite_prompts.TUNER_SYSTEM`, `TUNER_PROVISIONAL`) and
+  `live serve` refuses participant sessions.
+- **Build first;** prompt work on Trida's copies and repeated lines comes
+  later.
+
+**What changed (protocol v6):**
+- **Environment:** `envs/diff-generator` moves to transformers 4.57.3 and
+  einops, torch 2.5.1. Qwen runs there unchanged.
+- **Profile:** `TRIDA_7B` is pinned, with every text file and shard hashed.
+  The text hashes are those of §2.3.
+- **Runner:** `trida_runner` replaces `dream_runner`. The call is exactly
+  §4.4's:
+  - blocks of 32 in small blocks of 8;
+  - temperature 0 (`top_p` not passed);
+  - no block cache;
+  - mask/stop/pad 128012/128001/128004.
+- **Canvas:** whole blocks, 96 tokens for phase 1 and live and 128 for phase 2.
+  Measured Trida tokens per Korean character: 0.43 on average, 0.75 at most.
+- **Randomness:** none, so the "RNG unchanged" check (AC-07) is back and
+  Dream's seeds are gone.
+- **Guard:** a prompt of exactly 32 tokens is refused, because Trida's
+  `generate` does not prefill it. The first warm-up prompt hit exactly that
+  length and the guard stopped it.
+- **Qwen** has its own token constants.
+
+**The reading rule changes back.** Wherever this plan still says k, Dream,
+canvas ÷ steps, `alg` or seeds, read τ, Trida, whole 32-token blocks and "no
+randomness". §2.3, §4.4 and the AC-05 boundary suite describe Trida again and
+are current.
+
+**Measured with Trida (RTX 3090):**
+- **Automatic G0 run** on the six development cues
+  (`artifacts/diff/g0-trida-20261013`, 72 jobs):
+  - every job completed, with no technical failures;
+  - the RNG state was unchanged on every call;
+  - no broken characters and no empty outputs;
+  - about 0.6 s per caption.
+
+  | Condition | Script check |
+  |---|---|
+  | τ 0.7 | 18/18 |
+  | τ 0.9 (rated) | 17/18 (one exact copy) |
+  | τ 1.0 | 17/18 |
+  | Qwen | 13/18 |
+
+  G0's automatic script share at the rated τ is therefore 94.4%, against 95%:
+  it fails by one copy. The researcher's waiver covered the human rating, so
+  no Trida G0 decision is recorded until the researcher decides.
+- **Live serve with real Trida** (synthetic 60 s stream, headless walk):
+  - median 0.4 s per caption, 1.6 s at most;
+  - a tweak at 1.8 s showed at the 5 s boundary;
+  - captions changed only at boundaries; ratings, then done.
+  - The captions read as fluent Korean with no broken characters. One cue
+    repeated its sentence three times.
+
+**Open for the researcher:**
+- the tuner role text;
+- a G0 decision for Trida: waive, or fix the copy first;
+- the re-prepared videos with their starting captions;
+- the post-watch items;
+- prompt work on copies and repeated lines.
 
 ## Model change — 2026-10-09: Trida-7B → Dream 7B (researcher's decision)
+
+> **Superseded on 2026-10-12** by the change above: Dream is no longer used.
+> This section and the run write-ups below stay as the record of what Dream did.
 
 The researcher replaced Trida-7B with Dream 7B mid-way through Stage 1. The
 follow-up message amends the brief.
