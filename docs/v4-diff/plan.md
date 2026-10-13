@@ -83,8 +83,10 @@ are current.
   | Qwen | 13/18 |
 
   G0's automatic script share at the rated τ is therefore 94.4%, against 95%:
-  it fails by one copy. The researcher's waiver covered the human rating, so
-  no Trida G0 decision is recorded until the researcher decides.
+  it fails by one copy. The researcher waived G0 for Trida on 2026-10-13.
+  The decision is `g0/researcher/decision-dec-907de0dcf279ab025d45dcc7.json`,
+  with outcome `waived` and evidence that keeps the 17/18 and the unmet script
+  criterion.
 - **Live serve with real Trida** (synthetic 60 s stream, headless walk):
   - median 0.4 s per caption, 1.6 s at most;
   - a tweak at 1.8 s showed at the 5 s boundary;
@@ -94,7 +96,6 @@ are current.
 
 **Open for the researcher:**
 - the tuner role text;
-- a G0 decision for Trida: waive, or fix the copy first;
 - the re-prepared videos with their starting captions;
 - the post-watch items;
 - prompt work on copies and repeated lines.
