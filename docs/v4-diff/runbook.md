@@ -171,20 +171,23 @@ uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.j
 
 **What `draft-setup` fills in:**
 - media, frames and masks, from `data/live/regen-media`;
+- the prepared Korean captions, copied word for word from
+  `scripts/c2-korean-captions.json` (`--captions`). They are shown raw, with
+  their line breaks and no length or line limit;
 - `orig_text` and every AudioSet label, from `data/corpus/tidy_data.csv`;
 - each label's family, using the AudioSet ontology, as the reference for the
   options' families;
 - the minimal wording edits: two P0 sentences deleted, "1차"/"2차" dropped
   from the titles.
 
-The Korean captions and every option are written into the draft by hand and
-marked `assistant-draft-unreviewed`. The options keep `orig_text`:
+The options are written into the draft by hand and marked
+`assistant-draft-unreviewed`. They keep `orig_text`, so R2's answer key is
+relative to `orig_text`, not to the shown caption:
 - **A1s:** one option per sound `orig_text` names. Each option has a Korean
   label, a family, and `orig_phrase`, the words of `orig_text` it renders.
 - **R2:** the same sounds marked `mentioned` with their phrases, plus
   distractors that quote nothing.
-- **Practice:** its options come from the practice clip's `orig_text`, with
-  labels the clips do not use.
+- **Practice:** its options come from the practice clip's `orig_text`.
 
 `show` and `approve` refuse a phrase that is not in `orig_text`.
 

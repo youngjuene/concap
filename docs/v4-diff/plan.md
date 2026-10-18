@@ -23,12 +23,20 @@ stimulus bundle for it.
   or maintained caption, and the repeated P7–P9) is dropped. P10 (S1–S3) and
   P11 (R1/R2) follow P5 and refer to the first caption. The tuner reads A1s
   and S1–S3 as before.
-- **First caption:** a Korean rendering of each clip's corpus `orig_text`
-  (`data/corpus/tidy_data.csv`), for all 12 clips. The burnt-in 원문 is not
-  used: for four clips (`amsterdam_012`, `singapore_040`, `amsterdam_057`,
-  `bangkok_034`) it contradicts the audio. The video is regen's uncaptioned
-  `videos_10s` footage, so only diff's caption band shows. There is no 2×2
-  congruence × depth assignment.
+- **First caption: the prepared Korean caption, shown raw** (corrected later
+  on 2026-10-18).
+  - Each clip shows the Korean caption burnt into the delivered stimulus, as
+    transcribed in `scripts/c2-korean-captions.json`.
+  - It is shown word for word, with its line breaks and no length or line
+    limit.
+  - This holds for all 12 clips, including the four where it contradicts the
+    audio (`amsterdam_012`, `singapore_040`, `amsterdam_057`, `bangkok_034`).
+  - The assistant had read "use Korean orig_text for all" as its own Korean
+    rendering of the English `orig_text`. Those renderings were shown in the
+    first walks and are withdrawn.
+
+  The video is regen's uncaptioned `videos_10s` footage, so only diff's
+  caption band shows. There is no 2×2 congruence × depth assignment.
 - **Clips:** regen's 12 c2 clips. Six of them were G0's development cues. The
   rule "development material is never a participant clip" protected Trida's
   phase-1 generation, and phase 1 now generates nothing, so the researcher
@@ -52,7 +60,7 @@ stimulus bundle for it.
 - **Setup material drafted from the prepared metadata, then reviewed by the
   researcher.** Participant sessions are refused until every clip is marked
   reviewed. Drafts:
-  - the captions, from `orig_text`;
+  - the captions: copied raw from `scripts/c2-korean-captions.json`;
   - A1s options and R2 options, from `orig_text` (corrected below);
   - P2 objects, from the per-frame masks;
   - practice material, from one clip outside the 12 (`c1_video_audio`).
@@ -73,10 +81,38 @@ the `orig_text` caption, so its options keep `orig_text`.
   and the distractors may quote none.
 - **AudioSet labels** are kept, every one, only as the reference for each
   option's family.
-- **Practice:** the options come from the practice clip's `orig_text`. Their
-  labels differ from the clips' options, as regen's `QUESTIONNAIRE.md`
-  requires.
+- **Practice:** the options come from the practice clip's `orig_text`.
 - **Export:** `phase1.csv` carries the chosen sound's `orig_phrase`.
+- **Kept with the raw captions (researcher, 2026-10-18):** the options stay
+  from `orig_text`. R2's answer key (`mentioned`) is therefore relative to
+  `orig_text`. On the four clips whose caption contradicts the audio, the
+  options name sounds the shown caption does not.
+
+**Setup checks (researcher, 2026-10-18):** phase 1's goal is to collect the
+participants' responses to the prepared captions, to tune phase 2. Checks the
+assistant had invented were removed:
+- the 2-line and 96-character caption limits, and the Korean-only check on
+  captions;
+- at least two A1s options (regen accepts one);
+- at least one mentioned R2 option and one distractor;
+- "two options quote the same words" and "a distractor may not quote
+  `orig_text`";
+- practice labels differing from the clips' (regen documents it but does not
+  enforce it).
+
+What remains:
+- regen's own validation of every option list and answer;
+- the media, frame and mask files, and 3–9 annotated frames for P2;
+- one non-empty caption cue covering the clip;
+- for each A1s option, a family the tuner knows and its `orig_text` words;
+- R2's answer key on every option, with `orig_text` words on the mentioned
+  ones;
+- Korean-only option labels and titles;
+- the researcher's approval, and an unchanged workbook.
+
+**The caption band** copied from regen collapsed line breaks and had a fixed
+height for two lines. It now keeps the caption's line breaks and grows past
+two lines while the video gives way.
 
 **Wording (researcher, 2026-10-18):** minimal edits for review.
 - The workbook's P0 told participants about a second viewing and an
@@ -92,7 +128,8 @@ the `orig_text` caption, so its options keep `orig_text`.
   - The captions and options were drafted by the assistant into
     `artifacts/diff/phase1/setup-draft.json`, marked
     `assistant-draft-unreviewed`:
-    - 12 captions from `orig_text`, 27–61 characters;
+    - the 12 captions, copied raw from `scripts/c2-korean-captions.json`
+      (1–3 lines);
     - A1s: every sound `orig_text` names, 2–3 per clip, each with its
       `orig_phrase` and family;
     - R2: those sounds as mentioned, plus 1–2 distractors absent from both
@@ -141,6 +178,12 @@ the `orig_text` caption, so its options keep `orig_text`.
     families and the S1–S3 means);
   - 12 calls at a median of 0.4 s, with fluent Korean captions;
   - no page errors.
+- after the switch to raw captions, a headless walk of phase 1 with the fake
+  worker (1280×800, 2026-10-18):
+  - all 12 rendered captions equal `scripts/c2-korean-captions.json` exactly;
+  - each renders as many lines as it has;
+  - `singapore_067`'s three lines fill a 146 px band;
+  - no caption is clipped, leaves the screen or covers the video.
 
 **Not yet:**
 - the researcher's review and approval of the drafts;

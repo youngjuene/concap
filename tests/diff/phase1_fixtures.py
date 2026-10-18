@@ -1,4 +1,4 @@
-"""A synthetic phase-1 workspace: three clips with frames and masks, an ontology and a corpus."""
+"""A synthetic phase-1 workspace: three clips with frames and masks, captions, an ontology and a corpus."""
 
 from __future__ import annotations
 
@@ -43,6 +43,12 @@ CORPUS = {
     "oslo_303": ("c2_video_audio_caption", "a bird sings in the wind.", "Bird|Wind noise (microphone)|Bird"),
     "practice": ("c1_video_audio", "people talk near a bus.", "Speech|Bus"),
 }
+# The prepared Korean captions, shown raw: one runs to three lines, as singapore_067's does.
+PREPARED = {
+    "kyoto_101": "버스가 공회전하는 소리",
+    "lima_202": "도시의 거리는 차들로 가득하다.\n경적 소리가 끊임없이 들린다.\n멀리서 사람들이 말한다.",
+    "oslo_303": "바람 속에서 새가 지저귄다.",
+}
 # Each clip's sounds as the assistant drafts them from orig_text: (label, family, orig_phrase).
 SOUNDS = {
     "kyoto_101": [("버스 소리", "things", "a bus idles"), ("남자의 말소리", "human", "a man speaks")],
@@ -79,7 +85,7 @@ def fake_extract(video: Path, at_ms: int, out: Path) -> None:
 
 
 def make_workspace(root: Path) -> dict[str, Path]:
-    """Media, frames and masks (``road`` = bottom half, ``sky`` = top half), ontology, corpus."""
+    """Media, frames and masks (``road`` = bottom half, ``sky`` = top half), captions, ontology, corpus."""
     media = root / "data" / "media"
     for clip in CLIPS:
         (media / clip).mkdir(parents=True, exist_ok=True)
@@ -93,6 +99,10 @@ def make_workspace(root: Path) -> dict[str, Path]:
     (videos / "c1_video_audio" / "practice.mp4").write_bytes(b"\x00fake-mp4")
     ontology = root / "ontology.json"
     ontology.write_text(json.dumps(ONTOLOGY), encoding="utf-8")
+    captions = root / "scripts" / "captions.json"
+    captions.parent.mkdir(parents=True, exist_ok=True)
+    document = {"provenance": "transcribed-from-video", "captions": PREPARED}
+    captions.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
     corpus = root / "data" / "tidy.csv"
     with corpus.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
@@ -101,7 +111,7 @@ def make_workspace(root: Path) -> dict[str, Path]:
             name = "practice.mp4" if clip == "practice" else f"{clip}.mp4"
             for _ in range(2):
                 writer.writerow([clip, f"{condition}/{name}", text, labels])
-    return {"media": media, "videos": videos, "ontology": ontology, "corpus": corpus}
+    return {"media": media, "videos": videos, "ontology": ontology, "corpus": corpus, "captions": captions}
 
 
 def drafted(root: Path) -> dict[str, Any]:
@@ -110,6 +120,7 @@ def drafted(root: Path) -> dict[str, Any]:
         root=root,
         media_root=paths["media"],
         corpus=paths["corpus"],
+        captions=paths["captions"],
         ontology=paths["ontology"],
         video_root=paths["videos"],
         practice_clip="practice",
@@ -121,9 +132,8 @@ def drafted(root: Path) -> dict[str, Any]:
 
 
 def filled(setup: dict[str, Any]) -> dict[str, Any]:
-    """The captions and options written from orig_text, as the assistant's drafts would be."""
-    for number, clip in enumerate(setup["clips"], 1):
-        clip["caption"]["text"] = f"{number}번 영상의 소리가 들린다."
+    """The options written from orig_text, as the assistant's drafts would be."""
+    for clip in setup["clips"]:
         clip["options"]["A1s"] = sound_options(clip["key"])
         label, _, phrase = SOUNDS[clip["key"]][0]
         clip["options"]["R2"] = [

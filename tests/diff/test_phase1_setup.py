@@ -6,13 +6,13 @@ import copy
 import json
 from pathlib import Path
 
+import phase1_fixtures
 import pytest
-from phase1_fixtures import approved_setup, drafted, filled
+from phase1_fixtures import PREPARED, approved_setup, drafted, filled
 
 import dpo.regen.sheet_instrument as sheet_instrument
 from diff.__main__ import main
 from diff.phase1_setup import (
-    DRAFTED,
     P0_DELETED,
     SetupError,
     approve,
@@ -53,11 +53,12 @@ def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
     ]
     assert first_clip["options"] == {"A1s": [], "R2": []}  # written from orig_text, never from labels
     assert first_clip["caption"] == {
-        "text": "",
+        "text": "버스가 공회전하는 소리",
         "start_ms": 0,
         "end_ms": 10000,
+        "source": "scripts/captions.json",
+        "provenance": "transcribed-from-video",
         "orig_text": "a bus idles while a man speaks.",
-        "provenance": DRAFTED,
     }
     wind = setup["clips"][2]["audioset_labels"][1]
     assert wind["family"] == "natural" and wind["family_ambiguous"] == ["Natural sounds", "Sounds of things"]
@@ -80,11 +81,32 @@ def test_the_wording_draft_makes_only_the_researcher_s_edits(tmp_path: Path) -> 
     assert wording["titles"]["P2"]["shown"] == "시각 지각" and "P1" not in wording["titles"]
 
 
-def test_empty_korean_fields_block_even_smoke_sessions(tmp_path: Path) -> None:
+def test_the_prepared_captions_are_copied_raw(tmp_path: Path) -> None:
+    setup = drafted(tmp_path)
+    assert {clip["key"]: clip["caption"]["text"] for clip in setup["clips"]} == PREPARED
+    assert setup["clips"][1]["caption"]["text"].count("\n") == 2  # three lines, kept and allowed
+    assert problems(filled(setup), "smoke", tmp_path) == []
+
+
+def test_a_clip_without_a_prepared_caption_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(phase1_fixtures, "PREPARED", {"kyoto_101": "버스 소리", "lima_202": "경적 소리"})
+    with pytest.raises(SetupError, match=r"no prepared caption .* \['oslo_303'\]"):
+        drafted(tmp_path)
+
+
+def test_what_the_prepared_material_needs_no_longer_refuses(tmp_path: Path) -> None:
+    setup = filled(drafted(tmp_path))
+    setup["clips"][0]["caption"]["text"] = "버스 " * 60  # long and raw
+    setup["clips"][0]["options"]["A1s"] = setup["clips"][0]["options"]["A1s"][:1]  # one sound
+    setup["clips"][0]["options"]["R2"][1].update(mentioned=True, orig_phrase="a man speaks")  # no distractor
+    setup["practice"]["options"]["A1s"][1]["label"] = "버스 소리"  # a label the clips also use
+    assert problems(setup, "smoke", tmp_path) == []
+
+
+def test_unwritten_options_block_even_smoke_sessions(tmp_path: Path) -> None:
     found = problems(drafted(tmp_path), "smoke", tmp_path)
-    assert "kyoto_101.caption: no Korean text" in found
     assert any(problem.startswith("kyoto_101.R2") for problem in found)
-    assert problems(filled(drafted(tmp_path)), "smoke", tmp_path) == []
+    assert not any("caption" in problem for problem in found)
 
 
 def test_participant_sessions_need_every_part_approved(tmp_path: Path) -> None:
@@ -115,11 +137,8 @@ def test_a_changed_workbook_refuses_participant_sessions(tmp_path: Path) -> None
 @pytest.mark.parametrize(
     ("change", "expected"),
     [
-        (lambda s: s["clips"][0]["caption"].update(text="버스 " * 40), "characters, over 96"),
-        (lambda s: s["clips"][0]["caption"].update(text="버스\n남자\n바람"), "more than 2 lines"),
-        (lambda s: s["clips"][0]["caption"].update(text="bus 소리"), "Latin letters"),
+        (lambda s: s["clips"][0]["caption"].update(text=" "), "caption: empty"),
         (lambda s: s["clips"][0]["caption"].update(end_ms=9000), "must cover the clip"),
-        (lambda s: s["clips"][0]["options"]["R2"][1].update(mentioned=True), "one distractor"),
         (lambda s: s["clips"][0]["options"]["R2"][1].pop("mentioned"), "the answer key"),
         (lambda s: s["clips"][0]["options"]["A1s"][1].update(value="s1"), "duplicate"),
         (lambda s: s["clips"][0]["options"]["A1s"][1].update(family="vehicles"), "family must be one of"),
@@ -128,17 +147,8 @@ def test_a_changed_workbook_refuses_participant_sessions(tmp_path: Path) -> None
             lambda s: s["clips"][0]["options"]["A1s"][1].update(orig_phrase="a trumpet plays"),
             "'a trumpet plays' is not in orig_text",
         ),
-        (
-            lambda s: s["clips"][0]["options"]["A1s"][1].update(orig_phrase="A Bus Idles"),
-            "two options quote the same words",
-        ),
         (lambda s: s["clips"][0]["options"]["R2"][0].pop("orig_phrase"), "kyoto_101.R2 m1: no orig_phrase"),
-        (lambda s: s["clips"][0]["options"]["R2"][1].update(orig_phrase="a bus"), "a distractor quotes"),
         (lambda s: s["practice"]["options"]["A1s"][0].update(orig_phrase="a man"), "not in orig_text"),
-        (
-            lambda s: s["practice"]["options"]["A1s"][1].update(label="버스 소리"),
-            "labels also used by the clips' options: ['버스 소리']",
-        ),
         (lambda s: s["clips"][0]["frames"].pop(), "P2 needs 3–9"),
         (
             lambda s: s["practice"]["frames"][0].update(still=s["clips"][0]["frames"][0]["still"]),

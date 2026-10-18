@@ -176,6 +176,9 @@ p.lede {
 .sheet-viewing { position: fixed; inset: 0; z-index: 20; background: var(--stage); display: flex; flex-direction: column; }
 .sheet-viewing video { width: 100%; height: calc(100% - var(--caption-band)); object-fit: contain; flex: 1 1 0; min-height: 0; }
 .sheet-viewing .sheet-caption { flex: 0 0 var(--caption-band); display: flex; justify-content: center; align-items: center; color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; }
+/* diff: phase 1 shows the prepared captions raw (researcher, 2026-10-18): keep their line
+   breaks, and let the band grow past two lines while the video gives way. */
+.sheet-viewing .sheet-caption { flex: 0 0 auto; min-height: var(--caption-band); white-space: pre-line; }
 .sheet-viewing .sheet-paused { position: absolute; inset: 0; background: rgb(0 0 0 / .88); color: white; display: grid; place-content: center; padding: 24px; text-align: center; gap: 18px; }
 .sheet-viewing .sheet-paused p { max-width: 54ch; }
 @media (max-width: 620px) {

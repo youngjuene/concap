@@ -440,7 +440,7 @@ def g0_waive(args: argparse.Namespace) -> int:
 
 
 def phase1_draft(args: argparse.Namespace) -> int:
-    """Draft the phase-1 setup from the prepared metadata; Korean fields stay empty to write."""
+    """Draft the phase-1 setup from the prepared metadata; the options stay empty to write."""
     import dpo.regen.sheet_instrument as sheet_instrument
     from diff import phase1_setup as setup
 
@@ -452,6 +452,7 @@ def phase1_draft(args: argparse.Namespace) -> int:
             root=root,
             media_root=(root / args.media_root),
             corpus=(root / args.corpus),
+            captions=(root / args.captions),
             ontology=args.ontology,
             video_root=(root / args.video_root),
             practice_clip=args.practice_clip,
@@ -461,9 +462,7 @@ def phase1_draft(args: argparse.Namespace) -> int:
     except setup.SetupError as exc:
         raise SystemExit(f"cannot draft the phase-1 setup: {exc}") from exc
     _write_json(args.out, drafted, force=args.force)
-    print(
-        f"wrote {len(drafted['clips'])} clips to {args.out}; the Korean captions and options are still empty"
-    )
+    print(f"wrote {len(drafted['clips'])} clips to {args.out}; the options are still empty")
     return 0
 
 
@@ -488,7 +487,8 @@ def _print_setup(drafted: Any) -> None:
     for clip in drafted["clips"]:
         state = "approved" if _approved(clip) else "NOT approved"
         print(f"[{clip['key']}] {clip['duration_ms']} ms, {len(clip['frames'])} frames, {state}")
-        print(f"  caption: {clip['caption']['text'] or '(empty)'}")
+        caption = clip["caption"]["text"].replace("\n", "\n           ") or "(empty)"
+        print(f"  caption: {caption}  [{clip['caption']['provenance']}, raw]")
         _print_sounds({**clip, "orig_text": clip["caption"]["orig_text"]})
         for option in clip["options"]["R2"]:
             mark = f"mentioned ← {option.get('orig_phrase')!r}" if option.get("mentioned") else "distractor"
@@ -847,6 +847,12 @@ def parser() -> argparse.ArgumentParser:
     draft.add_argument("--out", type=Path, default=Path("artifacts/diff/phase1/setup-draft.json"))
     draft.add_argument("--media-root", type=Path, default=Path("data/live/regen-media"))
     draft.add_argument("--corpus", type=Path, default=Path("data/corpus/tidy_data.csv"))
+    draft.add_argument(
+        "--captions",
+        type=Path,
+        default=Path("scripts/c2-korean-captions.json"),
+        help="the prepared Korean captions, shown raw in phase 1",
+    )
     draft.add_argument("--video-root", type=Path, default=Path("data/video"))
     draft.add_argument(
         "--ontology", type=Path, default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json")

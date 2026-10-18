@@ -1,11 +1,13 @@
 """Phase-1 setup material: the short clips, their captions and options, practice and wording.
 
 Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"): phase 1
-only profiles the participant for the live tuner and shows no model output.
-Each of regen's 12 c2 clips is shown once over regen's uncaptioned
-``videos_10s`` media (``data/live/regen-media/<clip>/``), with a Korean
-rendering of the corpus ``orig_text`` as its caption, because the burnt-in
-원문 contradicts the audio on four clips.
+collects each participant's responses to the prepared captions, so that phase 2
+can be tuned to them; it shows no model output. Each of regen's 12 c2 clips is
+shown once over regen's uncaptioned ``videos_10s`` media
+(``data/live/regen-media/<clip>/``), with its prepared Korean caption shown raw:
+the text burnt into the delivered stimulus, as transcribed in
+``scripts/c2-korean-captions.json``, with its line breaks and no length or line
+limit.
 
 The file (``diff.phase1-setup/v1``) is server-side only: it holds the real clip
 keys, ``orig_text``, each A1s option's sound family and the R2 answer key
@@ -13,6 +15,7 @@ keys, ``orig_text``, each A1s option's sound family and the R2 answer key
 
 :func:`draft_setup` fills in what the prepared metadata determines:
 - media, durations and frames, with each frame's per-object masks;
+- the prepared Korean captions, copied verbatim;
 - ``orig_text``;
 - each clip's AudioSet labels, every one kept, with its family: a reference
   for the options' families, never a source of options;
@@ -20,12 +23,12 @@ keys, ``orig_text``, each A1s option's sound family and the R2 answer key
   second viewing and an interview are deleted, and "1차"/"2차" is dropped from
   the titles.
 
-The Korean captions and options are then written by hand into the draft,
-marked :data:`DRAFTED`. The questionnaire asks about the ``orig_text`` caption
-(researcher, 2026-10-18), so every A1s option and every mentioned R2 option
-renders a sound ``orig_text`` names and quotes those words (``orig_phrase``):
-nothing ``orig_text`` names is dropped and no sound is added from the labels.
-R2 distractors name sounds ``orig_text`` does not. Each part is approved by the
+The options are then written by hand into the draft, marked :data:`DRAFTED`.
+They come from ``orig_text`` (researcher, 2026-10-18): every A1s option and
+every mentioned R2 option renders a sound ``orig_text`` names and quotes those
+words (``orig_phrase``); nothing it names is dropped and no sound is added from
+the labels. R2's answer key (``mentioned``) is therefore relative to
+``orig_text``, which differs from the shown caption on four clips. Each part is approved by the
 researcher (:func:`approve`) against a hash of its content, so any later edit
 voids the approval. :func:`setup_problems` refuses a participant setup until
 every part is approved.
@@ -43,7 +46,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from diff.caption_sources import CATEGORIES_KO
-from diff.study_protocol import MAX_CHARS, MAX_LINES, sha256_of
+from diff.study_protocol import sha256_of
 
 SETUP_SCHEMA: Final = "diff.phase1-setup/v1"
 DRAFTED: Final = "assistant-draft-unreviewed"
@@ -62,7 +65,7 @@ FAMILY_OF_ROOT: Final[dict[str, str]] = {
 FAMILY_ORDER: Final = ("human", "animal", "music", "natural", "things", "other")
 OPTION_RULE: Final = (
     "each A1s option and each mentioned R2 option renders a sound orig_text names and quotes those "
-    "words (orig_phrase); R2 distractors name none; AudioSet labels only inform the families"
+    "words (orig_phrase); AudioSet labels only inform the families"
 )
 # Regen's document rule for a segment's annotated frames (dpo.regen.document).
 FRAMES_MIN: Final = 3
@@ -133,6 +136,15 @@ def corpus_clips(path: Path, condition: str) -> dict[str, dict[str, Any]]:
             if known != seen:
                 raise SetupError(f"{row['file_index']}: corpus rows disagree on orig_text or labels")
     return clips
+
+
+def provided_captions(path: Path) -> tuple[dict[str, str], str]:
+    """The prepared Korean caption of each clip, verbatim, and the file's provenance."""
+    document = json.loads(path.read_text(encoding="utf-8"))
+    captions = document.get("captions")
+    if not isinstance(captions, dict) or not all(isinstance(text, str) for text in captions.values()):
+        raise SetupError(f"{path}: no captions object of clip → text")
+    return captions, str(document.get("provenance", path.name))
 
 
 def probe_video(path: Path) -> tuple[int, float]:
@@ -240,6 +252,7 @@ def draft_setup(
     root: Path,
     media_root: Path,
     corpus: Path,
+    captions: Path,
     ontology: Path,
     video_root: Path,
     practice_clip: str,
@@ -248,9 +261,13 @@ def draft_setup(
     probe: Probe = probe_video,
     extract: Extract = extract_frame,
 ) -> dict[str, Any]:
-    """Every part the prepared metadata determines; the captions and options are left to write."""
+    """Every part the prepared metadata determines; the options are left to write."""
     ids, roots = read_ontology(ontology)
     shown = corpus_clips(corpus, "c2_video_audio_caption")
+    prepared, provenance = provided_captions(captions)
+    missing = sorted(set(shown) - set(prepared))
+    if missing:
+        raise SetupError(f"no prepared caption in {captions} for {missing}")
     practice_rows = corpus_clips(corpus, "c1_video_audio")
     if practice_clip not in practice_rows:
         raise SetupError(f"practice clip {practice_clip!r} is not a c1_video_audio clip in {corpus}")
@@ -271,11 +288,12 @@ def draft_setup(
                 "duration_ms": duration_ms,
                 "frames": _frames(clip_dir, fps, root),
                 "caption": {
-                    "text": "",
+                    "text": prepared[key],
                     "start_ms": 0,
                     "end_ms": duration_ms,
+                    "source": str(captions.relative_to(root)),
+                    "provenance": provenance,
                     "orig_text": shown[key]["orig_text"],
-                    "provenance": DRAFTED,
                 },
                 "audioset_labels": label_families(shown[key]["labels"], ids, roots),
                 "options": {"A1s": [], "R2": []},
@@ -302,6 +320,7 @@ def draft_setup(
         "sources": {
             "media_root": str(media_root.relative_to(root)),
             "corpus": str(corpus.relative_to(root)),
+            "captions": str(captions.relative_to(root)),
             "ontology": str(ontology),
             "option_rule": OPTION_RULE,
         },
@@ -382,25 +401,12 @@ def _phrase_problems(option: Mapping[str, Any], orig_text: str, where: str) -> l
     return []
 
 
-def _sound_problems(options: Sequence[Mapping[str, Any]], orig_text: str, where: str) -> list[str]:
-    """A1s options: each renders its own words of ``orig_text``."""
-    problems = []
-    for option in options:
-        problems += _phrase_problems(option, orig_text, f"{where} {option.get('value')}")
-    phrases = [str(option.get("orig_phrase", "")).casefold() for option in options]
-    if len(set(phrases)) != len(phrases):
-        problems.append(f"{where}: two options quote the same words of orig_text")
-    return problems
-
-
 def _caption_problems(clip: Mapping[str, Any], where: str) -> list[str]:
+    """The prepared caption is shown raw: it only has to exist and cover the clip."""
     caption = clip["caption"]
-    text = str(caption.get("text", ""))
-    problems = _korean_problems(text, f"{where}.caption")
-    if len(text) > MAX_CHARS[1]:
-        problems.append(f"{where}.caption: {len(text)} characters, over {MAX_CHARS[1]}")
-    if len(text.split("\n")) > MAX_LINES[1]:
-        problems.append(f"{where}.caption: more than {MAX_LINES[1]} lines")
+    problems = []
+    if not str(caption.get("text", "")).strip():
+        problems.append(f"{where}.caption: empty")
     if (caption.get("start_ms"), caption.get("end_ms")) != (0, clip["duration_ms"]):
         problems.append(f"{where}.caption: the cue must cover the clip, 0–{clip['duration_ms']} ms")
     return problems
@@ -432,32 +438,24 @@ def _clip_problems(clip: Mapping[str, Any], root: Path, page_spec: Callable[...,
     orig_text = str(clip["caption"].get("orig_text", ""))
     sounds = clip["options"]["A1s"]
     problems += _option_problems("P3", "A1s", sounds, page_spec, f"{where}.A1s")
-    problems += _sound_problems(sounds, orig_text, f"{where}.A1s")
-    if len(sounds) < 2:
-        problems.append(f"{where}.A1s: fewer than two sounds to choose from")
     for option in sounds:
+        problems += _phrase_problems(option, orig_text, f"{where}.A1s {option.get('value')}")
         if option.get("family") not in CATEGORIES_KO:
             problems.append(
                 f"{where}.A1s {option.get('value')}: family must be one of {sorted(CATEGORIES_KO)}"
             )
     recall = clip["options"]["R2"]
     problems += _option_problems("P11", "R2", recall, page_spec, f"{where}.R2")
-    marks = [option.get("mentioned") for option in recall]
-    if any(not isinstance(mark, bool) for mark in marks):
+    if any(not isinstance(option.get("mentioned"), bool) for option in recall):
         problems.append(f"{where}.R2: every option needs mentioned true or false (the answer key)")
-    elif not (any(marks) and not all(marks)):
-        problems.append(f"{where}.R2: needs at least one mentioned sound and one distractor")
     for option in recall:
-        at = f"{where}.R2 {option.get('value')}"
         if option.get("mentioned") is True:
-            problems += _phrase_problems(option, orig_text, at)
-        elif option.get("orig_phrase"):
-            problems.append(f"{at}: a distractor quotes orig_text")
+            problems += _phrase_problems(option, orig_text, f"{where}.R2 {option.get('value')}")
     return problems
 
 
 def _practice_problems(
-    practice: Mapping[str, Any], formal: set[str], formal_labels: set[str], root: Path, page_spec: Any
+    practice: Mapping[str, Any], formal: set[str], root: Path, page_spec: Any
 ) -> list[str]:
     problems = []
     frames = practice.get("frames", [])
@@ -469,11 +467,9 @@ def _practice_problems(
             problems.append("practice: the frame must not be one of the clips' frames")
     sounds = practice["options"]["A1s"]
     problems += _option_problems("P3", "A1s", sounds, page_spec, "practice.A1s")
-    problems += _sound_problems(sounds, str(practice.get("orig_text", "")), "practice.A1s")
-    # Regen's QUESTIONNAIRE.md: practice sound labels differ from the formal materials.
-    shared = sorted({str(option.get("label")) for option in sounds} & formal_labels)
-    if shared:
-        problems.append(f"practice.A1s: labels also used by the clips' options: {shared}")
+    orig_text = str(practice.get("orig_text", ""))
+    for option in sounds:
+        problems += _phrase_problems(option, orig_text, f"practice.A1s {option.get('value')}")
     return problems
 
 
@@ -509,13 +505,7 @@ def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instru
     for clip in clips:
         problems += _clip_problems(clip, root, instrument.page_spec)
     formal = {frame["still"] for clip in clips for frame in clip.get("frames", [])}
-    labels = {
-        str(option.get("label"))
-        for clip in clips
-        for options in clip["options"].values()
-        for option in options
-    }
-    problems += _practice_problems(setup["practice"], formal, labels, root, instrument.page_spec)
+    problems += _practice_problems(setup["practice"], formal, root, instrument.page_spec)
     if purpose == "participant":
         if setup.get("instrument_hash") != instrument.snapshot()["hash"]:
             problems.append("the workbook instrument changed since this setup was drafted")
