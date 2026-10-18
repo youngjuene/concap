@@ -106,16 +106,22 @@ def test_items_and_rules_are_regen_s(flow: Phase1) -> None:
             flow.apply(state, "submit", {"page": page, "answers": wrong}, 1.0)
 
 
-def test_page_titles_use_the_approved_wording(flow: Phase1) -> None:
+def test_page_texts_are_the_sheet_s_word_for_word(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=1)
     titles = {}
     for page in ("P0", "P2", "P10", "P11"):
         state["page"] = page
         titles[page] = flow.present(state, lambda name: name)["title"]
-    assert titles == {"P0": "도입", "P2": "시각 지각", "P10": "자막 평가", "P11": "자막 읽음 확인"}
+    assert titles == {
+        "P0": "도입",
+        "P2": "1차 시각 지각",
+        "P10": "2차 자막 평가",
+        "P11": "2차 자막 읽음 확인",
+    }
     state["page"] = "P0"
     intro = flow.present(state, lambda name: name)
-    assert "두 번" not in intro["instruction"] and "인터뷰" not in intro["instruction"]
+    assert intro["instruction"] == workbook_instrument.page_spec("P0")["instruction"]
+    assert "두 번" in intro["instruction"] and "인터뷰" in intro["instruction"]
     assert intro["consent_text"] is None
 
 

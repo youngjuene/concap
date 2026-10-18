@@ -13,7 +13,6 @@ from phase1_fixtures import PREPARED, approved_setup, drafted, filled
 import diff.workbook_instrument as workbook_instrument
 from diff.__main__ import main
 from diff.phase1_setup import (
-    P0_DELETED,
     SetupError,
     approve,
     approved,
@@ -69,16 +68,9 @@ def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
     assert setup["instrument_hash"] == workbook_instrument.snapshot()["hash"]
 
 
-def test_the_wording_draft_makes_only_the_researcher_s_edits(tmp_path: Path) -> None:
-    wording = drafted(tmp_path)["wording"]
-    intro = wording["P0_instruction"]
-    assert intro["workbook"] == workbook_instrument.page_spec("P0")["instruction"]
-    assert all(sentence not in intro["shown"] for sentence in P0_DELETED)
-    assert intro["shown"] == intro["workbook"].replace(" " + P0_DELETED[0], "").replace(
-        " " + P0_DELETED[1], ""
-    )
-    assert wording["titles"]["P10"] == {"workbook": "2차 자막 평가", "shown": "자막 평가"}
-    assert wording["titles"]["P2"]["shown"] == "시각 지각" and "P1" not in wording["titles"]
+def test_the_setup_carries_no_wording_of_its_own(tmp_path: Path) -> None:
+    setup = drafted(tmp_path)
+    assert "wording" not in setup and setup["consent_text"] is None
 
 
 def test_the_prepared_captions_are_copied_raw(tmp_path: Path) -> None:
@@ -112,7 +104,7 @@ def test_unwritten_options_block_even_smoke_sessions(tmp_path: Path) -> None:
 def test_participant_sessions_need_every_part_approved(tmp_path: Path) -> None:
     setup = filled(drafted(tmp_path))
     found = problems(setup, "participant", tmp_path)
-    assert len(found) == 5 and all("not approved" in problem for problem in found)
+    assert len(found) == 4 and all("not approved" in problem for problem in found)
     assert problems(approved_setup(tmp_path / "again"), "participant", tmp_path / "again") == []
 
 
@@ -154,7 +146,6 @@ def test_a_changed_workbook_refuses_participant_sessions(tmp_path: Path) -> None
             lambda s: s["practice"]["frames"][0].update(still=s["clips"][0]["frames"][0]["still"]),
             "must not be",
         ),
-        (lambda s: s["wording"]["titles"].update(P7={"shown": "시각"}), "does not show"),
         (lambda s: s.update(consent_text="  "), "consent_text"),
     ],
 )
@@ -191,8 +182,8 @@ def test_the_cli_shows_and_approves(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     path.write_text(json.dumps(filled(drafted(tmp_path)), ensure_ascii=False), encoding="utf-8")
     assert main(["phase1", "show", "--setup", str(path)]) == 0
     shown = capsys.readouterr().out
-    assert "[kyoto_101]" in shown and "5 problems for participant sessions" in shown
-    approval = ["--clip", "kyoto_101", "--clip", "lima_202", "--clip", "oslo_303", "--practice", "--wording"]
+    assert "[kyoto_101]" in shown and "4 problems for participant sessions" in shown
+    approval = ["--clip", "kyoto_101", "--clip", "lima_202", "--clip", "oslo_303", "--practice"]
     assert main(["phase1", "approve", "--setup", str(path), "--by", "researcher", *approval]) == 0
     assert "0 problems left" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="name what you approve"):

@@ -476,11 +476,6 @@ def _print_sounds(part: Any) -> None:
 
 
 def _print_setup(drafted: Any) -> None:
-    wording = drafted["wording"]
-    print(f"[wording] {'approved' if _approved(wording) else 'NOT approved'}")
-    print("  P0: " + wording["P0_instruction"]["shown"].replace("\n", "\n      "))
-    for page, title in wording["titles"].items():
-        print(f"  {page}: {title['workbook']} → {title['shown']}")
     practice = drafted["practice"]
     print(f"[practice] {practice['clip']}, {'approved' if _approved(practice) else 'NOT approved'}")
     _print_sounds(practice)
@@ -520,8 +515,8 @@ def phase1_approve(args: argparse.Namespace) -> int:
     import diff.workbook_instrument as workbook_instrument
     from diff.phase1_setup import SetupError, approve, read_setup, setup_problems
 
-    if not (args.clip or args.practice or args.wording):
-        raise SystemExit("name what you approve: --clip KEY (repeatable), --practice or --wording")
+    if not (args.clip or args.practice):
+        raise SystemExit("name what you approve: --clip KEY (repeatable) or --practice")
     drafted = read_setup(args.setup)
     try:
         updated = approve(
@@ -530,7 +525,6 @@ def phase1_approve(args: argparse.Namespace) -> int:
             at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             clips=args.clip or (),
             practice=args.practice,
-            wording=args.wording,
         )
     except SetupError as exc:
         raise SystemExit(f"cannot approve: {exc}") from exc
@@ -866,12 +860,11 @@ def parser() -> argparse.ArgumentParser:
     show.add_argument("--setup", type=Path, required=True)
     show.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     show.set_defaults(handler=phase1_show)
-    sign = phase1.add_parser("approve", help="record the researcher's approval of clips, practice or wording")
+    sign = phase1.add_parser("approve", help="record the researcher's approval of clips or the practice")
     sign.add_argument("--setup", type=Path, required=True)
     sign.add_argument("--by", required=True)
     sign.add_argument("--clip", action="append", help="a clip key; repeatable")
     sign.add_argument("--practice", action="store_true")
-    sign.add_argument("--wording", action="store_true")
     sign.set_defaults(handler=phase1_approve)
     exported = commands.add_parser("export", help="research export from the session store and live logs")
     exported.add_argument("--store", type=Path, default=PARTICIPANT_STORE)

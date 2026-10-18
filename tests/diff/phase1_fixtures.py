@@ -152,5 +152,4 @@ def approved_setup(root: Path) -> dict[str, Any]:
         at="2026-10-18T12:00:00+0900",
         clips=[clip["key"] for clip in setup["clips"]],
         practice=True,
-        wording=True,
     )

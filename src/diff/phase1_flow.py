@@ -184,10 +184,6 @@ class Phase1:
             return {f"frame-{i}": self.root / frame["still"] for i, frame in enumerate(frames)}
         return {}
 
-    def _title(self, page: str, workbook: str) -> str:
-        override = self.setup["wording"]["titles"].get(page)
-        return str(override["shown"]) if override else workbook
-
     def _practice_items(self) -> list[dict[str, Any]]:
         page_spec = self.instrument.page_spec
         rating = copy.deepcopy(page_spec("P4")["items"][0])
@@ -233,17 +229,13 @@ class Phase1:
             spec = self.instrument.page_spec(page, options=options, session_key=state["session_id"])
             result.update(
                 kind=spec["kind"],
-                title=self._title(page, spec["title"]),
+                title=spec["title"],
                 instruction=spec["instruction"],
                 language=spec["language"],
                 items=spec["items"],
             )
         if page == "P0":
-            result.update(
-                kind="intro",
-                instruction=self.setup["wording"]["P0_instruction"]["shown"],
-                consent_text=self.setup.get("consent_text"),
-            )
+            result.update(kind="intro", consent_text=self.setup.get("consent_text"))
         if page == "P1":
             clip = self.clip(state)
             saved = state["playback"].get(f"{state['clip_index']}:P1", checkpoint())

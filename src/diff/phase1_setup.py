@@ -1,37 +1,39 @@
-"""Phase-1 setup material: the short clips, their captions and options, practice and wording.
+"""Phase-1 setup material: the short clips, their first captions, options and practice.
 
 Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"): phase 1
 collects each participant's responses to the prepared captions, so that phase 2
-can be tuned to them; it shows no model output. Each of regen's 12 c2 clips is
-shown once over regen's uncaptioned ``videos_10s`` media
-(``data/live/regen-media/<clip>/``), with its prepared Korean caption shown raw:
-the text burnt into the delivered stimulus, as transcribed in
-``scripts/c2-korean-captions.json``, with its line breaks and no length or line
-limit.
+can be tuned to them. Each of regen's 12 c2 clips is shown twice over regen's
+uncaptioned ``videos_10s`` media (``data/live/regen-media/<clip>/``), following
+the questionnaire spreadsheet:
+- first with its prepared Korean caption shown raw: the text burnt into the
+  delivered stimulus, as transcribed in ``scripts/c2-korean-captions.json``,
+  with its line breaks and no length or line limit;
+- then with a second caption Trida writes from that caption and the
+  participant's first-step answers (``diff.phase1_tweak``), never stored here.
 
 The file (``diff.phase1-setup/v1``) is server-side only: it holds the real clip
 keys, ``orig_text``, each A1s option's sound family and the R2 answer key
-(``mentioned``), none of which may reach the participant's browser.
+(``mentioned``), none of which may reach the participant's browser. The
+page texts are the spreadsheet's, word for word (``diff.workbook_instrument``),
+so the setup carries no wording of its own beyond an optional ``consent_text``.
 
 :func:`draft_setup` fills in what the prepared metadata determines:
 - media, durations and frames, with each frame's per-object masks;
 - the prepared Korean captions, copied verbatim;
 - ``orig_text``;
 - each clip's AudioSet labels, every one kept, with its family: a reference
-  for the options' families, never a source of options;
-- the minimal wording edits the researcher asked for: the P0 sentences about a
-  second viewing and an interview are deleted, and "1차"/"2차" is dropped from
-  the titles.
+  for the options' families, never a source of options.
 
 The options are then written by hand into the draft, marked :data:`DRAFTED`.
 They come from ``orig_text`` (researcher, 2026-10-18): every A1s option and
 every mentioned R2 option renders a sound ``orig_text`` names and quotes those
 words (``orig_phrase``); nothing it names is dropped and no sound is added from
-the labels. R2's answer key (``mentioned``) is therefore relative to
-``orig_text``, which differs from the shown caption on four clips. Each part is approved by the
-researcher (:func:`approve`) against a hash of its content, so any later edit
-voids the approval. :func:`setup_problems` refuses a participant setup until
-every part is approved.
+the labels. R2 is asked after the second viewing, about Trida's caption, so
+its key is taken from the prompt (researcher, 2026-10-18): the mentioned
+options' labels are the sounds the second-caption prompt names, and so count
+as mentioned. Each part is approved by the researcher (:func:`approve`) against
+a hash of its content, so any later edit voids the approval.
+:func:`setup_problems` refuses a participant setup until every part is approved.
 """
 
 from __future__ import annotations
@@ -65,7 +67,8 @@ FAMILY_OF_ROOT: Final[dict[str, str]] = {
 FAMILY_ORDER: Final = ("human", "animal", "music", "natural", "things", "other")
 OPTION_RULE: Final = (
     "each A1s option and each mentioned R2 option renders a sound orig_text names and quotes those "
-    "words (orig_phrase); AudioSet labels only inform the families"
+    "words (orig_phrase); the mentioned R2 labels are the sounds the second-caption prompt names; "
+    "AudioSet labels only inform the families"
 )
 # Regen's document rule for a segment's annotated frames (dpo.regen.document).
 FRAMES_MIN: Final = 3
@@ -73,13 +76,6 @@ FRAMES_MAX: Final = 9
 PRACTICE_AT_MS: Final = 5000
 # The staged clips' frames are 1280 px wide; the practice still matches them.
 FRAME_WIDTH: Final = 1280
-# The workbook pages diff shows; their titles are the only workbook text it may override.
-SHOWN_PAGES: Final = ("P0", "P1", "P2", "P3", "P4", "P5", "P10", "P11")
-# The two P0 sentences that describe the dropped second viewing and interview.
-P0_DELETED: Final = (
-    "같은 영상을 두 번 보시는 경우가 있는데, 이는 서로 다른 버전의 자막을 비교하기 위한 것입니다.",
-    "모든 영상이 끝난 뒤에는 2~3분 정도 간단한 인터뷰가 있습니다.",
-)
 LATIN = re.compile(r"[A-Za-z]")
 HANGUL = re.compile(r"[가-힣]")
 
@@ -224,29 +220,6 @@ def label_families(
     return entries
 
 
-def draft_wording(page_spec: Callable[[str], Mapping[str, Any]]) -> dict[str, Any]:
-    """The researcher's minimal edits: two P0 sentences deleted, "1차"/"2차" dropped from titles."""
-    intro = str(page_spec("P0")["instruction"])
-    missing = [sentence for sentence in P0_DELETED if sentence not in intro]
-    if missing:
-        raise SetupError(f"the workbook P0 text no longer contains {missing}")
-    edited = intro
-    for sentence in P0_DELETED:
-        edited = edited.replace(" " + sentence, "").replace(sentence + " ", "").replace(sentence, "")
-    titles = {}
-    for page in SHOWN_PAGES:
-        title = str(page_spec(page)["title"])
-        stripped = re.sub(r"^[12]차\s*", "", title)
-        if stripped != title:
-            titles[page] = {"workbook": title, "shown": stripped}
-    return {
-        "P0_instruction": {"workbook": intro, "shown": edited, "deleted": list(P0_DELETED)},
-        "titles": titles,
-        "provenance": DRAFTED,
-        "review": None,
-    }
-
-
 def draft_setup(
     *,
     root: Path,
@@ -304,7 +277,6 @@ def draft_setup(
     return {
         "schema": SETUP_SCHEMA,
         "instrument_hash": instrument.snapshot()["hash"],
-        "wording": draft_wording(instrument.page_spec),
         "consent_text": None,
         "practice": {
             "clip": practice_clip,
@@ -344,7 +316,6 @@ def approve(
     at: str,
     clips: Sequence[str] = (),
     practice: bool = False,
-    wording: bool = False,
 ) -> dict[str, Any]:
     """A copy with the named parts approved by ``by`` against their current content."""
     if not by.strip():
@@ -357,8 +328,6 @@ def approve(
     parts = [by_key[key] for key in clips]
     if practice:
         parts.append(updated["practice"])
-    if wording:
-        parts.append(updated["wording"])
     for part in parts:
         part["review"] = {"by": by, "at": at, "content_sha256": content_sha256(part)}
     return updated
@@ -473,18 +442,6 @@ def _practice_problems(
     return problems
 
 
-def _wording_problems(wording: Mapping[str, Any]) -> list[str]:
-    problems = []
-    if not str(wording.get("P0_instruction", {}).get("shown", "")).strip():
-        problems.append("wording: the P0 text is empty")
-    unknown = sorted(set(wording.get("titles", {})) - set(SHOWN_PAGES))
-    if unknown:
-        problems.append(f"wording: titles for pages diff does not show: {unknown}")
-    for page, title in wording.get("titles", {}).items():
-        problems += _korean_problems(str(title.get("shown", "")), f"wording.titles.{page}")
-    return problems
-
-
 def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instrument: Any) -> list[str]:
     """Every reason this setup cannot serve sessions of ``purpose``; empty when it can."""
     if purpose not in PURPOSES:
@@ -501,7 +458,6 @@ def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instru
     consent = setup.get("consent_text")
     if consent is not None and not (isinstance(consent, str) and consent.strip()):
         problems.append("consent_text must be null or non-empty text")
-    problems += _wording_problems(setup["wording"])
     for clip in clips:
         problems += _clip_problems(clip, root, instrument.page_spec)
     formal = {frame["still"] for clip in clips for frame in clip.get("frames", [])}
@@ -509,9 +465,8 @@ def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instru
     if purpose == "participant":
         if setup.get("instrument_hash") != instrument.snapshot()["hash"]:
             problems.append("the workbook instrument changed since this setup was drafted")
-        for name, part in (("wording", setup["wording"]), ("practice", setup["practice"])):
-            if not approved(part):
-                problems.append(f"{name}: not approved by the researcher (or edited since approval)")
+        if not approved(setup["practice"]):
+            problems.append("practice: not approved by the researcher (or edited since approval)")
         for clip in clips:
             if not approved(clip):
                 problems.append(f"{clip['key']}: not approved by the researcher (or edited since approval)")
