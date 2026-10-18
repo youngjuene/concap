@@ -116,10 +116,17 @@ stimulus bundle for it.
   - handoff, watch, items and done, then the finished ID was refused;
   - no page errors;
 - the walk's export: 2 sessions, 504 phase-1 rows.
+- the same walk as `P3` with real Trida on GPU 0 (smoke purpose, synthetic
+  60-second watch, 2026-10-18):
+  - from the handoff to Start becoming available took 1.1 s, the time for
+    Trida to write cue 0;
+  - the system message carried this walk's phase-1 profile (the heard
+    families and the S1–S3 means);
+  - 12 calls at a median of 0.4 s, with fluent Korean captions;
+  - no page errors.
 
 **Not yet:**
 - the researcher's review and approval of the drafts;
-- a walk with real Trida behind the handoff;
 - any human participant.
 
 ## Model change — 2026-10-12: Dream 7B → Trida-7B (researcher's decision)
