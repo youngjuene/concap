@@ -372,6 +372,57 @@ def check_output(
     return CheckResult(f"p{phase}-v{CHECKS_VERSION}", tuple(failures), tuple(flags), measures)
 
 
+def check_tweak(source: CaptionSource, output: GeneratedOutput, *, max_chars: int) -> CheckResult:
+    """Phase 1's second caption: technical failures only.
+
+    The caption it tweaks is shown raw, with any number of sentences and lines
+    and its own ending (researcher, 2026-10-18), so the sentence, line and
+    ending rules do not apply; what fails is what cannot be shown as Korean
+    text. A failure excludes the output and skips that clip's second step.
+    """
+    text = output.text
+    failures: list[Finding] = []
+    flags: list[Finding] = []
+    if output.terminator is None:
+        failures.append(Finding("incomplete", f"no terminator inside {output.new_token_count} new positions"))
+    if output.leftover_mask_count:
+        failures.append(Finding("leftover_mask", f"{output.leftover_mask_count} mask tokens left"))
+    if output.special_ids_in_text:
+        failures.append(Finding("special_token_in_text", str(list(output.special_ids_in_text))))
+    if not text.strip():
+        failures.append(Finding("empty_text", "nothing before the terminator"))
+    else:
+        if len(text) > max_chars:
+            failures.append(Finding("length_over_limit", f"{len(text)} > {max_chars} characters"))
+        if "\ufffd" in text:
+            failures.append(Finding("undecodable_bytes", f"{text.count(chr(0xFFFD))} replacement characters"))
+        foreign = [run for run in non_hangul_runs(text) if run not in source.text]
+        if foreign:
+            failures.append(Finding("non_korean_script", ", ".join(foreign)))
+    if text and text == source.text:
+        flags.append(Finding("identical_to_source", "the output repeats the source text"))
+    label = next((prefix for prefix in LABEL_PREFIXES if text.startswith(prefix)), None)
+    if label:
+        flags.append(Finding("label_echo", label))
+    echoed = [marker for marker in FORMAT_MARKERS if marker in text] + _EVIDENCE_LINE.findall(text)
+    if echoed:
+        flags.append(Finding("format_echo", ", ".join(echoed)))
+    repeated = repeated_word_ngrams(text)
+    if repeated or consecutive_repeats(text):
+        flags.append(Finding("repetition", ", ".join(repeated) or "consecutive repeated words"))
+    measures = {
+        "chars": len(text),
+        "lines": len(text.split("\n")) if text else 0,
+        "new_tokens": output.new_token_count,
+        "completion": output.completion,
+        "terminator": output.terminator,
+        "exact_copy_of_source": bool(text) and text == source.text,
+        "repeated_word_trigrams": repeated,
+        "consecutive_repeats": consecutive_repeats(text),
+    }
+    return CheckResult(f"tweak-v{CHECKS_VERSION}", tuple(failures), tuple(flags), measures)
+
+
 def script_passes(result: CheckResult) -> bool:
     """G0's script check: no foreign-script letters, output that can be shown as a caption, no copy.
 

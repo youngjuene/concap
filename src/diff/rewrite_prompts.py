@@ -277,6 +277,59 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
     return render_cell(source, quality_limit, context)
 
 
+# Phase 1's second caption (researcher, 2026-10-18): Trida tweaks a clip's raw
+# first caption, steered by this participant's answers to that clip's first
+# step. diff.phase1_tweak fills the slots: {caption}; {sounds}, the clip's
+# sounds from orig_text, which this prompt names and which are therefore R2's
+# key; {attended_sound} (A1s) and {attended_object} (V1, or "없음"); and four
+# degrees in percent from the restorativeness and familiarity ratings. The
+# researcher approves the wording; until then it is provisional and
+# participant sessions are refused.
+TWEAK_PROVISIONAL: Final = True
+TWEAK_P1: Final = PromptTemplate(
+    template_id="tweak-p1",
+    version=0,
+    text=(
+        "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"
+        "이 영상에서 들리는 소리: {sounds}.\n"
+        "이 시청자가 가장 주의를 기울인 소리는 「{attended_sound}」이고, "
+        "화면에서 가장 먼저 눈에 들어온 것은 「{attended_object}」입니다.\n"
+        "시청자의 응답에 맞춰 아래 방향으로 이 자막을 고쳐 쓰세요. 퍼센트는 조정의 정도이며, "
+        "0%는 그 방향으로 바꾸지 않고 100%는 가장 강하게 바꾸라는 뜻입니다.\n"
+        "- 소리의 매력과 흥미로움을 살리기: {fascination}%\n"
+        "- 일상에서 벗어난 느낌을 살리기: {being_away}%\n"
+        "- 소리가 화면 속 장소에 어울리는 정도를 드러내기: {coherence}%\n"
+        "- 소리의 음원을 구체적으로 부르기: {familiarity}%\n"
+        "위에 적힌 소리 외에 새로운 소리를 더하지 마세요. 160자 이내로 쓰고, 고쳐 쓴 자막만 출력하세요. "
+        "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
+    ),
+)
+TWEAK_SLOTS: Final = (
+    "caption",
+    "sounds",
+    "attended_sound",
+    "attended_object",
+    "fascination",
+    "being_away",
+    "coherence",
+    "familiarity",
+)
+
+
+def render_tweak(slots: Mapping[str, str]) -> RenderedPrompt:
+    """Phase 1's second-caption prompt with every slot filled; no evidence, the fixed system message."""
+    if set(slots) != set(TWEAK_SLOTS):
+        raise ValueError(f"the tweak prompt needs exactly the slots {list(TWEAK_SLOTS)}")
+    return RenderedPrompt(
+        TWEAK_P1.template_id,
+        TWEAK_P1.version,
+        TWEAK_P1.sha256,
+        0,  # no evidence is rendered into a tweak prompt
+        None,
+        TWEAK_P1.text.format(**slots),
+    )
+
+
 def render_tuner_system(slots: Mapping[str, str]) -> str:
     """The session's system message: the tuner template with every slot filled."""
     if set(slots) != set(TUNER_SLOTS):

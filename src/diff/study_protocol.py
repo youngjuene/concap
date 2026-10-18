@@ -101,6 +101,11 @@ LIVE_MAX_CHARS: Final = 96
 # captions with Dream, the 0-4 range gave 25-30 broken, looping or copied
 # captions in 55, against 22 with the cap; the cap stays for Trida.
 LIVE_TEXTURE_MAX: Final = 2
+# Phase 1's second caption (researcher, 2026-10-18): Trida tweaks a clip's raw
+# first caption (up to 81 characters and three lines on the c2 clips), so it
+# gets phase 2's limits: 160 characters on four blocks, at the live condition.
+TWEAK_CANVAS_TOKENS: Final = 128
+TWEAK_MAX_CHARS: Final = 160
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
 PHASE2_CUE_MS: Final = 5000

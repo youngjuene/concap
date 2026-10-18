@@ -52,6 +52,7 @@ from diff.study_protocol import (
     TRIDA_SMALL_BLOCK_SIZE,
     TRIDA_TEMPERATURE,
     TRIDA_USE_BLOCK_CACHE,
+    TWEAK_CANVAS_TOKENS,
     canvas_tokens,
     lattice_cells,
     sha256_of,
@@ -335,6 +336,18 @@ def live_job(source: CaptionSource, texture: int, context: str, system_message: 
         generate,
         phase=2,
     )
+
+
+def tweak_job(source: CaptionSource, prompt: RenderedPrompt, purpose: str) -> Job:
+    """Phase 1's second caption for one participant and clip, at the live condition's τ.
+
+    The prompt carries the participant's slots, so the job's identity is that
+    participant's: the same answers give the same job.
+    """
+    if purpose not in ("participant", "smoke"):
+        raise PlanError([f"a tweak job serves a participant session or a smoke run, not {purpose!r}"])
+    generate = trida_call_settings(TWEAK_CANVAS_TOKENS, TAU_CONDITIONS[LIVE_CONDITION])
+    return make_job(source, purpose, LIVE_CONDITION, None, TRIDA_7B, prompt, generate, phase=1)
 
 
 def prompt_guard_problems(job: Job, token_ids: Sequence[int]) -> list[str]:
