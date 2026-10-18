@@ -12,7 +12,7 @@ from PIL import Image
 import dpo.regen.sheet_instrument as sheet_instrument
 from diff.phase1_setup import approve, draft_setup
 
-CLIPS = ("clip_a", "clip_b", "clip_c")
+CLIPS = ("kyoto_101", "lima_202", "oslo_303")
 FRAMES = ("00060", "00180", "00300")
 DURATION_MS = 10000
 WIDTH, HEIGHT = 64, 36
@@ -30,17 +30,17 @@ ONTOLOGY = [
     {"id": "/a/bird", "name": "Bird", "child_ids": []},
 ]
 CORPUS = {
-    "clip_a": (
+    "kyoto_101": (
         "c2_video_audio_caption",
         "a bus idles while a man speaks.",
         "Vehicle|Bus|Speech|Male speech, man speaking",
     ),
-    "clip_b": (
+    "lima_202": (
         "c2_video_audio_caption",
         "traffic with honking horns.",
         "Vehicle|Vehicle horn, car horn, honking",
     ),
-    "clip_c": ("c2_video_audio_caption", "a bird sings in the wind.", "Bird|Wind noise (microphone)|Bird"),
+    "oslo_303": ("c2_video_audio_caption", "a bird sings in the wind.", "Bird|Wind noise (microphone)|Bird"),
     "practice": ("c1_video_audio", "people talk near a bus.", "Speech|Bus"),
 }
 KOREAN = {

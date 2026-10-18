@@ -46,14 +46,17 @@ def test_a_single_remaining_sound_keeps_its_ancestor(tmp_path: Path) -> None:
 
 def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
     setup = drafted(tmp_path)
-    assert [clip["key"] for clip in setup["clips"]] == ["clip_a", "clip_b", "clip_c"]
-    clip_a = setup["clips"][0]
-    assert [frame["at_ms"] for frame in clip_a["frames"]] == [1000, 3000, 5000]
-    assert [item["id"] for item in clip_a["frames"][0]["objects"]] == ["road", "sky"]
-    assert [option["audioset"] for option in clip_a["options"]["A1s"]] == ["Bus", "Male speech, man speaking"]
-    assert {option["family"] for option in clip_a["options"]["A1s"]} == {"things", "human"}
-    assert clip_a["dropped_labels"] == ["Vehicle", "Speech"]
-    assert clip_a["caption"] == {
+    assert [clip["key"] for clip in setup["clips"]] == ["kyoto_101", "lima_202", "oslo_303"]
+    first_clip = setup["clips"][0]
+    assert [frame["at_ms"] for frame in first_clip["frames"]] == [1000, 3000, 5000]
+    assert [item["id"] for item in first_clip["frames"][0]["objects"]] == ["road", "sky"]
+    assert [option["audioset"] for option in first_clip["options"]["A1s"]] == [
+        "Bus",
+        "Male speech, man speaking",
+    ]
+    assert {option["family"] for option in first_clip["options"]["A1s"]} == {"things", "human"}
+    assert first_clip["dropped_labels"] == ["Vehicle", "Speech"]
+    assert first_clip["caption"] == {
         "text": "",
         "start_ms": 0,
         "end_ms": 10000,
@@ -80,8 +83,8 @@ def test_the_wording_draft_makes_only_the_researcher_s_edits(tmp_path: Path) -> 
 
 def test_empty_korean_fields_block_even_smoke_sessions(tmp_path: Path) -> None:
     found = problems(drafted(tmp_path), "smoke", tmp_path)
-    assert "clip_a.caption: no Korean text" in found
-    assert any(problem.startswith("clip_a.R2") for problem in found)
+    assert "kyoto_101.caption: no Korean text" in found
+    assert any(problem.startswith("kyoto_101.R2") for problem in found)
     assert problems(filled(drafted(tmp_path)), "smoke", tmp_path) == []
 
 
@@ -98,7 +101,7 @@ def test_an_edit_after_approval_voids_it(tmp_path: Path) -> None:
     setup["clips"][0]["caption"]["text"] = "버스가 공회전하고 남자가 말한다."
     assert not approved(setup["clips"][0])
     assert problems(setup, "participant", tmp_path) == [
-        "clip_a: not approved by the researcher (or edited since approval)"
+        "kyoto_101: not approved by the researcher (or edited since approval)"
     ]
 
 
@@ -142,18 +145,18 @@ def test_a_missing_media_file_is_named(tmp_path: Path) -> None:
     setup = filled(drafted(tmp_path))
     (tmp_path / setup["clips"][1]["frames"][0]["objects"][0]["mask"]).unlink()
     assert any(
-        "clip_b.frame 0 road: missing file" in problem for problem in problems(setup, "smoke", tmp_path)
+        "lima_202.frame 0 road: missing file" in problem for problem in problems(setup, "smoke", tmp_path)
     )
 
 
 def test_approval_needs_a_name_and_known_clips(tmp_path: Path) -> None:
     setup = filled(drafted(tmp_path))
     with pytest.raises(SetupError, match="reviewer's name"):
-        approve(setup, by=" ", at="now", clips=["clip_a"])
+        approve(setup, by=" ", at="now", clips=["kyoto_101"])
     with pytest.raises(SetupError, match="no such clips"):
         approve(setup, by="researcher", at="now", clips=["clip_z"])
     original = copy.deepcopy(setup)
-    approve(setup, by="researcher", at="now", clips=["clip_a"])
+    approve(setup, by="researcher", at="now", clips=["kyoto_101"])
     assert setup == original
 
 
@@ -163,8 +166,8 @@ def test_the_cli_shows_and_approves(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     path.write_text(json.dumps(filled(drafted(tmp_path)), ensure_ascii=False), encoding="utf-8")
     assert main(["phase1", "show", "--setup", str(path)]) == 0
     shown = capsys.readouterr().out
-    assert "[clip_a]" in shown and "5 problems for participant sessions" in shown
-    approval = ["--clip", "clip_a", "--clip", "clip_b", "--clip", "clip_c", "--practice", "--wording"]
+    assert "[kyoto_101]" in shown and "5 problems for participant sessions" in shown
+    approval = ["--clip", "kyoto_101", "--clip", "lima_202", "--clip", "oslo_303", "--practice", "--wording"]
     assert main(["phase1", "approve", "--setup", str(path), "--by", "researcher", *approval]) == 0
     assert "0 problems left" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="name what you approve"):
