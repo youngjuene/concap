@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 from phase1_fixtures import DURATION_MS, approved_setup
 
+import diff.workbook_instrument as workbook_instrument
 import dpo.regen.playback as regen_playback
-import dpo.regen.sheet_instrument as sheet_instrument
 from diff.phase1_flow import CLIP_PAGES, UNWATCHED, Phase1, checkpoint, clip_order, record_playback
 from diff.phase1_setup import stripped_options
 from diff.session_store import Conflict
@@ -88,14 +88,14 @@ def test_items_and_rules_are_regen_s(flow: Phase1) -> None:
     shown = flow.present(state, lambda name: name)
     clip = flow.clip(state)
     options = {"A1s": stripped_options(clip["options"]["A1s"]), "R2": stripped_options(clip["options"]["R2"])}
-    regen = sheet_instrument.page_spec("P11", options=options, session_key="s-test")
+    sheet = workbook_instrument.page_spec("P11", options=options, session_key="s-test")
     assert [item["id"] for item in shown["items"]] == ["R1", "R2"]
     assert shown["items"][1]["options"] == [
         {"value": "m1", "label": "버스 소리"},
         {"value": "m2", "label": "음악"},
         {"value": "memory_unknown", "label": "기억나지 않음", "exclusive": True},
     ]
-    assert [item["text"] for item in shown["items"]] == [item["text"] for item in regen["items"]]
+    assert [item["text"] for item in shown["items"]] == [item["text"] for item in sheet["items"]]
     for page, wrong, message in (
         ("P11", {"R1": 6, "R2": ["m1", "memory_unknown"]}, "exclusive"),
         ("P4", {"F1": 7}, "missing answers"),

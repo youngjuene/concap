@@ -9,8 +9,9 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
 
 What regen supplies and what is copied:
 - **Items, option rules and answer validation** come from
-  ``dpo.regen.sheet_instrument``; P2 points are matched against the masks by
-  ``dpo.regen.points``. Every item therefore matches regen exactly.
+  ``diff.workbook_instrument``, diff's copy of regen's instrument over the
+  spreadsheet as it stood on 2026-10-18; P2 points are matched against the
+  masks by ``dpo.regen.points``.
 - **The playback coverage rule** is copied from
   ``dpo.regen.playback.record_playback``, because importing it would load
   ``study_store``, ``study_schema`` and ``config``. A parity test runs regen's
@@ -32,8 +33,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
+import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
-import dpo.regen.sheet_instrument as sheet_instrument
 from diff.phase1_setup import stripped_options
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
@@ -120,7 +121,9 @@ def clip_order(keys: Sequence[str], seed: int) -> list[str]:
 class Phase1:
     """Pages, actions and records for one setup; the session's state lives in the store."""
 
-    def __init__(self, setup: Mapping[str, Any], *, root: Path, instrument: Any = sheet_instrument) -> None:
+    def __init__(
+        self, setup: Mapping[str, Any], *, root: Path, instrument: Any = workbook_instrument
+    ) -> None:
         self.setup = setup
         self.root = root
         self.instrument = instrument

@@ -11,7 +11,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "src" / "diff"
 ALLOWED_REGEN = {
-    "dpo.regen.sheet_instrument",
     "dpo.regen.playback",
     "dpo.regen.points",
     "dpo.regen.study_media",

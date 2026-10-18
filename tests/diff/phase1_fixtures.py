@@ -9,7 +9,7 @@ from typing import Any
 
 from PIL import Image
 
-import dpo.regen.sheet_instrument as sheet_instrument
+import diff.workbook_instrument as workbook_instrument
 from diff.phase1_setup import approve, draft_setup
 
 CLIPS = ("kyoto_101", "lima_202", "oslo_303")
@@ -125,7 +125,7 @@ def drafted(root: Path) -> dict[str, Any]:
         video_root=paths["videos"],
         practice_clip="practice",
         practice_still=root / "artifacts" / "practice.png",
-        instrument=sheet_instrument,
+        instrument=workbook_instrument,
         probe=fake_probe,
         extract=fake_extract,
     )

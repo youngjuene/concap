@@ -10,7 +10,7 @@ import phase1_fixtures
 import pytest
 from phase1_fixtures import PREPARED, approved_setup, drafted, filled
 
-import dpo.regen.sheet_instrument as sheet_instrument
+import diff.workbook_instrument as workbook_instrument
 from diff.__main__ import main
 from diff.phase1_setup import (
     P0_DELETED,
@@ -24,7 +24,7 @@ from diff.phase1_setup import (
 
 
 def problems(setup: dict, purpose: str, root: Path) -> list[str]:
-    return setup_problems(setup, purpose, root=root, instrument=sheet_instrument)
+    return setup_problems(setup, purpose, root=root, instrument=workbook_instrument)
 
 
 def test_every_audioset_label_is_kept_with_its_family(tmp_path: Path) -> None:
@@ -66,13 +66,13 @@ def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
         "A1s": []
     }
     assert setup["practice"]["frames"] == [{"still": "artifacts/practice.png", "at_ms": 5000}]
-    assert setup["instrument_hash"] == sheet_instrument.snapshot()["hash"]
+    assert setup["instrument_hash"] == workbook_instrument.snapshot()["hash"]
 
 
 def test_the_wording_draft_makes_only_the_researcher_s_edits(tmp_path: Path) -> None:
     wording = drafted(tmp_path)["wording"]
     intro = wording["P0_instruction"]
-    assert intro["workbook"] == sheet_instrument.page_spec("P0")["instruction"]
+    assert intro["workbook"] == workbook_instrument.page_spec("P0")["instruction"]
     assert all(sentence not in intro["shown"] for sentence in P0_DELETED)
     assert intro["shown"] == intro["workbook"].replace(" " + P0_DELETED[0], "").replace(
         " " + P0_DELETED[1], ""

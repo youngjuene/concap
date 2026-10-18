@@ -441,7 +441,7 @@ def g0_waive(args: argparse.Namespace) -> int:
 
 def phase1_draft(args: argparse.Namespace) -> int:
     """Draft the phase-1 setup from the prepared metadata; the options stay empty to write."""
-    import dpo.regen.sheet_instrument as sheet_instrument
+    import diff.workbook_instrument as workbook_instrument
     from diff import phase1_setup as setup
 
     if args.out.exists() and not args.force:
@@ -457,7 +457,7 @@ def phase1_draft(args: argparse.Namespace) -> int:
             video_root=(root / args.video_root),
             practice_clip=args.practice_clip,
             practice_still=(root / args.out.parent / "practice" / f"{args.practice_clip}.png"),
-            instrument=sheet_instrument,
+            instrument=workbook_instrument,
         )
     except setup.SetupError as exc:
         raise SystemExit(f"cannot draft the phase-1 setup: {exc}") from exc
@@ -503,12 +503,12 @@ def _approved(part: Any) -> bool:
 
 def phase1_show(args: argparse.Namespace) -> int:
     """Print the setup for review and every problem for the purpose."""
-    import dpo.regen.sheet_instrument as sheet_instrument
+    import diff.workbook_instrument as workbook_instrument
     from diff.phase1_setup import read_setup, setup_problems
 
     drafted = read_setup(args.setup)
     _print_setup(drafted)
-    problems = setup_problems(drafted, args.purpose, root=Path.cwd(), instrument=sheet_instrument)
+    problems = setup_problems(drafted, args.purpose, root=Path.cwd(), instrument=workbook_instrument)
     print(f"{len(problems)} problems for {args.purpose} sessions")
     for problem in problems:
         print(f"  {problem}")
@@ -517,7 +517,7 @@ def phase1_show(args: argparse.Namespace) -> int:
 
 def phase1_approve(args: argparse.Namespace) -> int:
     """Record the researcher's approval of the named parts, bound to their current content."""
-    import dpo.regen.sheet_instrument as sheet_instrument
+    import diff.workbook_instrument as workbook_instrument
     from diff.phase1_setup import SetupError, approve, read_setup, setup_problems
 
     if not (args.clip or args.practice or args.wording):
@@ -535,7 +535,7 @@ def phase1_approve(args: argparse.Namespace) -> int:
     except SetupError as exc:
         raise SystemExit(f"cannot approve: {exc}") from exc
     _write_json(args.setup, updated, force=True)
-    remaining = setup_problems(updated, "participant", root=Path.cwd(), instrument=sheet_instrument)
+    remaining = setup_problems(updated, "participant", root=Path.cwd(), instrument=workbook_instrument)
     print(f"approved by {args.by}; {len(remaining)} problems left for participant sessions")
     return 0
 
@@ -592,7 +592,7 @@ def live_serve(args: argparse.Namespace) -> int:
 
     import uvicorn
 
-    import dpo.regen.sheet_instrument as sheet_instrument
+    import diff.workbook_instrument as workbook_instrument
     from diff.generation_worker import Supervisor, WorkerCommand
     from diff.job_plan import live_job
     from diff.live_generation import LiveService, LiveStream, starting_caption_problems
@@ -629,7 +629,7 @@ def live_serve(args: argparse.Namespace) -> int:
     phase1 = None
     if args.phase1_setup is not None:
         setup = read_setup(args.phase1_setup)
-        problems = setup_problems(setup, args.purpose, root=Path.cwd(), instrument=sheet_instrument)
+        problems = setup_problems(setup, args.purpose, root=Path.cwd(), instrument=workbook_instrument)
         if problems:
             raise SystemExit(
                 f"the phase-1 setup cannot serve {args.purpose} sessions:\n  " + "\n  ".join(problems)
