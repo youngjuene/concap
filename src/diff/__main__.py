@@ -438,6 +438,104 @@ def g0_waive(args: argparse.Namespace) -> int:
     return 0
 
 
+def phase1_draft(args: argparse.Namespace) -> int:
+    """Draft the phase-1 setup from the prepared metadata; Korean fields stay empty to write."""
+    import dpo.regen.sheet_instrument as sheet_instrument
+    from diff import phase1_setup as setup
+
+    if args.out.exists() and not args.force:
+        raise SystemExit(f"{args.out} exists; pass --force to replace it")
+    root = Path.cwd()
+    try:
+        drafted = setup.draft_setup(
+            root=root,
+            media_root=(root / args.media_root),
+            corpus=(root / args.corpus),
+            ontology=args.ontology,
+            video_root=(root / args.video_root),
+            practice_clip=args.practice_clip,
+            practice_still=(root / args.out.parent / "practice" / f"{args.practice_clip}.png"),
+            instrument=sheet_instrument,
+        )
+    except setup.SetupError as exc:
+        raise SystemExit(f"cannot draft the phase-1 setup: {exc}") from exc
+    _write_json(args.out, drafted, force=args.force)
+    print(
+        f"wrote {len(drafted['clips'])} clips to {args.out}; the Korean captions and options are still empty"
+    )
+    return 0
+
+
+def _print_setup(drafted: Any) -> None:
+    wording = drafted["wording"]
+    print(f"[wording] {'approved' if _approved(wording) else 'NOT approved'}")
+    print("  P0: " + wording["P0_instruction"]["shown"].replace("\n", "\n      "))
+    for page, title in wording["titles"].items():
+        print(f"  {page}: {title['workbook']} → {title['shown']}")
+    practice = drafted["practice"]
+    print(f"[practice] {practice['clip']}, {'approved' if _approved(practice) else 'NOT approved'}")
+    for option in practice["options"]["A1s"]:
+        label = option["label"] or "(empty)"
+        print(f"  A1s {option['value']}: {label} [{option['family']}; {option['audioset']}]")
+    for clip in drafted["clips"]:
+        state = "approved" if _approved(clip) else "NOT approved"
+        print(f"[{clip['key']}] {clip['duration_ms']} ms, {len(clip['frames'])} frames, {state}")
+        print(f"  caption: {clip['caption']['text'] or '(empty)'}")
+        print(f"  orig_text: {clip['caption']['orig_text']}")
+        for option in clip["options"]["A1s"]:
+            ambiguous = f"; also under {option['family_ambiguous']}" if "family_ambiguous" in option else ""
+            label = option["label"] or "(empty)"
+            print(f"  A1s {option['value']}: {label} [{option['family']}; {option['audioset']}{ambiguous}]")
+        for option in clip["options"]["R2"]:
+            mark = "mentioned" if option.get("mentioned") else "distractor"
+            print(f"  R2 {option['value']}: {option['label']} [{mark}]")
+
+
+def _approved(part: Any) -> bool:
+    from diff.phase1_setup import approved
+
+    return approved(part)
+
+
+def phase1_show(args: argparse.Namespace) -> int:
+    """Print the setup for review and every problem for the purpose."""
+    import dpo.regen.sheet_instrument as sheet_instrument
+    from diff.phase1_setup import read_setup, setup_problems
+
+    drafted = read_setup(args.setup)
+    _print_setup(drafted)
+    problems = setup_problems(drafted, args.purpose, root=Path.cwd(), instrument=sheet_instrument)
+    print(f"{len(problems)} problems for {args.purpose} sessions")
+    for problem in problems:
+        print(f"  {problem}")
+    return 0
+
+
+def phase1_approve(args: argparse.Namespace) -> int:
+    """Record the researcher's approval of the named parts, bound to their current content."""
+    import dpo.regen.sheet_instrument as sheet_instrument
+    from diff.phase1_setup import SetupError, approve, read_setup, setup_problems
+
+    if not (args.clip or args.practice or args.wording):
+        raise SystemExit("name what you approve: --clip KEY (repeatable), --practice or --wording")
+    drafted = read_setup(args.setup)
+    try:
+        updated = approve(
+            drafted,
+            by=args.by,
+            at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            clips=args.clip or (),
+            practice=args.practice,
+            wording=args.wording,
+        )
+    except SetupError as exc:
+        raise SystemExit(f"cannot approve: {exc}") from exc
+    _write_json(args.setup, updated, force=True)
+    remaining = setup_problems(updated, "participant", root=Path.cwd(), instrument=sheet_instrument)
+    print(f"approved by {args.by}; {len(remaining)} problems left for participant sessions")
+    return 0
+
+
 def _gpu_free_mib() -> dict[str, int]:
     import subprocess
 
@@ -692,6 +790,33 @@ def parser() -> argparse.ArgumentParser:
     g0_skip.add_argument("--decided-by", required=True)
     g0_skip.add_argument("--notes", required=True, help="the reason for the waiver")
     g0_skip.set_defaults(handler=g0_waive)
+    phase1 = commands.add_parser(
+        "phase1", help="phase-1 setup: clips, captions, options, practice"
+    ).add_subparsers(dest="action", required=True)
+    draft = phase1.add_parser("draft-setup", help="draft the setup from the prepared metadata (unreviewed)")
+    draft.add_argument("--out", type=Path, default=Path("artifacts/diff/phase1/setup-draft.json"))
+    draft.add_argument("--media-root", type=Path, default=Path("data/live/regen-media"))
+    draft.add_argument("--corpus", type=Path, default=Path("data/corpus/tidy_data.csv"))
+    draft.add_argument("--video-root", type=Path, default=Path("data/video"))
+    draft.add_argument(
+        "--ontology", type=Path, default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json")
+    )
+    draft.add_argument(
+        "--practice-clip", default="amsterdam_006", help="a c1_video_audio clip outside the 12"
+    )
+    draft.add_argument("--force", action="store_true")
+    draft.set_defaults(handler=phase1_draft)
+    show = phase1.add_parser("show", help="print the setup for review, with its problems")
+    show.add_argument("--setup", type=Path, required=True)
+    show.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
+    show.set_defaults(handler=phase1_show)
+    sign = phase1.add_parser("approve", help="record the researcher's approval of clips, practice or wording")
+    sign.add_argument("--setup", type=Path, required=True)
+    sign.add_argument("--by", required=True)
+    sign.add_argument("--clip", action="append", help="a clip key; repeatable")
+    sign.add_argument("--practice", action="store_true")
+    sign.add_argument("--wording", action="store_true")
+    sign.set_defaults(handler=phase1_approve)
     live = commands.add_parser(
         "live", help="live phase 2: Trida rewrites captions while a participant watches"
     )
