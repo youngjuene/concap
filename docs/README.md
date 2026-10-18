@@ -13,7 +13,7 @@ archived.
 | [`v1-session/`](v1-session/) | the **skeleton** instrument: the ordered list of what a caption could mention is the only control surface | `dpo.session`, `dpo session …`, port 8777 |
 | [`v2-console/`](v2-console/) | the **console** instrument: three controls drive a read-only numbered skeleton | `dpo.console`, `dpo console …`, port 8778 |
 | [`v3-regen/`](v3-regen/) | the **regeneration** instrument: a participant's report of what they saw and heard writes the captions of a second viewing | `dpo.regen`, `dpo regen …`, port 8779 |
-| [`v4-diff/`](v4-diff/) | the **diff** pipeline: one participant app. Phase 1 profiles the participant on regen's pages (12 c2 clips, one viewing each; since 2026-10-18); then Trida-7B rewrites cue captions live while the participant moves two sliders | `diff`, `python -m diff …`, `python -m diff live serve` (port 8782), `python -m diff export` |
+| [`v4-diff/`](v4-diff/) | the **diff** pipeline: one participant app. Phase 1 follows the questionnaire sheet on 12 c2 clips, two viewings each (since 2026-10-18): the raw prepared caption, then a second caption Trida-7B writes from the participant's answers. Then Trida-7B rewrites cue captions live while the participant moves two sliders | `diff`, `python -m diff …`, `python -m diff live serve` (port 8782), `python -m diff export` |
 
 Within a version directory the filename says the role:
 
@@ -61,7 +61,7 @@ Within a version directory the filename says the role:
 
 | File | What it is |
 |---|---|
-| [`runbook.md`](v4-diff/runbook.md) | operator steps for `python -m diff`: model fetch, development sources, G0 (plan → freeze → generate → report → decide or waive), smoke runs, the live phase-2 app |
+| [`runbook.md`](v4-diff/runbook.md) | operator steps for `python -m diff`: model fetch, development sources, G0 (plan → freeze → generate → report → decide or waive), smoke runs, the phase-1 setup, the participant app (phase 1 and live phase 2), the export |
 | [`plan.md`](v4-diff/plan.md) | the plan, revised for both model changes (Trida → Dream → Trida): verified code and model facts, architecture, the response-order parity map against regen, schemas, traceability (incl. G0 and AC-20), the four stages and their exits, the PRD v1.1 changelog, and open questions |
 
 ## The two console/session specifications contradict each other

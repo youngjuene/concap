@@ -4,10 +4,153 @@ Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
 to Trida-7B (both model changes below). Written against `main` at `3842302`.
 Where the brief and the PRD disagree, the brief wins.
 
+## Phase 1 — two viewings per clip, the second caption by Trida (researcher, 2026-10-18, later)
+
+The researcher read the questionnaire spreadsheet (문항표; regen's copy was
+taken from the same sheet on 2026-10-04) and asked for phase 1 to follow it:
+each 10-second clip has two steps. This supersedes "one viewing per clip"
+and "it shows no model output" in the section below. The rest of that
+section stands: the raw first captions, the options from `orig_text`, entry
+by `P{n}`, the store and the export.
+
+**Decided by the researcher:**
+- **Two stages.** Stage A runs every clip's first step: P1 (viewing with the
+  raw first caption), P2 V1, P3 A1s, P4 (11 ratings) and P5 FA1–FA3. Stage B
+  runs every clip's second step **in the same order**:
+  - P6, a viewing with the second caption;
+  - P7 V2, P8 A2s and P9 (the 11 ratings with `_2` ids, shuffled as regen
+    does);
+  - P10 S1–S3 and P11 R1/R2.
+
+  Then the handoff to the live watch, as before. The split gives Trida the
+  rest of stage A to write each clip's second caption.
+- **Second caption.** Trida rewrites ("tweaks") the clip's raw first caption,
+  steered by that participant's step-1 answers. Every clip is tuned; no clip
+  keeps its first caption. The answers are processed into the slots of a
+  prepared prompt template, which names each direction and its degree in
+  percent.
+- **Failure.** If the output fails the technical checks or the worker fails,
+  that clip's step 2 is skipped and the reason recorded. There are no quality
+  retries; one identical retry follows a lost worker or device error.
+- **R2's key comes from the prompt.** The sounds the prompt names count as
+  mentioned. This is recorded as the intended key, not checked against what
+  Trida wrote.
+- **P0 and titles:** the sheet's text, word for word, including the
+  two-viewings and interview sentences. The interview (P12) and debrief (P13)
+  happen out loud, outside the app.
+- **Long-video stage:** unchanged. The sheet has no items for it ("미정"), so
+  the post-watch items still come from the researcher.
+
+**The sheet as of 2026-10-18.** Since regen's copy, one cell changed: R1 now
+reads "영상을 보는 동안 자막을 어디까지 읽으셨습니까?". diff now has its own copy
+of the instrument:
+- `workbook_instrument`, regen's `sheet_instrument` code unchanged;
+- over `src/diff/items/workbook-20261018.json`, which is regen's snapshot
+  with that cell updated, checked against the sheet's export on all 886
+  cells.
+
+This is plan Stage 4's detach for this module, done early.
+`dpo.regen.sheet_instrument` is no longer imported.
+
+**The tweak prompt** (`rewrite_prompts.TWEAK_P1`, `tweak-p1` v0) is
+**provisional**. `live serve --purpose participant` refuses until the
+researcher approves or rewrites it. `phase1_tweak` fills the slots from that
+clip's step-1 answers:
+
+| Slot | From | In the prompt |
+|---|---|---|
+| `{caption}` | the raw first caption | the text to tweak |
+| `{sounds}` | the labels of the mentioned R2 options (`orig_text` sounds) | "이 영상에서 들리는 소리"; also R2's intended key |
+| `{attended_sound}` | the P3 A1s answer's label | the sound the viewer attended to |
+| `{attended_object}` | the object under the P2 point, in Korean ("없음" off every mask) | what the viewer saw first |
+| `{fascination}` % | the F1–F3 mean | make the sounds' appeal and interest stand out |
+| `{being_away}` % | the BF1–BF3 and P1–P2 mean | bring out a sense of getting away from routine |
+| `{coherence}` % | the E1–E3 mean | show how the sounds belong to and fit the place |
+| `{familiarity}` % | FA2 | name the sound sources concretely |
+
+The degree is `round(mean / 6 × 100)`: it *reflects* the answers. FA1 and FA3
+are recorded, not used.
+
+**Open for the researcher:**
+- **A. Degree direction:** reflect, as drafted, or compensate,
+  `(6 − mean) / 6`. It is one constant, `phase1_tweak.DEGREE_RULE`.
+- **B. The sound list in the prompt:** it grounds the tweak in the audio and
+  defines R2's key. On the four clips whose raw caption contradicts the audio,
+  the prompt then holds both.
+- **C. The prompt's wording.**
+
+**Built (commits `5f4837a` … `c2d69cc`):**
+- **`workbook_instrument`:** diff's copy of the questionnaire, with a parity
+  test (every page equals regen's except R1). The setup has no wording part
+  any more; P0 and the titles are the sheet's.
+- **`phase1_tweak`:** the slots, the job and the check.
+  - The job runs at the live condition (τ 0.9) on a 128-token canvas.
+  - The check fails only what cannot be shown as Korean text: empty,
+    incomplete, broken characters, Latin letters, or over 160 characters.
+  - Sentence count, lines and endings are not checked, because the captions
+    it tweaks are raw.
+- **`LiveService`:** runs a queue of tweaks on the session's claimed GPU
+  whenever no video needs it. It applies the one-retry rule, and logs every
+  attempt in `live-<session>.jsonl` with `kind: "tweak"`. A worker that
+  cannot start now counts as a lost worker instead of ending the service
+  thread.
+- **`phase1_flow` (protocol `diff.phase1/v2`):** the two stages.
+  - P5 records the clip's slots and marks its second caption pending.
+  - The server queues the job after the answer commits and writes the outcome
+    back.
+  - P6 shows regen's "다음 영상을 준비하고 있습니다…" while it waits, and a failed
+    clip is skipped (`skip-second`) without a participant step.
+  - Pending captions are queued again at entry and at every phase-1 request,
+    so a restart loses none.
+  - P7–P11 bind to the P6 viewing.
+- **Export (`diff.export/v2`):**
+  - `phase1.csv` gains `viewing` and annotates A2s and V2;
+  - `r2_intended_key` replaces `r2_mentioned`;
+  - a new `second_captions.csv` gives one row per participant × clip.
+
+**Verified:**
+- the `tests/diff` suite, and a full check in a clean worktree for each
+  commit;
+- a headless Chromium walk with the fake worker (1280×800):
+  - stage A, then stage B, then the handoff, in 5 minutes;
+  - all 12 first captions equal the provided text;
+  - all 12 second captions were the fake's placeholder built on the clip's
+    caption;
+  - nothing clipped, and no page errors (only the pre-entry 401 the start
+    screen expects);
+- a second walk with a fake that held one caption back 200 s and timed out
+  another:
+  - the waiting page showed on that clip's P6 and moved on by itself when the
+    caption arrived;
+  - the failed clip's step 2 was skipped with no participant step;
+  - the walk reached the handoff, with 23 viewings.
+- the same walk with real Trida on GPU 0 (smoke purpose, 2026-10-19). The
+  walk answered every rating at the midpoint, so every degree was 50%.
+  - Trida took 0.53 s per second caption (median; 2.2 s at most). The slowest
+    was ready 2.25 s after its P5, and no waiting page appeared.
+  - 11 of 12 passed the check. On `singapore_067`, Trida repeated the caption
+    and then copied lines of the prompt, which failed the 160-character limit.
+    That clip's step 2 was skipped, as designed.
+  - What the provisional prompt produced (not a quality rating):
+    - three outputs are bare lists of sound names where the caption was a
+      sentence or a single phrase (`singapore_040`, `amsterdam_012`,
+      `bangkok_034`). For example `amsterdam_012`: "달리는 기차의 소리" became
+      "기차 소리, 경찰차 사이렌, 차량 소리";
+    - `amsterdam_181` copied its caption unchanged (flagged);
+    - `bangkok_034` starts with a broken word ("적 소리");
+    - `amsterdam_202` repeats "엔진";
+    - `bangkok_316` kept the prompt's 「」 quotes.
+
+    This bears on decision C.
+
+**Not yet:** the researcher's decisions A–C, the approval of the setup draft,
+and any human participant.
+
 ## Phase 1 — 2026-10-18: profiling only, rebuilt in diff (researcher's decision)
 
 Phase 1 exists to build the participant's profile for the live phase-2 tuner.
-It shows no model output, so Trida appears only in live phase 2. This
+It shows no model output, so Trida appears only in live phase 2 (superseded:
+see the section above). This
 supersedes the plan's phase 1 with Trida-written P6 tracks (§5–§6.3): there is
 no τ comparison in phase 1, and so no blind review, G1/G2 gates or phase-1
 stimulus bundle for it.
@@ -19,7 +162,7 @@ stimulus bundle for it.
 - **Items:** regen's phase-1 instrument (`sheet_instrument`, the source
   workbook frozen on 2026-10-04): P0 consent and practice; per clip P1–P5.
   Validation and order rules follow regen's, item for item.
-- **One viewing per clip.** The workbook's second viewing (P6 with an opposite
+- **Superseded by the section above — one viewing per clip.** The workbook's second viewing (P6 with an opposite
   or maintained caption, and the repeated P7–P9) is dropped. P10 (S1–S3) and
   P11 (R1/R2) follow P5 and refer to the first caption. The tuner reads A1s
   and S1–S3 as before.
@@ -114,7 +257,7 @@ What remains:
 height for two lines. It now keeps the caption's line breaks and grows past
 two lines while the video gives way.
 
-**Wording (researcher, 2026-10-18):** minimal edits for review.
+**Wording (researcher, 2026-10-18; superseded, the sheet's text is shown as is):** minimal edits for review.
 - The workbook's P0 told participants about a second viewing and an
   interview, and its titles said "1차"/"2차". Both no longer fit.
 - The two sentences are deleted and the prefixes dropped. Item texts stay the

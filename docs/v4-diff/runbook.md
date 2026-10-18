@@ -1,4 +1,4 @@
-# v4-diff runbook — Stage 1, G0 and live phase 2
+# v4-diff runbook — Stage 1, G0, phase 1 and live phase 2
 
 How an operator runs what exists today:
 - the Trida-7B and Qwen generator (Trida replaced Dream on 2026-10-12);
@@ -166,7 +166,7 @@ prepared metadata and then approved by the researcher:
 uv run python -m diff phase1 draft-setup      # → artifacts/diff/phase1/setup-draft.json
 uv run python -m diff phase1 show --setup artifacts/diff/phase1/setup-draft.json
 uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.json \
-  --by <name> --clip amsterdam_012 [--clip …] [--practice] [--wording]
+  --by <name> --clip amsterdam_012 [--clip …] [--practice]
 ```
 
 **What `draft-setup` fills in:**
@@ -177,8 +177,9 @@ uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.j
 - `orig_text` and every AudioSet label, from `data/corpus/tidy_data.csv`;
 - each label's family, using the AudioSet ontology, as the reference for the
   options' families;
-- the minimal wording edits: two P0 sentences deleted, "1차"/"2차" dropped
-  from the titles.
+- nothing about wording: P0 and every page title are the questionnaire
+  sheet's, word for word (`diff.workbook_instrument`, the sheet as of
+  2026-10-18).
 
 The options are written into the draft by hand and marked
 `assistant-draft-unreviewed`. They keep `orig_text`, so R2's answer key is
@@ -198,8 +199,8 @@ so it stays on this machine.
 - `show` prints each part, with every problem for participant sessions.
 - `approve` binds an approval to a hash of the part's content, so any later
   edit voids it.
-- Participant sessions are refused until every clip, the practice and the
-  wording are approved.
+- Participant sessions are refused until every clip and the practice are
+  approved.
 - An optional `consent_text` in the file puts a consent checkbox on P0.
 
 ## 7. Participant sessions: phase 1, then live phase 2
@@ -234,8 +235,11 @@ uv run python -m diff live serve \
   `artifacts/diff/participants.sqlite`, one store for the whole study, because
   IDs are unique across it. Smoke runs get `<log-dir>/smoke-sessions.sqlite`,
   so a test `P1` never blocks a real one.
-- `--purpose participant` is refused while the tuner role text is provisional
-  (`rewrite_prompts.TUNER_SYSTEM`), or while the setup has unapproved parts.
+- `--purpose participant` is refused in any of these cases:
+  - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
+  - the second-caption prompt is provisional (`rewrite_prompts.TWEAK_P1`);
+  - the setup has unapproved parts.
+
   Use `--purpose smoke` until then.
 
 **Running a session:**
@@ -246,13 +250,27 @@ uv run python -m diff live serve \
 - The flow is:
   - P0 (the introduction, plus consent if there is consent text), then the
     practice;
-  - for each of the 12 clips, in a random order recorded per participant: one
-    viewing, then P2, P3, P4, P5, S1–S3 and R1/R2;
+  - stage A: for each of the 12 clips, in a random order recorded per
+    participant, the first viewing (the raw prepared caption), then P2–P5;
+  - stage B: the same clips in the same order, the second viewing (Trida's
+    caption), then P7, P8, P9, P10 (S1–S3) and P11 (R1/R2);
   - "2스테이지 시작", which builds the tuner's calibration from the phase-1
     answers and opens the watch at `/watch/`;
   - the videos, then the post-watch items.
+- **Second captions:** when a clip's P5 is submitted, Trida writes its second
+  caption on the session's GPU. It works from the raw caption and that
+  participant's step-1 answers (`diff.phase1_tweak`), while the participant
+  goes on with stage A.
+  - A participant who reaches P6 before it is ready sees "다음 영상을 준비하고
+    있습니다…" until it is.
+  - A caption that fails its check, or whose call fails, skips that clip's
+    second step automatically, with the reason recorded. There are no
+    quality retries; one identical retry follows a lost worker or device
+    error.
 - Phase 1 copies regen's look; the watch keeps its own.
-- **After a server restart:** phase 1 continues exactly where it was. A watch
+- **After a server restart:** phase 1 continues exactly where it was, and any
+  second caption still pending is queued again when the participant's page
+  next talks to the server. A watch
   in progress restarts its current video from the start, with its settings
   (logged as `session_resumed`, `video_restarted: true`).
 
@@ -260,7 +278,7 @@ uv run python -m diff live serve \
 - Each GPU in `--gpus` must have 17 GB free at start, or `serve` refuses.
   Trida takes about 15 GB.
 - A session claims its GPU when the ID is typed, and holds it through phase 1
-  and the videos. It releases the GPU after the last video, before the items.
+  (which needs it for the second captions) and the videos. It releases the GPU after the last video, before the items.
   When no GPU is free, the entry says so before anything starts.
 - The researcher's midsentence renders share these cards, so check
   `nvidia-smi` first.
@@ -269,14 +287,18 @@ uv run python -m diff live serve \
 - `session-<id>.jsonl`: settings, playback, exposures (each with the job it
   showed), video ends and ratings;
 - `live-<id>.jsonl`: every Trida call, with its job, system message, token
-  hash, latency, `L`, target, output and checks.
+  hash, latency, output and checks. Live captions also carry `L` and the
+  target. Second captions are marked `kind: "tweak"`, with the clip, the
+  attempt, the slots and degrees, and the outcome.
 
 `verification-trida.json` and `worker-gpu<N>.log` sit beside them. Phase-1
-answers, viewings and the calibration are in the store.
+answers, viewings, second captions, skipped steps and the calibration are in
+the store.
 
 **Behaviour to expect:**
 - Trida at τ 0.9 on the 96-token live canvas (protocol v6) takes about 0.4 s a
-  caption on an RTX 3090.
+  caption on an RTX 3090. A second caption, on its 128-token canvas, took
+  0.53 s (median; 2.2 s at most) in the smoke walk of 2026-10-19.
 - The texture slider has three steps (0–2), and the context slider has three.
 - `L` follows the device with no floor, so a tweak appears at the next cue
   boundary (at most about 5 s later). If the worker is busy, it appears one call
@@ -298,10 +320,21 @@ uv run python -m diff export --log-dir artifacts/diff/live-20261020 [--log-dir �
 
 It reads the store (`--store`, default the participant store) and every
 `--log-dir`, and writes into a new, empty directory:
-- `participants.jsonl`: each session's full record;
-- `phase1.csv`: one row per participant × clip × item, practice excluded. It
-  carries the clip key, the A1s label, family and `orig_phrase`, the P2
-  matched object and the R2 answer key;
+- `participants.jsonl`: each session's full record, including every
+  second-caption attempt;
+- `phase1.csv`: one row per participant × clip × item, practice excluded.
+  `viewing` (`P1` or `P6`) says which viewing an answer belongs to. It
+  carries:
+  - the clip key;
+  - for A1s and A2s, the chosen sound's label, family and `orig_phrase`;
+  - for V1 and V2, the matched objects;
+  - for R2, the intended key, the sounds the second-caption prompt named;
+- `second_captions.csv`: one row per participant × clip:
+  - the status, and the reason for a skipped step;
+  - the first and second captions;
+  - the attended sound and object, and the four degrees;
+  - the intended R2 key, the template hash and whether it was provisional;
+  - the job and the check flags;
 - `post_watch.csv`;
 - `manifest.json`, with file hashes.
 
