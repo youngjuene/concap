@@ -4,6 +4,39 @@ Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
 to Trida-7B (both model changes below). Written against `main` at `3842302`.
 Where the brief and the PRD disagree, the brief wins.
 
+## Phase 1 — 2026-10-18: profiling only, rebuilt in diff (researcher's decision)
+
+Phase 1 exists to build the participant's profile for the live phase-2 tuner.
+It shows no model output, so Trida appears only in live phase 2. This
+supersedes the plan's phase 1 with Trida-written P6 tracks (§5–§6.3): there is
+no τ comparison in phase 1, and so no blind review, G1/G2 gates or phase-1
+stimulus bundle for it.
+
+**Decided by the researcher:**
+- **Where:** in diff, one app and one participant session. Phase 1 hands off
+  to live phase 2 inside the app; the tuner system message is built from the
+  phase-1 answers at that moment, with no researcher step in between.
+- **Items:** regen's phase-1 instrument (`sheet_instrument`, the source
+  workbook frozen on 2026-10-04): P0 consent and practice; per clip P1–P5.
+  Validation and order rules follow regen's, item for item.
+- **One viewing per clip.** The workbook's second viewing (P6 with an opposite
+  or maintained caption, and the repeated P7–P9) is dropped. P10 (S1–S3) and
+  P11 (R1/R2) follow P5 and refer to the first caption. The tuner reads A1s
+  and S1–S3 as before.
+- **First caption:** each clip's prepared Korean caption (원문). There is no
+  2×2 congruence × depth assignment.
+- **Clips:** regen's 12 c2 clips. Six of them were G0's development cues. The
+  rule "development material is never a participant clip" protected Trida's
+  phase-1 generation, and phase 1 now generates nothing, so the researcher
+  accepts this overlap.
+- **Ending:** the session ends after the post-watch items, with no P12
+  interview prompts and no P13 debrief.
+
+**Still needed from the researcher for phase 1:** the consent text, the
+practice material, and per clip the A1s sound options and the R2 recall
+options (sounds mentioned in the caption and distractors). No such setup file
+exists in the repository, for regen or for diff.
+
 ## Model change — 2026-10-12: Dream 7B → Trida-7B (researcher's decision)
 
 **Why.** Live phase 2 worked on Dream, but its Korean broke: about 2 in 5 live
