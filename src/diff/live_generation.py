@@ -31,6 +31,14 @@ The scheduler is pure (time is passed in), so it is tested without threads or
 a model. :class:`LiveService` adds the worker thread, the supervised Trida
 worker (:mod:`diff.generation_worker`, ``kind="live"``) and the attempt log.
 Nothing here imports torch: the worker renders, tokenizes and runs the job.
+
+The same worker also writes phase 1's second captions (researcher, 2026-10-18):
+:meth:`LiveService.submit_tweak` queues one per clip while the participant is
+still in phase 1, and the thread runs them whenever no video scheduler has a
+request, in the order submitted. Unlike a live caption, a tweak is checked
+before it counts: an output that fails its check, or a call that fails, ends
+that clip's tweak with the reason, except for one identical retry after a
+transient worker or device failure.
 """
 
 from __future__ import annotations
@@ -43,16 +51,17 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
 from diff.caption_sources import CaptionSource
-from diff.generation_worker import TRANSIENT
+from diff.generation_worker import TRANSIENT, WorkerStartupError
 from diff.job_plan import Job
 from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 
 LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v1"
+TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v1"
 LATENCY_WINDOW: Final = 20
 LATENCY_QUANTILE: Final = 0.9
 LATENCY_FLOOR_MS: Final = 0
@@ -245,6 +254,39 @@ def opaque_token(secret: bytes, session_id: str, internal_id: str) -> str:
 
 
 Attempt = Callable[[Mapping[str, Any], float], dict[str, Any]]
+Check = Callable[[CaptionSource, Job, Mapping[str, Any]], Mapping[str, Any]]
+
+
+@dataclass(frozen=True)
+class TweakRequest:
+    """One clip's second caption for one session; ``attempt`` counts from 1."""
+
+    session_id: str
+    clip: str
+    source: CaptionSource
+    job: Job
+    steer: Mapping[str, Any]
+    attempt: int = 1
+
+
+TweakDone = Callable[[TweakRequest, dict[str, Any]], None]
+
+
+def tweak_outcome(
+    request: TweakRequest, result: Mapping[str, Any], checks: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """What one attempt means for the clip: ``ready``, ``retry`` or ``failed`` with the reason."""
+    status = result.get("status")
+    base = {"attempt": request.attempt, "result_status": status, "job_id": request.job.job_id}
+    if status == "completed" and checks is not None and not checks.get("excluded"):
+        return {**base, "status": "ready", "text": result["output"]["text"], "checks": dict(checks)}
+    if status == "completed":
+        codes = [finding["code"] for finding in (checks or {}).get("failures", [])]
+        reason = "check failed: " + ", ".join(codes) if codes else "no check result"
+        return {**base, "status": "failed", "reason": reason, "checks": dict(checks or {})}
+    if status in TRANSIENT and request.attempt == 1:
+        return {**base, "status": "retry", "reason": f"{status}: {result.get('error')}"}
+    return {**base, "status": "failed", "reason": f"{status}: {result.get('error')}"}
 
 
 class LiveService:
@@ -260,16 +302,18 @@ class LiveService:
         attempt: Attempt,
         log_dir: Path,
         *,
-        check: Callable[[CaptionSource, Job, Mapping[str, Any]], Mapping[str, Any]] | None = None,
+        check: Check | None = None,
+        tweak_check: Check | None = None,
         deadline_s: float = LIVE_DEADLINE_S,
         clock: Callable[[], float] = time.monotonic,
         idle_wait_s: float = 0.25,
     ) -> None:
-        self.attempt, self.log_dir, self.check = attempt, log_dir, check
+        self.attempt, self.log_dir, self.check, self.tweak_check = attempt, log_dir, check, tweak_check
         self.deadline_s, self.clock, self.idle_wait_s = deadline_s, clock, idle_wait_s
         self.lock = threading.Condition()
         self.session_id: str | None = None
         self.scheduler: LiveScheduler | None = None
+        self.tweaks: deque[tuple[TweakRequest, TweakDone]] = deque()
         self.stopping = False
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -299,6 +343,7 @@ class LiveService:
         with self.lock:
             if self.session_id == session_id:
                 self.session_id, self.scheduler = None, None
+                self.tweaks = deque(item for item in self.tweaks if item[0].session_id != session_id)
 
     @property
     def free(self) -> bool:
@@ -320,6 +365,17 @@ class LiveService:
         with self.lock:
             return {} if self.scheduler is None else self.scheduler.ready()
 
+    def submit_tweak(self, request: TweakRequest, done: TweakDone) -> bool:
+        """Queue a clip's second caption for the claimed session; ``False`` if not claimed or queued."""
+        with self.lock:
+            if request.session_id != self.session_id:
+                return False
+            if any(queued.job.job_id == request.job.job_id for queued, _ in self.tweaks):
+                return False
+            self.tweaks.append((request, done))
+            self.lock.notify_all()
+            return True
+
     # -- the worker thread -----------------------------------------------------
     def start(self) -> None:
         self.thread.start()
@@ -331,17 +387,77 @@ class LiveService:
         self.thread.join(timeout=5)
 
     def step(self) -> bool:
-        """Run at most one request; ``True`` if one ran. The thread calls this in a loop."""
+        """Run at most one request; ``True`` if one ran. The thread calls this in a loop.
+
+        A video's requests come first; a queued tweak runs when the video has none.
+        """
         with self.lock:
             scheduler, session_id = self.scheduler, self.session_id
             request = scheduler.next_request(self.clock()) if scheduler is not None else None
+            tweak = None
+            if request is None and self.tweaks and self.tweaks[0][0].session_id == session_id:
+                tweak = self.tweaks.popleft()
+        if tweak is not None:
+            self._tweak(*tweak)
+            return True
         if request is None or scheduler is None or session_id is None:
             return False
-        result = self.attempt(request.job.record(), self.deadline_s)
+        result = self._call(request.job)
         with self.lock:
             scheduler.complete(request, result)
             self._log(session_id, scheduler, request, result)
         return True
+
+    def _call(self, job: Job) -> dict[str, Any]:
+        """One model call; a worker that cannot start counts as a lost worker, not a dead thread."""
+        try:
+            return self.attempt(job.record(), self.deadline_s)
+        except WorkerStartupError as exc:
+            return {"status": "worker_lost", "error": f"worker did not start: {exc}"}
+
+    def _tweak(self, request: TweakRequest, done: TweakDone) -> None:
+        result = self._call(request.job)
+        checks = None
+        if result.get("status") == "completed" and result.get("output") and self.tweak_check is not None:
+            checks = dict(self.tweak_check(request.source, request.job, result))
+        outcome = tweak_outcome(request, result, checks)
+        self._log_tweak(request, result, checks, outcome)
+        done(request, outcome)
+        if outcome["status"] == "retry":
+            with self.lock:
+                if self.session_id == request.session_id:
+                    self.tweaks.appendleft((replace(request, attempt=request.attempt + 1), done))
+                    self.lock.notify_all()
+
+    def _log_tweak(
+        self,
+        request: TweakRequest,
+        result: Mapping[str, Any],
+        checks: Mapping[str, Any] | None,
+        outcome: Mapping[str, Any],
+    ) -> None:
+        record = {
+            "schema": TWEAK_ATTEMPT_SCHEMA,
+            "kind": "tweak",
+            "session_id": request.session_id,
+            "clip": request.clip,
+            "attempt": request.attempt,
+            "job": request.job.record(),
+            "system_message": request.job.prompt.system_message,
+            "steer": dict(request.steer),
+            "status": result.get("status"),
+            "error": result.get("error"),
+            "token_ids_sha256": result.get("token_ids_sha256"),
+            "latency_ms": result.get("latency_ms"),
+            "wall_ms": result.get("wall_ms"),
+            "output": result.get("output"),
+            "checks": checks,
+            "outcome": outcome["status"],
+            "reason": outcome.get("reason"),
+        }
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        with (self.log_dir / f"live-{request.session_id}.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def _run(self) -> None:
         while True:

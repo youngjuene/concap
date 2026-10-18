@@ -30,7 +30,9 @@ from typing import Any, Final
 
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
+from diff.output_checks import check_tweak, output_from_record
 from diff.rewrite_prompts import TWEAK_P1, TWEAK_PROVISIONAL, RenderedPrompt, render_tweak
+from diff.study_protocol import TWEAK_MAX_CHARS
 
 TWEAK_POLICY: Final = "diff.phase1-tweak/v1"
 # The step-1 ratings behind each direction's degree (P4 restorativeness, P5 familiarity).
@@ -129,3 +131,8 @@ def tweak_request(
         "job_id": job.job_id,
     }
     return source, job, record
+
+
+def check_record(source: CaptionSource, job: Job, result: Mapping[str, Any]) -> dict[str, Any]:
+    """The tweak check's record for one completed call (``LiveService(tweak_check=...)``)."""
+    return check_tweak(source, output_from_record(result["output"]), max_chars=TWEAK_MAX_CHARS).record()
