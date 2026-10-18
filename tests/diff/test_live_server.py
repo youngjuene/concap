@@ -1,4 +1,8 @@
-"""The live phase-2 app: the page flow, capacity, ratings, the event log and blindness (§6.5)."""
+"""The live watch: the page flow, capacity, ratings, the event log and blindness (§6.5).
+
+These run the participant app without phase 1 (a smoke run), so an entry goes
+straight to the watch; tests/diff/test_participant_server.py covers phase 1.
+"""
 
 from __future__ import annotations
 
@@ -12,10 +16,11 @@ from fastapi.testclient import TestClient
 
 from diff.caption_sources import CaptionSource, parse_sources
 from diff.job_plan import Job, live_job
-from diff.live_calibration import calibrate
 from diff.live_generation import LiveService, LiveStream, Spec
-from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
+from diff.live_server import LivePool, LiveVideo, rating_items
 from diff.model_profile import TRIDA_7B
+from diff.participant_server import build_participant_app
+from diff.session_store import SessionStore
 
 VIDEO = "live_test_video"
 ITEMS = {
@@ -85,17 +90,22 @@ def app_parts(tmp_path: Path) -> dict[str, Any]:
     media.write_bytes(b"\x1a\x45\xdf\xa3fake-webm")
     now = [0.0]
     service = LiveService(FakeAttempt(), tmp_path / "logs", clock=lambda: now[0])
-    observations = [{"heard": {"human": True}, "labels": ["person"]}]
-    app = build_live_app(
-        [LiveVideo(VIDEO, media, stream())],
-        rating_items(ITEMS),
-        LivePool([service]),
-        tmp_path / "logs",
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    app = build_participant_app(
+        store=store,
+        pool=LivePool([service]),
+        videos=[LiveVideo(VIDEO, media, stream())],
+        items=rating_items(ITEMS),
+        log_dir=tmp_path / "logs",
         job_for=job_for,
-        calibrate=lambda code: calibrate(observations),
+        phase1=None,
         secret=b"test-secret",
     )
-    return {"app": app, "service": service, "logs": tmp_path / "logs", "media": media}
+    return {"app": app, "service": service, "logs": tmp_path / "logs", "media": media, "store": store}
+
+
+def enter(client: TestClient, participant: str = "P1") -> Any:
+    return client.post("/api/enter", json={"participant": participant}, headers={"x-study-request": "1"})
 
 
 def drain(service: LiveService) -> None:
@@ -112,34 +122,39 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
         bodies.extend(f"{k}={v}" for k, v in response.headers.items())
         return response
 
-    started = keep(client.post("/api/session", json={}))
+    assert keep(enter(client)).json() == {"next_url": "watch/"}
+    started = keep(client.post("/watch/api/session", json={}))
     assert started.status_code == 200 and started.json()["stage"] == "ready"
-    assert keep(client.post("/api/start")).status_code == 409  # cue 0 is not written yet
+    assert keep(client.post("/watch/api/start")).status_code == 409  # cue 0 is not written yet
     drain(service)
-    ready = keep(client.get("/api/captions")).json()["captions"]
+    ready = keep(client.get("/watch/api/captions")).json()["captions"]
     assert sorted(ready) == ["0", "1", "2"] and ready["0"]["text"] == "다시 쓴 자막 0번"
     media_url = started.json()["video"]["media"]
-    assert keep(client.get("/" + media_url)).status_code == 200
-    assert client.get("/media/wrong-token").status_code == 404
-    assert keep(client.post("/api/start")).json()["stage"] == "watch"
+    assert keep(client.get("/watch/" + media_url)).status_code == 200
+    assert client.get("/watch/media/wrong-token").status_code == 404
+    assert keep(client.post("/watch/api/start")).json()["stage"] == "watch"
     assert keep(
         client.post(
-            "/api/settings",
+            "/watch/api/settings",
             json={"texture": 1.0, "context": 1.0, "position_ms": 0, "origin": "slider:texture"},
         )
     ).json() == {"ok": True}
-    assert keep(client.post("/api/playback", json={"position_ms": 1000, "playing": True})).status_code == 200
+    playback = {"position_ms": 1000, "playing": True}
+    assert keep(client.post("/watch/api/playback", json=playback)).status_code == 200
     drain(service)
     token = ready["0"]["token"]
     keep(
         client.post(
-            "/api/exposures", json={"entries": [{"cue": 0, "token": token, "from_ms": 0, "to_ms": 5000}]}
+            "/watch/api/exposures",
+            json={"entries": [{"cue": 0, "token": token, "from_ms": 0, "to_ms": 5000}]},
         )
     )
-    assert keep(client.post("/api/video-ended")).json()["stage"] == "ratings"
-    assert keep(client.get("/api/items")).json()["items"][0]["id"] == "L1"
-    assert keep(client.post("/api/ratings", json={"answers": {"L1": 9}})).status_code == 422
-    assert keep(client.post("/api/ratings", json={"answers": {"L1": 5}})).json() == {"stage": "done"}
+    assert keep(client.post("/watch/api/video-ended")).json()["stage"] == "ratings"
+    assert service.free  # the last video releases the GPU before the items
+    assert keep(client.get("/watch/api/items")).json()["items"][0]["id"] == "L1"
+    assert keep(client.post("/watch/api/ratings", json={"answers": {"L1": 9}})).status_code == 422
+    assert keep(client.post("/watch/api/ratings", json={"answers": {"L1": 5}})).json() == {"stage": "done"}
+    assert enter(TestClient(app_parts["app"])).status_code == 409  # a finished ID cannot be entered again
 
     everything = "\n".join(bodies)
     for secret in (
@@ -160,41 +175,41 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     events = [json.loads(line) for line in session_log.read_text(encoding="utf-8").splitlines()]
     kinds = [event["event"] for event in events if event["event"] != "playback"]
     assert kinds == ["session_started", "watch_started", "settings", "exposures", "video_ended", "ratings"]
-    assert events[0]["calibration"]["heard_observations"] == {"human": 1}
+    assert events[0]["calibration"]["heard_observations"] == {}  # no phase 1 in a smoke run
     assert next(e for e in events if e["event"] == "exposures")["entries"][0]["job_id"].startswith("job-")
     settings_event = next(e for e in events if e["event"] == "settings")
     assert settings_event["steps"] == {"texture": 2, "context": "relation"}  # texture capped at step 2
     live_log = next(app_parts["logs"].glob("live-*.jsonl"))
     attempts = [json.loads(line) for line in live_log.read_text(encoding="utf-8").splitlines()]
-    assert (
-        attempts[0]["system_message"].startswith("당신은")
-        and "사람 소리 1번" in attempts[0]["system_message"]
-    )
+    assert attempts[0]["system_message"].startswith("당신은") and "없음" in attempts[0]["system_message"]
     assert attempts[-1]["spec"] == {"texture": 2, "context": "relation"}
 
 
 def test_a_second_participant_is_refused_while_the_gpu_is_taken(app_parts: dict[str, Any]) -> None:
     first, second = TestClient(app_parts["app"]), TestClient(app_parts["app"])
-    assert first.post("/api/session", json={}).status_code == 200
-    busy = second.post("/api/session", json={})
-    assert busy.status_code == 503 and busy.json()["stage"] == "busy" and "잠시 후" in busy.json()["message"]
+    assert enter(first, "P1").status_code == 200
+    busy = enter(second, "P2")
+    assert busy.status_code == 503 and "잠시 후" in busy.json()["error"]
+    assert "diff_session" not in busy.cookies
 
 
 def test_requests_without_a_session_are_refused(app_parts: dict[str, Any]) -> None:
     client = TestClient(app_parts["app"])
-    assert client.get("/api/captions").status_code == 401
-    assert client.post("/api/settings", json={}).status_code == 401
+    assert client.get("/watch/api/captions").status_code == 401
+    assert client.post("/watch/api/settings", json={}).status_code == 401
+    assert client.post("/watch/api/session", json={}).status_code == 401
 
 
 def test_bad_settings_are_refused(app_parts: dict[str, Any]) -> None:
     client = TestClient(app_parts["app"])
-    client.post("/api/session", json={})
+    enter(client)
+    client.post("/watch/api/session", json={})
     for body in (
         {"texture": 2, "context": 0.5, "position_ms": 0, "origin": "slider:texture"},
         {"texture": 0.5, "context": 0.5, "position_ms": 0, "origin": "keyboard"},
         {"texture": 0.5},
     ):
-        assert client.post("/api/settings", json=body).status_code == 422
+        assert client.post("/watch/api/settings", json=body).status_code == 422
 
 
 def test_rating_items_are_validated() -> None:
@@ -221,3 +236,18 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text(tmp_path: Pat
     argv += ["--log-dir", str(tmp_path / "logs"), "--fake-worker", "--purpose", "participant"]
     with pytest.raises(SystemExit, match="provisional"):
         main(argv)
+
+
+def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from diff.__main__ import main
+
+    monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
+    sources = tmp_path / "sources.json"
+    document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
+    sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    items = tmp_path / "items.json"
+    items.write_text(json.dumps(ITEMS, ensure_ascii=False), encoding="utf-8")
+    argv = ["live", "serve", "--sources", str(sources), "--video", f"{VIDEO}={tmp_path / 'v.webm'}"]
+    argv += ["--items", str(items), "--log-dir", str(tmp_path / "logs"), "--fake-worker"]
+    with pytest.raises(SystemExit, match="--phase1-setup"):
+        main([*argv, "--purpose", "participant"])

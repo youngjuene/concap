@@ -162,8 +162,13 @@ async function submitRatings() {
 
 async function begin() {
   const result = await call("api/session", {});
+  if (result.status === 401 || result.status === 409) {
+    // No live session for this browser yet: the entry and phase 1 come first.
+    window.location.assign("../");
+    return;
+  }
   if (result.status === 503) {
-    $("busy-message").textContent = result.data.message || "";
+    $("busy-message").textContent = result.data.message || result.data.detail || "";
     show("busy");
     return;
   }

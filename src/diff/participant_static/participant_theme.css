@@ -1,0 +1,202 @@
+/* Phase 1's look, copied from regen at dc06c7f for the researcher's decision of
+   2026-10-18 (phase 1 copies regen's look): identity.css whole, the shell, head
+   and actions rules of regen.css, and sheet_questionnaire.css whole. Comments
+   are dropped; the reasoning stays with regen's originals. The entry form at
+   the end is diff's own. */
+
+:root {
+  --ground: #EFEFEE;
+  --panel: #FFFFFF;
+  --band: #F7F8F8;
+  --ink: #16181A;
+  --body-ink: #33383D;
+  --dim: #5B6167;
+  --rule: #83878C;
+  --ahead: #676C71;
+  --hairline: #DEE0E1;
+  --seam: #EDEEEF;
+  --accent: #2F5EA8;
+  --accent-press: #274F8C;
+  --accent-wash: #F4F7FB;
+  --muted-fill: #EDEEEF;
+  --stage: #000000;
+
+  --body: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --leading: 1.5;
+  --leading-ui: 1.3;
+
+  --motion: 140ms;
+  --gap: 8px;
+  --column: 880px;
+  --target: 44px;
+  --target-lg: 52px;
+  --radius-sm: 10px;
+  --radius: 12px;
+  --radius-lg: 14px;
+  --caption-band: 112px;
+  --caption-leading: 38px;
+}
+
+:root:lang(ko) {
+  --body: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Inter", sans-serif;
+  --mono: "D2Coding", "Noto Sans Mono CJK KR", "IBM Plex Mono", Menlo, monospace;
+  --leading: 1.7;
+  --leading-ui: 1.5;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 16px/var(--leading) var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: 500 15px/1 var(--body);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  min-height: var(--target);
+  padding: 0 18px;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion), color var(--motion);
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:active:not(:disabled) { background: var(--accent-wash); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+button:disabled {
+  background: var(--muted-fill);
+  color: var(--dim);
+  border-color: var(--rule);
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  min-height: var(--target-lg);
+  padding: 0 30px;
+  font-size: 16px;
+}
+
+button.primary:hover:not(:disabled) { background: var(--accent-press); border-color: var(--accent-press); }
+button.primary:disabled { background: var(--muted-fill); border-color: var(--rule); color: var(--dim); }
+
+.eyebrow {
+  font: 11px/1.4 var(--mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+:lang(ko) .eyebrow { text-transform: none; letter-spacing: 0; }
+
+.shell {
+  max-width: var(--column);
+  margin: 0 auto;
+  padding: 34px 24px 96px;
+}
+.head { margin-bottom: 26px; }
+.head .eyebrow { display: block; margin-bottom: 9px; }
+h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+p.lede {
+  max-width: 62ch;
+  margin-top: 12px;
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--body-ink);
+  text-wrap: pretty;
+}
+.actions { display: flex; gap: 12px; align-items: center; margin-top: 26px; flex-wrap: wrap; }
+.actions .spacer { flex: 1; }
+.actions .note { color: var(--body-ink); font: 12.5px/1.45 var(--mono); }
+
+.sheet-questionnaire .head { margin-bottom: 24px; }
+.sheet-questionnaire .lede { white-space: pre-line; }
+.sheet-questionnaire .sheet-progress { margin-bottom: 24px; color: var(--dim); }
+.sheet-questionnaire .sheet-item {
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 22px 20px;
+  margin: 0 0 22px;
+}
+.sheet-questionnaire legend { float: left; width: 100%; margin-bottom: 18px; font-weight: 600; }
+.sheet-questionnaire legend + * { clear: both; }
+.sheet-questionnaire .sheet-scale { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; }
+.sheet-questionnaire .sheet-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: var(--target);
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--panel);
+}
+.sheet-questionnaire .sheet-option:has(input:checked) { background: var(--accent-wash); border: 2px solid var(--accent); padding: 11px; }
+.sheet-questionnaire .sheet-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sheet-questionnaire .sheet-option input { accent-color: var(--accent); width: 18px; height: 18px; flex: 0 0 18px; }
+.sheet-questionnaire .sheet-scale .sheet-option { flex-direction: column; gap: 7px; text-align: center; align-items: center; justify-content: flex-start; padding: 12px 5px; }
+.sheet-questionnaire .sheet-scale .sheet-option:has(input:checked) { padding: 11px 4px; }
+.sheet-questionnaire .sheet-score { font-size: 18px; font-weight: 600; }
+.sheet-questionnaire .sheet-label { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; word-break: keep-all; }
+.sheet-questionnaire .sheet-choices { display: grid; gap: 10px; }
+.sheet-questionnaire .sheet-text { width: 100%; min-height: 120px; font: inherit; padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.sheet-questionnaire .sheet-hint { color: var(--body-ink); font-size: 14px; margin-top: 12px; }
+.sheet-questionnaire .sheet-invalid { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.sheet-questionnaire .sheet-feedback { min-height: 1.7em; margin-top: 14px; color: var(--body-ink); white-space: pre-line; }
+.sheet-questionnaire .sheet-submitbar { position: sticky; bottom: 0; background: var(--ground); border-top: 1px solid var(--hairline); padding: 16px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; z-index: 2; }
+.sheet-questionnaire .sheet-submitbar .sheet-hint { margin: 0; }
+.sheet-questionnaire .sheet-setup { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 22px; }
+.sheet-questionnaire .sheet-setup ul { padding-left: 22px; margin: 12px 0; overflow-wrap: anywhere; }
+.sheet-questionnaire .sheet-consent { white-space: pre-line; background: var(--panel); padding: 20px; margin-bottom: 24px; border: 1px solid var(--hairline); border-radius: var(--radius); }
+.sheet-questionnaire .sheet-consent-check { margin-top: 20px; }
+.sheet-questionnaire .sheet-frame { position: relative; width: 100%; padding: 0; border: 1px solid var(--rule); border-radius: var(--radius-sm); overflow: hidden; cursor: crosshair; touch-action: manipulation; }
+.sheet-questionnaire .sheet-frame img { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; }
+.sheet-questionnaire .sheet-mark { position: absolute; width: 24px; height: 24px; background: var(--accent); border: 3px solid white; outline: 2px solid var(--ink); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.sheet-questionnaire .sheet-cursor { background: transparent; border-style: dashed; }
+.sheet-questionnaire .sheet-frames { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sheet-questionnaire .sheet-frames button[aria-pressed="true"] { background: var(--accent-wash); border: 2px solid var(--accent); }
+.sheet-questionnaire .sheet-reset { margin-top: 12px; }
+.sheet-viewing { position: fixed; inset: 0; z-index: 20; background: var(--stage); display: flex; flex-direction: column; }
+.sheet-viewing video { width: 100%; height: calc(100% - var(--caption-band)); object-fit: contain; flex: 1 1 0; min-height: 0; }
+.sheet-viewing .sheet-caption { flex: 0 0 var(--caption-band); display: flex; justify-content: center; align-items: center; color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; }
+.sheet-viewing .sheet-paused { position: absolute; inset: 0; background: rgb(0 0 0 / .88); color: white; display: grid; place-content: center; padding: 24px; text-align: center; gap: 18px; }
+.sheet-viewing .sheet-paused p { max-width: 54ch; }
+@media (max-width: 620px) {
+  .sheet-questionnaire .sheet-item { padding: 18px 12px; }
+  .sheet-questionnaire .sheet-scale { grid-template-columns: 1fr; }
+  .sheet-questionnaire .sheet-scale .sheet-option { flex-direction: row; align-items: center; text-align: left; padding: 12px; }
+  .sheet-questionnaire .sheet-scale .sheet-option:has(input:checked) { padding: 11px; }
+  .sheet-questionnaire .sheet-label { font-size: 15px; }
+  .sheet-questionnaire .sheet-score { width: 1.5em; }
+  .sheet-viewing .sheet-caption { font-size: 19px; line-height: 1.6; padding: 12px; }
+}
+
+/* diff: the experimenter's start screen. */
+.entry { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.entry input {
+  font: 500 18px/1 var(--body);
+  min-height: var(--target-lg);
+  width: 12ch;
+  padding: 0 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+}

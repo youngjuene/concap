@@ -31,6 +31,7 @@ GENERATOR_LOCK = Path("envs/diff-generator/uv.lock")
 GENERATOR_PYTHON = Path("envs/diff-generator/.venv/bin/python")
 # Trida's bf16 weights take about 15 GB; a card needs this much free to host a live worker.
 LIVE_MIN_FREE_MIB = 17408
+PARTICIPANT_STORE = Path("artifacts/diff/participants.sqlite")
 
 
 def _read_json(path: Path) -> Any:
@@ -560,19 +561,23 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
 
 
 def live_serve(args: argparse.Namespace) -> int:
-    """[repository env + GPU] The live phase-2 app, one supervised Trida worker per GPU."""
+    """[repository env + GPU] The participant app: entry, phase 1, then live phase 2 on Trida."""
     import functools
 
     import uvicorn
 
+    import dpo.regen.sheet_instrument as sheet_instrument
     from diff.generation_worker import Supervisor, WorkerCommand
     from diff.job_plan import live_job
-    from diff.live_calibration import calibrate
     from diff.live_generation import LiveService, LiveStream, starting_caption_problems
-    from diff.live_server import LivePool, LiveVideo, build_live_app, rating_items
+    from diff.live_server import LivePool, LiveVideo, rating_items
     from diff.model_profile import TRIDA_7B, verify_snapshot
     from diff.output_checks import check_output, output_from_record
+    from diff.participant_server import build_participant_app
+    from diff.phase1_flow import Phase1
+    from diff.phase1_setup import read_setup, setup_problems
     from diff.rewrite_prompts import TUNER_PROVISIONAL
+    from diff.session_store import SessionStore
     from diff.study_protocol import LIVE_MAX_CHARS
 
     sources = _sources(args.sources).sources
@@ -588,17 +593,28 @@ def live_serve(args: argparse.Namespace) -> int:
     if too_long:
         raise SystemExit("starting captions must fit the live canvas:\n  " + "\n  ".join(too_long))
     items = rating_items(_read_json(args.items))
-    profiles = _read_json(args.observations) if args.observations else {}
     if args.purpose == "participant" and TUNER_PROVISIONAL:
         raise SystemExit(
             "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "
             "participant sessions wait for the researcher's role text (use --purpose smoke to test)"
         )
+    if args.purpose == "participant" and args.phase1_setup is None:
+        raise SystemExit("participant sessions need phase 1: pass --phase1-setup")
+    phase1 = None
+    if args.phase1_setup is not None:
+        setup = read_setup(args.phase1_setup)
+        problems = setup_problems(setup, args.purpose, root=Path.cwd(), instrument=sheet_instrument)
+        if problems:
+            raise SystemExit(
+                f"the phase-1 setup cannot serve {args.purpose} sessions:\n  " + "\n  ".join(problems)
+            )
+        phase1 = Phase1(setup, root=Path.cwd())
     log_dir: Path = args.log_dir
-
-    def calibrate_for(code: str | None) -> Any:
-        profile = profiles.get(code or "", {})
-        return calibrate(profile.get("observations", []), profile.get("caption_ratings", []))
+    # Participant IDs are unique across the study, so participant sessions share one store;
+    # smoke runs get their own, so a test P1 never blocks a participant P1.
+    store_path = args.store or (
+        PARTICIPANT_STORE if args.purpose == "participant" else log_dir / "smoke-sessions.sqlite"
+    )
 
     def job_for(source: Any, spec: Any) -> Any:
         return live_job(source, spec.texture, spec.context, spec.system_message, args.purpose)
@@ -662,10 +678,18 @@ def live_serve(args: argparse.Namespace) -> int:
             services.append(LiveService(attempt, log_dir / "sessions", check=check))
     for service in services:
         service.start()
-    app = build_live_app(
-        videos, items, LivePool(services), log_dir / "sessions", job_for=job_for, calibrate=calibrate_for
+    app = build_participant_app(
+        store=SessionStore(store_path),
+        pool=LivePool(services),
+        videos=videos,
+        items=items,
+        log_dir=log_dir / "sessions",
+        job_for=job_for,
+        phase1=phase1,
     )
-    print(f"live phase 2 on http://{args.host}:{args.port}/ with {len(services)} worker(s)", flush=True)
+    first = "phase 1, then the watch" if phase1 else "the watch (no phase 1)"
+    print(f"participant app on http://{args.host}:{args.port}/: {first}", flush=True)
+    print(f"  store {store_path}; {len(services)} worker(s)", flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
@@ -821,16 +845,19 @@ def parser() -> argparse.ArgumentParser:
         "live", help="live phase 2: Trida rewrites captions while a participant watches"
     )
     live_commands = live.add_subparsers(dest="action", required=True)
-    serve_live = live_commands.add_parser("serve", help="[repository env + GPU] run the live participant app")
+    serve_live = live_commands.add_parser(
+        "serve", help="[repository env + GPU] run the participant app: entry, phase 1, live phase 2"
+    )
     serve_live.add_argument("--sources", type=Path, required=True, help="phase-2 cues with starting captions")
     serve_live.add_argument("--video", action="append", required=True, help="ID=PATH, in watch order")
     serve_live.add_argument(
         "--items", type=Path, required=True, help="the researcher's post-watch items (JSON)"
     )
     serve_live.add_argument(
-        "--observations",
-        type=Path,
-        help='{code: {"observations": [...], "caption_ratings": [{"S1", "S2", "S3"}...]}} from phase 1',
+        "--phase1-setup", type=Path, help="the approved diff.phase1-setup/v1 file (required for participants)"
+    )
+    serve_live.add_argument(
+        "--store", type=Path, help=f"session store (default {PARTICIPANT_STORE} for participants)"
     )
     serve_live.add_argument("--trida-dir", type=Path)
     serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")

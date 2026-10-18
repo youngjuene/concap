@@ -195,9 +195,9 @@ class SessionStore:
         return reply
 
     def update(
-        self, session_id: str, change: Callable[[dict[str, Any]], None], event: Mapping[str, Any]
+        self, session_id: str, change: Callable[[dict[str, Any]], None], event: Mapping[str, Any] | None
     ) -> None:
-        """A server-side change (live progress) with no browser revision or key."""
+        """A server-side change (live progress) with no browser revision or key; ``event`` if worth one."""
         now = self.clock()
         with self._transaction() as db:
             row = db.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
@@ -209,7 +209,8 @@ class SessionStore:
             db.execute(
                 "UPDATE sessions SET state = ? WHERE session_id = ?", (canonical_json(state), session_id)
             )
-            self._event(db, session_id, now, event)
+            if event is not None:
+                self._event(db, session_id, now, event)
 
     def finish(self, session_id: str) -> None:
         now = self.clock()

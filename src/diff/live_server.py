@@ -1,4 +1,4 @@
-"""The live phase-2 participant app (plan "Live phase 2", researcher's design of 2026-10-11).
+"""The live phase-2 routes (plan "Live phase 2", researcher's design of 2026-10-11).
 
 Pages, in order:
 1. ready: the calibrated settings are written as Trida's rewrite of the first
@@ -10,19 +10,27 @@ Pages, in order:
    the last video ends;
 4. done.
 
+Since 2026-10-18 the participant app (:mod:`diff.participant_server`) owns the
+session:
+- the experimenter's entry claims a GPU;
+- phase 1 runs;
+- the handoff builds the calibration.
+
+These routes serve the watch under ``/watch/`` for the session that app hands
+them through ``current``, and report each change through ``changed`` so that
+it is stored.
+
 Every response the browser can fetch carries opaque tokens, caption text and
-timing only. Job IDs, the model, the decoding condition, seeds, step names and
-media file names never leave the server (plan §6.5). Participant-facing text is
+timing only. Job IDs, the model, the decoding condition, step names and media
+file names never leave the server (plan §6.5). Participant-facing text is
 Korean.
 
-FastAPI is imported inside :func:`build_live_app`, so importing this module
-pulls in no web stack and no model code. Session state lives in memory, with an
-append-only event log per session. A server restart ends the sessions in
-progress; their logs remain.
+FastAPI is imported inside :func:`add_live_routes`, so importing this module
+pulls in no web stack and no model code.
 """
 
 # No ``from __future__ import annotations`` here: FastAPI reads the handlers'
-# annotations at runtime, and ``Request`` is imported inside build_live_app so
+# annotations at runtime, and ``Request`` is imported inside add_live_routes so
 # that importing this module pulls in no web stack.
 import json
 import secrets
@@ -39,8 +47,8 @@ from diff.live_calibration import Calibration
 from diff.live_generation import LiveScheduler, LiveService, LiveStream, Spec, opaque_token, slider_steps
 
 EVENT_SCHEMA: Final = "diff.live-event/v1"
-COOKIE: Final = "diff_live"
 STATIC: Final = Path(__file__).with_name("live_static")
+WATCH: Final = "/watch"
 BUSY_MESSAGE: Final = "지금은 다른 참가자가 참여하고 있습니다. 잠시 후 다시 시도해 주세요."
 ORIGINS: Final = ("slider:texture", "slider:context", "reset")
 
@@ -95,15 +103,27 @@ def rating_items(document: Mapping[str, Any]) -> tuple[RatingItem, ...]:
 
 
 class LivePool:
-    """The live services, one per GPU; a session takes a free one or is refused."""
+    """The live services, one per GPU; a session claims a free one at entry or is refused."""
 
     def __init__(self, services: Sequence[LiveService]) -> None:
         self.services = list(services)
         self.lock = threading.Lock()
 
-    def acquire(self) -> LiveService | None:
+    def holder(self, session_id: str) -> LiveService | None:
+        return next((service for service in self.services if service.session_id == session_id), None)
+
+    def acquire(self, session_id: str) -> LiveService | None:
+        """The GPU this session holds, else a free one now claimed for it, else ``None``."""
         with self.lock:
-            return next((service for service in self.services if service.free), None)
+            held = self.holder(session_id)
+            if held is not None:
+                return held
+            return next((service for service in self.services if service.claim(session_id)), None)
+
+    def release(self, session_id: str) -> None:
+        with self.lock:
+            for service in self.services:
+                service.detach(session_id)
 
 
 @dataclass
@@ -122,61 +142,51 @@ class LiveSession:
 JobFor = Callable[[CaptionSource, Spec], Job]
 
 
-def build_live_app(
+def live_event(log_dir: Path, at: float, session_id: str, event: str, **data: Any) -> None:
+    """Append one ``diff.live-event/v1`` record to the session's log."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    record = {"schema": EVENT_SCHEMA, "at": at, "session_id": session_id, "event": event, **data}
+    with (log_dir / f"session-{session_id}.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def spec_of(session: LiveSession) -> Spec:
+    texture, context = slider_steps(session.texture, session.context)
+    return Spec(texture, context, session.calibration.system_message)
+
+
+def open_video(session: LiveSession, videos: Sequence[LiveVideo], job_for: JobFor) -> None:
+    """Attach the video's scheduler and write its first cues at the current settings."""
+    scheduler = LiveScheduler(videos[session.video_index].stream, job_for)
+    session.service.attach(session.session_id, scheduler)
+    session.service.settings(spec_of(session), 0)
+
+
+def add_live_routes(
+    app: Any,
+    *,
     videos: Sequence[LiveVideo],
     items: Sequence[RatingItem],
-    pool: LivePool,
     log_dir: Path,
-    *,
     job_for: JobFor,
-    calibrate: Callable[[str | None], Calibration],
-    secret: bytes | None = None,
+    key: bytes,
+    current: Callable[[Any], LiveSession],
+    changed: Callable[[LiveSession, str], None],
     clock: Callable[[], float] = time.time,
-) -> Any:
-    """The FastAPI app; ``calibrate(code)`` returns a session's starting point."""
-    from fastapi import FastAPI, HTTPException, Request, Response
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+) -> None:
+    """The watch's routes under ``/watch/``; ``current(request)`` raises HTTPException without a session."""
+    from fastapi import APIRouter, HTTPException, Request, Response
+    from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
     if not videos:
         raise ValueError("the live app needs at least one video")
-    key = secret if secret is not None else secrets.token_bytes(32)
-    sessions: dict[str, LiveSession] = {}
-    lock = threading.Lock()
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    router = APIRouter(prefix=WATCH)
 
     def log(session: LiveSession, event: str, **data: Any) -> None:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        record = {
-            "schema": EVENT_SCHEMA,
-            "at": clock(),
-            "session_id": session.session_id,
-            "event": event,
-            **data,
-        }
-        with (log_dir / f"session-{session.session_id}.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-    def current(request: Request) -> LiveSession:
-        session = sessions.get(request.cookies.get(COOKIE, ""))
-        if session is None:
-            raise HTTPException(status_code=401, detail="세션이 없습니다. 처음부터 다시 시작해 주세요.")
-        return session
-
-    def video_of(session: LiveSession) -> LiveVideo:
-        return videos[session.video_index]
-
-    def spec_of(session: LiveSession) -> Spec:
-        texture, context = slider_steps(session.texture, session.context)
-        return Spec(texture, context, session.calibration.system_message)
-
-    def open_video(session: LiveSession) -> None:
-        """Attach the video's scheduler and write its first cues at the current settings."""
-        scheduler = LiveScheduler(video_of(session).stream, job_for)
-        session.service.attach(session.session_id, scheduler)
-        session.service.settings(spec_of(session), 0)
+        live_event(log_dir, clock(), session.session_id, event, **data)
 
     def view(session: LiveSession) -> dict[str, Any]:
-        video = video_of(session)
+        video = videos[session.video_index]
         return {
             "stage": session.stage,
             "video": {
@@ -188,54 +198,38 @@ def build_live_app(
             "sliders": {"texture": session.texture, "context": session.context},
         }
 
-    @app.get("/", response_class=HTMLResponse)
+    def watch_root() -> RedirectResponse:
+        return RedirectResponse("watch/")
+
+    app.add_api_route(WATCH, watch_root, methods=["GET"])
+
+    @router.get("/", response_class=HTMLResponse)
     def index() -> str:
         return (STATIC / "live.html").read_text(encoding="utf-8")
 
-    @app.get("/live.js")
+    @router.get("/live.js")
     def script() -> Response:
         return Response((STATIC / "live.js").read_text(encoding="utf-8"), media_type="text/javascript")
 
-    @app.post("/api/session")
-    async def start_session(request: Request) -> Response:
-        body = await request.json() if await request.body() else {}
-        existing = sessions.get(request.cookies.get(COOKIE, ""))
-        if existing is not None:
-            return JSONResponse(view(existing))
-        service = pool.acquire()
-        if service is None:
-            return JSONResponse({"stage": "busy", "message": BUSY_MESSAGE}, status_code=503)
-        calibration = calibrate(body.get("code") if isinstance(body, Mapping) else None)
-        session = LiveSession(
-            secrets.token_urlsafe(18),
-            service,
-            calibration,
-            texture=calibration.texture,
-            context=calibration.context,
-        )
-        with lock:
-            sessions[session.session_id] = session
-        log(session, "session_started", calibration=dict(calibration.record))
-        open_video(session)
-        response = JSONResponse(view(session))
-        response.set_cookie(COOKIE, session.session_id, httponly=True, samesite="strict")
-        return response
+    @router.post("/api/session")
+    def session_view(request: Request) -> dict[str, Any]:
+        return view(current(request))
 
-    @app.get("/api/state")
+    @router.get("/api/state")
     def state(request: Request) -> dict[str, Any]:
         return view(current(request))
 
-    @app.get("/media/{token}")
+    @router.get("/media/{token}")
     def media(token: str, request: Request) -> FileResponse:
         session = current(request)
-        video = video_of(session)
+        video = videos[session.video_index]
         if not secrets.compare_digest(token, opaque_token(key, session.session_id, video.video_id)):
             raise HTTPException(status_code=404)
         return FileResponse(
             video.media, media_type="video/webm" if video.media.suffix == ".webm" else "video/mp4"
         )
 
-    @app.post("/api/start")
+    @router.post("/api/start")
     def start_watch(request: Request) -> dict[str, Any]:
         session = current(request)
         if session.stage != "ready":
@@ -244,9 +238,10 @@ def build_live_app(
             raise HTTPException(status_code=409, detail="첫 자막을 준비하고 있습니다.")
         session.stage = "watch"
         log(session, "watch_started", video_index=session.video_index)
+        changed(session, "watch_started")
         return view(session)
 
-    @app.post("/api/settings")
+    @router.post("/api/settings")
     async def settings(request: Request) -> dict[str, Any]:
         session = current(request)
         body = await request.json()
@@ -271,9 +266,10 @@ def build_live_app(
             position_ms=position,
             origin=origin,
         )
+        changed(session, "settings")
         return {"ok": True}
 
-    @app.post("/api/playback")
+    @router.post("/api/playback")
     async def playback(request: Request) -> dict[str, Any]:
         session = current(request)
         body = await request.json()
@@ -285,7 +281,7 @@ def build_live_app(
         log(session, "playback", video_index=session.video_index, position_ms=position, playing=playing)
         return {"ok": True}
 
-    @app.get("/api/captions")
+    @router.get("/api/captions")
     def captions(request: Request) -> dict[str, Any]:
         session = current(request)
         ready = session.service.ready() if session.stage in ("ready", "watch") else {}
@@ -296,7 +292,7 @@ def build_live_app(
             served[str(cue)] = {"token": token, "text": entry["text"]}
         return {"captions": served}
 
-    @app.post("/api/exposures")
+    @router.post("/api/exposures")
     async def exposures(request: Request) -> dict[str, Any]:
         session = current(request)
         body = await request.json()
@@ -311,27 +307,30 @@ def build_live_app(
         log(session, "exposures", video_index=session.video_index, entries=resolved)
         return {"ok": True}
 
-    @app.post("/api/video-ended")
+    @router.post("/api/video-ended")
     def video_ended(request: Request) -> dict[str, Any]:
         session = current(request)
         if session.stage != "watch":
             raise HTTPException(status_code=409, detail="지금은 영상을 마칠 수 없습니다.")
         log(session, "video_ended", video_index=session.video_index)
-        session.service.detach(session.session_id)
         if session.video_index + 1 < len(videos):
+            session.service.stop(session.session_id)
             session.video_index += 1
             session.stage = "ready"
-            open_video(session)
+            open_video(session, videos, job_for)
         else:
+            # The last video frees the GPU for the next participant while this one rates.
+            session.service.detach(session.session_id)
             session.stage = "ratings"
+        changed(session, "video_ended")
         return view(session)
 
-    @app.get("/api/items")
+    @router.get("/api/items")
     def get_items(request: Request) -> dict[str, Any]:
         current(request)
         return {"items": [item.record() for item in items]}
 
-    @app.post("/api/ratings")
+    @router.post("/api/ratings")
     async def ratings(request: Request) -> dict[str, Any]:
         session = current(request)
         if session.stage != "ratings":
@@ -351,6 +350,7 @@ def build_live_app(
         session.answers = {item.item_id: int(answers[item.item_id]) for item in items}
         session.stage = "done"
         log(session, "ratings", answers=session.answers)
+        changed(session, "ratings")
         return {"stage": "done"}
 
-    return app
+    app.include_router(router)

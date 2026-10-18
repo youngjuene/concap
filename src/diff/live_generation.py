@@ -281,6 +281,20 @@ class LiveService:
             self.session_id, self.scheduler = session_id, scheduler
             self.lock.notify_all()
 
+    def claim(self, session_id: str) -> bool:
+        """Hold this GPU for a session from its entry on; ``False`` if another session holds it."""
+        with self.lock:
+            if self.session_id not in (None, session_id):
+                return False
+            self.session_id = session_id
+            return True
+
+    def stop(self, session_id: str) -> None:
+        """End the current video's scheduler but keep the session's claim (between videos)."""
+        with self.lock:
+            if self.session_id == session_id:
+                self.scheduler = None
+
     def detach(self, session_id: str) -> None:
         with self.lock:
             if self.session_id == session_id:
