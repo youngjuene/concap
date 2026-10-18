@@ -537,6 +537,29 @@ def phase1_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+def export_run(args: argparse.Namespace) -> int:
+    """Write the research export from the session store and the live logs (this machine only)."""
+    from diff.export_bundle import export
+    from diff.phase1_setup import read_setup
+    from diff.session_store import SessionStore
+
+    if not args.store.is_file():
+        raise SystemExit(f"no session store at {args.store}")
+    try:
+        manifest = export(
+            SessionStore(args.store),
+            args.log_dir,
+            read_setup(args.phase1_setup),
+            args.out,
+            generated_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        )
+    except FileExistsError as exc:
+        raise SystemExit(str(exc)) from exc
+    counts = manifest["counts"]
+    print(f"exported {counts['sessions']} sessions ({counts['finished']} finished) to {args.out}")
+    return 0
+
+
 def _gpu_free_mib() -> dict[str, int]:
     import subprocess
 
@@ -841,6 +864,14 @@ def parser() -> argparse.ArgumentParser:
     sign.add_argument("--practice", action="store_true")
     sign.add_argument("--wording", action="store_true")
     sign.set_defaults(handler=phase1_approve)
+    exported = commands.add_parser("export", help="research export from the session store and live logs")
+    exported.add_argument("--store", type=Path, default=PARTICIPANT_STORE)
+    exported.add_argument(
+        "--log-dir", type=Path, action="append", required=True, help="a live serve --log-dir; repeatable"
+    )
+    exported.add_argument("--phase1-setup", type=Path, required=True, help="the setup the sessions ran with")
+    exported.add_argument("--out", type=Path, required=True, help="a new, empty directory")
+    exported.set_defaults(handler=export_run)
     live = commands.add_parser(
         "live", help="live phase 2: Trida rewrites captions while a participant watches"
     )
