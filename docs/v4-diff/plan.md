@@ -60,6 +60,68 @@ stimulus bundle for it.
   - P2 objects, from the per-frame masks;
   - practice material, from one clip outside the 12 (`c1_video_audio`).
 
+**Wording (researcher, 2026-10-18):** minimal edits for review.
+- The workbook's P0 told participants about a second viewing and an
+  interview, and its titles said "1차"/"2차". Both no longer fit.
+- The two sentences are deleted and the prefixes dropped. Item texts stay the
+  workbook's.
+
+### Built, 2026-10-18 (commits `cb70787` … `060cb23`)
+
+- **`phase1_setup`** drafts the setup: media, frames, masks, `orig_text`,
+  AudioSet labels and families, and the wording edits.
+  - A1s options drop a label's AudioSet ancestors (regen staging's rule).
+    Where that would leave one sound, the ancestor is kept and marked
+    (`amsterdam_181`: vehicle and horn).
+  - `phase1 approve` binds an approval to a hash of each part's content.
+  - The Korean fields were drafted by the assistant into
+    `artifacts/diff/phase1/setup-draft.json`, marked
+    `assistant-draft-unreviewed`:
+    - 12 captions from `orig_text`, 27–61 characters;
+    - A1s labels;
+    - R2 options: 2–3 mentioned sounds and 1–2 distractors absent from both
+      caption and audio;
+    - practice options from `c1` `amsterdam_006`.
+- **`session_store`** keeps sessions in SQLite, keyed by participant ID, with
+  regen's revision and idempotency-key contract. Sessions survive restarts.
+- **`phase1_flow`** implements the pages:
+  - items and validation come from `sheet_instrument`, and P2 matching from
+    `points`;
+  - regen's playback coverage rule is copied, with a parity test over 300
+    random tick sequences;
+  - payloads carry no clip key, family or R2 answer key;
+  - `profile_inputs` gives the tuner its observations and ratings.
+- **`participant_server`** is one app:
+  - the start screen and phase 1 at `/`, with regen's pages copied at
+    `dc06c7f`;
+  - the handoff, which builds the calibration;
+  - the watch at `/watch/`, with the GPU claimed at entry;
+  - security headers and per-session opaque media tokens.
+
+  `live_server` now serves sessions it is handed. `live serve` takes
+  `--phase1-setup` and `--store`, and the hand-written profiles file is
+  gone.
+- **`export_bundle`** (`python -m diff export`) writes:
+  - `participants.jsonl`;
+  - `phase1.csv`, with clip keys, families and the R2 answer key;
+  - `post_watch.csv`;
+  - a manifest with file hashes.
+
+**Verified:**
+- unit and HTTP tests (the `diff` suite), and a clean-worktree full check on
+  each commit;
+- a headless Chromium walk as `P1` and `P2` with the fake worker:
+  - entry, P0, practice, then 12 clips at about 10.2 s each;
+  - a reload resumed on the same page;
+  - handoff, watch, items and done, then the finished ID was refused;
+  - no page errors;
+- the walk's export: 2 sessions, 504 phase-1 rows.
+
+**Not yet:**
+- the researcher's review and approval of the drafts;
+- a walk with real Trida behind the handoff;
+- any human participant.
+
 ## Model change — 2026-10-12: Dream 7B → Trida-7B (researcher's decision)
 
 **Why.** Live phase 2 worked on Dream, but its Korean broke: about 2 in 5 live

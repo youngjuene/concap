@@ -13,7 +13,7 @@ archived.
 | [`v1-session/`](v1-session/) | the **skeleton** instrument: the ordered list of what a caption could mention is the only control surface | `dpo.session`, `dpo session …`, port 8777 |
 | [`v2-console/`](v2-console/) | the **console** instrument: three controls drive a read-only numbered skeleton | `dpo.console`, `dpo console …`, port 8778 |
 | [`v3-regen/`](v3-regen/) | the **regeneration** instrument: a participant's report of what they saw and heard writes the captions of a second viewing | `dpo.regen`, `dpo regen …`, port 8779 |
-| [`v4-diff/`](v4-diff/) | the **diff** pipeline: Trida-7B (since 2026-10-12, replacing Dream) writes phase-1 caption text offline into a hashed stimulus bundle, and in phase 2 rewrites cue captions live while the participant moves two sliders | `diff`, `python -m diff …`, `python -m diff live serve` (port 8782) |
+| [`v4-diff/`](v4-diff/) | the **diff** pipeline: one participant app. Phase 1 profiles the participant on regen's pages (12 c2 clips, one viewing each; since 2026-10-18); then Trida-7B rewrites cue captions live while the participant moves two sliders | `diff`, `python -m diff …`, `python -m diff live serve` (port 8782), `python -m diff export` |
 
 Within a version directory the filename says the role:
 

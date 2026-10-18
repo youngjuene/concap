@@ -156,7 +156,39 @@ uv run mypy
 detachment test currently trip over `src/dpo/regen/.omx/`, scratch copies
 excluded from git only by `.git/info/exclude`. That failure predates diff.
 
-## 6. Live phase 2
+## 6. Phase-1 setup (researcher review)
+
+Phase 1 profiles the participant on regen's 12 c2 clips with regen's pages
+(researcher's decisions of 2026-10-18). Its material is drafted from the
+prepared metadata and then approved by the researcher:
+
+```sh
+uv run python -m diff phase1 draft-setup      # → artifacts/diff/phase1/setup-draft.json
+uv run python -m diff phase1 show --setup artifacts/diff/phase1/setup-draft.json
+uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.json \
+  --by <name> --clip amsterdam_012 [--clip …] [--practice] [--wording]
+```
+
+**What `draft-setup` fills in:**
+- media, frames and masks, from `data/live/regen-media`;
+- `orig_text` and AudioSet labels, from `data/corpus/tidy_data.csv`;
+- the families, using the AudioSet ontology;
+- the minimal wording edits: two P0 sentences deleted, "1차"/"2차" dropped
+  from the titles.
+
+The Korean captions, A1s labels, R2 options and practice options are written
+into the draft by hand and marked `assistant-draft-unreviewed`. The setup file
+holds clip keys, families and the R2 answer key, so it stays on this machine.
+
+**Approval:**
+- `show` prints each part, with every problem for participant sessions.
+- `approve` binds an approval to a hash of the part's content, so any later
+  edit voids it.
+- Participant sessions are refused until every clip, the practice and the
+  wording are approved.
+- An optional `consent_text` in the file puts a consent checkbox on P0.
+
+## 7. Participant sessions: phase 1, then live phase 2
 
 The participant app runs in the repository environment. It starts one Trida
 worker per GPU in the generator environment, so `uv sync --project
@@ -164,15 +196,18 @@ envs/diff-generator --frozen` must have run.
 
 ```sh
 uv run python -m diff live serve \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json \
   --sources path/to/phase2-sources.json \
   --video <video_id>=path/to/video.mp4 \
   --items path/to/items.json \
-  --observations path/to/observations.json \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
   --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
 **The inputs:**
+- `--phase1-setup` is the approved setup (§6). It is required for
+  participants. Smoke runs may leave it out, and then an entry goes straight to
+  the watch with midpoint sliders and tuner slots reading "없음".
 - `--sources` is a `diff.caption-sources/v1` file with phase-2 cues (unit kind
   `video`). Each cue holds its starting caption (`text`, at most 96 characters,
   or `serve` refuses it) and its `start_ms` and `end_ms`. No evidence is needed.
@@ -181,20 +216,38 @@ uv run python -m diff live serve \
 - `--items` holds the post-watch items:
   `{"items": [{"id", "text", "min", "max", "anchors": [low, high]}]}`.
   The text is Korean.
-- `--observations` (optional) holds each participant's phase-1 profile:
-  `{code: {"observations": [{"heard": {family: true}, "labels": [...]}],
-  "caption_ratings": [{"S1": 0-6, "S2": 0-6, "S3": 0-6}]}}`. It fills the tuner
-  system message's slots. With none, a session gets midpoint sliders and slots
-  reading "없음".
+- `--store` is the session store. Participants default to
+  `artifacts/diff/participants.sqlite`, one store for the whole study, because
+  IDs are unique across it. Smoke runs get `<log-dir>/smoke-sessions.sqlite`,
+  so a test `P1` never blocks a real one.
 - `--purpose participant` is refused while the tuner role text is provisional
-  (`rewrite_prompts.TUNER_SYSTEM`); use `--purpose smoke` until the researcher's
-  text lands.
+  (`rewrite_prompts.TUNER_SYSTEM`), or while the setup has unapproved parts.
+  Use `--purpose smoke` until then.
+
+**Running a session:**
+- Open `http://<host>:8782/` and type the participant ID (`P1`, `P2`, …).
+  Typing the same ID again resumes an unfinished session, and a finished ID is
+  refused. To switch participants on a browser that still holds a session,
+  open `/#enter`.
+- The flow is:
+  - P0 (the introduction, plus consent if there is consent text), then the
+    practice;
+  - for each of the 12 clips, in a random order recorded per participant: one
+    viewing, then P2, P3, P4, P5, S1–S3 and R1/R2;
+  - "2스테이지 시작", which builds the tuner's calibration from the phase-1
+    answers and opens the watch at `/watch/`;
+  - the videos, then the post-watch items.
+- Phase 1 copies regen's look; the watch keeps its own.
+- **After a server restart:** phase 1 continues exactly where it was. A watch
+  in progress restarts its current video from the start, with its settings
+  (logged as `session_resumed`, `video_restarted: true`).
 
 **GPUs:**
 - Each GPU in `--gpus` must have 17 GB free at start, or `serve` refuses.
   Trida takes about 15 GB.
-- One GPU serves one session; a further participant sees a "try again later"
-  page.
+- A session claims its GPU when the ID is typed, and holds it through phase 1
+  and the videos. It releases the GPU after the last video, before the items.
+  When no GPU is free, the entry says so before anything starts.
 - The researcher's midsentence renders share these cards, so check
   `nvidia-smi` first.
 
@@ -204,7 +257,8 @@ uv run python -m diff live serve \
 - `live-<id>.jsonl`: every Trida call, with its job, system message, token
   hash, latency, `L`, target, output and checks.
 
-`verification-trida.json` and `worker-gpu<N>.log` sit beside them.
+`verification-trida.json` and `worker-gpu<N>.log` sit beside them. Phase-1
+answers, viewings and the calibration are in the store.
 
 **Behaviour to expect:**
 - Trida at τ 0.9 on the 96-token live canvas (protocol v6) takes about 0.4 s a
@@ -218,6 +272,23 @@ uv run python -m diff live serve \
 
 **Walking the interface without a GPU:** add `--fake-worker --purpose smoke`
 and leave out `--trida-dir`. The captions are placeholders marked "시험용",
-never research data. A headless walk with Playwright passed on 2026-10-11:
-Start waits for cue 0, captions change only at boundaries, and the ratings
-appear after the video.
+never research data. Playwright's Chromium has no H.264, so a headless walk
+needs WebM copies of the clips in a walk-only copy of the setup.
+
+## 8. Export
+
+```sh
+uv run python -m diff export --log-dir artifacts/diff/live-20261020 [--log-dir …] \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json --out artifacts/diff/export-$(date +%Y%m%d)
+```
+
+It reads the store (`--store`, default the participant store) and every
+`--log-dir`, and writes into a new, empty directory:
+- `participants.jsonl`: each session's full record;
+- `phase1.csv`: one row per participant × clip × item, practice excluded. It
+  carries the clip key, the A1s family and label, the P2 matched object and
+  the R2 answer key;
+- `post_watch.csv`;
+- `manifest.json`, with file hashes.
+
+This is the only way data leave the app.
