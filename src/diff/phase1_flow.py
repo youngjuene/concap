@@ -47,6 +47,7 @@ import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
 from diff.phase1_setup import stripped_options
 from diff.phase1_tweak import tweak_slots
+from diff.rewrite_prompts import TWEAK_P1, TWEAK_PROVISIONAL
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
@@ -476,6 +477,12 @@ class Phase1:
             "status": "pending",
             "clip_index": state["clip_index"],
             "slots": tweak_slots(clip, records),
+            "template": {
+                "id": TWEAK_P1.template_id,
+                "version": TWEAK_P1.version,
+                "sha256": TWEAK_P1.sha256,
+                "provisional": TWEAK_PROVISIONAL,
+            },
             "attempts": [],
             "requested_at": now,
         }

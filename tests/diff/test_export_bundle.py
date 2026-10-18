@@ -12,7 +12,7 @@ from test_live_server import drain
 from test_participant_server import Lab, through_phase_one
 
 from diff.__main__ import main
-from diff.export_bundle import PHASE1_COLUMNS, export
+from diff.export_bundle import PHASE1_COLUMNS, SECOND_CAPTION_COLUMNS, export
 from diff.session_store import SessionStore
 
 
@@ -37,7 +37,13 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     manifest = export(
         store, [finished.root / "logs"], finished.setup, out, generated_at="2026-10-18T12:00:00"
     )
-    assert manifest["counts"] == {"sessions": 2, "finished": 1, "phase1_rows": 102, "post_watch_rows": 1}
+    assert manifest["counts"] == {
+        "sessions": 2,
+        "finished": 1,
+        "phase1_rows": 102,
+        "second_caption_rows": 3,
+        "post_watch_rows": 1,
+    }
 
     records = [
         json.loads(line) for line in (out / "participants.jsonl").read_text(encoding="utf-8").splitlines()
@@ -52,15 +58,34 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     assert tuple(rows[0]) == PHASE1_COLUMNS
     pages = {"P2", "P3", "P4", "P5", "P7", "P8", "P9", "P10", "P11"}
     assert {row["page"] for row in rows} == pages  # practice excluded
+    assert {row["viewing"] for row in rows if row["page"] in ("P2", "P5")} == {"P1"}
+    assert {row["viewing"] for row in rows if row["page"] in ("P7", "P11")} == {"P6"}
     a1s = next(row for row in rows if row["item"] == "A1s")
     clip = next(c for c in finished.setup["clips"] if c["key"] == a1s["clip"])
-    assert a1s["answer"] == "s1" and a1s["a1s_family"] == clip["options"]["A1s"][0]["family"]
-    assert a1s["a1s_orig_phrase"] == clip["options"]["A1s"][0]["orig_phrase"]
-    assert a1s["a1s_orig_phrase"].casefold() in clip["caption"]["orig_text"]
+    assert a1s["answer"] == "s1" and a1s["sound_family"] == clip["options"]["A1s"][0]["family"]
+    assert a1s["sound_orig_phrase"] == clip["options"]["A1s"][0]["orig_phrase"]
+    assert a1s["sound_orig_phrase"].casefold() in clip["caption"]["orig_text"]
+    a2s = next(row for row in rows if row["item"] == "A2s" and row["clip"] == a1s["clip"])
+    assert a2s["answer"] == "s2" and a2s["sound_label"] == clip["options"]["A1s"][1]["label"]
     r2 = next(row for row in rows if row["item"] == "R2")
-    assert json.loads(r2["r2_mentioned"]) == ["m1"] and json.loads(r2["answer"]) == ["m1"]
-    v1 = next(row for row in rows if row["item"] == "V1")
-    assert json.loads(v1["p2_object"]) == ["sky"]
+    assert json.loads(r2["r2_intended_key"]) == ["m1"] and json.loads(r2["answer"]) == ["m1"]
+    for item in ("V1", "V2"):
+        assert json.loads(next(row for row in rows if row["item"] == item)["point_object"]) == ["sky"]
+
+    with (out / "second_captions.csv").open(encoding="utf-8") as handle:
+        seconds = list(csv.DictReader(handle))
+    assert tuple(seconds[0]) == SECOND_CAPTION_COLUMNS and len(seconds) == 3
+    row = next(row for row in seconds if row["clip"] == a1s["clip"])
+    assert (row["status"], row["second_caption"], row["first_caption"]) == (
+        "ready",
+        "다시 쓴 두 번째 자막",
+        clip["caption"]["text"],
+    )
+    assert row["attended_sound"] == clip["options"]["A1s"][0]["label"] and row["attended_object"] == "하늘"
+    assert (
+        row["fascination"] == "33" and row["intended_r2_key"] == '["m1"]' and row["job_id"].startswith("job-")
+    )
+    assert row["template_provisional"] == "True"
 
     with (out / "post_watch.csv").open(encoding="utf-8") as handle:
         assert list(csv.DictReader(handle)) == [
