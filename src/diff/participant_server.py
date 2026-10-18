@@ -5,10 +5,13 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   The same ID resumes an unfinished session; a finished one is refused.
 - **GPU:** each session claims a GPU when the ID is entered, so a full machine
   shows before the participant starts, not at the handoff.
-- **Phases:** phase 1 (:class:`diff.phase1_flow.Phase1`) runs regen's pages. At
-  the handoff, the tuner's calibration is built from the phase-1 answers and
-  the live watch (``/watch/``) opens with it, with no researcher step in
-  between.
+- **Phases:** phase 1 (:class:`diff.phase1_flow.Phase1`) runs the
+  questionnaire spreadsheet's pages, two viewings per clip. Each clip's second
+  caption is written by Trida on the GPU the session claimed, queued when the
+  clip's first step closes (P5) and written back into the session when it
+  finishes. At the handoff, the tuner's calibration is built from the phase-1
+  answers and the live watch (``/watch/``) opens with it, with no researcher
+  step in between.
 - **Lab only:** the server listens on loopback or the lab network.
 
 Routes:
@@ -40,8 +43,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
+from diff.caption_sources import CaptionSource
+from diff.job_plan import Job
 from diff.live_calibration import Calibration, calibrate
-from diff.live_generation import opaque_token
+from diff.live_generation import TweakRequest, opaque_token
 from diff.live_server import (
     BUSY_MESSAGE,
     JobFor,
@@ -60,8 +65,9 @@ COOKIE: Final = "diff_session"
 STATIC: Final = Path(__file__).with_name("participant_static")
 ASSETS: Final = {"phase1_pages.js": "text/javascript", "participant_theme.css": "text/css"}
 ACTIONS: Final = frozenset(
-    {"intro-complete", "practice-complete", "playback", "view-ended", "submit", "handoff"}
+    {"intro-complete", "practice-complete", "playback", "view-ended", "submit", "skip-second", "handoff"}
 )
+TweakFor = Callable[[Mapping[str, Any], Mapping[str, str]], tuple[CaptionSource, Job, dict[str, Any]]]
 WATCH_URL: Final = "watch/"
 PHASE2_ONLY: Final = "diff.phase2-only/v1"
 MEDIA_TYPES: Final = {".png": "image/png", ".mp4": "video/mp4", ".webm": "video/webm"}
@@ -117,10 +123,14 @@ def build_participant_app(
     log_dir: Path,
     job_for: JobFor,
     phase1: Phase1 | None,
+    tweak_for: TweakFor | None = None,
     secret: bytes | None = None,
     clock: Callable[[], float] = time.time,
 ) -> Any:
-    """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch."""
+    """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
+
+    ``tweak_for(clip, slots)`` builds a clip's second-caption job; phase 1 needs it.
+    """
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
@@ -153,6 +163,37 @@ def build_participant_app(
         payload = phase1.present(state, lambda name: f"api/p1/media/{media_token(state, name)}")
         payload["session"] = opaque_token(key, state["session_id"], "drafts")
         return payload
+
+    def tweak_done(request: TweakRequest, outcome: dict[str, Any]) -> None:
+        assert phase1 is not None
+        note = {
+            "event": f"tweak_{outcome['status']}",
+            "clip": request.clip,
+            "attempt": outcome["attempt"],
+            "reason": outcome.get("reason"),
+        }
+        store.update(
+            request.session_id,
+            lambda state: phase1.record_tweak(state, request.clip, outcome, clock()),
+            note,
+        )
+
+    def submit_pending(session_id: str) -> None:
+        """Queue every pending second caption on the session's GPU (already queued ones are skipped)."""
+        if phase1 is None or tweak_for is None:
+            return
+        session = store.get(session_id)
+        if session.state.get("stage") != "phase1":
+            return
+        pending = phase1.pending_tweaks(session.state)
+        if not pending:
+            return
+        service = pool.holder(session_id) or pool.acquire(session_id)
+        if service is None:
+            return
+        for clip_key, slots, attempt in pending:
+            source, job, steer = tweak_for(phase1.clips[clip_key], slots)
+            service.submit_tweak(TweakRequest(session_id, clip_key, source, job, steer, attempt), tweak_done)
 
     def initial(participant: str) -> Callable[[str], dict[str, Any]]:
         def make(session_id: str) -> dict[str, Any]:
@@ -204,6 +245,7 @@ def build_participant_app(
             return error(400, BAD_ID)
         if pool.acquire(session.session_id) is None:
             return error(503, BUSY_MESSAGE)
+        submit_pending(session.session_id)
         reply = {"next_url": WATCH_URL} if session.state["stage"] == "phase2" else {"stage": "phase1"}
         response = JSONResponse(reply)
         response.set_cookie(COOKIE, session.token, httponly=True, samesite="strict", path="/")
@@ -217,6 +259,7 @@ def build_participant_app(
             return error(401, NO_SESSION)
         if session.state["stage"] == "phase2":
             return JSONResponse({"kind": "moved", "next_url": WATCH_URL})
+        submit_pending(session.session_id)
         return JSONResponse(page(session.state))
 
     @app.get("/api/p1/media/{token}")
@@ -268,6 +311,7 @@ def build_participant_app(
             return error(409, str(exc))
         except (ValueError, KeyError, TypeError) as exc:
             return error(400, str(exc))
+        submit_pending(session.session_id)
         return JSONResponse(reply)
 
     # -- live phase 2 ----------------------------------------------------------

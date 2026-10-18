@@ -314,6 +314,7 @@ class LiveService:
         self.session_id: str | None = None
         self.scheduler: LiveScheduler | None = None
         self.tweaks: deque[tuple[TweakRequest, TweakDone]] = deque()
+        self.running_tweak: str | None = None
         self.stopping = False
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -370,7 +371,9 @@ class LiveService:
         with self.lock:
             if request.session_id != self.session_id:
                 return False
-            if any(queued.job.job_id == request.job.job_id for queued, _ in self.tweaks):
+            if request.job.job_id == self.running_tweak or any(
+                queued.job.job_id == request.job.job_id for queued, _ in self.tweaks
+            ):
                 return False
             self.tweaks.append((request, done))
             self.lock.notify_all()
@@ -397,6 +400,7 @@ class LiveService:
             tweak = None
             if request is None and self.tweaks and self.tweaks[0][0].session_id == session_id:
                 tweak = self.tweaks.popleft()
+                self.running_tweak = tweak[0].job.job_id
         if tweak is not None:
             self._tweak(*tweak)
             return True
@@ -422,10 +426,12 @@ class LiveService:
             checks = dict(self.tweak_check(request.source, request.job, result))
         outcome = tweak_outcome(request, result, checks)
         self._log_tweak(request, result, checks, outcome)
-        done(request, outcome)
-        if outcome["status"] == "retry":
+        try:
+            done(request, outcome)
+        finally:
             with self.lock:
-                if self.session_id == request.session_id:
+                self.running_tweak = None
+                if outcome["status"] == "retry" and self.session_id == request.session_id:
                     self.tweaks.appendleft((replace(request, attempt=request.attempt + 1), done))
                     self.lock.notify_all()
 

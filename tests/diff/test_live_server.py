@@ -69,12 +69,28 @@ def job_for(source: CaptionSource, spec: Spec) -> Job:
     return live_job(source, spec.texture, spec.context, spec.system_message, "smoke")
 
 
+def full_output(text: str, terminator: str | None = "endoftext") -> dict[str, Any]:
+    """An output record as the worker sends it, which the checks read."""
+    return {
+        "raw_text": text,
+        "text": text,
+        "terminator": terminator,
+        "terminator_index": len(text) if terminator else None,
+        "postprocess": {"tail_token_ids": [], "tail_text": ""},
+        "leftover_mask_count": 0,
+        "special_ids_in_text": [],
+        "new_token_count": 40,
+    }
+
+
 class FakeAttempt:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
     def __call__(self, payload: Mapping[str, Any], timeout: float) -> dict[str, Any]:
         self.calls.append(payload["job_id"])
+        if payload.get("cell") is None:  # phase 1's second caption
+            return {"status": "completed", "output": full_output("다시 쓴 두 번째 자막"), "latency_ms": 400}
         cue = payload["cue_index"]
         return {
             "status": "completed",
@@ -222,8 +238,14 @@ def test_rating_items_are_validated() -> None:
             rating_items(bad)
 
 
-def test_participant_sessions_wait_for_the_researcher_s_tuner_text(tmp_path: Path) -> None:
+@pytest.mark.parametrize("approved", ["", "TUNER_PROVISIONAL"])
+def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_tweak_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: str
+) -> None:
     from diff.__main__ import main
+
+    if approved:  # the tuner text is in, the second-caption prompt still provisional
+        monkeypatch.setattr(f"diff.rewrite_prompts.{approved}", False)
 
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
@@ -234,7 +256,8 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text(tmp_path: Pat
     media.write_bytes(b"x")
     argv = ["live", "serve", "--sources", str(sources), "--video", f"{VIDEO}={media}", "--items", str(items)]
     argv += ["--log-dir", str(tmp_path / "logs"), "--fake-worker", "--purpose", "participant"]
-    with pytest.raises(SystemExit, match="provisional"):
+    expected = "second-caption prompt is still provisional" if approved else "tuner system message"
+    with pytest.raises(SystemExit, match=expected):
         main(argv)
 
 
@@ -242,6 +265,7 @@ def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest
     from diff.__main__ import main
 
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
+    monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
     sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")

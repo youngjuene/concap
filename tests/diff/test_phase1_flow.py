@@ -1,4 +1,4 @@
-"""Phase 1 in diff: regen's items and rules, one viewing per clip, and a blind page payload."""
+"""Phase 1 in diff: the sheet's items and rules, two viewings per clip, and a blind page payload."""
 
 from __future__ import annotations
 
@@ -14,18 +14,31 @@ from phase1_fixtures import DURATION_MS, approved_setup
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.playback as regen_playback
-from diff.phase1_flow import CLIP_PAGES, UNWATCHED, Phase1, checkpoint, clip_order, record_playback
+from diff.phase1_flow import (
+    PREPARING,
+    STEP_A,
+    STEP_B,
+    UNWATCHED,
+    Phase1,
+    checkpoint,
+    clip_order,
+    record_playback,
+)
 from diff.phase1_setup import stripped_options
 from diff.session_store import Conflict
 from dpo.regen.study_store import Conflict as RegenConflict
 
+RATED = ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")
 ANSWERS: dict[str, dict[str, Any]] = {
     "P3": {"A1s": "s1"},
-    "P4": {item: 4 for item in ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")},
+    "P4": {item: 4 for item in RATED},
     "P5": {"FA1": "no", "FA2": 3, "FA3": 5},
+    "P8": {"A2s": "s2"},
+    "P9": {f"{item}_2": 5 for item in RATED},
     "P10": {"S1": 5, "S2": 2, "S3": 6},
     "P11": {"R1": 6, "R2": ["m1"]},
 }
+POINTS = {"P2": "V1", "P7": "V2"}
 
 
 @pytest.fixture
@@ -34,21 +47,42 @@ def flow(tmp_path: Path) -> Phase1:
 
 
 def watch(flow: Phase1, state: dict[str, Any], now: float) -> float:
+    page = state["page"]
     for sequence, position in enumerate(range(0, DURATION_MS + 1, 1000)):
         now += 1.0
-        data = {"page": "P1", "position_ms": position, "playing": True, "hidden": False, "sequence": sequence}
+        data = {"page": page, "position_ms": position, "playing": True, "hidden": False, "sequence": sequence}
         flow.apply(state, "playback", data, now)
-    flow.apply(state, "view-ended", {"page": "P1"}, now)
+    flow.apply(state, "view-ended", {"page": page}, now)
     return now
 
 
-def complete_clip(flow: Phase1, state: dict[str, Any], now: float, point: tuple[float, float]) -> float:
+def answer(flow: Phase1, state: dict[str, Any], now: float, point: tuple[float, float] = (0.5, 0.9)) -> None:
+    page = state["page"]
+    if page in POINTS:
+        x, y = point
+        answers: dict[str, Any] = {POINTS[page]: [{"frame_id": "0", "x": x, "y": y}]}
+    else:
+        answers = ANSWERS[page]
+    flow.apply(state, "submit", {"page": page, "answers": answers, "submitted_at": now}, now)
+
+
+def step(flow: Phase1, state: dict[str, Any], now: float, point: tuple[float, float] = (0.5, 0.9)) -> float:
+    """One clip's step: its viewing, then the step's pages."""
     now = watch(flow, state, now)
-    x, y = point
-    flow.apply(state, "submit", {"page": "P2", "answers": {"V1": [{"frame_id": "0", "x": x, "y": y}]}}, now)
-    for page in ("P3", "P4", "P5", "P10", "P11"):
-        flow.apply(state, "submit", {"page": page, "answers": ANSWERS[page], "submitted_at": now}, now)
+    for _ in range(len(STEP_A if state["page"] in STEP_A else STEP_B) - 1):
+        answer(flow, state, now, point)
     return now
+
+
+def written(flow: Phase1, state: dict[str, Any], status: str = "ready") -> None:
+    """Trida's outcome for every pending second caption, as the server writes it back."""
+    for key, _, attempt in flow.pending_tweaks(state):
+        outcome = {"status": status, "attempt": attempt, "result_status": "completed", "job_id": "job-x"}
+        if status == "ready":
+            outcome["text"] = f"두 번째 자막 {state['clip_order'].index(key)}"
+        else:
+            outcome["reason"] = "check failed"
+        flow.record_tweak(state, key, outcome, 50.0)
 
 
 def through_practice(flow: Phase1, state: dict[str, Any]) -> None:
@@ -68,18 +102,78 @@ def test_a_whole_phase_one_walk(flow: Phase1) -> None:
     assert state["practice"][0]["analysis_excluded"] is True and state["page"] == "P1"
     now = 10.0
     for _ in range(3):
-        now = complete_clip(flow, state, now, (0.5, 0.9))
-    assert state["page"] == "handoff"
-    assert [r["page"] for r in state["responses"]] == [p for p in CLIP_PAGES if p != "P1"] * 3
-    assert len(state["viewings"]) == 3 and state["viewings"][0]["coverage"] == [[0.0, 10000.0]]
-    assert {r["view_id"] for r in state["responses"] if r["clip_index"] == 0} == {"s-test-0-P1"}
-    p2 = state["responses"][0]
-    assert p2["matches"][0]["object_id"] == "road" and p2["labels"] == ["Road"]
-    observations, ratings = flow.profile_inputs(state)
+        now = step(flow, state, now)
+    assert (state["step"], state["clip_index"], state["page"]) == ("B", 0, "P6")
     first = state["clip_order"][0]
+    expected = flow.clips[first]["options"]["A1s"][0]["label"]
+    assert state["second_captions"][first]["slots"]["attended_sound"] == expected
+    waiting = flow.present(state, lambda name: name)
+    assert waiting["kind"] == "preparing" and waiting["instruction"] == PREPARING and "media" not in waiting
+    written(flow, state)
+    shown = flow.present(state, lambda name: name)
+    assert shown["kind"] == "view" and shown["media"]["captions"][0]["text"] == "두 번째 자막 0"
+    for _ in range(3):
+        now = step(flow, state, now, (0.5, 0.1))
+    assert state["page"] == "handoff"
+    pages = [r["page"] for r in state["responses"]]
+    assert pages == [*(list(STEP_A[1:]) * 3), *(list(STEP_B[1:]) * 3)]
+    assert [v["page"] for v in state["viewings"]] == ["P1"] * 3 + ["P6"] * 3
+    assert (
+        state["viewings"][3]["caption_source"] == "trida"
+        and state["viewings"][0]["caption_source"] == "prepared"
+    )
+    views = {(r["page"], r["view_id"]) for r in state["responses"] if r["clip_index"] == 0}
+    assert {view for page, view in views if page in STEP_A} == {"s-test-0-P1"}
+    assert {view for page, view in views if page in STEP_B} == {"s-test-0-P6"}
+    p2, p7 = (next(r for r in state["responses"] if r["page"] == page) for page in ("P2", "P7"))
+    assert p2["labels"] == ["Road"] and p7["labels"] == ["Sky"]
+    p9 = next(r for r in state["responses"] if r["page"] == "P9")
+    assert p9["presented_order"] == [
+        i["id"] for i in workbook_instrument.page_spec("P9", session_key="s-test")["items"]
+    ]
+    observations, ratings = flow.profile_inputs(state)
     family = flow.clips[first]["options"]["A1s"][0]["family"]
     assert observations[0] == {"heard": {family: True}, "labels": ["Road"]}
     assert ratings == [{"S1": 5, "S2": 2, "S3": 6}] * 3
+
+
+def test_a_failed_second_caption_skips_that_clip_s_second_step(flow: Phase1) -> None:
+    state = flow.new_state("s-test", "P1", seed=7)
+    through_practice(flow, state)
+    now = 10.0
+    for _ in range(3):
+        now = step(flow, state, now)
+    written(flow, state, "failed")
+    assert flow.present(state, lambda name: name)["kind"] == "skipped"
+    assert flow.media_files(state) == {}
+    with pytest.raises(Conflict, match="no viewing"):
+        flow.apply(state, "view-ended", {"page": "P6"}, now)
+    for index in range(3):
+        flow.apply(state, "skip-second", {"page": "P6"}, now)
+        assert state["skipped"][index]["reason"] == "check failed"
+    assert state["page"] == "handoff"
+    observations, ratings = flow.profile_inputs(state)
+    assert len(observations) == 3 and ratings == []
+    with pytest.raises(Conflict, match="not skipped"):
+        state.update(page="P6", clip_index=0, second_captions={})
+        flow.apply(state, "skip-second", {"page": "P6"}, now)
+
+
+def test_one_retry_is_kept_across_restarts_and_late_outcomes_are_ignored(flow: Phase1) -> None:
+    state = flow.new_state("s-test", "P1", seed=7)
+    through_practice(flow, state)
+    step(flow, state, 10.0)
+    ((key, slots, attempt),) = flow.pending_tweaks(state)
+    assert attempt == 1 and slots == state["second_captions"][key]["slots"]
+    retry = {"status": "retry", "attempt": 1, "result_status": "worker_lost", "reason": "worker_lost: x"}
+    flow.record_tweak(state, key, retry, 20.0)
+    assert flow.pending_tweaks(state) == [(key, slots, 2)]
+    ready = {"status": "ready", "attempt": 2, "result_status": "completed", "job_id": "j", "text": "새 자막"}
+    flow.record_tweak(state, key, ready, 21.0)
+    flow.record_tweak(state, key, {**ready, "text": "늦게 온 자막"}, 22.0)
+    entry = state["second_captions"][key]
+    assert entry["status"] == "ready" and entry["text"] == "새 자막" and len(entry["attempts"]) == 2
+    assert flow.pending_tweaks(state) == []
 
 
 def test_items_and_rules_are_regen_s(flow: Phase1) -> None:
@@ -125,24 +219,20 @@ def test_page_texts_are_the_sheet_s_word_for_word(flow: Phase1) -> None:
     assert intro["consent_text"] is None
 
 
-def test_no_clip_key_family_or_answer_key_reaches_the_browser(flow: Phase1) -> None:
+def test_no_clip_key_family_answer_key_or_prompt_reaches_the_browser(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=3)
     through_practice(flow, state)
     payloads = [flow.present(state, lambda name: f"media/{name}")]
     now = 10.0
-    for page in CLIP_PAGES:
+    while state["page"] != "handoff":
+        if state["page"] == "P6" and flow.pending_tweaks(state):
+            payloads.append(flow.present(state, lambda name: f"media/{name}"))
+            written(flow, state)
         payloads.append(flow.present(state, lambda name: f"media/{name}"))
-        if page == "P1":
+        if state["page"] in ("P1", "P6"):
             now = watch(flow, state, now)
-        elif page == "P2":
-            flow.apply(
-                state,
-                "submit",
-                {"page": "P2", "answers": {"V1": [{"frame_id": "1", "x": 0.2, "y": 0.2}]}},
-                now,
-            )
         else:
-            flow.apply(state, "submit", {"page": page, "answers": ANSWERS[page]}, now)
+            answer(flow, state, now, (0.2, 0.2))
     text = json.dumps(payloads, ensure_ascii=False)
     for secret in (
         "kyoto_101",
@@ -156,12 +246,16 @@ def test_no_clip_key_family_or_answer_key_reaches_the_browser(flow: Phase1) -> N
         "a bus idles",
         "things",
         "human",
+        "slots",
+        "fascination",
+        "job-x",
         ".png",
         ".mp4",
     ):
         assert secret not in text, secret
     assert payloads[1]["media"]["url"] == "media/video"
     assert payloads[2]["frames"][2]["url"] == "media/frame-2"
+    assert sum(payload["kind"] == "preparing" for payload in payloads) == 1
 
 
 def test_only_the_current_page_s_media_are_served(flow: Phase1) -> None:
@@ -169,10 +263,13 @@ def test_only_the_current_page_s_media_are_served(flow: Phase1) -> None:
     assert flow.media_files(state) == {}
     through_practice(flow, state)
     assert set(flow.media_files(state)) == {"video"}
-    state["page"] = "P2"
+    for page, expected in (("P2", {"frame-0", "frame-1", "frame-2"}), ("P3", set()), ("P6", set())):
+        state["page"] = page
+        assert set(flow.media_files(state)) == expected
+    state["second_captions"][flow.clip(state)["key"]] = {"status": "ready", "text": "자막", "attempts": []}
+    assert set(flow.media_files(state)) == {"video"}
+    state["page"] = "P7"
     assert set(flow.media_files(state)) == {"frame-0", "frame-1", "frame-2"}
-    state["page"] = "P3"
-    assert flow.media_files(state) == {}
 
 
 def test_the_clip_must_be_watched_to_the_end(flow: Phase1) -> None:

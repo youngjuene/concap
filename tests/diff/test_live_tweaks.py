@@ -9,25 +9,12 @@ from typing import Any
 
 import pytest
 from phase1_fixtures import approved_setup
-from test_live_server import FakeAttempt, job_for, stream
+from test_live_server import FakeAttempt, full_output, job_for, stream
 from test_phase1_tweak import first_step
 
 from diff.generation_worker import WorkerStartupError
 from diff.live_generation import LiveScheduler, LiveService, Spec, TweakRequest
 from diff.phase1_tweak import check_record, tweak_request
-
-
-def record(text: str, terminator: str | None = "endoftext") -> dict[str, Any]:
-    return {
-        "raw_text": text,
-        "text": text,
-        "terminator": terminator,
-        "terminator_index": len(text) if terminator else None,
-        "postprocess": {"tail_token_ids": [], "tail_text": ""},
-        "leftover_mask_count": 0,
-        "special_ids_in_text": [],
-        "new_token_count": 40,
-    }
 
 
 class Scripted:
@@ -69,7 +56,7 @@ def run(service: LiveService) -> None:
 def test_tweaks_run_in_order_and_only_for_the_claimed_session(
     requests: list[TweakRequest], tmp_path: Path
 ) -> None:
-    ok = {"status": "completed", "output": record("버스가 낮게 공회전한다.")}
+    ok = {"status": "completed", "output": full_output("버스가 낮게 공회전한다.")}
     service = service_with(Scripted(ok, ok, ok), tmp_path)
     outcomes: list[tuple[str, dict[str, Any]]] = []
     for request in requests:
@@ -87,7 +74,7 @@ def test_tweaks_run_in_order_and_only_for_the_claimed_session(
 
 
 def test_a_failed_check_ends_the_clip_s_tweak(requests: list[TweakRequest], tmp_path: Path) -> None:
-    service = service_with(Scripted({"status": "completed", "output": record("bus noise")}), tmp_path)
+    service = service_with(Scripted({"status": "completed", "output": full_output("bus noise")}), tmp_path)
     outcomes: list[dict[str, Any]] = []
     service.submit_tweak(requests[0], lambda r, o: outcomes.append(o))
     run(service)
@@ -110,7 +97,7 @@ def test_one_identical_retry_after_a_transient_failure_and_none_after_a_timeout(
         {"status": "worker_lost", "error": "pipe closed"},
         {"status": "worker_lost", "error": "pipe closed"},
         WorkerStartupError("no GPU memory"),
-        {"status": "completed", "output": record("버스 소리가 들린다.")},
+        {"status": "completed", "output": full_output("버스 소리가 들린다.")},
         {"status": "timeout", "error": "30 s"},
     )
     service = service_with(attempt, tmp_path)

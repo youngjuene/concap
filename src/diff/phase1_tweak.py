@@ -113,7 +113,13 @@ def tweak_request(
     clip: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]], purpose: str
 ) -> tuple[CaptionSource, Job, dict[str, Any]]:
     """The source, the job and the record of what steered it, for one participant and clip."""
-    slots = tweak_slots(clip, records)
+    return tweak_job_for(clip, tweak_slots(clip, records), purpose)
+
+
+def tweak_job_for(
+    clip: Mapping[str, Any], slots: Mapping[str, str], purpose: str
+) -> tuple[CaptionSource, Job, dict[str, Any]]:
+    """The source, the job and its steering record from slots already computed (and stored)."""
     prompt: RenderedPrompt = render_tweak(slots)
     source = tweak_source(clip)
     job = tweak_job(source, prompt, purpose)
@@ -126,11 +132,16 @@ def tweak_request(
             "provisional": TWEAK_PROVISIONAL,
         },
         "degree_rule": DEGREE_RULE,
-        "slots": slots,
-        "intended_r2_key": [o["value"] for o in clip["options"]["R2"] if o.get("mentioned")],
+        "slots": dict(slots),
+        "intended_r2_key": intended_r2_key(clip),
         "job_id": job.job_id,
     }
     return source, job, record
+
+
+def intended_r2_key(clip: Mapping[str, Any]) -> list[str]:
+    """The R2 options the prompt names (the mentioned ones): R2's key, intended, not checked."""
+    return [option["value"] for option in clip["options"]["R2"] if option.get("mentioned")]
 
 
 def check_record(source: CaptionSource, job: Job, result: Mapping[str, Any]) -> dict[str, Any]:

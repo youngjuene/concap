@@ -37,7 +37,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     manifest = export(
         store, [finished.root / "logs"], finished.setup, out, generated_at="2026-10-18T12:00:00"
     )
-    assert manifest["counts"] == {"sessions": 2, "finished": 1, "phase1_rows": 63, "post_watch_rows": 1}
+    assert manifest["counts"] == {"sessions": 2, "finished": 1, "phase1_rows": 102, "post_watch_rows": 1}
 
     records = [
         json.loads(line) for line in (out / "participants.jsonl").read_text(encoding="utf-8").splitlines()
@@ -50,7 +50,8 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     with (out / "phase1.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert tuple(rows[0]) == PHASE1_COLUMNS
-    assert {row["page"] for row in rows} == {"P2", "P3", "P4", "P5", "P10", "P11"}  # practice excluded
+    pages = {"P2", "P3", "P4", "P5", "P7", "P8", "P9", "P10", "P11"}
+    assert {row["page"] for row in rows} == pages  # practice excluded
     a1s = next(row for row in rows if row["item"] == "A1s")
     clip = next(c for c in finished.setup["clips"] if c["key"] == a1s["clip"])
     assert a1s["answer"] == "s1" and a1s["a1s_family"] == clip["options"]["A1s"][0]["family"]

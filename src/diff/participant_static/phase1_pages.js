@@ -6,7 +6,10 @@
  * - paths are relative (api/p1, api/enter), so the app can sit behind any prefix;
  * - a start screen where the experimenter types the participant ID (P1, P2, …);
  * - P0 shows the introduction with a start button until consent text exists;
- * - one viewing per clip: the generate step and the second viewing are gone;
+ * - two stages (every clip's first viewing, then every second viewing): while a
+ *   clip's second caption is still being written the page waits with regen's
+ *   "다음 영상을 준비하고 있습니다…" and polls the state; a clip whose second
+ *   caption failed is skipped at once (skip-second), with no participant step;
  * - the handoff opens the live watch (watch/);
  * - drafts are keyed by the server's opaque session scope, because successive
  *   participants share the experimenter's tab. */
@@ -330,6 +333,22 @@ function renderIntro(detail) {
   const actions = node("div", undefined, "actions"); actions.append(next); shell.append(actions); errorRegion();
 }
 
+function renderPreparing(detail, renderID) {
+  const region = errorRegion();
+  const timer = setInterval(async () => {
+    try {
+      const latest = await request("state");
+      if (generation === renderID && (latest.kind !== "preparing" || scope(latest) !== scope(detail))) await render(latest);
+    } catch (error) { feedback(error.message, region); }
+  }, 1000);
+  cleanup = () => clearInterval(timer);
+}
+
+async function renderSkipped(detail) {
+  const region = errorRegion();
+  try { await action("skip-second", {}, detail); await refresh(); } catch (error) { await recover(error, region); }
+}
+
 function renderHandoff(detail) {
   const next = button("2스테이지 시작", async () => {
     next.disabled = true;
@@ -533,6 +552,8 @@ async function render(detail) {
   else if (detail.kind === "view") await renderVideo(detail, renderID);
   else if (detail.kind === "practice") renderForm(detail, "practice-complete");
   else if (["survey", "visual", "audio"].includes(detail.kind)) renderForm(detail);
+  else if (detail.kind === "preparing") renderPreparing(detail, renderID);
+  else if (detail.kind === "skipped") await renderSkipped(detail);
   else if (detail.kind === "handoff") renderHandoff(detail);
   else if (detail.kind === "done") shell.append(node("p", "응답이 저장되었습니다. 참여해 주셔서 감사합니다.", "lede"));
   else problem("실험 단계 정보를 확인할 수 없습니다. 연구자에게 문의해 주세요.");

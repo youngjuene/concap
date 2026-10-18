@@ -573,11 +573,23 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     import re
 
     time.sleep(1.5)
-    match = re.search(r"「(.*?)」", str(payload["prompt"]["text"]))
-    cell = payload.get("cell") or {}
-    marker = f"시험용 · 질감 {cell.get('quality_limit')} · {cell.get('context')}"
+    match = re.search(r"「(.*?)」", str(payload["prompt"]["text"]), re.S)
+    cell = payload.get("cell")
+    marker = "시험용 · 두 번째 자막"
+    if cell is not None:
+        marker = f"시험용 · 질감 {cell['quality_limit']} · {cell['context']}"
     text = f"{match.group(1) if match else ''} ({marker})"
-    return {"status": "completed", "output": {"text": text}, "latency_ms": 1500, "seed": None}
+    output = {
+        "raw_text": text,
+        "text": text,
+        "terminator": "endoftext",
+        "terminator_index": len(text),
+        "postprocess": {"tail_token_ids": [], "tail_text": ""},
+        "leftover_mask_count": 0,
+        "special_ids_in_text": [],
+        "new_token_count": 0,
+    }
+    return {"status": "completed", "output": output, "latency_ms": 1500, "seed": None}
 
 
 def live_serve(args: argparse.Namespace) -> int:
@@ -596,7 +608,8 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.participant_server import build_participant_app
     from diff.phase1_flow import Phase1
     from diff.phase1_setup import read_setup, setup_problems
-    from diff.rewrite_prompts import TUNER_PROVISIONAL
+    from diff.phase1_tweak import check_record, tweak_job_for
+    from diff.rewrite_prompts import TUNER_PROVISIONAL, TWEAK_PROVISIONAL
     from diff.session_store import SessionStore
     from diff.study_protocol import LIVE_MAX_CHARS
 
@@ -617,6 +630,11 @@ def live_serve(args: argparse.Namespace) -> int:
         raise SystemExit(
             "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "
             "participant sessions wait for the researcher's role text (use --purpose smoke to test)"
+        )
+    if args.purpose == "participant" and TWEAK_PROVISIONAL:
+        raise SystemExit(
+            "the second-caption prompt is still provisional (rewrite_prompts.TWEAK_P1); "
+            "participant sessions wait for the researcher's approval (use --purpose smoke to test)"
         )
     if args.purpose == "participant" and args.phase1_setup is None:
         raise SystemExit("participant sessions need phase 1: pass --phase1-setup")
@@ -639,6 +657,9 @@ def live_serve(args: argparse.Namespace) -> int:
     def job_for(source: Any, spec: Any) -> Any:
         return live_job(source, spec.texture, spec.context, spec.system_message, args.purpose)
 
+    def tweak_for(clip: Any, slots: Any) -> Any:
+        return tweak_job_for(clip, slots, args.purpose)
+
     def check(source: Any, job: Any, result: Any) -> Any:
         output = output_from_record(result["output"])
         return check_output(
@@ -648,7 +669,9 @@ def live_serve(args: argparse.Namespace) -> int:
     services = []
     if args.fake_worker:
         print("FAKE WORKER: captions are placeholders for walking the interface, never research data")
-        services.append(LiveService(_fake_live_attempt, log_dir / "fake-worker", check=None))
+        services.append(
+            LiveService(_fake_live_attempt, log_dir / "fake-worker", check=None, tweak_check=check_record)
+        )
     else:
         if args.trida_dir is None:
             raise SystemExit("pass --trida-dir (or --fake-worker to walk the interface)")
@@ -695,7 +718,7 @@ def live_serve(args: argparse.Namespace) -> int:
             print(f"loading Trida on GPU {gpu} …", flush=True)
             supervisor.ensure_started()
             attempt = functools.partial(supervisor.attempt, kind="live")
-            services.append(LiveService(attempt, log_dir / "sessions", check=check))
+            services.append(LiveService(attempt, log_dir / "sessions", check=check, tweak_check=check_record))
     for service in services:
         service.start()
     app = build_participant_app(
@@ -706,6 +729,7 @@ def live_serve(args: argparse.Namespace) -> int:
         log_dir=log_dir / "sessions",
         job_for=job_for,
         phase1=phase1,
+        tweak_for=tweak_for,
     )
     first = "phase 1, then the watch" if phase1 else "the watch (no phase 1)"
     print(f"participant app on http://{args.host}:{args.port}/: {first}", flush=True)

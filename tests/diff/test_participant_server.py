@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from diff.live_server import LivePool, LiveVideo, rating_items
 from diff.model_profile import TRIDA_7B
 from diff.participant_server import COOKIE, build_participant_app
 from diff.phase1_flow import Phase1
+from diff.phase1_tweak import check_record, tweak_job_for
 from diff.session_store import SessionStore
 
 HEADERS = {"x-study-request": "1"}
@@ -24,6 +26,8 @@ ANSWERS: dict[str, dict[str, Any]] = {
     "P3": {"A1s": "s1"},
     "P4": {item: 2 for item in ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")},
     "P5": {"FA1": "unsure", "FA2": 1, "FA3": 4},
+    "P8": {"A2s": "s2"},
+    "P9": {f"{item}_2": 3 for item in ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")},
     "P10": {"S1": 4, "S2": 3, "S3": 5},
     "P11": {"R1": 5, "R2": ["m1"]},
 }
@@ -42,7 +46,9 @@ class Lab:
         self.start()
 
     def start(self) -> None:
-        self.service = LiveService(FakeAttempt(), self.root / "logs", clock=lambda: 0.0)
+        self.service = LiveService(
+            FakeAttempt(), self.root / "logs", tweak_check=check_record, clock=lambda: 0.0
+        )
         self.app = build_participant_app(
             store=SessionStore(self.root / "sessions.sqlite"),
             pool=LivePool([self.service]),
@@ -51,6 +57,7 @@ class Lab:
             log_dir=self.root / "logs",
             job_for=job_for,
             phase1=Phase1(self.setup, root=self.root),
+            tweak_for=partial(tweak_job_for, purpose="smoke"),
             secret=b"test-secret",
             clock=lambda: self.now[0],
         )
@@ -87,7 +94,7 @@ def watch_clip(lab: Lab, client: TestClient, detail: dict[str, Any]) -> dict[str
     return dict(lab.act(client, detail, "view-ended").json())
 
 
-def through_phase_one(lab: Lab, client: TestClient) -> dict[str, Any]:
+def through_stage_a(lab: Lab, client: TestClient) -> dict[str, Any]:
     detail = lab.state(client)
     assert detail["page"] == "P0" and detail["title"] == "도입"
     detail = lab.act(client, detail, "intro-complete").json()
@@ -100,15 +107,37 @@ def through_phase_one(lab: Lab, client: TestClient) -> dict[str, Any]:
     }
     detail = lab.act(client, detail, "practice-complete", answers=practice).json()
     for _ in CLIPS:
-        detail = watch_clip(lab, client, detail)
-        assert lab.keep(client.get(detail["frames"][1]["url"])).status_code == 200
-        point = [{"frame_id": "1", "x": 0.4, "y": 0.2}]
-        detail = lab.act(client, detail, "submit", answers={"V1": point}).json()
-        for page in ("P3", "P4", "P5", "P10", "P11"):
-            assert detail["page"] == page
-            detail = lab.act(client, detail, "submit", answers=ANSWERS[page]).json()
+        detail = clip_step(lab, client, detail, "V1", ("P3", "P4", "P5"))
+    assert detail["page"] == "P6"
+    return detail
+
+
+def clip_step(
+    lab: Lab, client: TestClient, detail: dict[str, Any], item: str, pages: tuple[str, ...]
+) -> dict[str, Any]:
+    detail = watch_clip(lab, client, detail)
+    assert lab.keep(client.get(detail["frames"][1]["url"])).status_code == 200
+    point = [{"frame_id": "1", "x": 0.4, "y": 0.2}]
+    detail = lab.act(client, detail, "submit", answers={item: point}).json()
+    for page in pages:
+        assert detail["page"] == page
+        detail = lab.act(client, detail, "submit", answers=ANSWERS[page]).json()
+    return detail
+
+
+def through_stage_b(lab: Lab, client: TestClient, detail: dict[str, Any]) -> dict[str, Any]:
+    for _ in CLIPS:
+        assert detail["kind"] == "view", detail["kind"]
+        detail = clip_step(lab, client, detail, "V2", ("P8", "P9", "P10", "P11"))
     assert detail["page"] == "handoff"
     return detail
+
+
+def through_phase_one(lab: Lab, client: TestClient) -> dict[str, Any]:
+    detail = through_stage_a(lab, client)
+    assert detail["kind"] == "preparing"
+    drain(lab.service)  # Trida writes the three second captions
+    return through_stage_b(lab, client, lab.state(client))
 
 
 @pytest.fixture
@@ -144,12 +173,17 @@ def test_a_whole_session_hands_phase_one_answers_to_the_tuner(lab: Lab) -> None:
     attempts = [
         json.loads(line) for line in next((lab.root / "logs").glob("live-*.jsonl")).read_text().splitlines()
     ]
-    assert "소리 표현 4" in attempts[0]["system_message"]
+    live = [line for line in attempts if line.get("kind") != "tweak"]
+    assert "소리 표현 4" in live[0]["system_message"]
+    assert [line["kind"] for line in attempts if line.get("kind") == "tweak"] == ["tweak"] * 3
 
     store = SessionStore(lab.root / "sessions.sqlite")
     (session,) = store.sessions()
     assert session.participant == "P1" and session.finished_at is not None
-    assert len(session.state["responses"]) == 18 and session.state["live"]["answers"] == {"L1": 4}
+    assert len(session.state["responses"]) == 27 and session.state["live"]["answers"] == {"L1": 4}
+    seconds = session.state["second_captions"]
+    assert {entry["status"] for entry in seconds.values()} == {"ready"}
+    assert {entry["text"] for entry in seconds.values()} == {"다시 쓴 두 번째 자막"}
     assert lab.enter(lab.client()).status_code == 409
 
 
@@ -173,6 +207,9 @@ def test_nothing_a_browser_fetches_names_clips_families_answers_or_the_model(lab
         "smoke",
         VIDEO,
         "secret-name",
+        "slots",
+        "fascination",
+        "job-",
     ):
         assert secret not in everything, secret
     api = "\n".join(lab.bodies)
@@ -192,6 +229,43 @@ def test_a_restart_resumes_phase_one_and_restarts_an_interrupted_video(lab: Lab)
     assert lab.state(client).get("error")  # the old browser's cookie was voided by the new entry
     detail = lab.act(resumed, lab.state(resumed), "practice-complete", answers={"practice_rating": 3})
     assert detail.status_code == 400
+
+
+def test_second_captions_pending_at_a_restart_are_queued_again(lab: Lab) -> None:
+    client = lab.client()
+    lab.enter(client)
+    assert through_stage_a(lab, client)["kind"] == "preparing"
+    assert len(lab.service.tweaks) == 3
+    lab.start()  # the restart drops the queue with the process
+    resumed = lab.client()
+    assert lab.enter(resumed).json() == {"stage": "phase1"}
+    assert len(lab.service.tweaks) == 3  # entry queues the pending ones again
+    drain(lab.service)
+    assert lab.state(resumed)["kind"] == "view"
+    attempts = [
+        json.loads(line) for line in next((lab.root / "logs").glob("live-*.jsonl")).read_text().splitlines()
+    ]
+    assert [line["kind"] for line in attempts] == ["tweak"] * 3
+    assert {line["attempt"] for line in attempts} == {1}
+
+
+def test_a_failed_second_caption_skips_its_step_through_http(lab: Lab) -> None:
+    client = lab.client()
+    lab.enter(client)
+    through_stage_a(lab, client)
+    lab.service.attempt = lambda payload, timeout: {"status": "timeout", "error": "30 s"}
+    drain(lab.service)
+    detail = lab.state(client)
+    assert detail["kind"] == "skipped" and "media" not in detail
+    for _ in CLIPS:
+        detail = lab.act(client, detail, "skip-second").json()
+    assert detail["page"] == "handoff"
+    (session,) = SessionStore(lab.root / "sessions.sqlite").sessions()
+    assert [entry["reason"] for entry in session.state["skipped"]] == ["timeout: 30 s"] * 3
+    events = [
+        event["event"] for event in SessionStore(lab.root / "sessions.sqlite").events(session.session_id)
+    ]
+    assert events.count("tweak_failed") == 3
 
 
 def test_a_watch_interrupted_by_a_restart_restarts_its_video(lab: Lab) -> None:
