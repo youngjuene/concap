@@ -23,8 +23,12 @@ stimulus bundle for it.
   or maintained caption, and the repeated P7–P9) is dropped. P10 (S1–S3) and
   P11 (R1/R2) follow P5 and refer to the first caption. The tuner reads A1s
   and S1–S3 as before.
-- **First caption:** each clip's prepared Korean caption (원문). There is no
-  2×2 congruence × depth assignment.
+- **First caption:** a Korean rendering of each clip's corpus `orig_text`
+  (`data/corpus/tidy_data.csv`), for all 12 clips. The burnt-in 원문 is not
+  used: for four clips (`amsterdam_012`, `singapore_040`, `amsterdam_057`,
+  `bangkok_034`) it contradicts the audio. The video is regen's uncaptioned
+  `videos_10s` footage, so only diff's caption band shows. There is no 2×2
+  congruence × depth assignment.
 - **Clips:** regen's 12 c2 clips. Six of them were G0's development cues. The
   rule "development material is never a participant clip" protected Trida's
   phase-1 generation, and phase 1 now generates nothing, so the researcher
@@ -32,10 +36,29 @@ stimulus bundle for it.
 - **Ending:** the session ends after the post-watch items, with no P12
   interview prompts and no P13 debrief.
 
-**Still needed from the researcher for phase 1:** the consent text, the
-practice material, and per clip the A1s sound options and the R2 recall
-options (sounds mentioned in the caption and distractors). No such setup file
-exists in the repository, for regen or for diff.
+**Build decisions (researcher, 2026-10-18):**
+- **Clips and order:** all 12 per participant, in a random order per
+  participant from a recorded seed.
+- **Entry:** the experimenter types the participant ID (`P1`, `P2`, …) on the
+  start screen and the participant's pages appear. The same ID resumes an
+  unfinished session; a finished one is refused.
+- **Lab only:** the server listens on loopback or the lab network, with no
+  off-campus edge.
+- **Export:** a command on this machine (`python -m diff export`), with no
+  export reachable from a browser.
+- **Look:** regen's questionnaire pages.
+- **P0:** the workbook's introduction text, as regen's P0, until the
+  researcher adds consent text.
+- **Setup material drafted from the prepared metadata, then reviewed by the
+  researcher.** Participant sessions are refused until every clip is marked
+  reviewed. Drafts:
+  - the captions, from `orig_text`;
+  - A1s options, from each clip's AudioSet labels, with nested labels merged
+    as regen's staging does and each sound's family kept for the tuner;
+  - R2 options: the sounds the caption mentions, plus distractors from other
+    clips' labels;
+  - P2 objects, from the per-frame masks;
+  - practice material, from one clip outside the 12 (`c1_video_audio`).
 
 ## Model change — 2026-10-12: Dream 7B → Trida-7B (researcher's decision)
 
