@@ -43,15 +43,23 @@ CORPUS = {
     "oslo_303": ("c2_video_audio_caption", "a bird sings in the wind.", "Bird|Wind noise (microphone)|Bird"),
     "practice": ("c1_video_audio", "people talk near a bus.", "Speech|Bus"),
 }
-KOREAN = {
-    "Bus": "버스 소리",
-    "Male speech, man speaking": "남자의 말소리",
-    "Vehicle": "차량 소리",
-    "Vehicle horn, car horn, honking": "경적 소리",
-    "Bird": "새소리",
-    "Wind noise (microphone)": "바람 소리",
-    "Speech": "사람들의 말소리",
+# Each clip's sounds as the assistant drafts them from orig_text: (label, family, orig_phrase).
+SOUNDS = {
+    "kyoto_101": [("버스 소리", "things", "a bus idles"), ("남자의 말소리", "human", "a man speaks")],
+    "lima_202": [("차량이 오가는 소리", "things", "traffic"), ("경적 소리", "things", "honking horns")],
+    "oslo_303": [("새소리", "animal", "a bird sings"), ("바람 소리", "natural", "the wind")],
+    "practice": [
+        ("사람들이 이야기하는 소리", "human", "people talk"),
+        ("근처의 버스 소리", "things", "a bus"),
+    ],
 }
+
+
+def sound_options(key: str) -> list[dict[str, Any]]:
+    return [
+        {"value": f"s{number}", "label": label, "family": family, "orig_phrase": phrase}
+        for number, (label, family, phrase) in enumerate(SOUNDS[key], 1)
+    ]
 
 
 def _png(path: Path, box: tuple[int, int, int, int] | None = None, colour: str = "grey") -> None:
@@ -113,17 +121,16 @@ def drafted(root: Path) -> dict[str, Any]:
 
 
 def filled(setup: dict[str, Any]) -> dict[str, Any]:
-    """The Korean fields written, as the assistant's drafts would be."""
+    """The captions and options written from orig_text, as the assistant's drafts would be."""
     for number, clip in enumerate(setup["clips"], 1):
         clip["caption"]["text"] = f"{number}번 영상의 소리가 들린다."
-        for option in clip["options"]["A1s"]:
-            option["label"] = KOREAN[option["audioset"]]
+        clip["options"]["A1s"] = sound_options(clip["key"])
+        label, _, phrase = SOUNDS[clip["key"]][0]
         clip["options"]["R2"] = [
-            {"value": "m1", "label": "버스 소리", "mentioned": True},
+            {"value": "m1", "label": label, "mentioned": True, "orig_phrase": phrase},
             {"value": "m2", "label": "음악", "mentioned": False},
         ]
-    for option in setup["practice"]["options"]["A1s"]:
-        option["label"] = KOREAN[option["audioset"]]
+    setup["practice"]["options"]["A1s"] = sound_options("practice")
     return setup
 
 

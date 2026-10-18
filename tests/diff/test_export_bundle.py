@@ -54,6 +54,8 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     a1s = next(row for row in rows if row["item"] == "A1s")
     clip = next(c for c in finished.setup["clips"] if c["key"] == a1s["clip"])
     assert a1s["answer"] == "s1" and a1s["a1s_family"] == clip["options"]["A1s"][0]["family"]
+    assert a1s["a1s_orig_phrase"] == clip["options"]["A1s"][0]["orig_phrase"]
+    assert a1s["a1s_orig_phrase"].casefold() in clip["caption"]["orig_text"]
     r2 = next(row for row in rows if row["item"] == "R2")
     assert json.loads(r2["r2_mentioned"]) == ["m1"] and json.loads(r2["answer"]) == ["m1"]
     v1 = next(row for row in rows if row["item"] == "V1")

@@ -17,10 +17,9 @@ from diff.phase1_setup import (
     SetupError,
     approve,
     approved,
+    label_families,
     read_ontology,
     setup_problems,
-    sound_options,
-    specific_labels,
 )
 
 
@@ -28,20 +27,16 @@ def problems(setup: dict, purpose: str, root: Path) -> list[str]:
     return setup_problems(setup, purpose, root=root, instrument=sheet_instrument)
 
 
-def test_ancestors_go_as_in_regen_staging(tmp_path: Path) -> None:
+def test_every_audioset_label_is_kept_with_its_family(tmp_path: Path) -> None:
     drafted(tmp_path)
-    ids, below, _ = read_ontology(tmp_path / "ontology.json")
-    assert specific_labels(["Vehicle", "Bus", "Speech"], ids, below) == (["Bus", "Speech"], ["Vehicle"])
+    ids, roots = read_ontology(tmp_path / "ontology.json")
+    assert label_families(["Vehicle", "Bus", "Vehicle", "Speech"], ids, roots) == [
+        {"label": "Vehicle", "family": "things"},
+        {"label": "Bus", "family": "things"},
+        {"label": "Speech", "family": "human"},
+    ]
     with pytest.raises(SetupError, match="absent from the ontology"):
-        specific_labels(["Tuba"], ids, below)
-
-
-def test_a_single_remaining_sound_keeps_its_ancestor(tmp_path: Path) -> None:
-    drafted(tmp_path)
-    ids, below, roots = read_ontology(tmp_path / "ontology.json")
-    options, dropped = sound_options(["Vehicle", "Vehicle horn, car horn, honking"], ids, below, roots)
-    assert [option["audioset"] for option in options] == ["Vehicle", "Vehicle horn, car horn, honking"]
-    assert options[0]["kept_ancestor"] is True and dropped == []
+        label_families(["Tuba"], ids, roots)
 
 
 def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
@@ -50,12 +45,13 @@ def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
     first_clip = setup["clips"][0]
     assert [frame["at_ms"] for frame in first_clip["frames"]] == [1000, 3000, 5000]
     assert [item["id"] for item in first_clip["frames"][0]["objects"]] == ["road", "sky"]
-    assert [option["audioset"] for option in first_clip["options"]["A1s"]] == [
+    assert [entry["label"] for entry in first_clip["audioset_labels"]] == [
+        "Vehicle",
         "Bus",
+        "Speech",
         "Male speech, man speaking",
     ]
-    assert {option["family"] for option in first_clip["options"]["A1s"]} == {"things", "human"}
-    assert first_clip["dropped_labels"] == ["Vehicle", "Speech"]
+    assert first_clip["options"] == {"A1s": [], "R2": []}  # written from orig_text, never from labels
     assert first_clip["caption"] == {
         "text": "",
         "start_ms": 0,
@@ -63,8 +59,11 @@ def test_the_draft_holds_what_the_metadata_determines(tmp_path: Path) -> None:
         "orig_text": "a bus idles while a man speaks.",
         "provenance": DRAFTED,
     }
-    wind = setup["clips"][2]["options"]["A1s"][1]
+    wind = setup["clips"][2]["audioset_labels"][1]
     assert wind["family"] == "natural" and wind["family_ambiguous"] == ["Natural sounds", "Sounds of things"]
+    assert setup["practice"]["orig_text"] == "people talk near a bus." and setup["practice"]["options"] == {
+        "A1s": []
+    }
     assert setup["practice"]["frames"] == [{"still": "artifacts/practice.png", "at_ms": 5000}]
     assert setup["instrument_hash"] == sheet_instrument.snapshot()["hash"]
 
@@ -124,6 +123,22 @@ def test_a_changed_workbook_refuses_participant_sessions(tmp_path: Path) -> None
         (lambda s: s["clips"][0]["options"]["R2"][1].pop("mentioned"), "the answer key"),
         (lambda s: s["clips"][0]["options"]["A1s"][1].update(value="s1"), "duplicate"),
         (lambda s: s["clips"][0]["options"]["A1s"][1].update(family="vehicles"), "family must be one of"),
+        (lambda s: s["clips"][0]["options"]["A1s"][1].pop("orig_phrase"), "no orig_phrase"),
+        (
+            lambda s: s["clips"][0]["options"]["A1s"][1].update(orig_phrase="a trumpet plays"),
+            "'a trumpet plays' is not in orig_text",
+        ),
+        (
+            lambda s: s["clips"][0]["options"]["A1s"][1].update(orig_phrase="A Bus Idles"),
+            "two options quote the same words",
+        ),
+        (lambda s: s["clips"][0]["options"]["R2"][0].pop("orig_phrase"), "kyoto_101.R2 m1: no orig_phrase"),
+        (lambda s: s["clips"][0]["options"]["R2"][1].update(orig_phrase="a bus"), "a distractor quotes"),
+        (lambda s: s["practice"]["options"]["A1s"][0].update(orig_phrase="a man"), "not in orig_text"),
+        (
+            lambda s: s["practice"]["options"]["A1s"][1].update(label="버스 소리"),
+            "labels also used by the clips' options: ['버스 소리']",
+        ),
         (lambda s: s["clips"][0]["frames"].pop(), "P2 needs 3–9"),
         (
             lambda s: s["practice"]["frames"][0].update(still=s["clips"][0]["frames"][0]["still"]),

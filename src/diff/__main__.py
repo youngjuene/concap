@@ -467,6 +467,15 @@ def phase1_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_sounds(part: Any) -> None:
+    print(f"  orig_text: {part['orig_text']}")
+    labels = ", ".join(f"{entry['label']} ({entry['family']})" for entry in part["audioset_labels"])
+    print(f"  AudioSet labels (families only): {labels}")
+    for option in part["options"]["A1s"]:
+        label = option["label"] or "(empty)"
+        print(f"  A1s {option['value']}: {label} [{option.get('family')}] ← {option.get('orig_phrase')!r}")
+
+
 def _print_setup(drafted: Any) -> None:
     wording = drafted["wording"]
     print(f"[wording] {'approved' if _approved(wording) else 'NOT approved'}")
@@ -475,20 +484,14 @@ def _print_setup(drafted: Any) -> None:
         print(f"  {page}: {title['workbook']} → {title['shown']}")
     practice = drafted["practice"]
     print(f"[practice] {practice['clip']}, {'approved' if _approved(practice) else 'NOT approved'}")
-    for option in practice["options"]["A1s"]:
-        label = option["label"] or "(empty)"
-        print(f"  A1s {option['value']}: {label} [{option['family']}; {option['audioset']}]")
+    _print_sounds(practice)
     for clip in drafted["clips"]:
         state = "approved" if _approved(clip) else "NOT approved"
         print(f"[{clip['key']}] {clip['duration_ms']} ms, {len(clip['frames'])} frames, {state}")
         print(f"  caption: {clip['caption']['text'] or '(empty)'}")
-        print(f"  orig_text: {clip['caption']['orig_text']}")
-        for option in clip["options"]["A1s"]:
-            ambiguous = f"; also under {option['family_ambiguous']}" if "family_ambiguous" in option else ""
-            label = option["label"] or "(empty)"
-            print(f"  A1s {option['value']}: {label} [{option['family']}; {option['audioset']}{ambiguous}]")
+        _print_sounds({**clip, "orig_text": clip["caption"]["orig_text"]})
         for option in clip["options"]["R2"]:
-            mark = "mentioned" if option.get("mentioned") else "distractor"
+            mark = f"mentioned ← {option.get('orig_phrase')!r}" if option.get("mentioned") else "distractor"
             print(f"  R2 {option['value']}: {option['label']} [{mark}]")
 
 

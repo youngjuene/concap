@@ -53,12 +53,30 @@ stimulus bundle for it.
   researcher.** Participant sessions are refused until every clip is marked
   reviewed. Drafts:
   - the captions, from `orig_text`;
-  - A1s options, from each clip's AudioSet labels, with nested labels merged
-    as regen's staging does and each sound's family kept for the tuner;
-  - R2 options: the sounds the caption mentions, plus distractors from other
-    clips' labels;
+  - A1s options and R2 options, from `orig_text` (corrected below);
   - P2 objects, from the per-frame masks;
   - practice material, from one clip outside the 12 (`c1_video_audio`).
+
+**Options come from `orig_text` (researcher, 2026-10-18, correcting the
+draft):** phase 1 collects the responses to the prepared questionnaire about
+the `orig_text` caption, so its options keep `orig_text`.
+- The first draft built A1s options from each clip's AudioSet labels and
+  dropped any label that is an ancestor of another (regen media staging's
+  rule). That is not a study decision. It let the options drift from the
+  caption. For example, `amsterdam_057` offered "트럼펫 소리", which
+  `orig_text` never names, and `bangkok_316` lost the traffic it names.
+- **A1s now has one option per sound `orig_text` names, in its order.**
+  Nothing is dropped and nothing is added from the labels. Each option quotes
+  the words it renders (`orig_phrase`), and the setup check refuses a phrase
+  that is not in `orig_text`.
+- **R2:** the mentioned options are the same sounds with the same phrases,
+  and the distractors may quote none.
+- **AudioSet labels** are kept, every one, only as the reference for each
+  option's family.
+- **Practice:** the options come from the practice clip's `orig_text`. Their
+  labels differ from the clips' options, as regen's `QUESTIONNAIRE.md`
+  requires.
+- **Export:** `phase1.csv` carries the chosen sound's `orig_phrase`.
 
 **Wording (researcher, 2026-10-18):** minimal edits for review.
 - The workbook's P0 told participants about a second viewing and an
@@ -69,19 +87,17 @@ stimulus bundle for it.
 ### Built, 2026-10-18 (commits `cb70787` … `060cb23`)
 
 - **`phase1_setup`** drafts the setup: media, frames, masks, `orig_text`,
-  AudioSet labels and families, and the wording edits.
-  - A1s options drop a label's AudioSet ancestors (regen staging's rule).
-    Where that would leave one sound, the ancestor is kept and marked
-    (`amsterdam_181`: vehicle and horn).
+  every AudioSet label with its family, and the wording edits.
   - `phase1 approve` binds an approval to a hash of each part's content.
-  - The Korean fields were drafted by the assistant into
+  - The captions and options were drafted by the assistant into
     `artifacts/diff/phase1/setup-draft.json`, marked
     `assistant-draft-unreviewed`:
     - 12 captions from `orig_text`, 27–61 characters;
-    - A1s labels;
-    - R2 options: 2–3 mentioned sounds and 1–2 distractors absent from both
-      caption and audio;
-    - practice options from `c1` `amsterdam_006`.
+    - A1s: every sound `orig_text` names, 2–3 per clip, each with its
+      `orig_phrase` and family;
+    - R2: those sounds as mentioned, plus 1–2 distractors absent from both
+      `orig_text` and the clip's labels;
+    - practice options from `c1` `amsterdam_006`'s `orig_text`.
 - **`session_store`** keeps sessions in SQLite, keyed by participant ID, with
   regen's revision and idempotency-key contract. Sessions survive restarts.
 - **`phase1_flow`** implements the pages:
@@ -103,7 +119,8 @@ stimulus bundle for it.
   gone.
 - **`export_bundle`** (`python -m diff export`) writes:
   - `participants.jsonl`;
-  - `phase1.csv`, with clip keys, families and the R2 answer key;
+  - `phase1.csv`, with clip keys, families, the chosen sound's
+    `orig_phrase` and the R2 answer key;
   - `post_watch.csv`;
   - a manifest with file hashes.
 

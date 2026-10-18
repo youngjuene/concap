@@ -171,14 +171,25 @@ uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.j
 
 **What `draft-setup` fills in:**
 - media, frames and masks, from `data/live/regen-media`;
-- `orig_text` and AudioSet labels, from `data/corpus/tidy_data.csv`;
-- the families, using the AudioSet ontology;
+- `orig_text` and every AudioSet label, from `data/corpus/tidy_data.csv`;
+- each label's family, using the AudioSet ontology, as the reference for the
+  options' families;
 - the minimal wording edits: two P0 sentences deleted, "1차"/"2차" dropped
   from the titles.
 
-The Korean captions, A1s labels, R2 options and practice options are written
-into the draft by hand and marked `assistant-draft-unreviewed`. The setup file
-holds clip keys, families and the R2 answer key, so it stays on this machine.
+The Korean captions and every option are written into the draft by hand and
+marked `assistant-draft-unreviewed`. The options keep `orig_text`:
+- **A1s:** one option per sound `orig_text` names. Each option has a Korean
+  label, a family, and `orig_phrase`, the words of `orig_text` it renders.
+- **R2:** the same sounds marked `mentioned` with their phrases, plus
+  distractors that quote nothing.
+- **Practice:** its options come from the practice clip's `orig_text`, with
+  labels the clips do not use.
+
+`show` and `approve` refuse a phrase that is not in `orig_text`.
+
+The setup file holds clip keys, `orig_text`, families and the R2 answer key,
+so it stays on this machine.
 
 **Approval:**
 - `show` prints each part, with every problem for participant sessions.
@@ -286,8 +297,8 @@ It reads the store (`--store`, default the participant store) and every
 `--log-dir`, and writes into a new, empty directory:
 - `participants.jsonl`: each session's full record;
 - `phase1.csv`: one row per participant × clip × item, practice excluded. It
-  carries the clip key, the A1s family and label, the P2 matched object and
-  the R2 answer key;
+  carries the clip key, the A1s label, family and `orig_phrase`, the P2
+  matched object and the R2 answer key;
 - `post_watch.csv`;
 - `manifest.json`, with file hashes.
 

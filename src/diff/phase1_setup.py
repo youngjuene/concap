@@ -8,21 +8,24 @@ rendering of the corpus ``orig_text`` as its caption, because the burnt-in
 원문 contradicts the audio on four clips.
 
 The file (``diff.phase1-setup/v1``) is server-side only: it holds the real clip
-keys, each A1s option's sound family and the R2 answer key (``mentioned``),
-none of which may reach the participant's browser.
+keys, ``orig_text``, each A1s option's sound family and the R2 answer key
+(``mentioned``), none of which may reach the participant's browser.
 
 :func:`draft_setup` fills in what the prepared metadata determines:
 - media, durations and frames, with each frame's per-object masks;
 - ``orig_text``;
-- each clip's AudioSet labels, with ancestors dropped by the rule
-  ``scripts/stage_regen_media.py`` uses;
-- each label's family;
+- each clip's AudioSet labels, every one kept, with its family: a reference
+  for the options' families, never a source of options;
 - the minimal wording edits the researcher asked for: the P0 sentences about a
   second viewing and an interview are deleted, and "1차"/"2차" is dropped from
   the titles.
 
-The Korean captions, option labels and R2 options are then written by hand
-into the draft, marked :data:`DRAFTED`. Each part is approved by the
+The Korean captions and options are then written by hand into the draft,
+marked :data:`DRAFTED`. The questionnaire asks about the ``orig_text`` caption
+(researcher, 2026-10-18), so every A1s option and every mentioned R2 option
+renders a sound ``orig_text`` names and quotes those words (``orig_phrase``):
+nothing ``orig_text`` names is dropped and no sound is added from the labels.
+R2 distractors name sounds ``orig_text`` does not. Each part is approved by the
 researcher (:func:`approve`) against a hash of its content, so any later edit
 voids the approval. :func:`setup_problems` refuses a participant setup until
 every part is approved.
@@ -57,6 +60,10 @@ FAMILY_OF_ROOT: Final[dict[str, str]] = {
 }
 # A label under two top-level categories takes the first of these, flagged for review.
 FAMILY_ORDER: Final = ("human", "animal", "music", "natural", "things", "other")
+OPTION_RULE: Final = (
+    "each A1s option and each mentioned R2 option renders a sound orig_text names and quotes those "
+    "words (orig_phrase); R2 distractors name none; AudioSet labels only inform the families"
+)
 # Regen's document rule for a segment's annotated frames (dpo.regen.document).
 FRAMES_MIN: Final = 3
 FRAMES_MAX: Final = 9
@@ -81,8 +88,8 @@ class SetupError(ValueError):
     """Material the drafter cannot build from, named where the researcher can act on it."""
 
 
-def read_ontology(path: Path) -> tuple[dict[str, str], dict[str, set[str]], dict[str, set[str]]]:
-    """Label → AudioSet id, each id's descendants, and each id's top-level category names."""
+def read_ontology(path: Path) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """Label → AudioSet id, and each id's top-level category names."""
     entries = json.loads(path.read_text(encoding="utf-8"))
     children = {entry["id"]: list(entry["child_ids"]) for entry in entries}
     ids = {entry["name"]: entry["id"] for entry in entries}
@@ -92,43 +99,13 @@ def read_ontology(path: Path) -> tuple[dict[str, str], dict[str, set[str]], dict
         for child in below:
             parents.setdefault(child, set()).add(node)
 
-    def descendants(node: str, seen: set[str]) -> set[str]:
-        for child in children.get(node, []):
-            if child not in seen:
-                seen.add(child)
-                descendants(child, seen)
-        return seen
-
     def roots(node: str) -> set[str]:
         above = parents.get(node)
         if not above:
             return {names[node]}
         return set().union(*(roots(parent) for parent in above))
 
-    return (
-        ids,
-        {node: descendants(node, set()) for node in children},
-        {node: roots(node) for node in children},
-    )
-
-
-def specific_labels(
-    labels: Iterable[str], ids: Mapping[str, str], descendants: Mapping[str, set[str]]
-) -> tuple[list[str], list[str]]:
-    """Distinct labels with any ancestor of another label dropped (regen staging's rule)."""
-    distinct: list[str] = []
-    for label in labels:
-        if label and label not in distinct:
-            distinct.append(label)
-    unknown = [label for label in distinct if label not in ids]
-    if unknown:
-        raise SetupError(f"labels absent from the ontology: {unknown}")
-    dropped = [
-        ancestor
-        for ancestor in distinct
-        if any(other != ancestor and ids[other] in descendants[ids[ancestor]] for other in distinct)
-    ]
-    return [label for label in distinct if label not in dropped], dropped
+    return ids, {node: roots(node) for node in children}
 
 
 def family_of(label: str, ids: Mapping[str, str], roots: Mapping[str, set[str]]) -> tuple[str, list[str]]:
@@ -217,32 +194,22 @@ def _frames(clip_dir: Path, fps: float, root: Path) -> list[dict[str, Any]]:
     return frames
 
 
-def sound_options(
-    labels: Sequence[str],
-    ids: Mapping[str, str],
-    descendants: Mapping[str, set[str]],
-    roots: Mapping[str, set[str]],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """A1s options from AudioSet labels: opaque values, family kept, Korean label left to write.
-
-    Ancestors are dropped as regen's staging does, unless that leaves fewer than
-    two sounds: a single option is no choice, so they are then kept and marked.
-    """
-    kept, dropped = specific_labels(labels, ids, descendants)
-    restored = []
-    if len(kept) < 2 and dropped:
-        restored, dropped = dropped, []
-        kept = [label for label in dict.fromkeys(labels) if label]
-    options = []
-    for number, label in enumerate(kept, 1):
+def label_families(
+    labels: Iterable[str], ids: Mapping[str, str], roots: Mapping[str, set[str]]
+) -> list[dict[str, Any]]:
+    """Each distinct AudioSet label with its family, every label kept: the reviewer's reference."""
+    distinct = [label for label in dict.fromkeys(labels) if label]
+    unknown = [label for label in distinct if label not in ids]
+    if unknown:
+        raise SetupError(f"labels absent from the ontology: {unknown}")
+    entries = []
+    for label in distinct:
         family, under = family_of(label, ids, roots)
-        option: dict[str, Any] = {"value": f"s{number}", "label": "", "family": family, "audioset": label}
+        entry: dict[str, Any] = {"label": label, "family": family}
         if len(under) > 1:
-            option["family_ambiguous"] = under
-        if label in restored:
-            option["kept_ancestor"] = True
-        options.append(option)
-    return options, dropped
+            entry["family_ambiguous"] = under
+        entries.append(entry)
+    return entries
 
 
 def draft_wording(page_spec: Callable[[str], Mapping[str, Any]]) -> dict[str, Any]:
@@ -281,8 +248,8 @@ def draft_setup(
     probe: Probe = probe_video,
     extract: Extract = extract_frame,
 ) -> dict[str, Any]:
-    """Every part the prepared metadata determines; Korean text fields are left empty to write."""
-    ids, descendants, roots = read_ontology(ontology)
+    """Every part the prepared metadata determines; the captions and options are left to write."""
+    ids, roots = read_ontology(ontology)
     shown = corpus_clips(corpus, "c2_video_audio_caption")
     practice_rows = corpus_clips(corpus, "c1_video_audio")
     if practice_clip not in practice_rows:
@@ -297,7 +264,6 @@ def draft_setup(
         if not video.exists():
             raise SetupError(f"{key}: no staged media at {clip_dir}")
         duration_ms, fps = probe(video)
-        options, dropped = sound_options(shown[key]["labels"], ids, descendants, roots)
         clips.append(
             {
                 "key": key,
@@ -311,13 +277,12 @@ def draft_setup(
                     "orig_text": shown[key]["orig_text"],
                     "provenance": DRAFTED,
                 },
-                "options": {"A1s": options, "R2": []},
-                "dropped_labels": dropped,
+                "audioset_labels": label_families(shown[key]["labels"], ids, roots),
+                "options": {"A1s": [], "R2": []},
                 "review": None,
             }
         )
     extract(practice_video, PRACTICE_AT_MS, practice_still)
-    practice_options, _ = sound_options(practice_rows[practice_clip]["labels"], ids, descendants, roots)
     return {
         "schema": SETUP_SCHEMA,
         "instrument_hash": instrument.snapshot()["hash"],
@@ -327,7 +292,9 @@ def draft_setup(
             "clip": practice_clip,
             "video": str(practice_video.relative_to(root)),
             "frames": [{"still": str(practice_still.relative_to(root)), "at_ms": PRACTICE_AT_MS}],
-            "options": {"A1s": practice_options},
+            "orig_text": practice_rows[practice_clip]["orig_text"],
+            "audioset_labels": label_families(practice_rows[practice_clip]["labels"], ids, roots),
+            "options": {"A1s": []},
             "provenance": DRAFTED,
             "review": None,
         },
@@ -336,7 +303,7 @@ def draft_setup(
             "media_root": str(media_root.relative_to(root)),
             "corpus": str(corpus.relative_to(root)),
             "ontology": str(ontology),
-            "label_rule": "an AudioSet ancestor of another label of the clip is dropped (stage_regen_media)",
+            "option_rule": OPTION_RULE,
         },
     }
 
@@ -405,6 +372,27 @@ def _option_problems(
     return problems
 
 
+def _phrase_problems(option: Mapping[str, Any], orig_text: str, where: str) -> list[str]:
+    """An option must quote the words of ``orig_text`` it renders."""
+    phrase = option.get("orig_phrase")
+    if not (isinstance(phrase, str) and phrase.strip()):
+        return [f"{where}: no orig_phrase (the words of orig_text this option renders)"]
+    if phrase.casefold() not in orig_text.casefold():
+        return [f"{where}: orig_phrase {phrase!r} is not in orig_text"]
+    return []
+
+
+def _sound_problems(options: Sequence[Mapping[str, Any]], orig_text: str, where: str) -> list[str]:
+    """A1s options: each renders its own words of ``orig_text``."""
+    problems = []
+    for option in options:
+        problems += _phrase_problems(option, orig_text, f"{where} {option.get('value')}")
+    phrases = [str(option.get("orig_phrase", "")).casefold() for option in options]
+    if len(set(phrases)) != len(phrases):
+        problems.append(f"{where}: two options quote the same words of orig_text")
+    return problems
+
+
 def _caption_problems(clip: Mapping[str, Any], where: str) -> list[str]:
     caption = clip["caption"]
     text = str(caption.get("text", ""))
@@ -441,8 +429,10 @@ def _clip_problems(clip: Mapping[str, Any], root: Path, page_spec: Callable[...,
         for item in frame.get("objects", []):
             problems += _file_problems(root, item["mask"], f"{at} {item.get('id')}")
     problems += _caption_problems(clip, where)
+    orig_text = str(clip["caption"].get("orig_text", ""))
     sounds = clip["options"]["A1s"]
     problems += _option_problems("P3", "A1s", sounds, page_spec, f"{where}.A1s")
+    problems += _sound_problems(sounds, orig_text, f"{where}.A1s")
     if len(sounds) < 2:
         problems.append(f"{where}.A1s: fewer than two sounds to choose from")
     for option in sounds:
@@ -457,11 +447,17 @@ def _clip_problems(clip: Mapping[str, Any], root: Path, page_spec: Callable[...,
         problems.append(f"{where}.R2: every option needs mentioned true or false (the answer key)")
     elif not (any(marks) and not all(marks)):
         problems.append(f"{where}.R2: needs at least one mentioned sound and one distractor")
+    for option in recall:
+        at = f"{where}.R2 {option.get('value')}"
+        if option.get("mentioned") is True:
+            problems += _phrase_problems(option, orig_text, at)
+        elif option.get("orig_phrase"):
+            problems.append(f"{at}: a distractor quotes orig_text")
     return problems
 
 
 def _practice_problems(
-    practice: Mapping[str, Any], formal: set[str], root: Path, page_spec: Any
+    practice: Mapping[str, Any], formal: set[str], formal_labels: set[str], root: Path, page_spec: Any
 ) -> list[str]:
     problems = []
     frames = practice.get("frames", [])
@@ -471,7 +467,13 @@ def _practice_problems(
         problems += _file_problems(root, frame["still"], "practice")
         if frame["still"] in formal:
             problems.append("practice: the frame must not be one of the clips' frames")
-    problems += _option_problems("P3", "A1s", practice["options"]["A1s"], page_spec, "practice.A1s")
+    sounds = practice["options"]["A1s"]
+    problems += _option_problems("P3", "A1s", sounds, page_spec, "practice.A1s")
+    problems += _sound_problems(sounds, str(practice.get("orig_text", "")), "practice.A1s")
+    # Regen's QUESTIONNAIRE.md: practice sound labels differ from the formal materials.
+    shared = sorted({str(option.get("label")) for option in sounds} & formal_labels)
+    if shared:
+        problems.append(f"practice.A1s: labels also used by the clips' options: {shared}")
     return problems
 
 
@@ -507,7 +509,13 @@ def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instru
     for clip in clips:
         problems += _clip_problems(clip, root, instrument.page_spec)
     formal = {frame["still"] for clip in clips for frame in clip.get("frames", [])}
-    problems += _practice_problems(setup["practice"], formal, root, instrument.page_spec)
+    labels = {
+        str(option.get("label"))
+        for clip in clips
+        for options in clip["options"].values()
+        for option in options
+    }
+    problems += _practice_problems(setup["practice"], formal, labels, root, instrument.page_spec)
     if purpose == "participant":
         if setup.get("instrument_hash") != instrument.snapshot()["hash"]:
             problems.append("the workbook instrument changed since this setup was drafted")

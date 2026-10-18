@@ -12,8 +12,8 @@ Files written to ``--out``:
   - the store's events;
   - the live event and attempt logs.
 - ``phase1.csv``: one row per participant × clip × item, practice excluded.
-  It adds the A1s family and label, the P2 matched object and the R2 answer
-  key.
+  It adds the A1s label, family and the ``orig_text`` words the chosen sound
+  renders, the P2 matched object and the R2 answer key.
 - ``post_watch.csv``: one row per participant × post-watch item.
 - ``manifest.json``: counts, the setup's hash and each file's SHA-256.
 """
@@ -43,6 +43,7 @@ PHASE1_COLUMNS: Final = (
     "answer",
     "a1s_label",
     "a1s_family",
+    "a1s_orig_phrase",
     "p2_object",
     "r2_mentioned",
     "submitted_at",
@@ -98,12 +99,17 @@ def phase1_rows(
                 "answer": _cell(answer),
                 "a1s_label": "",
                 "a1s_family": "",
+                "a1s_orig_phrase": "",
                 "p2_object": "",
                 "r2_mentioned": "",
                 "submitted_at": record["submitted_at"],
             }
             if item == "A1s" and answer in sounds:
-                row.update(a1s_label=sounds[answer]["label"], a1s_family=sounds[answer]["family"])
+                row.update(
+                    a1s_label=sounds[answer]["label"],
+                    a1s_family=sounds[answer]["family"],
+                    a1s_orig_phrase=sounds[answer].get("orig_phrase", ""),
+                )
             if item == "V1":
                 row["p2_object"] = _cell(
                     [match.get("object_id") or "unclassified" for match in record.get("matches", [])]
