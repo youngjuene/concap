@@ -15,6 +15,7 @@ from phase1_fixtures import DURATION_MS, approved_setup
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.playback as regen_playback
 from diff.phase1_flow import (
+    HANDOFF_TEXT,
     PREPARING,
     STEP_A,
     STEP_B,
@@ -216,6 +217,14 @@ def test_every_page_says_where_it_sits_in_the_session(flow: Phase1) -> None:
     event = flow.apply(state, "interlude-complete", {"page": "interlude"}, now)
     assert (event["phase"], event["analysis_excluded"], event["clip_index"]) == (0, True, None)
     assert where() == ("P6", "B", {"segment": 3, "fraction": 0.0})
+
+    state["page"] = "handoff"
+    briefing = flow.present(state, lambda name: name, (5, 5, 5))
+    assert briefing["progress"] == {"segment": 4, "fraction": 0.0}
+    assert briefing["title"] == "이제 긴 영상 3편을 봅니다"
+    assert briefing["instruction"] == f"한 편은 약 5분입니다. {HANDOFF_TEXT}"
+    assert flow.present(state, lambda name: name, (4, 6))["instruction"].startswith("한 편은 약 4~6분입니다.")
+    assert flow.present(state, lambda name: name)["title"] == "이제 긴 영상을 봅니다"
 
 
 def test_items_and_rules_are_regen_s(flow: Phase1) -> None:

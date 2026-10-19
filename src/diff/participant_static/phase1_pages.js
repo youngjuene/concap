@@ -15,9 +15,10 @@
  *   participants share the experimenter's tab;
  * - the UI review of 2026-10-19 ("Diff Flow Improved"): a progress header for
  *   the whole session, an eyebrow naming the viewing (첫 번째 / 두 번째 시청)
- *   with the clip count repeated as dots, the stage-B interstitial, a waiting
- *   card while a second caption is written, and items in cards of three with
- *   the missing-item message in the sticky bar. */
+ *   with the clip count repeated as dots, the stage-B interstitial, the
+ *   handoff as phase 2's briefing, a waiting card while a second caption is
+ *   written, and items in cards of three with the missing-item message in the
+ *   sticky bar. */
 const API = "api/p1";
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const node = (tag, text, className) => {
@@ -132,6 +133,7 @@ const clipPage = detail => /^P([1-9]|1[01])$/.test(detail.page) && Number.isInte
 function eyebrow(detail) {
   if (detail.practice) return "연습 · 응답은 분석에서 제외됩니다";
   if (detail.kind === "interlude") return "1스테이지 · 두 번째 시청";
+  if (detail.kind === "handoff") return "1스테이지 완료 · 2스테이지 안내";
   if (!clipPage(detail)) return "소리 자막 연구";
   return `1스테이지 · ${VIEWING[detail.step]} · 영상 ${detail.clip_index + 1} / ${detail.clip_count}`;
 }
@@ -466,7 +468,47 @@ async function renderSkipped(detail) {
   try { await action("skip-second", {}, detail); await refresh(); } catch (error) { await recover(error, region); }
 }
 
+// A still picture of a live slider at its middle stop, for the briefing.
+function stepperFigure() {
+  const figure = node("div", undefined, "figure stepper mini");
+  figure.setAttribute("aria-hidden", "true");
+  const track = node("div", undefined, "stepper-track");
+  track.style.setProperty("--stop", "1");
+  track.append(node("span", undefined, "stepper-rail"), node("span", undefined, "stepper-fill"));
+  [0, 1, 2].forEach(stop => {
+    const dot = node("span", undefined, stop <= 1 ? "stepper-stop on" : "stepper-stop");
+    dot.style.left = `${stop * 50}%`;
+    track.append(dot);
+  });
+  track.append(node("span", undefined, "stepper-thumb"));
+  const labels = node("div", undefined, "stepper-labels");
+  labels.append(node("span", "없이"), node("span", "조금"), node("span", "많이"));
+  figure.append(track, labels);
+  return figure;
+}
+
+// Cues in a row: a move during one cue shows from a later one.
+function cueFigure() {
+  const figure = node("div", undefined, "figure");
+  figure.setAttribute("aria-hidden", "true");
+  const cues = node("div", undefined, "figure-cues"), marks = node("div", undefined, "figure-marks");
+  cues.append(node("span"), node("span", undefined, "moved"), node("span", undefined, "applied"), node("span", undefined, "applied"));
+  marks.append(node("span"), node("span", "조절"), node("span", "반영", "applied"), node("span"));
+  figure.append(cues, marks);
+  return figure;
+}
+
 function renderHandoff(detail) {
+  const briefing = node("ol", undefined, "briefing");
+  const point = (number, heading, extra) => {
+    const entry = node("li");
+    entry.append(node("span", String(number), "num"), node("strong", heading), extra);
+    briefing.append(entry);
+  };
+  point(1, "영상 아래 두 조절 막대로 자막의 표현을 바꿀 수 있습니다", stepperFigure());
+  point(2, "바꾼 설정은 몇 초 뒤, 다음 자막부터 반영됩니다", cueFigure());
+  point(3, "영상은 멈추지 않고 이어집니다", node("p", "다른 창으로 이동하면 일시 정지됩니다."));
+  shell.append(briefing);
   const next = button("2스테이지 시작", async () => {
     next.disabled = true;
     feedback("다음 단계를 준비하고 있습니다…");

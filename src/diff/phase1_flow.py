@@ -13,7 +13,7 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   natural break, and it says nothing about the captions differing (P0
   already does, and repeating it would prime D1). Every page carries
   ``step`` and ``progress`` (a segment of the whole session and how far
-  into it).
+  into it), and the handoff briefs phase 2.
 - **Clip order:** random per participant, from a seed recorded in the state.
 - **Captions:** P1 shows the clip's prepared caption raw. P6 shows the caption
   Trida wrote from it and the participant's first-step answers
@@ -86,7 +86,8 @@ INTERLUDE_TEXT: Final = (
 )
 # The interview's length is P0's ("2~3분 정도 간단한 인터뷰").
 INTERVIEW_STEP: Final = {"label": "짧은 인터뷰", "time": "2~3분"}
-HANDOFF_TITLE: Final = "1스테이지 완료"
+HANDOFF_TITLE: Final = "이제 긴 영상 {count}편을 봅니다"
+HANDOFF_TEXT: Final = "이번에는 영상을 보는 동안 자막을 직접 조절할 수 있습니다."
 # The session's segments, in order (the browser holds their labels):
 # intro, practice, first viewings, second viewings, long videos, interview.
 SEGMENT: Final = {"P0": 0, "practice": 1, "A": 2, "B": 3, INTERLUDE: 3, "handoff": 4}
@@ -153,6 +154,15 @@ def record_playback(state: dict[str, Any], data: Mapping[str, Any], duration: fl
 
 def clip_order(keys: Sequence[str], seed: int) -> list[str]:
     return random.Random(seed).sample(list(keys), len(keys))
+
+
+def handoff_text(minutes: Sequence[int]) -> str:
+    """The briefing's lead: how long each long video is (from the videos served), then what changes."""
+    if not minutes:
+        return HANDOFF_TEXT
+    low, high = min(minutes), max(minutes)
+    length = f"약 {low}분" if low == high else f"약 {low}~{high}분"
+    return f"한 편은 {length}입니다. {HANDOFF_TEXT}"
 
 
 class Phase1:
@@ -270,7 +280,7 @@ class Phase1:
         """The page payload for the browser: no clip key, family or answer key.
 
         ``live_minutes`` gives each long video's length in whole minutes, for the
-        interstitial's remaining steps.
+        interstitial's remaining steps and the handoff's briefing.
         """
         if state.get("stage") != "phase1":
             raise Conflict("phase 1 is complete")
@@ -311,7 +321,8 @@ class Phase1:
                 ],
             )
         elif page == "handoff":
-            result.update(kind="handoff", title=HANDOFF_TITLE, instruction="")
+            title = HANDOFF_TITLE.format(count=len(live_minutes)) if live_minutes else "이제 긴 영상을 봅니다"
+            result.update(kind="handoff", title=title, instruction=handoff_text(live_minutes))
         else:
             options = {} if page == "P0" else self.options(state)
             spec = self.instrument.page_spec(page, options=options, session_key=state["session_id"])

@@ -17,7 +17,7 @@ from diff.live_generation import LiveService
 from diff.live_server import LivePool, LiveVideo, rating_items
 from diff.model_profile import TRIDA_7B
 from diff.participant_server import COOKIE, build_participant_app
-from diff.phase1_flow import Phase1
+from diff.phase1_flow import HANDOFF_TEXT, Phase1
 from diff.phase1_tweak import check_record, tweak_job_for
 from diff.session_store import SessionStore
 
@@ -139,7 +139,8 @@ def through_stage_b(lab: Lab, client: TestClient, detail: dict[str, Any]) -> dic
     for _ in CLIPS:
         assert detail["kind"] == "view", detail["kind"]
         detail = clip_step(lab, client, detail, "V2", ("P8", "P9", "P10", "P11"))
-    assert detail["page"] == "handoff"
+    assert detail["page"] == "handoff" and detail["title"] == "이제 긴 영상 1편을 봅니다"
+    assert detail["instruction"] == f"한 편은 약 1분입니다. {HANDOFF_TEXT}"
     return detail
 
 

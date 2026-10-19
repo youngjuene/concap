@@ -239,6 +239,20 @@ p.lede {
 .remaining li:first-child .num { color: var(--accent); }
 .remaining li:first-child .time { font-weight: 400; }
 
+/* The handoff's phase-2 briefing. */
+.briefing { list-style: none; margin-top: 26px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.briefing li { background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.briefing .num { font: 600 12px var(--mono); color: var(--accent); }
+.briefing strong { font-size: 16px; font-weight: 600; line-height: 1.45; word-break: keep-all; }
+.briefing p { font-size: 14px; line-height: 1.6; color: var(--body-ink); }
+.briefing .figure { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.figure-cues, .figure-marks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+.figure-cues span { position: relative; height: 22px; border-radius: 5px; background: var(--muted-fill); border: 1px solid var(--hairline); }
+.figure-cues .moved::after { content: ""; position: absolute; left: 55%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
+.figure-cues .applied { background: var(--accent-wash); border: 2px solid var(--accent); }
+.figure-marks { font-size: 11.5px; color: var(--dim); text-align: center; }
+.figure-marks .applied { color: var(--accent); }
+
 /* Waiting for a second caption: a quiet indeterminate bar, still under reduced motion. */
 .waiting { max-width: 560px; margin-top: 26px; padding: 24px 22px; display: flex; flex-direction: column; gap: 14px; }
 .waiting .message { font-size: 16.5px; }
@@ -293,6 +307,7 @@ button.hold.holding::after { transform: scaleX(1); transition: transform 1s line
 .stepper-fill { width: calc(var(--stop, 0) * 50%); background: var(--accent); }
 .stepper-stop { position: absolute; top: 10px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--panel); border: 2px solid var(--rule); }
 .stepper-stop.on { background: var(--accent); border-color: var(--accent); }
+.stepper-thumb { position: absolute; top: 2px; left: calc(var(--stop, 0) * 50%); width: 28px; height: 28px; margin-left: -14px; border-radius: 50%; background: var(--panel); border: 3px solid var(--accent); box-shadow: 0 1px 4px rgb(0 0 0 / .18); }
 .stepper input { position: absolute; left: -14px; top: 0; width: calc(100% + 28px); height: 32px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
 .stepper input:focus-visible { outline: none; }
 .stepper input::-webkit-slider-runnable-track { height: 32px; background: transparent; border: 0; }
@@ -306,6 +321,12 @@ button.hold.holding::after { transform: scaleX(1); transition: transform 1s line
 .stepper-labels span:nth-child(2) { text-align: center; }
 .stepper-labels span:nth-child(3) { text-align: right; }
 .stepper-labels .on { color: var(--ink); font-weight: 600; }
+.stepper.mini .stepper-track { height: 22px; margin: 0 9px; }
+.stepper.mini .stepper-rail, .stepper.mini .stepper-fill { top: 9px; }
+.stepper.mini .stepper-stop { top: 6px; width: 10px; height: 10px; margin-left: -5px; }
+.stepper.mini .stepper-thumb { top: 1px; width: 20px; height: 20px; margin-left: -10px; }
+.stepper.mini .stepper-labels { font-size: 12px; }
+.stepper.mini .stepper-labels span { cursor: default; }
 .watch-chip { display: flex; justify-content: center; min-height: 38px; }
 .chip { display: inline-flex; align-items: center; gap: 10px; min-height: 38px; font-size: 14px; color: var(--dim); }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -318,6 +339,7 @@ button.hold.holding::after { transform: scaleX(1); transition: transform 1s line
 .chip[data-state="waiting"] { color: var(--body-ink); }
 .watch .sheet-paused { z-index: 5; border-radius: var(--radius); }
 @media (max-width: 620px) {
+  .briefing { grid-template-columns: 1fr; }
   .steppers { grid-template-columns: 1fr; gap: 24px; padding: 4px 0 0; }
   .watch { padding: 16px 12px 24px; }
 }

@@ -144,7 +144,7 @@ def build_participant_app(
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
     key = secret if secret is not None else secrets.token_bytes(32)
-    # Each long video's length in whole minutes, for phase 1's interstitial.
+    # Each long video's length in whole minutes, for phase 1's interstitial and briefing.
     live_minutes = tuple(max(1, round(video.stream.duration_ms / 60000)) for video in videos)
     live_sessions: dict[str, LiveSession] = {}
     lock = threading.Lock()
