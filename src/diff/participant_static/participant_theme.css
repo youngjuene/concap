@@ -228,23 +228,12 @@ p.lede {
 .clip-dots .current { background: var(--panel); box-shadow: inset 0 0 0 2px var(--accent); }
 
 .card { margin-top: 28px; background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 20px 22px; }
-.card-title { display: block; font: 11px/1.4 var(--mono); color: var(--dim); }
-
-/* The stage-B interstitial's remaining steps. */
-.remaining { list-style: none; display: grid; gap: 10px; margin-top: 14px; font-size: 15px; }
-.remaining li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 14px; align-items: baseline; color: var(--body-ink); }
-.remaining .num { font: 600 12px var(--mono); color: var(--dim); }
-.remaining .time { font-size: 13px; color: var(--dim); }
-.remaining li:first-child { color: var(--ink); font-weight: 600; }
-.remaining li:first-child .num { color: var(--accent); }
-.remaining li:first-child .time { font-weight: 400; }
 
 /* The handoff's phase-2 briefing. */
 .briefing { list-style: none; margin-top: 26px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .briefing li { background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .briefing .num { font: 600 12px var(--mono); color: var(--accent); }
 .briefing strong { font-size: 16px; font-weight: 600; line-height: 1.45; word-break: keep-all; }
-.briefing p { font-size: 14px; line-height: 1.6; color: var(--body-ink); }
 .briefing .figure { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 .figure-cues, .figure-marks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
 .figure-cues span { position: relative; height: 22px; border-radius: 5px; background: var(--muted-fill); border: 1px solid var(--hairline); }

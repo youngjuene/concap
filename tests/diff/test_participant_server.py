@@ -108,14 +108,10 @@ def through_stage_a(lab: Lab, client: TestClient) -> dict[str, Any]:
     detail = lab.act(client, detail, "practice-complete", answers=practice).json()
     for _ in CLIPS:
         detail = clip_step(lab, client, detail, "V1", ("P3", "P4", "P5"))
-    # The stage-B interstitial, with the long videos' count and length from the videos served.
+    # The stage-B interstitial, before the clip count restarts at 1.
     assert (detail["page"], detail["kind"], detail["step"]) == ("interlude", "interlude", "B")
     assert detail["progress"] == {"segment": 3, "fraction": 0.0}
-    assert detail["remaining"] == [
-        {"label": f"두 번째 시청 · 영상 {len(CLIPS)}편", "time": None},
-        {"label": "긴 영상 1편 · 자막 조절", "time": "약 1분"},
-        {"label": "짧은 인터뷰", "time": "2~3분"},
-    ]
+    assert detail["instruction"] == f"앞에서 본 영상 {len(CLIPS)}편을 한 번 더 봅니다."
     detail = lab.act(client, detail, "interlude-complete").json()
     assert (detail["page"], detail["clip_index"]) == ("P6", 0)
     assert detail["progress"] == {"segment": 3, "fraction": 0.0}
@@ -140,7 +136,7 @@ def through_stage_b(lab: Lab, client: TestClient, detail: dict[str, Any]) -> dic
         assert detail["kind"] == "view", detail["kind"]
         detail = clip_step(lab, client, detail, "V2", ("P8", "P9", "P10", "P11"))
     assert detail["page"] == "handoff" and detail["title"] == "이제 긴 영상 1편을 봅니다"
-    assert detail["instruction"] == f"한 편은 약 1분입니다. {HANDOFF_TEXT}"
+    assert detail["instruction"] == f"한 편은 약 1분이며, {HANDOFF_TEXT}"
     return detail
 
 

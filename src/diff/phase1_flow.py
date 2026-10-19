@@ -79,15 +79,11 @@ PRACTICE_TEXTS: Final = {
     "practice_visual": "연습 이미지에서 한 곳을 선택해 주세요.",
 }
 INTERLUDE: Final = "interlude"
-INTERLUDE_TITLE: Final = "첫 번째 시청을 모두 마쳤습니다"
-INTERLUDE_TEXT: Final = (
-    "이제 앞에서 본 영상 {count}편을 한 번 더 봅니다. 영상마다 시청이 끝나면 질문에 답해 주세요. "
-    "첫 번째와 같은 방식으로 진행됩니다."
-)
-# The interview's length is P0's ("2~3분 정도 간단한 인터뷰").
-INTERVIEW_STEP: Final = {"label": "짧은 인터뷰", "time": "2~3분"}
+# The researcher found the review's interstitial and briefing copy verbose (2026-10-19): one line each.
+INTERLUDE_TITLE: Final = "첫 번째 시청을 마쳤습니다"
+INTERLUDE_TEXT: Final = "앞에서 본 영상 {count}편을 한 번 더 봅니다."
 HANDOFF_TITLE: Final = "이제 긴 영상 {count}편을 봅니다"
-HANDOFF_TEXT: Final = "이번에는 영상을 보는 동안 자막을 직접 조절할 수 있습니다."
+HANDOFF_TEXT: Final = "보는 동안 자막을 직접 조절할 수 있습니다."
 # The session's segments, in order (the browser holds their labels):
 # intro, practice, first viewings, second viewings, long videos, interview.
 SEGMENT: Final = {"P0": 0, "practice": 1, "A": 2, "B": 3, INTERLUDE: 3, "handoff": 4}
@@ -162,7 +158,7 @@ def handoff_text(minutes: Sequence[int]) -> str:
         return HANDOFF_TEXT
     low, high = min(minutes), max(minutes)
     length = f"약 {low}분" if low == high else f"약 {low}~{high}분"
-    return f"한 편은 {length}입니다. {HANDOFF_TEXT}"
+    return f"한 편은 {length}이며, {HANDOFF_TEXT}"
 
 
 class Phase1:
@@ -280,7 +276,7 @@ class Phase1:
         """The page payload for the browser: no clip key, family or answer key.
 
         ``live_minutes`` gives each long video's length in whole minutes, for the
-        interstitial's remaining steps and the handoff's briefing.
+        handoff's briefing.
         """
         if state.get("stage") != "phase1":
             raise Conflict("phase 1 is complete")
@@ -306,20 +302,8 @@ class Phase1:
                 for i, frame in enumerate(self.setup["practice"]["frames"])
             ]
         elif page == INTERLUDE:
-            videos = len(live_minutes)
-            result.update(
-                kind=INTERLUDE,
-                title=INTERLUDE_TITLE,
-                instruction=INTERLUDE_TEXT.format(count=count),
-                remaining=[
-                    {"label": f"두 번째 시청 · 영상 {count}편", "time": None},
-                    {
-                        "label": f"긴 영상 {videos}편 · 자막 조절" if videos else "긴 영상 · 자막 조절",
-                        "time": f"약 {sum(live_minutes)}분" if videos else None,
-                    },
-                    dict(INTERVIEW_STEP),
-                ],
-            )
+            instruction = INTERLUDE_TEXT.format(count=count)
+            result.update(kind=INTERLUDE, title=INTERLUDE_TITLE, instruction=instruction)
         elif page == "handoff":
             title = HANDOFF_TITLE.format(count=len(live_minutes)) if live_minutes else "이제 긴 영상을 봅니다"
             result.update(kind="handoff", title=title, instruction=handoff_text(live_minutes))

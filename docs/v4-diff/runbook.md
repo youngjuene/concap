@@ -252,8 +252,8 @@ uv run python -m diff live serve \
     practice;
   - stage A: for each of the 12 clips, in a random order recorded per
     participant, the first viewing (the raw prepared caption), then P2–P5;
-  - the stage-B interstitial ("첫 번째 시청을 모두 마쳤습니다"): the remaining
-    steps, and phase 1's one natural break;
+  - the stage-B interstitial ("첫 번째 시청을 마쳤습니다"), phase 1's one natural
+    break;
   - stage B: the same clips in the same order, the second viewing (Trida's
     caption), then P7, P8, P9, P10 (S1–S3) and P11 (R1/R2);
   - the phase-2 briefing ("이제 긴 영상 N편을 봅니다"), whose "2스테이지 시작"

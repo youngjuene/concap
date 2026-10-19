@@ -203,16 +203,8 @@ def test_every_page_says_where_it_sits_in_the_session(flow: Phase1) -> None:
     # The stage-B interstitial: phase 1's one break, before the clip count restarts at 1.
     assert where() == ("interlude", "B", {"segment": 3, "fraction": 0.0})
     interlude = flow.present(state, lambda name: name, (5, 6))
-    assert (interlude["kind"], interlude["title"]) == ("interlude", "첫 번째 시청을 모두 마쳤습니다")
-    assert interlude["instruction"].startswith("이제 앞에서 본 영상 3편을 한 번 더 봅니다.")
-    assert "자막" not in interlude["instruction"]  # P0 already says the captions differ (D1)
-    assert interlude["remaining"] == [
-        {"label": "두 번째 시청 · 영상 3편", "time": None},
-        {"label": "긴 영상 2편 · 자막 조절", "time": "약 11분"},
-        {"label": "짧은 인터뷰", "time": "2~3분"},
-    ]
-    without_videos = flow.present(state, lambda name: name)["remaining"]
-    assert without_videos[1] == {"label": "긴 영상 · 자막 조절", "time": None}
+    assert (interlude["kind"], interlude["title"]) == ("interlude", "첫 번째 시청을 마쳤습니다")
+    assert interlude["instruction"] == "앞에서 본 영상 3편을 한 번 더 봅니다."  # nothing on the captions (D1)
     assert flow.media_files(state) == {}
     event = flow.apply(state, "interlude-complete", {"page": "interlude"}, now)
     assert (event["phase"], event["analysis_excluded"], event["clip_index"]) == (0, True, None)
@@ -222,8 +214,8 @@ def test_every_page_says_where_it_sits_in_the_session(flow: Phase1) -> None:
     briefing = flow.present(state, lambda name: name, (5, 5, 5))
     assert briefing["progress"] == {"segment": 4, "fraction": 0.0}
     assert briefing["title"] == "이제 긴 영상 3편을 봅니다"
-    assert briefing["instruction"] == f"한 편은 약 5분입니다. {HANDOFF_TEXT}"
-    assert flow.present(state, lambda name: name, (4, 6))["instruction"].startswith("한 편은 약 4~6분입니다.")
+    assert briefing["instruction"] == f"한 편은 약 5분이며, {HANDOFF_TEXT}"
+    assert flow.present(state, lambda name: name, (4, 6))["instruction"].startswith("한 편은 약 4~6분이며,")
     assert flow.present(state, lambda name: name)["title"] == "이제 긴 영상을 봅니다"
 
 

@@ -133,7 +133,7 @@ const clipPage = detail => /^P([1-9]|1[01])$/.test(detail.page) && Number.isInte
 function eyebrow(detail) {
   if (detail.practice) return "연습 · 응답은 분석에서 제외됩니다";
   if (detail.kind === "interlude") return "1스테이지 · 두 번째 시청";
-  if (detail.kind === "handoff") return "1스테이지 완료 · 2스테이지 안내";
+  if (detail.kind === "handoff") return "2스테이지 안내";
   if (!clipPage(detail)) return "소리 자막 연구";
   return `1스테이지 · ${VIEWING[detail.step]} · 영상 ${detail.clip_index + 1} / ${detail.clip_count}`;
 }
@@ -443,24 +443,12 @@ function renderPreparing(detail, renderID) {
 }
 
 function renderInterlude(detail) {
-  const card = node("section", undefined, "card");
-  card.append(node("span", "남은 과정", "card-title"));
-  const list = node("ol", undefined, "remaining");
-  (detail.remaining || []).forEach((step, index) => {
-    const row = node("li");
-    row.append(node("span", String(index + 1), "num"), node("span", step.label), node("span", step.time || "", "time"));
-    list.append(row);
-  });
-  card.append(list);
-  shell.append(card);
   const next = button("두 번째 시청 시작", async () => {
     next.disabled = true;
     try { await action("interlude-complete", {}, detail); await refresh(); }
     catch (error) { await recover(error); next.disabled = false; }
   }, true);
-  const actions = node("div", undefined, "actions");
-  actions.append(next, node("span", "잠시 쉬어도 괜찮습니다", "note"));
-  shell.append(actions); errorRegion();
+  const actions = node("div", undefined, "actions"); actions.append(next); shell.append(actions); errorRegion();
 }
 
 async function renderSkipped(detail) {
@@ -502,12 +490,13 @@ function renderHandoff(detail) {
   const briefing = node("ol", undefined, "briefing");
   const point = (number, heading, extra) => {
     const entry = node("li");
-    entry.append(node("span", String(number), "num"), node("strong", heading), extra);
+    entry.append(node("span", String(number), "num"), node("strong", heading));
+    if (extra) entry.append(extra);
     briefing.append(entry);
   };
-  point(1, "영상 아래 두 조절 막대로 자막의 표현을 바꿀 수 있습니다", stepperFigure());
-  point(2, "바꾼 설정은 몇 초 뒤, 다음 자막부터 반영됩니다", cueFigure());
-  point(3, "영상은 멈추지 않고 이어집니다", node("p", "다른 창으로 이동하면 일시 정지됩니다."));
+  point(1, "두 조절 막대로 자막의 표현을 바꿀 수 있습니다", stepperFigure());
+  point(2, "바꾼 설정은 다음 자막부터 반영됩니다", cueFigure());
+  point(3, "영상은 멈추지 않고 이어집니다");
   shell.append(briefing);
   const next = button("2스테이지 시작", async () => {
     next.disabled = true;

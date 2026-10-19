@@ -33,15 +33,17 @@ screens end before the protocol does.
     count repeated as dots.
   - The watch header shows "긴 영상 n / V" and the elapsed time.
 - **Stage-B interstitial (F2).** A new page, `interlude`, sits between the
-  last P5 and the first P6. It lists the remaining steps and is phase 1's one
-  natural break.
+  last P5 and the first P6, and is phase 1's one natural break. It reads
+  "첫 번째 시청을 마쳤습니다 / 앞에서 본 영상 N편을 한 번 더 봅니다." and has a
+  start button.
   - It does not say that the captions differ: P0 already does, and saying it
     again would prime D1.
   - It is closed by `interlude-complete`, which is analysis-excluded.
   - The page order changed, so the protocol is now `diff.phase1/v3`.
-- **The end of the screens (F3).** The last screen says the screen tasks are
-  over and asks the participant to stay, take off the headphones and call the
-  experimenter for the 2–3 minute interview.
+- **The end of the screens (F3).** The last screen reads "화면 과제가
+  끝났습니다" and asks the participant to take off the headphones in their
+  seat ("자리에서") and call the experimenter, because a short interview
+  follows.
   - The interview (P12) and debrief (P13) stay outside the app, as decided on
     2026-10-18. The session still finishes when the ratings are saved.
   - Holding "연구자 확인 · 다음 참가자" for 1 s returns to the entry.
@@ -50,7 +52,7 @@ screens end before the protocol does.
 - **Briefing (F6):** the handoff is phase 2's briefing:
   - what the sliders change;
   - that a change shows from a later caption;
-  - that the video does not stop, but pauses in a hidden tab.
+  - that the video keeps playing while they steer.
 
   The long videos' count and length come from the videos served.
 - **Hidden tab (F9):** the watch pauses behind phase 1's overlay, which covers
@@ -78,13 +80,26 @@ screens end before the protocol does.
 - **The briefing's optional 20-second slider practice.** It needs a non-study
   clip.
 
-**Draft wording for the researcher:**
-- The middle slider labels (조금, 구체적인 음원) are new.
-- The texture slider's left end now reads "없이" instead of "적게": step 0
-  forbids texture words.
-- The design's steering goal ("정답은 없으니 읽기 편한 자막을 찾아 주세요") was
-  left out, because the goal participants steer towards is a study decision.
-- The interstitial, briefing, waiting and end-screen sentences are drafts.
+**Wording, decided by the researcher on 2026-10-19:**
+- **Slider labels approved:** 없이 / 조금 / 많이 for texture (step 0 forbids
+  texture words, so "적게" became "없이") and 넓은 범주로 / 구체적인 음원 /
+  위치와 관계까지 for context.
+- **No steering goal:** the design's "정답은 없으니 읽기 편한 자막을 찾아 주세요"
+  stays out, so participants are given no goal for steering.
+- **The watch's change chip stays as designed.**
+- **Shorter screens:** the design's interstitial, briefing and end screen
+  were too verbose for the user test, so each is cut to one or two lines:
+  - The interstitial has no remaining-steps list and no "잠시 쉬어도
+    괜찮습니다".
+  - The briefing has a one-line lead ("한 편은 약 N분이며, 보는 동안 자막을 직접
+    조절할 수 있습니다.") and three one-line points: two sliders change the
+    caption; a change shows from the next caption; the video keeps playing
+    ("영상은 멈추지 않고 이어집니다", F6's "no pausing"). The hidden-tab pause
+    is not briefed, because phase 1 already pauses the same way and the
+    overlay explains itself.
+  - The end screen has its title and one notice. The notice keeps
+    "자리에서", because keeping the participant in place for D1 is F3's
+    point.
 
 **Verified:**
 - the `tests/diff` suite, ruff and mypy;
