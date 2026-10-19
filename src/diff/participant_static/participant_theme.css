@@ -233,3 +233,16 @@ p.lede {
 .remaining li:first-child { color: var(--ink); font-weight: 600; }
 .remaining li:first-child .num { color: var(--accent); }
 .remaining li:first-child .time { font-weight: 400; }
+
+/* Items in cards of three with hairlines between them, with no subscale names. */
+.sheet-questionnaire .sheet-group-head { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 8px; font: 11px/1.4 var(--mono); color: var(--dim); }
+.sheet-questionnaire .sheet-group { background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; margin: 0 0 22px; }
+.sheet-questionnaire .sheet-group .sheet-item { border: 0; border-radius: 0; margin: 0; background: transparent; }
+.sheet-questionnaire .sheet-group .sheet-item + .sheet-item { border-top: 1px solid var(--seam); }
+.sheet-questionnaire .sheet-group .sheet-invalid { box-shadow: inset 0 0 0 2px var(--accent); }
+/* The missing-item message lives in the sticky bar, so it stays in view while the field scrolls. */
+.sheet-questionnaire .sheet-submitbar .sheet-feedback { margin: 0 0 0 auto; min-height: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; color: var(--ink); }
+.sheet-questionnaire .sheet-submitbar .sheet-feedback .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+button.link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: 600 14px/1.4 var(--body); text-decoration: underline; }
+button.link:hover:not(:disabled) { color: var(--accent-press); }
+button.link:active:not(:disabled) { background: none; }

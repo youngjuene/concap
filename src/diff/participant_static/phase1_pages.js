@@ -15,7 +15,8 @@
  *   participants share the experimenter's tab;
  * - the UI review of 2026-10-19 ("Diff Flow Improved"): a progress header for
  *   the whole session, an eyebrow naming the viewing (첫 번째 / 두 번째 시청)
- *   with the clip count repeated as dots, and the stage-B interstitial. */
+ *   with the clip count repeated as dots, the stage-B interstitial, and items
+ *   in cards of three with the missing-item message in the sticky bar. */
 const API = "api/p1";
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const node = (tag, text, className) => {
@@ -39,6 +40,7 @@ let shell, current, cleanup = () => {}, generation = 0;
 // The session's segments, sized by expected time in the CSS; live.js holds the same list.
 const SEGMENTS = ["도입", "연습", "첫 번째 시청", "두 번째 시청", "긴 영상", "인터뷰"];
 const VIEWING = {A: "첫 번째 시청", B: "두 번째 시청"};
+const GROUP = 3;
 
 async function post(path, payload) {
   const response = await fetch(path, {
@@ -298,7 +300,23 @@ function renderForm(detail, actionName = "submit") {
     fields.get(item.id)?.classList.remove("sheet-invalid");
     save(); update();
   };
+  // Items sit in cards of three (after any shuffle, so P9 keeps its order).
+  const groups = [];
+  let group;
   for (const [index, item] of items.entries()) {
+    if (index % GROUP === 0) {
+      const slice = items.slice(index, index + GROUP);
+      const status = node("span");
+      if (items.length > GROUP) {
+        const head = node("div", undefined, "sheet-group-head");
+        const range = slice.length > 1 ? `${index + 1}–${index + slice.length}` : `${index + 1}`;
+        head.append(node("span", `문항 ${range} / ${items.length}`), status);
+        form.append(head);
+      }
+      group = node("div", undefined, "sheet-group");
+      form.append(group);
+      groups.push({slice, status});
+    }
     const field = node("fieldset", undefined, "sheet-item");
     field.dataset.item = item.id;
     fields.set(item.id, field);
@@ -319,29 +337,52 @@ function renderForm(detail, actionName = "submit") {
       if (item.type === "multi") field.append(node("p", "해당하는 것을 모두 선택해 주세요. ‘기억나지 않음’은 다른 선택지와 함께 선택할 수 없습니다.", "sheet-hint"));
       if (!options.length) field.append(node("p", "선택지가 준비되지 않았습니다. 연구자에게 문의해 주세요.", "sheet-hint"));
     } else field.append(node("p", "이 응답 형식은 연구자 확인이 필요합니다.", "sheet-hint"));
-    form.append(field);
+    group.append(field);
   }
   const bar = node("div", undefined, "sheet-submitbar");
   const submit = node("button", "응답 저장 후 계속", "primary");
   submit.type = "submit";
   const count = node("p", "", "sheet-hint");
   count.setAttribute("role", "status");
+  // The validation message sits in the sticky bar, so it stays in view while the field scrolls.
+  const region = node("p", "", "sheet-feedback");
+  region.setAttribute("role", "alert");
+  let flagged = false;
   const remaining = () => items.filter(item => !itemValid(item, answers[item.id]));
-  function update() { count.textContent = `${items.length - remaining().length} / ${items.length} 응답`; }
-  bar.append(submit, count); form.append(bar); shell.append(form);
-  const region = errorRegion();
+  function reveal(item) {
+    const field = fields.get(item.id);
+    field.classList.add("sheet-invalid");
+    field.scrollIntoView({block: "center"});
+    (field.querySelector("input,textarea,[tabindex='0']") || field).focus();
+  }
+  function flag(missing) {
+    if (!missing.length) { region.replaceChildren(); flagged = false; return; }
+    const jump = node("button", `${items.indexOf(missing[0]) + 1}번으로 이동`, "link");
+    jump.type = "button";
+    jump.addEventListener("click", () => reveal(missing[0]));
+    region.replaceChildren(node("span", undefined, "dot"), node("span", `응답하지 않은 문항 ${missing.length}개`), node("span", "·"), jump);
+    flagged = true;
+  }
+  function update() {
+    const missing = remaining();
+    count.textContent = `${items.length - missing.length} / ${items.length} 응답`;
+    for (const {slice, status} of groups) {
+      const done = slice.filter(item => itemValid(item, answers[item.id])).length;
+      status.textContent = done === slice.length ? "완료" : `${done} / ${slice.length}`;
+    }
+    if (flagged) flag(missing);
+  }
+  bar.append(submit, count, region); form.append(bar); shell.append(form);
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (submit.disabled) return;
     const missing = remaining();
     if (missing.length) {
-      const field = fields.get(missing[0].id);
-      field.classList.add("sheet-invalid");
-      feedback(`응답하지 않은 문항이 ${missing.length}개 있습니다. 첫 번째 미응답 문항을 확인해 주세요.`, region);
-      field.scrollIntoView({block: "center"});
-      (field.querySelector("input,textarea,[tabindex='0']") || field).focus();
+      flag(missing);
+      reveal(missing[0]);
       return;
     }
+    flagged = false;
     submit.disabled = true;
     fields.forEach(field => { field.disabled = true; });
     feedback("응답을 저장하고 있습니다…", region);
