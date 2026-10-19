@@ -12,6 +12,7 @@ let exposures = [];
 let debounce = null;
 let poller = null;
 let ticker = null;
+let epoch = 0;  // bumps for each new video, so a reply about the previous one is dropped
 
 const $ = (id) => document.getElementById(id);
 const video = () => $("video");
@@ -67,8 +68,11 @@ function paint(ms) {
 }
 
 async function poll() {
+  const asked = epoch;
   const result = await call("api/captions");
-  if (result.ok) captions = result.data.captions || {};
+  // A reply that crossed a new video may hold the previous video's captions; the next poll is current.
+  if (!result.ok || asked !== epoch) return;
+  captions = result.data.captions || {};
   if (state && state.stage === "ready") {
     const ready = Boolean(captions["0"]);
     $("start").disabled = !ready;
@@ -95,6 +99,11 @@ function sendPlayback() {
 function render() {
   if (!state) return;
   if (state.stage === "ready") {
+    // The previous video's captions and Start state must not carry over.
+    epoch += 1;
+    captions = {};
+    $("start").disabled = true;
+    $("ready-status").textContent = "첫 자막을 준비하고 있습니다…";
     show("ready");
     $("video-count").textContent = state.video.count > 1 ? `(${state.video.number}/${state.video.count})` : "";
     $("texture").value = state.sliders.texture;
@@ -180,8 +189,13 @@ async function begin() {
 
 function wire() {
   $("start").addEventListener("click", async () => {
+    $("start").disabled = true;
     const result = await call("api/start", {});
-    if (!result.ok) return;
+    if (!result.ok) {
+      $("ready-status").textContent = result.data.detail || "첫 자막을 준비하고 있습니다…";
+      poll();
+      return;
+    }
     state = result.data;
     render();
     paint(0);
