@@ -74,6 +74,8 @@ button:hover:not(:disabled) { border-color: var(--accent); }
 button:active:not(:disabled) { background: var(--accent-wash); }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* diff: a page's heading takes focus only to move screen readers to the new page. */
+h1[tabindex="-1"]:focus-visible { outline: none; }
 
 button:disabled {
   background: var(--muted-fill);
@@ -136,7 +138,8 @@ p.lede {
 }
 .sheet-questionnaire legend { float: left; width: 100%; margin-bottom: 18px; font-weight: 600; }
 .sheet-questionnaire legend + * { clear: both; }
-.sheet-questionnaire .sheet-scale { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; }
+/* diff: --points lets the live watch's researcher items use other scale lengths. */
+.sheet-questionnaire .sheet-scale { display: grid; grid-template-columns: repeat(var(--points, 7), minmax(0, 1fr)); gap: 7px; }
 .sheet-questionnaire .sheet-option {
   display: flex;
   gap: 10px;
@@ -175,12 +178,14 @@ p.lede {
 .sheet-questionnaire .sheet-reset { margin-top: 12px; }
 .sheet-viewing { position: fixed; inset: 0; z-index: 20; background: var(--stage); display: flex; flex-direction: column; }
 .sheet-viewing video { width: 100%; height: calc(100% - var(--caption-band)); object-fit: contain; flex: 1 1 0; min-height: 0; }
-.sheet-viewing .sheet-caption { flex: 0 0 var(--caption-band); display: flex; justify-content: center; align-items: center; color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; }
-/* diff: phase 1 shows the prepared captions raw (researcher, 2026-10-18): keep their line
-   breaks, and let the band grow past two lines while the video gives way. */
-.sheet-viewing .sheet-caption { flex: 0 0 auto; min-height: var(--caption-band); white-space: pre-line; }
-.sheet-viewing .sheet-paused { position: absolute; inset: 0; background: rgb(0 0 0 / .88); color: white; display: grid; place-content: center; padding: 24px; text-align: center; gap: 18px; }
-.sheet-viewing .sheet-paused p { max-width: 54ch; }
+/* diff: one caption band for every viewing, phase 1's and the live watch's (UI review of
+   2026-10-19): position, size and occlusion are part of the stimulus, and phase 1's S1–S3
+   seed the live tuner. Phase 1 shows the prepared captions raw (researcher, 2026-10-18), so
+   the band keeps line breaks and grows past two lines while the video gives way. */
+.sheet-caption { display: flex; justify-content: center; align-items: center; min-height: var(--caption-band); background: var(--stage); color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; white-space: pre-line; }
+.sheet-viewing .sheet-caption { flex: 0 0 auto; }
+.sheet-paused { position: absolute; inset: 0; background: rgb(0 0 0 / .88); color: white; display: grid; place-content: center; padding: 24px; text-align: center; gap: 18px; }
+.sheet-paused p { max-width: 54ch; }
 @media (max-width: 620px) {
   .sheet-questionnaire .sheet-item { padding: 18px 12px; }
   .sheet-questionnaire .sheet-scale { grid-template-columns: 1fr; }
@@ -188,7 +193,7 @@ p.lede {
   .sheet-questionnaire .sheet-scale .sheet-option:has(input:checked) { padding: 11px; }
   .sheet-questionnaire .sheet-label { font-size: 15px; }
   .sheet-questionnaire .sheet-score { width: 1.5em; }
-  .sheet-viewing .sheet-caption { font-size: 19px; line-height: 1.6; padding: 12px; }
+  .sheet-caption { font-size: 19px; line-height: 1.6; padding: 12px; }
 }
 
 /* diff: the experimenter's start screen. */
@@ -205,7 +210,7 @@ p.lede {
 }
 
 /* diff: the UI review of 2026-10-19 ("Diff Flow Improved"). Everything below reuses the
-   tokens above. */
+   tokens above, so the live watch is the same app as phase 1. */
 
 /* The whole session's progress: six segments sized by expected time, not by page count. */
 .session-progress { margin-bottom: 40px; }
@@ -256,3 +261,52 @@ p.lede {
 button.link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: 600 14px/1.4 var(--body); text-decoration: underline; }
 button.link:hover:not(:disabled) { color: var(--accent-press); }
 button.link:active:not(:disabled) { background: none; }
+
+/* The live watch: video, the shared caption band, and two three-stop sliders. */
+.watch { position: relative; max-width: 1000px; margin: 0 auto; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 14px; }
+.watch-head { display: flex; flex-direction: column; gap: 8px; }
+.watch-head .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.watch-head .eyebrow, .watch-head .clock { font: 12px/1.4 var(--mono); color: var(--dim); }
+.watch-elapsed { position: relative; height: 3px; border-radius: 2px; background: var(--hairline); overflow: hidden; }
+.watch-elapsed span { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: var(--rule); }
+.watch-stage { border-radius: var(--radius); overflow: hidden; background: var(--stage); display: flex; flex-direction: column; }
+.watch-stage video { display: block; width: 100%; height: clamp(220px, calc(100vh - 430px), 560px); object-fit: contain; background: var(--stage); }
+.steppers { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; padding: 4px 8px 0; }
+.stepper { display: flex; flex-direction: column; gap: 8px; }
+.stepper-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.stepper-head label { font-size: 16px; font-weight: 600; }
+.stepper-value { font-size: 14px; color: var(--body-ink); }
+.stepper-track { position: relative; height: 32px; margin: 0 14px; }
+.stepper-rail, .stepper-fill { position: absolute; left: 0; top: 14px; height: 4px; border-radius: 2px; }
+.stepper-rail { right: 0; background: var(--hairline); }
+.stepper-fill { width: calc(var(--stop, 0) * 50%); background: var(--accent); }
+.stepper-stop { position: absolute; top: 10px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--panel); border: 2px solid var(--rule); }
+.stepper-stop.on { background: var(--accent); border-color: var(--accent); }
+.stepper input { position: absolute; left: -14px; top: 0; width: calc(100% + 28px); height: 32px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.stepper input:focus-visible { outline: none; }
+.stepper input::-webkit-slider-runnable-track { height: 32px; background: transparent; border: 0; }
+.stepper input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; margin-top: 2px; border-radius: 50%; background: var(--panel); border: 3px solid var(--accent); box-shadow: 0 1px 4px rgb(0 0 0 / .18); }
+.stepper input:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stepper input::-moz-range-track { height: 32px; background: transparent; border: 0; }
+.stepper input::-moz-range-thumb { box-sizing: border-box; width: 28px; height: 28px; border-radius: 50%; background: var(--panel); border: 3px solid var(--accent); box-shadow: 0 1px 4px rgb(0 0 0 / .18); }
+.stepper input:focus-visible::-moz-range-thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stepper-labels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); font-size: 13px; color: var(--dim); word-break: keep-all; }
+.stepper-labels span { cursor: pointer; }
+.stepper-labels span:nth-child(2) { text-align: center; }
+.stepper-labels span:nth-child(3) { text-align: right; }
+.stepper-labels .on { color: var(--ink); font-weight: 600; }
+.watch-chip { display: flex; justify-content: center; min-height: 38px; }
+.chip { display: inline-flex; align-items: center; gap: 10px; min-height: 38px; font-size: 14px; color: var(--dim); }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+.chip .countdown { font: 500 12px var(--mono); color: var(--accent); }
+.chip[data-state="pending"], .chip[data-state="applied"] { padding: 0 14px; border-radius: var(--radius-sm); }
+.chip[data-state="pending"] { background: var(--accent-wash); border: 1px solid var(--accent); color: var(--ink); }
+.chip[data-state="pending"] .dot { background: var(--accent); }
+.chip[data-state="applied"] { background: var(--panel); border: 1px solid var(--hairline); color: var(--body-ink); }
+.chip[data-state="applied"] .dot { background: var(--rule); }
+.chip[data-state="waiting"] { color: var(--body-ink); }
+.watch .sheet-paused { z-index: 5; border-radius: var(--radius); }
+@media (max-width: 620px) {
+  .steppers { grid-template-columns: 1fr; gap: 24px; padding: 4px 0 0; }
+  .watch { padding: 16px 12px 24px; }
+}

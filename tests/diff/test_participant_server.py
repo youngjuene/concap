@@ -293,7 +293,9 @@ def test_a_watch_interrupted_by_a_restart_restarts_its_video(lab: Lab) -> None:
     resumed = lab.client()
     assert lab.enter(resumed).json() == {"next_url": "watch/"}
     view = resumed.post("/watch/api/session", json={}).json()
-    assert view["stage"] == "ready" and view["sliders"] == {"texture": 1.0, "context": 0.0}
+    assert view["stage"] == "ready"
+    assert view["sliders"] == {"texture": 1.0, "context": 0.0, "stops": {"texture": 2, "context": 0}}
+    assert view["progress"] == {"segment": 4, "fraction": 0.0}
     log = next((lab.root / "logs").glob("session-*.jsonl")).read_text().splitlines()
     assert json.loads(log[-1]) | {"at": 0} == {
         "schema": "diff.live-event/v1",

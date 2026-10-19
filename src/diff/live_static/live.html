@@ -2,78 +2,87 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>영상 시청</title>
-<style>
-  :root { color-scheme: light; --ink: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --accent: #1f5fbf; }
-  body { margin: 0; font-family: "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color: var(--ink); background: #fafafa; }
-  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
-  section[hidden] { display: none; }
-  h1 { font-size: 1.4rem; margin: 0 0 12px; }
-  p { line-height: 1.6; }
-  .stage { position: relative; background: #000; aspect-ratio: 16 / 9; }
-  video { width: 100%; height: 100%; display: block; }
-  .caption { position: absolute; left: 4%; right: 4%; bottom: 6%; text-align: center; font-size: clamp(16px, 2.4vw, 24px);
-             line-height: 1.45; color: #fff; text-shadow: 0 0 4px #000, 0 0 8px #000; min-height: 1.45em; white-space: pre-line; }
-  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 32px; margin-top: 16px; }
-  .slider label { display: block; font-weight: 600; margin-bottom: 4px; }
-  .slider input { width: 100%; }
-  .ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.9rem; }
-  button { font: inherit; padding: 10px 20px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
-  button:disabled { background: var(--line); border-color: var(--line); color: var(--muted); cursor: default; }
-  .item { border-top: 1px solid var(--line); padding: 16px 0; }
-  .scale { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
-  .scale label { display: inline-flex; flex-direction: column; align-items: center; font-size: 0.9rem; }
-  .status { color: var(--muted); }
-  @media (max-width: 640px) { .controls { grid-template-columns: 1fr; } }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>소리 자막 연구</title>
+<!-- Phase 1's theme, so the watch is the same app (UI review of 2026-10-19). -->
+<link rel="stylesheet" href="../participant_theme.css">
 </head>
 <body>
-<main>
+<main class="shell sheet-questionnaire" id="shell">
+  <div id="progress"></div>
+
   <section id="busy" hidden>
-    <h1>잠시 후 다시 시도해 주세요</h1>
-    <p id="busy-message"></p>
+    <div class="head">
+      <span class="eyebrow">소리 자막 연구</span>
+      <h1 tabindex="-1">잠시 후 다시 시도해 주세요</h1>
+      <p class="lede" id="busy-message"></p>
+    </div>
   </section>
 
   <section id="ready" hidden>
-    <h1>영상 시청 준비 <span id="video-count"></span></h1>
-    <p>영상을 보는 동안 아래의 두 조절 막대로 자막을 언제든지 바꿀 수 있습니다. 바꾼 자막은 몇 초 뒤에 나타납니다.</p>
-    <p class="status" id="ready-status">첫 자막을 준비하고 있습니다…</p>
-    <button id="start" disabled>영상 시청 시작</button>
-  </section>
-
-  <section id="watch" hidden>
-    <div class="stage">
-      <video id="video" playsinline preload="auto"></video>
-      <div class="caption" id="caption" aria-live="polite"></div>
+    <div class="head">
+      <span class="eyebrow" id="ready-eyebrow"></span>
+      <h1 tabindex="-1">영상 시청 준비</h1>
+      <p class="lede" id="ready-lede"></p>
     </div>
-    <div class="controls">
-      <div class="slider">
-        <label for="texture">소리의 질감 표현</label>
-        <input id="texture" type="range" min="0" max="1" step="0.01">
-        <div class="ends"><span>적게</span><span>많이</span></div>
-      </div>
-      <div class="slider">
-        <label for="context">음원 설명</label>
-        <input id="context" type="range" min="0" max="1" step="0.01">
-        <div class="ends"><span>넓은 범주로</span><span>위치와 관계까지</span></div>
-      </div>
-    </div>
+    <p class="sheet-hint" id="ready-status" role="status">첫 자막을 준비하고 있습니다…</p>
+    <div class="actions"><button class="primary" id="start" type="button" disabled>영상 시청 시작</button></div>
   </section>
 
   <section id="ratings" hidden>
-    <h1>시청 후 응답</h1>
-    <p>방금 본 영상과 자막에 대해 답해 주세요.</p>
-    <form id="items"></form>
-    <button id="submit" type="button">응답 제출</button>
-    <p class="status" id="ratings-status"></p>
+    <div class="head">
+      <span class="eyebrow">2스테이지 · 시청 후 응답</span>
+      <h1 tabindex="-1">시청 후 응답</h1>
+      <p class="lede">방금 본 긴 영상과 자막에 대해 답해 주세요.</p>
+    </div>
+    <form id="items" novalidate></form>
   </section>
 
   <section id="done" hidden>
-    <h1>참여해 주셔서 감사합니다</h1>
-    <p>모든 응답이 저장되었습니다.</p>
+    <div class="head">
+      <span class="eyebrow">2스테이지 완료</span>
+      <h1 tabindex="-1">참여해 주셔서 감사합니다</h1>
+      <p class="lede">모든 응답이 저장되었습니다.</p>
+    </div>
   </section>
 </main>
+
+<section class="watch" id="watch" hidden>
+  <div class="watch-head">
+    <div class="row"><span class="eyebrow" id="watch-eyebrow"></span><span class="clock" id="clock"></span></div>
+    <div class="watch-elapsed" aria-hidden="true"><span id="elapsed"></span></div>
+  </div>
+  <div class="watch-stage">
+    <video id="video" playsinline preload="auto" disablepictureinpicture></video>
+    <p class="sheet-caption" id="caption" aria-live="polite"></p>
+  </div>
+  <div class="steppers">
+    <div class="stepper" id="texture-stepper">
+      <div class="stepper-head"><label for="texture">소리의 질감 표현</label><span class="stepper-value" id="texture-value"></span></div>
+      <div class="stepper-track">
+        <span class="stepper-rail"></span><span class="stepper-fill"></span>
+        <span class="stepper-stop" style="left: 0%"></span><span class="stepper-stop" style="left: 50%"></span><span class="stepper-stop" style="left: 100%"></span>
+        <input id="texture" type="range" min="0" max="2" step="1">
+      </div>
+      <div class="stepper-labels"><span>없이</span><span>조금</span><span>많이</span></div>
+    </div>
+    <div class="stepper" id="context-stepper">
+      <div class="stepper-head"><label for="context">음원 설명</label><span class="stepper-value" id="context-value"></span></div>
+      <div class="stepper-track">
+        <span class="stepper-rail"></span><span class="stepper-fill"></span>
+        <span class="stepper-stop" style="left: 0%"></span><span class="stepper-stop" style="left: 50%"></span><span class="stepper-stop" style="left: 100%"></span>
+        <input id="context" type="range" min="0" max="2" step="1">
+      </div>
+      <div class="stepper-labels"><span>넓은 범주로</span><span>구체적인 음원</span><span>위치와 관계까지</span></div>
+    </div>
+  </div>
+  <div class="watch-chip"><p class="chip" id="chip" data-state="idle" role="status"></p></div>
+  <div class="sheet-paused" id="paused" hidden>
+    <h2>시청이 일시 중지되었습니다</h2>
+    <p>화면으로 돌아온 뒤 이어서 시청해 주세요. 멈춘 동안의 자막 설정은 그대로 유지됩니다.</p>
+    <div><button class="primary" id="resume" type="button">이어서 시청</button></div>
+  </div>
+</section>
 <script src="live.js"></script>
 </body>
 </html>

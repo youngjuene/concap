@@ -395,5 +395,6 @@ def build_participant_app(
         current=current,
         changed=changed,
         clock=clock,
+        after_phase1=phase1 is not None,
     )
     return app

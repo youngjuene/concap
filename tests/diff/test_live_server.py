@@ -16,11 +16,12 @@ from fastapi.testclient import TestClient
 
 from diff.caption_sources import CaptionSource, parse_sources
 from diff.job_plan import Job, live_job
-from diff.live_generation import LiveService, LiveStream, Spec
+from diff.live_generation import LiveService, LiveStream, Spec, slider_steps
 from diff.live_server import LivePool, LiveVideo, rating_items
 from diff.model_profile import TRIDA_7B
 from diff.participant_server import build_participant_app
 from diff.session_store import SessionStore
+from diff.study_protocol import CONTEXT_STEPS
 
 VIDEO = "live_test_video"
 ITEMS = {
@@ -141,6 +142,9 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert keep(enter(client)).json() == {"next_url": "watch/"}
     started = keep(client.post("/watch/api/session", json={}))
     assert started.status_code == 200 and started.json()["stage"] == "ready"
+    # The calibrated start (0.5, 0.5) is the middle stop of each slider; no phase 1, no session progress.
+    assert started.json()["sliders"]["stops"] == {"texture": 1, "context": 1}
+    assert started.json()["video"]["duration_ms"] == 15000 and "progress" not in started.json()
     assert keep(client.post("/watch/api/start")).status_code == 409  # cue 0 is not written yet
     drain(service)
     ready = keep(client.get("/watch/api/captions")).json()["captions"]
@@ -156,6 +160,9 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
         )
     ).json() == {"ok": True}
     playback = {"position_ms": 1000, "playing": True}
+    assert keep(client.post("/watch/api/playback", json=playback)).status_code == 200
+    hidden = {"position_ms": 1200, "playing": False, "hidden": True}  # the page paused for a hidden tab
+    assert keep(client.post("/watch/api/playback", json=hidden)).status_code == 200
     assert keep(client.post("/watch/api/playback", json=playback)).status_code == 200
     drain(service)
     token = ready["0"]["token"]
@@ -193,6 +200,8 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert kinds == ["session_started", "watch_started", "settings", "exposures", "video_ended", "ratings"]
     assert events[0]["calibration"]["heard_observations"] == {}  # no phase 1 in a smoke run
     assert next(e for e in events if e["event"] == "exposures")["entries"][0]["job_id"].startswith("job-")
+    pauses = [(e["position_ms"], e["hidden"]) for e in events if e["event"] == "playback"]
+    assert pauses == [(1000, False), (1200, True), (1000, False)]
     settings_event = next(e for e in events if e["event"] == "settings")
     assert settings_event["steps"] == {"texture": 2, "context": "relation"}  # texture capped at step 2
     live_log = next(app_parts["logs"].glob("live-*.jsonl"))
@@ -226,6 +235,13 @@ def test_bad_settings_are_refused(app_parts: dict[str, Any]) -> None:
         {"texture": 0.5},
     ):
         assert client.post("/watch/api/settings", json=body).status_code == 422
+
+
+def test_the_browser_s_three_stops_are_the_prompt_s_steps() -> None:
+    """live.js sends a stop as stop / 2; each lands on its own step, in order."""
+    assert [slider_steps(stop / 2, stop / 2) for stop in (0, 1, 2)] == [
+        (step, CONTEXT_STEPS[step]) for step in (0, 1, 2)
+    ]
 
 
 def test_rating_items_are_validated() -> None:

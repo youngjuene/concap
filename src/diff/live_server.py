@@ -8,7 +8,15 @@ Pages, in order:
    nothing new is ready);
 3. the next video (settings carry over), or the researcher's rating items once
    the last video ends;
-4. done.
+4. done: the screens are over, but the oral interview (P12) and debrief (P13)
+   follow outside the app, so the page asks the participant to stay and call
+   the experimenter (UI review of 2026-10-19).
+
+The sliders snap to the three steps each axis really has (texture 0–2,
+context broad/specific/relation): the browser sends 0, 0.5 or 1, which
+:func:`slider_steps` maps onto those steps, and only when the step changes.
+The view reports the steps (``sliders.stops``) so a resumed watch shows the
+stop that is in force.
 
 Since 2026-10-18 the participant app (:mod:`diff.participant_server`) owns the
 session:
@@ -45,6 +53,7 @@ from diff.caption_sources import CaptionSource
 from diff.job_plan import Job
 from diff.live_calibration import Calibration
 from diff.live_generation import LiveScheduler, LiveService, LiveStream, Spec, opaque_token, slider_steps
+from diff.study_protocol import CONTEXT_STEPS
 
 EVENT_SCHEMA: Final = "diff.live-event/v1"
 STATIC: Final = Path(__file__).with_name("live_static")
@@ -173,8 +182,13 @@ def add_live_routes(
     current: Callable[[Any], LiveSession],
     changed: Callable[[LiveSession, str], None],
     clock: Callable[[], float] = time.time,
+    after_phase1: bool = False,
 ) -> None:
-    """The watch's routes under ``/watch/``; ``current(request)`` raises HTTPException without a session."""
+    """The watch's routes under ``/watch/``; ``current(request)`` raises HTTPException without a session.
+
+    ``after_phase1``: the watch follows phase 1, so each view says where it sits
+    in the whole session (segment 4 of 0–5, the long videos).
+    """
     from fastapi import APIRouter, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
@@ -187,16 +201,26 @@ def add_live_routes(
 
     def view(session: LiveSession) -> dict[str, Any]:
         video = videos[session.video_index]
-        return {
+        texture, context = slider_steps(session.texture, session.context)
+        result: dict[str, Any] = {
             "stage": session.stage,
             "video": {
                 "number": session.video_index + 1,
                 "count": len(videos),
                 "media": f"media/{opaque_token(key, session.session_id, video.video_id)}",
+                "duration_ms": video.stream.duration_ms,
                 "cues": [{"start_ms": cue.start_ms, "end_ms": cue.end_ms} for cue in video.stream.cues],
             },
-            "sliders": {"texture": session.texture, "context": session.context},
+            "sliders": {
+                "texture": session.texture,
+                "context": session.context,
+                "stops": {"texture": texture, "context": CONTEXT_STEPS.index(context)},
+            },
         }
+        if after_phase1:
+            done = 1.0 if session.stage in ("ratings", "done") else session.video_index / len(videos)
+            result["progress"] = {"segment": 4, "fraction": round(done, 3)}
+        return result
 
     def watch_root() -> RedirectResponse:
         return RedirectResponse("watch/")
@@ -275,10 +299,19 @@ def add_live_routes(
         body = await request.json()
         try:
             position, playing = int(body["position_ms"]), bool(body["playing"])
-        except (KeyError, TypeError, ValueError) as exc:
+            hidden = bool(body.get("hidden", False))
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise HTTPException(status_code=422, detail="재생 정보를 읽을 수 없습니다.") from exc
         session.service.playback(position, playing)
-        log(session, "playback", video_index=session.video_index, position_ms=position, playing=playing)
+        # ``hidden``: the page paused itself because the tab was hidden (it never plays unseen).
+        log(
+            session,
+            "playback",
+            video_index=session.video_index,
+            position_ms=position,
+            playing=playing,
+            hidden=hidden,
+        )
         return {"ok": True}
 
     @router.get("/api/captions")
