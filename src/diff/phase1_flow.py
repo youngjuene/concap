@@ -6,6 +6,14 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   ``P1 P2 P3 P4 P5``; stage B runs every clip's second step,
   ``P6 P7 P8 P9 P10 P11``, in the same clip order. Splitting the steps gives
   Trida the rest of stage A to write each clip's second caption.
+- **Seams (UI review of 2026-10-19, "Diff Flow Improved"):** a stage-B
+  interstitial (``interlude``, closed by ``interlude-complete``) sits
+  between the last P5 and the first P6, so the clip count restarting at 1
+  reads as a second viewing rather than a restart. It is phase 1's one
+  natural break, and it says nothing about the captions differing (P0
+  already does, and repeating it would prime D1). Every page carries
+  ``step`` and ``progress`` (a segment of the whole session and how far
+  into it).
 - **Clip order:** random per participant, from a seed recorded in the state.
 - **Captions:** P1 shows the clip's prepared caption raw. P6 shows the caption
   Trida wrote from it and the participant's first-step answers
@@ -51,7 +59,7 @@ from diff.rewrite_prompts import TWEAK_P1, TWEAK_PROVISIONAL
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
-PROTOCOL: Final = "diff.phase1/v2"
+PROTOCOL: Final = "diff.phase1/v3"
 STEP_A: Final = ("P1", "P2", "P3", "P4", "P5")
 STEP_B: Final = ("P6", "P7", "P8", "P9", "P10", "P11")
 CLIP_PAGES: Final = STEP_A + STEP_B
@@ -70,7 +78,18 @@ PRACTICE_TEXTS: Final = {
     "practice_sound": "연습: 선택지 하나를 골라 주세요.",
     "practice_visual": "연습 이미지에서 한 곳을 선택해 주세요.",
 }
+INTERLUDE: Final = "interlude"
+INTERLUDE_TITLE: Final = "첫 번째 시청을 모두 마쳤습니다"
+INTERLUDE_TEXT: Final = (
+    "이제 앞에서 본 영상 {count}편을 한 번 더 봅니다. 영상마다 시청이 끝나면 질문에 답해 주세요. "
+    "첫 번째와 같은 방식으로 진행됩니다."
+)
+# The interview's length is P0's ("2~3분 정도 간단한 인터뷰").
+INTERVIEW_STEP: Final = {"label": "짧은 인터뷰", "time": "2~3분"}
 HANDOFF_TITLE: Final = "1스테이지 완료"
+# The session's segments, in order (the browser holds their labels):
+# intro, practice, first viewings, second viewings, long videos, interview.
+SEGMENT: Final = {"P0": 0, "practice": 1, "A": 2, "B": 3, INTERLUDE: 3, "handoff": 4}
 # Regen's waiting message while a clip's second caption is prepared (sheet_questionnaire.js).
 PREPARING: Final = "다음 영상을 준비하고 있습니다…"
 UNWATCHED: Final = "영상을 끝까지 시청한 뒤 진행해 주세요."
@@ -233,17 +252,38 @@ class Phase1:
             items.append(item)
         return items
 
-    def present(self, state: Mapping[str, Any], url: Callable[[str], str]) -> dict[str, Any]:
-        """The page payload for the browser: no clip key, family or answer key."""
+    def progress(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Where the page sits in the whole session: its segment, and how far into it (0–1)."""
+        page = state["page"]
+        steps = STEP_A if page in STEP_A else STEP_B if page in STEP_B else None
+        if steps is None:
+            return {"segment": SEGMENT[page], "fraction": 0.0}
+        done = state["clip_index"] + steps.index(page) / len(steps)
+        return {"segment": SEGMENT[state["step"]], "fraction": round(done / len(state["clip_order"]), 3)}
+
+    def present(
+        self,
+        state: Mapping[str, Any],
+        url: Callable[[str], str],
+        live_minutes: Sequence[int] = (),
+    ) -> dict[str, Any]:
+        """The page payload for the browser: no clip key, family or answer key.
+
+        ``live_minutes`` gives each long video's length in whole minutes, for the
+        interstitial's remaining steps.
+        """
         if state.get("stage") != "phase1":
             raise Conflict("phase 1 is complete")
         page = state["page"]
+        count = len(state["clip_order"])
         result: dict[str, Any] = {
             "revision": state["revision"],
             "protocol": PROTOCOL,
             "page": page,
+            "step": state["step"],
             "clip_index": state["clip_index"],
-            "clip_count": len(state["clip_order"]),
+            "clip_count": count,
+            "progress": self.progress(state),
             "practice": page == "practice",
             "instrument_hash": state["instrument_hash"],
             "items": [],
@@ -255,6 +295,21 @@ class Phase1:
                 {"id": str(i), "index": i, "at_ms": frame.get("at_ms", 0), "url": url(f"practice-{i}")}
                 for i, frame in enumerate(self.setup["practice"]["frames"])
             ]
+        elif page == INTERLUDE:
+            videos = len(live_minutes)
+            result.update(
+                kind=INTERLUDE,
+                title=INTERLUDE_TITLE,
+                instruction=INTERLUDE_TEXT.format(count=count),
+                remaining=[
+                    {"label": f"두 번째 시청 · 영상 {count}편", "time": None},
+                    {
+                        "label": f"긴 영상 {videos}편 · 자막 조절" if videos else "긴 영상 · 자막 조절",
+                        "time": f"약 {sum(live_minutes)}분" if videos else None,
+                    },
+                    dict(INTERVIEW_STEP),
+                ],
+            )
         elif page == "handoff":
             result.update(kind="handoff", title=HANDOFF_TITLE, instruction="")
         else:
@@ -312,7 +367,7 @@ class Phase1:
             state["clip_index"] += 1
             state["page"] = "P1" if page == "P5" else "P6"
         elif page == "P5":
-            state.update(step="B", clip_index=0, page="P6")
+            state.update(step="B", clip_index=0, page=INTERLUDE)
         else:
             state["page"] = "handoff"
 
@@ -345,6 +400,10 @@ class Phase1:
             self._submit(state, data, now)
         elif action == "skip-second":
             self._skip_second(state, now)
+        elif action == "interlude-complete":
+            if page != INTERLUDE:
+                raise Conflict("The second viewings have not been reached")
+            state["page"] = "P6"
         else:
             raise ValueError("Unknown questionnaire action")
         # A next page that cannot render must roll the answer back (regen does the same).

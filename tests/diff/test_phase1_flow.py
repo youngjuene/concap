@@ -85,6 +85,15 @@ def written(flow: Phase1, state: dict[str, Any], status: str = "ready") -> None:
         flow.record_tweak(state, key, outcome, 50.0)
 
 
+def through_stage_a(flow: Phase1, state: dict[str, Any], now: float) -> float:
+    """Every clip's first step, then the stage-B interstitial."""
+    for _ in range(len(state["clip_order"])):
+        now = step(flow, state, now)
+    assert (state["step"], state["clip_index"], state["page"]) == ("B", 0, "interlude")
+    flow.apply(state, "interlude-complete", {"page": "interlude"}, now)
+    return now
+
+
 def through_practice(flow: Phase1, state: dict[str, Any]) -> None:
     flow.apply(state, "intro-complete", {"page": "P0"}, 1.0)
     answers = {
@@ -100,9 +109,7 @@ def test_a_whole_phase_one_walk(flow: Phase1) -> None:
     assert state["clip_order"] == clip_order(["kyoto_101", "lima_202", "oslo_303"], 7)
     through_practice(flow, state)
     assert state["practice"][0]["analysis_excluded"] is True and state["page"] == "P1"
-    now = 10.0
-    for _ in range(3):
-        now = step(flow, state, now)
+    now = through_stage_a(flow, state, 10.0)
     assert (state["step"], state["clip_index"], state["page"]) == ("B", 0, "P6")
     first = state["clip_order"][0]
     expected = flow.clips[first]["options"]["A1s"][0]["label"]
@@ -140,9 +147,7 @@ def test_a_whole_phase_one_walk(flow: Phase1) -> None:
 def test_a_failed_second_caption_skips_that_clip_s_second_step(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=7)
     through_practice(flow, state)
-    now = 10.0
-    for _ in range(3):
-        now = step(flow, state, now)
+    now = through_stage_a(flow, state, 10.0)
     written(flow, state, "failed")
     assert flow.present(state, lambda name: name)["kind"] == "skipped"
     assert flow.media_files(state) == {}
@@ -174,6 +179,43 @@ def test_one_retry_is_kept_across_restarts_and_late_outcomes_are_ignored(flow: P
     entry = state["second_captions"][key]
     assert entry["status"] == "ready" and entry["text"] == "새 자막" and len(entry["attempts"]) == 2
     assert flow.pending_tweaks(state) == []
+
+
+def test_every_page_says_where_it_sits_in_the_session(flow: Phase1) -> None:
+    state = flow.new_state("s-test", "P1", seed=7)
+
+    def where(live_minutes: tuple[int, ...] = ()) -> tuple[str, str, dict[str, Any]]:
+        payload = flow.present(state, lambda name: name, live_minutes)
+        return payload["page"], payload["step"], payload["progress"]
+
+    assert where() == ("P0", "A", {"segment": 0, "fraction": 0.0})
+    with pytest.raises(Conflict, match="not been reached"):
+        flow.apply(state, "interlude-complete", {"page": "P0"}, 1.0)
+    through_practice(flow, state)
+    assert where() == ("P1", "A", {"segment": 2, "fraction": 0.0})
+    now = watch(flow, state, 10.0)
+    assert where() == ("P2", "A", {"segment": 2, "fraction": 0.067})  # P2 of clip 1 of 3: (0 + 1/5) / 3
+    for _ in range(len(STEP_A) - 1):
+        answer(flow, state, now)
+    for _ in range(2):
+        now = step(flow, state, now)
+    # The stage-B interstitial: phase 1's one break, before the clip count restarts at 1.
+    assert where() == ("interlude", "B", {"segment": 3, "fraction": 0.0})
+    interlude = flow.present(state, lambda name: name, (5, 6))
+    assert (interlude["kind"], interlude["title"]) == ("interlude", "첫 번째 시청을 모두 마쳤습니다")
+    assert interlude["instruction"].startswith("이제 앞에서 본 영상 3편을 한 번 더 봅니다.")
+    assert "자막" not in interlude["instruction"]  # P0 already says the captions differ (D1)
+    assert interlude["remaining"] == [
+        {"label": "두 번째 시청 · 영상 3편", "time": None},
+        {"label": "긴 영상 2편 · 자막 조절", "time": "약 11분"},
+        {"label": "짧은 인터뷰", "time": "2~3분"},
+    ]
+    without_videos = flow.present(state, lambda name: name)["remaining"]
+    assert without_videos[1] == {"label": "긴 영상 · 자막 조절", "time": None}
+    assert flow.media_files(state) == {}
+    event = flow.apply(state, "interlude-complete", {"page": "interlude"}, now)
+    assert (event["phase"], event["analysis_excluded"], event["clip_index"]) == (0, True, None)
+    assert where() == ("P6", "B", {"segment": 3, "fraction": 0.0})
 
 
 def test_items_and_rules_are_regen_s(flow: Phase1) -> None:
@@ -231,6 +273,8 @@ def test_no_clip_key_family_answer_key_or_prompt_reaches_the_browser(flow: Phase
         payloads.append(flow.present(state, lambda name: f"media/{name}"))
         if state["page"] in ("P1", "P6"):
             now = watch(flow, state, now)
+        elif state["page"] == "interlude":
+            flow.apply(state, "interlude-complete", {"page": "interlude"}, now)
         else:
             answer(flow, state, now, (0.2, 0.2))
     text = json.dumps(payloads, ensure_ascii=False)

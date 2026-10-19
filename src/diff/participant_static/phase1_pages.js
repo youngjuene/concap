@@ -12,7 +12,10 @@
  *   caption failed is skipped at once (skip-second), with no participant step;
  * - the handoff opens the live watch (watch/);
  * - drafts are keyed by the server's opaque session scope, because successive
- *   participants share the experimenter's tab. */
+ *   participants share the experimenter's tab;
+ * - the UI review of 2026-10-19 ("Diff Flow Improved"): a progress header for
+ *   the whole session, an eyebrow naming the viewing (첫 번째 / 두 번째 시청)
+ *   with the clip count repeated as dots, and the stage-B interstitial. */
 const API = "api/p1";
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const node = (tag, text, className) => {
@@ -33,6 +36,9 @@ const storage = {
   remove(key) { try { sessionStorage.removeItem(key); } catch { /* Server state remains authoritative. */ } },
 };
 let shell, current, cleanup = () => {}, generation = 0;
+// The session's segments, sized by expected time in the CSS; live.js holds the same list.
+const SEGMENTS = ["도입", "연습", "첫 번째 시청", "두 번째 시청", "긴 영상", "인터뷰"];
+const VIEWING = {A: "첫 번째 시청", B: "두 번째 시청"};
 
 async function post(path, payload) {
   const response = await fetch(path, {
@@ -102,11 +108,47 @@ async function recover(error, target) {
   feedback(`저장하지 못했습니다. 입력은 이 탭에 유지됩니다. 다시 시도해 주세요.\n${error.message}`, target);
 }
 
+function sessionProgress({segment, fraction}) {
+  const wrap = node("div", undefined, "session-progress");
+  const bars = node("div", undefined, "bars"), labels = node("div", undefined, "labels");
+  bars.setAttribute("aria-hidden", "true");
+  SEGMENTS.forEach((label, index) => {
+    const bar = node("span");
+    bar.style.setProperty("--fill", `${index < segment ? 100 : index === segment ? Math.round(fraction * 100) : 0}%`);
+    const name = node("span", label, index === segment ? "current" : "");
+    if (index === segment) name.setAttribute("aria-current", "step");
+    bars.append(bar); labels.append(name);
+  });
+  wrap.append(bars, labels);
+  return wrap;
+}
+
+const clipPage = detail => /^P([1-9]|1[01])$/.test(detail.page) && Number.isInteger(detail.clip_index);
+
+function eyebrow(detail) {
+  if (detail.practice) return "연습 · 응답은 분석에서 제외됩니다";
+  if (detail.kind === "interlude") return "1스테이지 · 두 번째 시청";
+  if (!clipPage(detail)) return "소리 자막 연구";
+  return `1스테이지 · ${VIEWING[detail.step]} · 영상 ${detail.clip_index + 1} / ${detail.clip_count}`;
+}
+
+function clipDots(detail) {
+  const dots = node("span", undefined, "clip-dots");
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < detail.clip_count; index += 1) {
+    dots.append(node("span", undefined, index < detail.clip_index ? "done" : index === detail.clip_index ? "current" : ""));
+  }
+  return dots;
+}
+
 function title(detail) {
+  if (detail.progress) shell.append(sessionProgress(detail.progress));
   const head = node("div", undefined, "head");
-  const context = detail.practice ? "연습 · 응답은 분석에서 제외됩니다" : detail.kind === "intro" || detail.kind === "handoff" ? "소리 자막 연구" : Number.isInteger(detail.clip_index)
-    ? `1스테이지 · 영상 ${detail.clip_index + 1} / ${detail.clip_count}` : "소리 자막 연구";
-  head.append(node("span", context, "eyebrow"));
+  if (clipPage(detail)) {
+    const row = node("div", undefined, "eyebrow-row");
+    row.append(node("span", eyebrow(detail), "eyebrow"), clipDots(detail));
+    head.append(row);
+  } else head.append(node("span", eyebrow(detail), "eyebrow"));
   const heading = node("h1", detail.title || "소리 자막 연구");
   heading.tabIndex = -1;
   head.append(heading);
@@ -344,6 +386,27 @@ function renderPreparing(detail, renderID) {
   cleanup = () => clearInterval(timer);
 }
 
+function renderInterlude(detail) {
+  const card = node("section", undefined, "card");
+  card.append(node("span", "남은 과정", "card-title"));
+  const list = node("ol", undefined, "remaining");
+  (detail.remaining || []).forEach((step, index) => {
+    const row = node("li");
+    row.append(node("span", String(index + 1), "num"), node("span", step.label), node("span", step.time || "", "time"));
+    list.append(row);
+  });
+  card.append(list);
+  shell.append(card);
+  const next = button("두 번째 시청 시작", async () => {
+    next.disabled = true;
+    try { await action("interlude-complete", {}, detail); await refresh(); }
+    catch (error) { await recover(error); next.disabled = false; }
+  }, true);
+  const actions = node("div", undefined, "actions");
+  actions.append(next, node("span", "잠시 쉬어도 괜찮습니다", "note"));
+  shell.append(actions); errorRegion();
+}
+
 async function renderSkipped(detail) {
   const region = errorRegion();
   try { await action("skip-second", {}, detail); await refresh(); } catch (error) { await recover(error, region); }
@@ -554,6 +617,7 @@ async function render(detail) {
   else if (["survey", "visual", "audio"].includes(detail.kind)) renderForm(detail);
   else if (detail.kind === "preparing") renderPreparing(detail, renderID);
   else if (detail.kind === "skipped") await renderSkipped(detail);
+  else if (detail.kind === "interlude") renderInterlude(detail);
   else if (detail.kind === "handoff") renderHandoff(detail);
   else if (detail.kind === "done") shell.append(node("p", "응답이 저장되었습니다. 참여해 주셔서 감사합니다.", "lede"));
   else problem("실험 단계 정보를 확인할 수 없습니다. 연구자에게 문의해 주세요.");

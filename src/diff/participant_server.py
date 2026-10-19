@@ -65,7 +65,16 @@ COOKIE: Final = "diff_session"
 STATIC: Final = Path(__file__).with_name("participant_static")
 ASSETS: Final = {"phase1_pages.js": "text/javascript", "participant_theme.css": "text/css"}
 ACTIONS: Final = frozenset(
-    {"intro-complete", "practice-complete", "playback", "view-ended", "submit", "skip-second", "handoff"}
+    {
+        "intro-complete",
+        "practice-complete",
+        "playback",
+        "view-ended",
+        "submit",
+        "skip-second",
+        "interlude-complete",
+        "handoff",
+    }
 )
 TweakFor = Callable[[Mapping[str, Any], Mapping[str, str]], tuple[CaptionSource, Job, dict[str, Any]]]
 WATCH_URL: Final = "watch/"
@@ -135,6 +144,8 @@ def build_participant_app(
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
     key = secret if secret is not None else secrets.token_bytes(32)
+    # Each long video's length in whole minutes, for phase 1's interstitial.
+    live_minutes = tuple(max(1, round(video.stream.duration_ms / 60000)) for video in videos)
     live_sessions: dict[str, LiveSession] = {}
     lock = threading.Lock()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -160,7 +171,7 @@ def build_participant_app(
 
     def page(state: Mapping[str, Any]) -> dict[str, Any]:
         assert phase1 is not None
-        payload = phase1.present(state, lambda name: f"api/p1/media/{media_token(state, name)}")
+        payload = phase1.present(state, lambda name: f"api/p1/media/{media_token(state, name)}", live_minutes)
         payload["session"] = opaque_token(key, state["session_id"], "drafts")
         return payload
 
