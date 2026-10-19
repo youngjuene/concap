@@ -388,3 +388,23 @@ check that the logged prompts are what the worker tokenized:
 envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir artifacts/diff/live-20261020
 ```
+
+## 10. Comparing prompt wordings
+
+`scripts/diff_prompt_bench.py` runs candidate wordings of live-p2, tweak-p1
+and the tuner on fixed participant answers, at the study's settings. Its
+docstring gives the candidate file's format.
+- `inputs` keeps a run's answers and the slider steps of its live calls.
+- `run`, in the generator env on one GPU, rebuilds every prompt from those
+  answers with the checkout's code (or a candidate's wording) and writes it
+  with Trida.
+
+It reports:
+- how often an output copies its starting caption;
+- whether texture words appear as each texture step asks;
+- check failures and flags;
+- how many second captions change between 0% and 100% degrees.
+
+The baseline inputs are `artifacts/diff/bench/inputs-smoke-20261019.json`,
+from the 2026-10-19 smoke run with three agent pseudo participants. The file
+is not tracked, because it holds the long videos' draft cues.
