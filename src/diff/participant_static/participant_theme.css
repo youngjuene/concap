@@ -234,6 +234,16 @@ p.lede {
 .remaining li:first-child .num { color: var(--accent); }
 .remaining li:first-child .time { font-weight: 400; }
 
+/* Waiting for a second caption: a quiet indeterminate bar, still under reduced motion. */
+.waiting { max-width: 560px; margin-top: 26px; padding: 24px 22px; display: flex; flex-direction: column; gap: 14px; }
+.waiting .message { font-size: 16.5px; }
+.waiting .note { font-size: 14px; color: var(--dim); }
+.waiting .late { font-size: 14px; color: var(--ink); font-weight: 600; }
+.indeterminate { position: relative; height: 4px; border-radius: 2px; background: var(--muted-fill); overflow: hidden; }
+.indeterminate::before { content: ""; position: absolute; top: 0; bottom: 0; width: 28%; border-radius: 2px; background: var(--accent); animation: indeterminate 1.2s ease-in-out infinite; }
+@keyframes indeterminate { from { left: -28%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .indeterminate::before { animation: none; left: 36%; } }
+
 /* Items in cards of three with hairlines between them, with no subscale names. */
 .sheet-questionnaire .sheet-group-head { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 8px; font: 11px/1.4 var(--mono); color: var(--dim); }
 .sheet-questionnaire .sheet-group { background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; margin: 0 0 22px; }

@@ -15,8 +15,9 @@
  *   participants share the experimenter's tab;
  * - the UI review of 2026-10-19 ("Diff Flow Improved"): a progress header for
  *   the whole session, an eyebrow naming the viewing (첫 번째 / 두 번째 시청)
- *   with the clip count repeated as dots, the stage-B interstitial, and items
- *   in cards of three with the missing-item message in the sticky bar. */
+ *   with the clip count repeated as dots, the stage-B interstitial, a waiting
+ *   card while a second caption is written, and items in cards of three with
+ *   the missing-item message in the sticky bar. */
 const API = "api/p1";
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const node = (tag, text, className) => {
@@ -41,6 +42,7 @@ let shell, current, cleanup = () => {}, generation = 0;
 const SEGMENTS = ["도입", "연습", "첫 번째 시청", "두 번째 시청", "긴 영상", "인터뷰"];
 const VIEWING = {A: "첫 번째 시청", B: "두 번째 시청"};
 const GROUP = 3;
+const LATE_MS = 20000;
 
 async function post(path, payload) {
   const response = await fetch(path, {
@@ -154,7 +156,8 @@ function title(detail) {
   const heading = node("h1", detail.title || "소리 자막 연구");
   heading.tabIndex = -1;
   head.append(heading);
-  if (detail.instruction) head.append(node("p", detail.instruction, "lede"));
+  // The waiting card holds a preparing page's message.
+  if (detail.instruction && detail.kind !== "preparing") head.append(node("p", detail.instruction, "lede"));
   shell.append(head);
   return heading;
 }
@@ -417,14 +420,24 @@ function renderIntro(detail) {
 }
 
 function renderPreparing(detail, renderID) {
+  const card = node("section", undefined, "card waiting");
+  card.setAttribute("role", "status");
+  const bar = node("div", undefined, "indeterminate");
+  bar.setAttribute("aria-hidden", "true");
+  const late = node("p", "시간이 걸리고 있습니다. 연구자에게 알려 주세요.", "late");
+  late.hidden = true;
+  card.append(node("p", detail.instruction, "message"), bar,
+    node("p", "보통 몇 초 안에 끝납니다. 준비되면 자동으로 넘어갑니다.", "note"), late);
+  shell.append(card);
   const region = errorRegion();
+  const slow = setTimeout(() => { late.hidden = false; }, LATE_MS);
   const timer = setInterval(async () => {
     try {
       const latest = await request("state");
       if (generation === renderID && (latest.kind !== "preparing" || scope(latest) !== scope(detail))) await render(latest);
     } catch (error) { feedback(error.message, region); }
   }, 1000);
-  cleanup = () => clearInterval(timer);
+  cleanup = () => { clearInterval(timer); clearTimeout(slow); };
 }
 
 function renderInterlude(detail) {
