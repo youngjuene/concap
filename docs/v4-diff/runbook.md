@@ -353,3 +353,38 @@ It reads the store (`--store`, default the participant store) and every
 - `manifest.json`, with file hashes.
 
 This is the only way data leave the app.
+
+## 9. Audit before analysis
+
+```sh
+uv run python scripts/diff_session_audit.py check --store artifacts/diff/participants.sqlite \
+  --log-dir artifacts/diff/live-20261020 [--log-dir …] \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json --sources path/to/phase2-sources.json \
+  --export artifacts/diff/export-20261020 --out artifacts/diff/audit-20261020.json
+```
+
+Run it on the pilot and on every participant session before analysis. It
+opens the store read-only and exits 1 on any mismatch. From each
+participant's answers it recomputes:
+- the object under each P2 point, by re-reading the masks;
+- each direction's degree and the other tweak slots;
+- the tuner's heard families and rating means.
+
+diff's own prompt functions render what those values should produce, and the
+audit compares that with every logged call. It also checks that:
+- each second caption is what Trida wrote and what P6 showed, or that a
+  failed one was skipped;
+- every slider change got a live call;
+- every caption shown maps to a call;
+- the export matches the store.
+
+Audit with the commit the sessions ran: a session run on another template is
+reported once, as a version mismatch.
+
+When the model, its tokenizer or the generator environment changes, also
+check that the logged prompts are what the worker tokenized:
+
+```sh
+envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
+  --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir artifacts/diff/live-20261020
+```
