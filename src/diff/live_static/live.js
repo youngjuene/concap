@@ -7,13 +7,16 @@
 // - a chip says when a change will show: a countdown to the next cue boundary,
 //   then "applied" for 2 s, or "kept" while the new caption is still being written;
 // - a hidden tab pauses the video behind phase 1's overlay, so no caption counts as seen unseen;
-// - the ratings use phase 1's scale cards and sticky bar.
+// - the ratings use phase 1's scale cards and sticky bar;
+// - the last screen keeps the participant for the oral interview, and a held
+//   button takes the experimenter back to the entry.
 "use strict";
 
 const POLL_MS = 1000;
 const TICK_MS = 1000;
 const DEBOUNCE_MS = 300;
 const APPLIED_MS = 2000;
+const HOLD_MS = 1000;
 const GROUP = 3;
 // The session's segments, sized by expected time in the CSS; phase1_pages.js holds the same list.
 const SEGMENTS = ["도입", "연습", "첫 번째 시청", "두 번째 시청", "긴 영상", "인터뷰"];
@@ -417,6 +420,28 @@ function pauseHidden() {
   flushExposures();
 }
 
+// The experimenter holds the button for a second to return to the entry for the next participant.
+function wireHold() {
+  const hold = $("hold");
+  let timer = null;
+  const start = () => {
+    if (timer !== null) return;
+    hold.classList.add("holding");
+    timer = setTimeout(() => window.location.assign("../#enter"), HOLD_MS);
+  };
+  const stop = () => {
+    clearTimeout(timer);
+    timer = null;
+    hold.classList.remove("holding");
+  };
+  hold.addEventListener("pointerdown", start);
+  for (const name of ["pointerup", "pointerleave", "pointercancel"]) hold.addEventListener(name, stop);
+  hold.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && !event.repeat) { event.preventDefault(); start(); }
+  });
+  hold.addEventListener("keyup", (event) => { if (event.key === "Enter" || event.key === " ") stop(); });
+}
+
 async function begin() {
   const result = await call("api/session", {});
   if (result.status === 401 || result.status === 409) {
@@ -489,6 +514,7 @@ function wire() {
     $("paused").hidden = true;
     await video().play();
   });
+  wireHold();
 }
 
 wire();

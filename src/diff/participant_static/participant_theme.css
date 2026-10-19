@@ -262,6 +262,17 @@ button.link { min-height: 0; padding: 0; border: 0; background: none; color: var
 button.link:hover:not(:disabled) { color: var(--accent-press); }
 button.link:active:not(:disabled) { background: none; }
 
+/* The end of the screens: the oral interview and the debrief follow, outside the app. */
+.notice { display: flex; align-items: center; gap: 18px; padding: 26px 24px; }
+.notice .mark { flex: none; width: 44px; height: 44px; border-radius: 50%; background: var(--accent-wash); border: 2px solid var(--accent); display: grid; place-items: center; font: 600 15px var(--mono); color: var(--accent); }
+.notice strong { display: block; font-size: 20px; font-weight: 600; line-height: 1.4; word-break: keep-all; }
+.notice span { display: block; margin-top: 4px; font-size: 14.5px; color: var(--body-ink); }
+.experimenter { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 64px; }
+.experimenter .note { font: 12.5px/1.45 var(--mono); color: var(--dim); }
+button.hold { position: relative; overflow: hidden; font-size: 14px; color: var(--body-ink); }
+button.hold::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 120ms; }
+button.hold.holding::after { transform: scaleX(1); transition: transform 1s linear; }
+
 /* The live watch: video, the shared caption band, and two three-stop sliders. */
 .watch { position: relative; max-width: 1000px; margin: 0 auto; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 14px; }
 .watch-head { display: flex; flex-direction: column; gap: 8px; }
