@@ -252,11 +252,18 @@ uv run python -m diff live serve \
     practice;
   - stage A: for each of the 12 clips, in a random order recorded per
     participant, the first viewing (the raw prepared caption), then P2–P5;
+  - the stage-B interstitial ("첫 번째 시청을 모두 마쳤습니다"): the remaining
+    steps, and phase 1's one natural break;
   - stage B: the same clips in the same order, the second viewing (Trida's
     caption), then P7, P8, P9, P10 (S1–S3) and P11 (R1/R2);
-  - "2스테이지 시작", which builds the tuner's calibration from the phase-1
-    answers and opens the watch at `/watch/`;
-  - the videos, then the post-watch items.
+  - the phase-2 briefing ("이제 긴 영상 N편을 봅니다"), whose "2스테이지 시작"
+    builds the tuner's calibration from the phase-1 answers and opens the
+    watch at `/watch/`;
+  - the videos, then the post-watch items;
+  - the end screen, which asks the participant to stay and call you for the
+    interview (P12) and debrief (P13), both outside the app. The session is
+    already finished and saved. Hold "연구자 확인 · 다음 참가자" for one
+    second to return to the entry.
 - **Second captions:** when a clip's P5 is submitted, Trida writes its second
   caption on the session's GPU. It works from the raw caption and that
   participant's step-1 answers (`diff.phase1_tweak`), while the participant
@@ -267,7 +274,14 @@ uv run python -m diff live serve \
     second step automatically, with the reason recorded. There are no
     quality retries; one identical retry follows a lost worker or device
     error.
-- Phase 1 copies regen's look; the watch keeps its own.
+- Phase 1 copies regen's look, and the watch shares it (UI review of
+  2026-10-19), including the caption band. Every page but the watch shows the
+  whole session's progress in six segments.
+- **The watch:** each slider has three stops, the steps its axis really has.
+  A move shows a chip that counts down to the next caption boundary, then
+  says the change is applied or that the previous caption is kept while the
+  new one is written. Hiding the tab pauses the video behind phase 1's
+  overlay.
 - **After a server restart:** phase 1 continues exactly where it was, and any
   second caption still pending is queued again when the participant's page
   next talks to the server. A watch

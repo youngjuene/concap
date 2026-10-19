@@ -4,6 +4,100 @@ Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
 to Trida-7B (both model changes below). Written against `main` at `3842302`.
 Where the brief and the PRD disagree, the brief wins.
 
+## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
+
+The researcher supplied a review of the participant flow (14 findings) and an
+improved design, and asked for its fixes to be applied. The weak spots were
+the seams: where the stage changes, where the app changes, and where the
+screens end before the protocol does.
+
+**Applied:**
+- **One caption band (F1).** The watch uses phase 1's black band below the
+  video (24/38 px, line breaks kept, grows), not a text-shadow overlay on the
+  frame. Phase 1's S1–S3 seed the tuner, so both phases now judge the same
+  presentation.
+- **Stepped sliders (F4).** Each slider has the three stops its axis really
+  has: texture 0–2 and context broad/specific/relation. The browser sends 0,
+  0.5 or 1, only when the stop changes, so the log no longer carries
+  meaningless 0.01 moves. `slider_steps` is unchanged.
+  - A chip follows each change: a countdown to the next cue boundary, then
+    "applied" for 2 s, or "the previous caption stays" when the boundary came
+    before the new caption.
+  - Once a change is accepted, the browser drops the cached captions for
+    later cues written under the old settings, so a boundary keeps the
+    previous caption, as the scheduler intends.
+- **Where am I (F2, F14).** Every page except the watch has a six-segment
+  session progress bar (도입 · 연습 · 첫 번째 시청 · 두 번째 시청 · 긴 영상 ·
+  인터뷰), sized by expected time.
+  - Clip pages read "1스테이지 · 첫/두 번째 시청 · 영상 n / N", with the
+    count repeated as dots.
+  - The watch header shows "긴 영상 n / V" and the elapsed time.
+- **Stage-B interstitial (F2).** A new page, `interlude`, sits between the
+  last P5 and the first P6. It lists the remaining steps and is phase 1's one
+  natural break.
+  - It does not say that the captions differ: P0 already does, and saying it
+    again would prime D1.
+  - It is closed by `interlude-complete`, which is analysis-excluded.
+  - The page order changed, so the protocol is now `diff.phase1/v3`.
+- **The end of the screens (F3).** The last screen says the screen tasks are
+  over and asks the participant to stay, take off the headphones and call the
+  experimenter for the 2–3 minute interview.
+  - The interview (P12) and debrief (P13) stay outside the app, as decided on
+    2026-10-18. The session still finishes when the ratings are saved.
+  - Holding "연구자 확인 · 다음 참가자" for 1 s returns to the entry.
+- **One theme (F5):** `live.html` links `participant_theme.css` and has no
+  palette of its own.
+- **Briefing (F6):** the handoff is phase 2's briefing:
+  - what the sliders change;
+  - that a change shows from a later caption;
+  - that the video does not stop, but pauses in a hidden tab.
+
+  The long videos' count and length come from the videos served.
+- **Hidden tab (F9):** the watch pauses behind phase 1's overlay, which covers
+  the sliders. The playback log records `hidden`.
+- **Ratings (F10):** the post-watch items use phase 1's scale cards, answered
+  count and sticky bar.
+- **Waiting (F11):** while a second caption is written, P6 shows an
+  indeterminate bar (still under reduced motion). After 20 s it adds "시간이
+  걸리고 있습니다. 연구자에게 알려 주세요."
+- **Items in cards of three (F12)**, with no subscale names. P9 keeps its
+  shuffled order.
+- **Validation (F13):** the missing-item message moved into the sticky bar,
+  with a link that jumps to the first missing item.
+- **Found by the walk:** on the second long video, Start stayed enabled from
+  the first video. A click before cue 0 was ready got a silent 409. Start and
+  the caption cache are now reset for each video.
+
+**Not applied:**
+- **F7, practice viewing.** The practice clip has no prepared caption, and
+  the researcher chose to remove the practice viewing pages.
+- **F8, clip order (lag-1 interleave).** This is the researcher's decision,
+  not a UI change.
+- **The in-app interview checklist (design H6).** It would contradict "P12
+  and P13 happen outside the app".
+- **The briefing's optional 20-second slider practice.** It needs a non-study
+  clip.
+
+**Draft wording for the researcher:**
+- The middle slider labels (조금, 구체적인 음원) are new.
+- The texture slider's left end now reads "없이" instead of "적게": step 0
+  forbids texture words.
+- The design's steering goal ("정답은 없으니 읽기 편한 자막을 찾아 주세요") was
+  left out, because the goal participants steer towards is a study decision.
+- The interstitial, briefing, waiting and end-screen sentences are drafts.
+
+**Verified:**
+- the `tests/diff` suite, ruff and mypy;
+- a headless Chromium walk with the fake worker (3 clips, two long videos of
+  30 s and 15 s), with no page errors. Every chip state showed as intended:
+  - pending, then applied at the next boundary;
+  - a move 1.2 s before a boundary kept the previous caption, then applied
+    one cue later;
+  - a hidden tab paused behind the overlay;
+  - the settings carried over to the second video;
+  - a short press of the end button did nothing, and a held press returned to
+    the entry.
+
 ## Phase 1 — two viewings per clip, the second caption by Trida (researcher, 2026-10-18, later)
 
 The researcher read the questionnaire spreadsheet (문항표; regen's copy was
