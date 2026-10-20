@@ -604,7 +604,7 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.live_generation import LiveService, LiveStream, starting_caption_problems
     from diff.live_server import LivePool, LiveVideo, rating_items
     from diff.model_profile import TRIDA_7B, verify_snapshot
-    from diff.output_checks import check_output, output_from_record
+    from diff.output_checks import check_output, displayed, output_from_record
     from diff.participant_server import build_participant_app
     from diff.phase1_flow import Phase1
     from diff.phase1_setup import read_setup, setup_problems
@@ -661,7 +661,7 @@ def live_serve(args: argparse.Namespace) -> int:
         return tweak_job_for(clip, slots, args.purpose)
 
     def check(source: Any, job: Any, result: Any) -> Any:
-        output = output_from_record(result["output"])
+        output = displayed(output_from_record(result["output"]))
         return check_output(
             source, output, template_phase=2, cell=job.cell, max_chars=LIVE_MAX_CHARS
         ).record()

@@ -27,7 +27,8 @@ deterministic at temperature 0, so a rerun gives the same outputs.
 It reports:
 - how often an output copies its starting caption;
 - whether a live output has as many texture words as its step asks (0, 1 or 2);
-- check failures and flags, from the server's own checks, and 「」 left in the text;
+- check failures and flags, from the server's own checks on the shown text (the display rule);
+- how often Trida's own text has 「」 or a leading prompt label, which the display rule removes;
 - how many second captions change between 0% and 100% degrees.
 
 A candidate is a JSON file that replaces any of the checkout's wordings for this run only:
@@ -62,7 +63,14 @@ from diff import rewrite_prompts  # noqa: E402
 from diff.caption_sources import CaptionSource, parse_sources  # noqa: E402
 from diff.job_plan import Job, PlanError, live_job  # noqa: E402
 from diff.live_calibration import calibrate  # noqa: E402
-from diff.output_checks import check_output, output_from_record, quality_keys_in  # noqa: E402
+from diff.output_checks import (  # noqa: E402
+    LABEL_PREFIXES,
+    check_output,
+    displayed,
+    output_from_record,
+    quality_keys_in,
+    shown_text,
+)
 from diff.phase1_tweak import DIRECTIONS, check_record, tweak_job_for, tweak_slots, tweak_source  # noqa: E402
 from diff.study_protocol import LIVE_MAX_CHARS, SYSTEM_MESSAGE  # noqa: E402
 
@@ -180,11 +188,15 @@ def profile_inputs(
 
 
 def measure(text: str | None, source: str, checks: Mapping[str, Any] | None) -> dict[str, Any]:
-    text = text or ""
+    """Copies and texture words in what is shown; quotes and labels in what Trida wrote."""
+    written = text or ""
+    shown = shown_text(written)
     return {
-        "copy": text == source,
-        "texture_words": quality_keys_in(text),
-        "quotes": "「" in text or "」" in text,
+        "shown": shown,
+        "copy": shown == source,
+        "texture_words": quality_keys_in(shown),
+        "quotes": "「" in written or "」" in written,
+        "label": written.startswith(LABEL_PREFIXES),
         "failures": [f["code"] for f in (checks or {}).get("failures", [])],
         "flags": [f["code"] for f in (checks or {}).get("flags", [])],
     }
@@ -208,6 +220,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "copies": sum(r["copy"] for r in live),
             "not_completed": sum(r["status"] != "completed" for r in live),
             "quotes": sum(r["quotes"] for r in live),
+            "labels": sum(r["label"] for r in live),
             "by_texture": {str(k): dict(v) for k, v in sorted(by_texture.items())},
             "by_context": {k: dict(v) for k, v in sorted(by_context.items())},
             "failures": dict(Counter(code for r in live for code in r["failures"])),
@@ -219,6 +232,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "copies": sum(r["copy"] for r in tweaks),
         "failed": sum(r["status"] != "completed" or bool(r["failures"]) for r in tweaks),
         "quotes": sum(r["quotes"] for r in tweaks),
+        "labels": sum(r["label"] for r in tweaks),
         "failures": dict(Counter(code for r in tweaks for code in r["failures"])),
         "flags": dict(Counter(code for r in tweaks for code in r["flags"])),
     }
@@ -232,7 +246,8 @@ def print_summary(summary: Mapping[str, Any]) -> None:
         live = summary[f"live_{system}"]
         print(
             f"live under {system}: {live['copies']}/{live['calls']} copies, "
-            f"{live['not_completed']} not completed, {live['quotes']} with 「」"
+            f"{live['not_completed']} not completed; Trida wrote 「」 in {live['quotes']}, "
+            f"a label in {live['labels']}"
         )
         for step, counts in live["by_texture"].items():
             print(
@@ -245,7 +260,8 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     tweak = summary["tweak"]
     print(
         f"second caption: {tweak['copies']}/{tweak['calls']} copies, {tweak['failed']} failed, "
-        f"{tweak['quotes']} with 「」\n  failures {tweak['failures']}  flags {tweak['flags']}"
+        f"Trida wrote 「」 in {tweak['quotes']}, a label in {tweak['labels']}"
+        f"\n  failures {tweak['failures']}  flags {tweak['flags']}"
     )
     ends = summary["tweak_degrees"]
     print(f"  degrees 0% vs 100%: {ends['differ']}/{ends['pairs']} outputs differ")
@@ -335,7 +351,7 @@ def bench(
                 checks = (
                     check_output(
                         source,
-                        output_from_record(result["output"]),
+                        displayed(output_from_record(result["output"])),
                         template_phase=2,
                         cell=job.cell,
                         max_chars=LIVE_MAX_CHARS,
@@ -393,7 +409,7 @@ def bench(
                     "participant": who,
                     "clip": entry["key"],
                     **{f"at_{end}": texts[f"degrees-{end}"] for end in DEGREE_ENDS},
-                    "differ": texts["degrees-0"] != texts["degrees-100"],
+                    "differ": shown_text(texts["degrees-0"] or "") != shown_text(texts["degrees-100"] or ""),
                 }
             )
     return rows

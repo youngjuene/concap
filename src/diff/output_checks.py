@@ -16,13 +16,20 @@ feed G2: a closed-vocabulary quality counts only in one of its two vocabulary
 forms as whole words; an evidence source or relation term counts when a word
 sequence starts with it (so particles such as "버스가" still match). Everything
 is versioned by ``CHECKS_VERSION``.
+
+One exception to "never repair", for what a participant sees (researcher,
+2026-10-20): a live caption or a second caption is shown under
+``DISPLAY_RULE``, which removes a leading prompt label ("자막:") and one pair
+of quotes or 「」 wrapping the whole text, and changes nothing inside it. The
+checks of those captions run on the shown text (:func:`displayed`), so a
+quoted copy still counts as a copy. The model's own text stays in every record.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 from diff.caption_sources import QUALITIES, CaptionSource
@@ -44,6 +51,9 @@ LABEL_PREFIXES: Final = (
     "출력:",
 )
 FORMAT_MARKERS: Final = ("음원:", "개수:", "확실성:", "음향 특성:")
+DISPLAY_RULE: Final = "diff.display/v1"
+_DISPLAY_LABEL: Final = re.compile(r"^(?:바꿔 쓴 자막|고쳐 쓴 자막|다시 쓴 자막|자막|답|출력)\s*:+\s*")
+_WRAPPING: Final = (("「", "」"), ("『", "』"), ('"', '"'), ("“", "”"), ("'", "'"), ("‘", "’"))
 _EVIDENCE_LINE: Final = re.compile(r"소리 \d+\s*—")
 _PUNCTUATION: Final = ".,!?;:…·'\"“”‘’()[]{}「」『』<>~-—"
 _HANGUL_RANGES: Final = (
@@ -86,6 +96,22 @@ class GeneratedOutput:
             "special_ids_in_text": list(self.special_ids_in_text),
             "new_token_count": self.new_token_count,
         }
+
+
+def shown_text(text: str) -> str:
+    """What a participant sees of a caption: ``DISPLAY_RULE``'s edges removed, nothing inside changed."""
+    shown = _DISPLAY_LABEL.sub("", text.strip(), count=1)
+    for opening, closing in _WRAPPING:
+        inner = shown[1:-1]
+        wraps = len(shown) >= 2 and shown.startswith(opening) and shown.endswith(closing)
+        if wraps and opening not in inner and closing not in inner:
+            return inner.strip()
+    return shown
+
+
+def displayed(output: GeneratedOutput) -> GeneratedOutput:
+    """The output with its text as shown, for the checks of live and second captions."""
+    return replace(output, text=shown_text(output.text))
 
 
 def output_from_record(record: Mapping[str, Any]) -> GeneratedOutput:

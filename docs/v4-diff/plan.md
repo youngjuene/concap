@@ -16,6 +16,24 @@ engineering fixes found on the way to the user test.
   `--video` order, so the index alone did not say which video an event
   belonged to. `scripts/diff_session_audit.py` uses the ID, and for older logs
   infers it from the order of the attempts.
+- **The display rule** (researcher's decision, relaxing "shown as written" of
+  the live redesign of 2026-10-11). Trida often opens with a prompt label
+  ("자막:", 7 of 163 live calls in the smoke baseline) or wraps the caption in
+  「」 or quotes (7 of 36 second captions; 87 of 163 live calls under one probe
+  wording). What a participant sees of a live caption or a second caption is
+  now Trida's text under `output_checks.DISPLAY_RULE` (`diff.display/v1`):
+  - a leading label is removed ("자막", "바꿔/고쳐/다시 쓴 자막", "답",
+    "출력", followed by colons);
+  - one pair of quotes or 「」『』 wrapping the whole text is removed, only
+    when that pair appears nowhere inside it;
+  - nothing inside the text changes, so a broken word is still shown.
+
+  The checks of those captions run on the shown text, so a quoted copy is
+  still flagged as a copy. The attempt logs (`diff.live-attempt/v2`,
+  `diff.tweak-attempt/v2`) keep Trida's text and add `shown_text` and
+  `display_rule`. The offline G0 path is unchanged. The audit checks every
+  shown text against the rule, and the bench scores copies and texture words
+  on the shown text but still counts the quotes and labels in Trida's own.
 
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 

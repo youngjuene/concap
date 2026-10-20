@@ -11,6 +11,8 @@ from diff.caption_sources import CaptionSource, SourceSet
 from diff.output_checks import (
     GeneratedOutput,
     check_output,
+    check_tweak,
+    displayed,
     ending_class,
     extract_output,
     non_hangul_runs,
@@ -18,6 +20,7 @@ from diff.output_checks import (
     repeated_word_ngrams,
     script_passes,
     sentence_count,
+    shown_text,
 )
 from diff.study_protocol import QWEN_TERMINATOR_IDS, TRIDA_TERMINATOR_IDS
 
@@ -174,6 +177,35 @@ def test_a_live_check_can_hold_a_shorter_length_limit(development_sources: Sourc
     text = "가" * 120
     assert "length_over_limit" not in codes(check_output(source, output(text), cell=cell))
     assert "length_over_limit" in codes(check_output(source, output(text), cell=cell, max_chars=96))
+
+
+@pytest.mark.parametrize(
+    ("written", "shown"),
+    [
+        ("자막: 「경찰차 사이렌 소리, 차량 오가는 소리」", "경찰차 사이렌 소리, 차량 오가는 소리"),
+        ("고쳐 쓴 자막 : 버스가 지나간다.", "버스가 지나간다."),
+        ("자막:: 도로 위에서 나는 소리", "도로 위에서 나는 소리"),
+        ('"자동차 엔진 소리, 타이어 마찰음"', "자동차 엔진 소리, 타이어 마찰음"),
+        ("  『물 흐르는 소리』 ", "물 흐르는 소리"),
+        # nothing inside the text changes, and an unpaired edge stays
+        ("「큰 엔진 소리」와 「작은 소리」", "「큰 엔진 소리」와 「작은 소리」"),
+        ('"큰" 소리와 "작은" 소리', '"큰" 소리와 "작은" 소리'),
+        ('"자동차 소리""', '"자동차 소리""'),
+        ("자막 소리가 들린다", "자막 소리가 들린다"),
+        ("버스가 지나간다.", "버스가 지나간다."),
+    ],
+)
+def test_the_display_rule_removes_only_the_edges(written: str, shown: str) -> None:
+    # Researcher, 2026-10-20: a leading prompt label and one wrapping pair of quotes.
+    assert shown_text(written) == shown
+
+
+def test_a_shown_caption_is_what_the_checks_see(bus: CaptionSource) -> None:
+    quoted = output(f"자막: 「{bus.text}」")
+    assert "identical_to_source" not in codes(check_tweak(bus, quoted, max_chars=160), "flags")
+    shown = displayed(quoted)
+    assert shown.text == bus.text and shown.raw_text == quoted.raw_text  # the model's text is kept
+    assert "identical_to_source" in codes(check_tweak(bus, shown, max_chars=160), "flags")
 
 
 def test_helpers() -> None:

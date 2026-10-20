@@ -23,8 +23,11 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
   worker.
 * Before playback, the first cues are written at the calibrated settings, so a
   video opens with Trida's rewrite.
-* A caption is shown as Trida wrote it. A call that fails is logged and not
-  asked again, except for one identical retry after a transient worker or
+* A caption is shown as Trida wrote it, under the display rule
+  (``output_checks.DISPLAY_RULE``, researcher 2026-10-20): a leading prompt
+  label and one wrapping pair of quotes are removed, nothing inside. The
+  attempt log keeps Trida's text and the shown text. A call that fails is
+  logged and not asked again, except for one identical retry after a transient worker or
   device failure (the brief's rule).
 
 The scheduler is pure (time is passed in), so it is tested without threads or
@@ -58,10 +61,12 @@ from typing import Any, Final
 from diff.caption_sources import CaptionSource
 from diff.generation_worker import TRANSIENT, WorkerStartupError
 from diff.job_plan import Job
+from diff.output_checks import DISPLAY_RULE, shown_text
 from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 
-LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v1"
-TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v1"
+# v2 (2026-10-20): each attempt also records the shown text and the display rule.
+LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v2"
+TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v2"
 LATENCY_WINDOW: Final = 20
 LATENCY_QUANTILE: Final = 0.9
 LATENCY_FLOOR_MS: Final = 0
@@ -236,7 +241,7 @@ class LiveScheduler:
             self.failures.setdefault(request.job.job_id, []).append(str(result.get("status")))
 
     def ready(self) -> dict[int, dict[str, Any]]:
-        """Captions written under the current spec, by cue; failures are shown as written."""
+        """Captions written under the current spec, by cue, as shown (the display rule)."""
         if self.spec is None:
             return {}
         ready: dict[int, dict[str, Any]] = {}
@@ -244,7 +249,8 @@ class LiveScheduler:
             job = self.job(cue)
             result = self.results.get(job.job_id)
             if result is not None:
-                ready[cue] = {"job_id": job.job_id, "text": str((result.get("output") or {}).get("text", ""))}
+                written = str((result.get("output") or {}).get("text", ""))
+                ready[cue] = {"job_id": job.job_id, "text": shown_text(written)}
         return ready
 
 
@@ -279,7 +285,12 @@ def tweak_outcome(
     status = result.get("status")
     base = {"attempt": request.attempt, "result_status": status, "job_id": request.job.job_id}
     if status == "completed" and checks is not None and not checks.get("excluded"):
-        return {**base, "status": "ready", "text": result["output"]["text"], "checks": dict(checks)}
+        return {
+            **base,
+            "status": "ready",
+            "text": shown_text(result["output"]["text"]),
+            "checks": dict(checks),
+        }
     if status == "completed":
         codes = [finding["code"] for finding in (checks or {}).get("failures", [])]
         reason = "check failed: " + ", ".join(codes) if codes else "no check result"
@@ -457,6 +468,8 @@ class LiveService:
             "latency_ms": result.get("latency_ms"),
             "wall_ms": result.get("wall_ms"),
             "output": result.get("output"),
+            "shown_text": shown_text(result["output"]["text"]) if result.get("output") else None,
+            "display_rule": DISPLAY_RULE,
             "checks": checks,
             "outcome": outcome["status"],
             "reason": outcome.get("reason"),
@@ -499,6 +512,8 @@ class LiveService:
             "latency_ms": result.get("latency_ms"),
             "wall_ms": result.get("wall_ms"),
             "output": result.get("output"),
+            "shown_text": shown_text(result["output"]["text"]) if result.get("output") else None,
+            "display_rule": DISPLAY_RULE,
             "checks": dict(self.check(source, request.job, result))
             if self.check and result.get("output")
             else None,

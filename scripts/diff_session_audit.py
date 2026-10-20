@@ -12,6 +12,7 @@ prompt functions then render what those values should have produced, and every l
 compared with that, so new prompt wording needs no change here. A session that ran an older
 template than the checkout is reported once, not call by call. It also checks that:
 - each clip's second caption is the one Trida wrote and P6 showed, or that a failed one was skipped;
+- each attempt's shown text is Trida's text under the display rule (logs from 2026-10-20 on);
 - every slider change got a live call, unless no cue boundary was left to write;
 - every caption shown is one Trida wrote for that cue or an earlier one (the kept caption);
 - with ``--export``, that the export matches the store and the logs.
@@ -44,6 +45,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
+from diff.output_checks import DISPLAY_RULE, shown_text  # noqa: E402
 from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     DEGREE_RULE,
@@ -197,6 +199,23 @@ def differing(expected: Mapping[str, Any], logged: Mapping[str, Any]) -> list[st
     return sorted(key for key in set(expected) | set(logged) if expected.get(key) != logged.get(key))
 
 
+def shown_on_screen(audit: Audit, where: str, attempt: Mapping[str, Any]) -> str | None:
+    """What the attempt put on screen: the display rule's text, or Trida's own before the rule existed."""
+    written = (attempt.get("output") or {}).get("text")
+    if written is None or "display_rule" not in attempt:
+        return written
+    if not audit.ok(
+        "display", attempt["display_rule"] == DISPLAY_RULE, f"{where}: {attempt['display_rule']}"
+    ):
+        return attempt.get("shown_text")
+    audit.ok(
+        "display",
+        attempt.get("shown_text") == shown_text(written),
+        f"{where}: the logged shown text is not the display rule's",
+    )
+    return shown_text(written)
+
+
 def audit_phase1(
     audit: Audit, who: str, state: Mapping[str, Any], clips: Mapping[str, Any], tweaks: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -257,13 +276,16 @@ def audit_phase1(
             last["system_message"] == job.prompt.system_message,
             f"{who} {key}: tweak system message {last['system_message']!r}",
         )
-        text = (last.get("output") or {}).get("text")
+        text = shown_on_screen(audit, f"{who} {key}", last)
         if last["status"] == "completed" and last.get("output"):
-            audit.ok(
-                "tweak-check",
-                plain(check_record(tweak_source(clip), job, last)) == last["checks"],
-                f"{who} {key}: re-running the tweak check gives a different result than logged",
-            )
+            if last.get("display_rule") == DISPLAY_RULE:
+                audit.ok(
+                    "tweak-check",
+                    plain(check_record(tweak_source(clip), job, last)) == last["checks"],
+                    f"{who} {key}: re-running the tweak check gives a different result than logged",
+                )
+            else:
+                audit.note("tweak-check", "before the display rule, not re-run")
         failed = last["status"] != "completed" or bool((last.get("checks") or {}).get("failures"))
         if entry["status"] == "ready":
             audit.ok("tweak-outcome", not failed, f"{who} {key}: ready although the last attempt failed")
@@ -394,6 +416,7 @@ def audit_live(
             )
         audit.ok("live-call", call["status"] == "completed", f"{where}: {call['status']} {call.get('error')}")
         if call["status"] == "completed":
+            shown_on_screen(audit, where, call)
             audit.ok(
                 "live-call",
                 call["target_ms"] <= source.start_ms

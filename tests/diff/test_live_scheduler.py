@@ -140,13 +140,14 @@ def test_an_older_spec_is_never_shown_but_comes_back_from_the_cache() -> None:
     assert scheduler.next_request(2.0).cue == 1  # type: ignore[union-attr]
 
 
-def test_a_failed_caption_is_shown_as_written() -> None:
+def test_a_failed_caption_is_still_shown_under_the_display_rule() -> None:
+    # The display rule (2026-10-20) removes the leading label; nothing inside is repaired.
     scheduler = LiveScheduler(stream(), job_for)
     scheduler.set_spec(Spec(2, "specific"), 0, 0.0)
     request = scheduler.next_request(0.0)
     assert request is not None
     scheduler.complete(request, completed("자막: 차가 지�나간다"))
-    assert scheduler.ready()[0]["text"] == "자막: 차가 지�나간다"
+    assert scheduler.ready()[0]["text"] == "차가 지�나간다"
 
 
 @pytest.mark.parametrize(
@@ -183,7 +184,7 @@ class FakeAttempt:
 
 
 def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> None:
-    attempt = FakeAttempt(["첫 자막", "둘째 자막", "셋째 자막"])
+    attempt = FakeAttempt(["자막: 「첫 자막」", "둘째 자막", "셋째 자막"])
     now = [0.0]
     service = LiveService(
         attempt, tmp_path, check=lambda source, job, result: {"ok": True}, clock=lambda: now[0]
@@ -195,12 +196,15 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
     service.settings(Spec(2, "specific", "참고 문장"), 0)
     assert service.step() and service.step() and service.step() and not service.step()
     assert [cue for cue in sorted(service.ready())] == [0, 1, 2]
+    assert service.ready()[0]["text"] == "첫 자막"  # shown under the display rule
     assert attempt.calls[0][1] == 30.0
     lines = [
         json.loads(line)
         for line in (tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v1"
+    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v2"
+    assert lines[0]["output"]["text"] == "자막: 「첫 자막」" and lines[0]["shown_text"] == "첫 자막"
+    assert lines[0]["display_rule"] == "diff.display/v1"
     assert (
         lines[0]["cue"] == 0
         and lines[0]["system_message"] == "참고 문장"

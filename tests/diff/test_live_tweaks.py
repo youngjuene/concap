@@ -90,6 +90,27 @@ def test_a_failed_check_ends_the_clip_s_tweak(requests: list[TweakRequest], tmp_
     ]
 
 
+def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
+    requests: list[TweakRequest], tmp_path: Path
+) -> None:
+    labelled = {"status": "completed", "output": full_output("자막: 「버스가 낮게 공회전한다.」")}
+    copied = {"status": "completed", "output": full_output(f"「{requests[1].source.text}」")}
+    service = service_with(Scripted(labelled, copied), tmp_path)
+    outcomes: list[dict[str, Any]] = []
+    for request in requests[:2]:
+        service.submit_tweak(request, lambda r, o: outcomes.append(o))
+    run(service)
+    assert outcomes[0]["status"] == "ready" and outcomes[0]["text"] == "버스가 낮게 공회전한다."
+    flags = [finding["code"] for finding in outcomes[1]["checks"]["flags"]]
+    assert "identical_to_source" in flags  # a quoted copy is still a copy
+    lines = [json.loads(line) for line in (tmp_path / "logs" / "live-s1.jsonl").read_text().splitlines()]
+    assert lines[0]["schema"] == "diff.tweak-attempt/v2"
+    assert lines[0]["output"]["text"] == "자막: 「버스가 낮게 공회전한다.」"
+    assert (
+        lines[0]["shown_text"] == "버스가 낮게 공회전한다." and lines[0]["display_rule"] == "diff.display/v1"
+    )
+
+
 def test_one_identical_retry_after_a_transient_failure_and_none_after_a_timeout(
     requests: list[TweakRequest], tmp_path: Path
 ) -> None:
