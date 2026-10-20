@@ -111,6 +111,22 @@ def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
     )
 
 
+@pytest.mark.parametrize(
+    ("written", "reason"),
+    [("자막:", "check failed: empty_text"), ("「...」", "nothing readable after the display rule")],
+)
+def test_a_second_caption_with_nothing_readable_skips_the_step(
+    requests: list[TweakRequest], tmp_path: Path, written: str, reason: str
+) -> None:
+    # Researcher, 2026-10-20: a caption never goes blank; a blank second caption fails instead.
+    service = service_with(Scripted({"status": "completed", "output": full_output(written)}), tmp_path)
+    outcomes: list[dict[str, Any]] = []
+    service.submit_tweak(requests[0], lambda r, o: outcomes.append(o))
+    run(service)
+    assert outcomes[0]["status"] == "failed" and outcomes[0]["reason"] == reason
+    assert "text" not in outcomes[0]
+
+
 def test_one_identical_retry_after_a_transient_failure_and_none_after_a_timeout(
     requests: list[TweakRequest], tmp_path: Path
 ) -> None:

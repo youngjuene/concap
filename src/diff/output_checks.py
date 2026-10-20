@@ -109,6 +109,11 @@ def shown_text(text: str) -> str:
     return shown
 
 
+def readable(text: str) -> bool:
+    """Whether a shown caption has anything to read: a letter or a digit, not only marks and spaces."""
+    return any(character.isalnum() for character in text)
+
+
 def displayed(output: GeneratedOutput) -> GeneratedOutput:
     """The output with its text as shown, for the checks of live and second captions."""
     return replace(output, text=shown_text(output.text))

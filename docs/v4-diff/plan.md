@@ -34,6 +34,23 @@ engineering fixes found on the way to the user test.
   `display_rule`. The offline G0 path is unchanged. The audit checks every
   shown text against the rule, and the bench scores copies and texture words
   on the shown text but still counts the quotes and labels in Trida's own.
+- **A caption never goes blank** (researcher, 2026-10-20). On 13,216 real
+  Trida outputs from 40 synthetic participants and all nine slider cells,
+  Trida twice wrote only the prompt's label "자막:" and stopped, which the
+  display rule left empty. Nothing makes Trida keep the caption it was given.
+  - A live caption with nothing readable left (no letter or digit) shows the
+    cue's starting caption, the text Trida was given to rewrite. The attempt
+    log (`diff.live-attempt/v3`) records `shown_from`: `trida` or
+    `starting caption`.
+  - A second caption with nothing readable fails ("nothing readable after the
+    display rule", or the check's `empty_text`), so that clip's second step is
+    skipped, as for any failed second caption.
+
+  Replayed through Trida (deterministic), both cases write "자막:" again; the
+  live one now shows its starting caption and the second caption fails. A
+  15-session run of the app on both GPUs (unattended pseudo participants,
+  seven answer profiles, seven slider styles) passed the session audit, and
+  every caption the browser showed was the logged shown text.
 
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 

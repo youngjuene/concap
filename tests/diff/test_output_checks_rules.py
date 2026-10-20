@@ -17,6 +17,7 @@ from diff.output_checks import (
     extract_output,
     non_hangul_runs,
     output_from_record,
+    readable,
     repeated_word_ngrams,
     script_passes,
     sentence_count,
@@ -198,6 +199,11 @@ def test_a_live_check_can_hold_a_shorter_length_limit(development_sources: Sourc
 def test_the_display_rule_removes_only_the_edges(written: str, shown: str) -> None:
     # Researcher, 2026-10-20: a leading prompt label and one wrapping pair of quotes.
     assert shown_text(written) == shown
+
+
+def test_readable_means_a_letter_or_digit() -> None:
+    assert readable("자") and readable("3번") and readable("bus")
+    assert not readable("") and not readable(" 「」 ") and not readable("...,,")
 
 
 def test_a_shown_caption_is_what_the_checks_see(bus: CaptionSource) -> None:

@@ -45,7 +45,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
-from diff.output_checks import DISPLAY_RULE, shown_text  # noqa: E402
+from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
 from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     DEGREE_RULE,
@@ -199,8 +199,13 @@ def differing(expected: Mapping[str, Any], logged: Mapping[str, Any]) -> list[st
     return sorted(key for key in set(expected) | set(logged) if expected.get(key) != logged.get(key))
 
 
-def shown_on_screen(audit: Audit, where: str, attempt: Mapping[str, Any]) -> str | None:
-    """What the attempt put on screen: the display rule's text, or Trida's own before the rule existed."""
+def shown_on_screen(
+    audit: Audit, where: str, attempt: Mapping[str, Any], starting: str | None = None
+) -> str | None:
+    """What the attempt put on screen: the display rule's text, or Trida's own before the rule existed.
+
+    A live caption with nothing readable left shows the cue's starting caption (``shown_from``).
+    """
     written = (attempt.get("output") or {}).get("text")
     if written is None or "display_rule" not in attempt:
         return written
@@ -208,12 +213,22 @@ def shown_on_screen(audit: Audit, where: str, attempt: Mapping[str, Any]) -> str
         "display", attempt["display_rule"] == DISPLAY_RULE, f"{where}: {attempt['display_rule']}"
     ):
         return attempt.get("shown_text")
+    expected = shown_text(written)
+    if "shown_from" in attempt:
+        fell_back = not readable(expected)
+        audit.ok(
+            "display",
+            attempt["shown_from"] == ("starting caption" if fell_back else "trida"),
+            f"{where}: shown from {attempt['shown_from']}, Trida's text blank: {fell_back}",
+        )
+        if fell_back and starting is not None:
+            expected = starting
     audit.ok(
         "display",
-        attempt.get("shown_text") == shown_text(written),
+        attempt.get("shown_text") == expected,
         f"{where}: the logged shown text is not the display rule's",
     )
-    return shown_text(written)
+    return expected
 
 
 def audit_phase1(
@@ -416,7 +431,7 @@ def audit_live(
             )
         audit.ok("live-call", call["status"] == "completed", f"{where}: {call['status']} {call.get('error')}")
         if call["status"] == "completed":
-            shown_on_screen(audit, where, call)
+            shown_on_screen(audit, where, call, source.text)
             audit.ok(
                 "live-call",
                 call["target_ms"] <= source.start_ms

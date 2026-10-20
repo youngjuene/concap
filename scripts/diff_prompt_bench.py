@@ -32,6 +32,8 @@ It reports:
 - visibly broken text in what is shown: "소" cut from "소리", doubled commas or full stops. The
   count is rough (it misses typos such as "웅거림" and would count the animal 소), so a fluent
   reader still rates the chosen wording;
+- blank outputs, nothing readable left: a live caption then shows its starting caption (counted as
+  a copy), and a second caption fails;
 - how many second captions change between 0% and 100% degrees.
 
 A candidate is a JSON file that replaces any of the checkout's wordings for this run only:
@@ -73,6 +75,7 @@ from diff.output_checks import (  # noqa: E402
     displayed,
     output_from_record,
     quality_keys_in,
+    readable,
     shown_text,
 )
 from diff.phase1_tweak import DIRECTIONS, check_record, tweak_job_for, tweak_slots, tweak_source  # noqa: E402
@@ -194,12 +197,21 @@ def profile_inputs(
     return observations, ratings
 
 
-def measure(text: str | None, source: str, checks: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Copies and texture words in what is shown; quotes and labels in what Trida wrote."""
+def measure(
+    text: str | None, source: str, checks: Mapping[str, Any] | None, *, falls_back: bool = False
+) -> dict[str, Any]:
+    """Copies and texture words in what is shown; quotes and labels in what Trida wrote.
+
+    ``falls_back``: a live caption, which shows its starting caption when nothing readable is left.
+    """
     written = text or ""
     shown = shown_text(written)
+    blank = not readable(shown)
+    if blank and falls_back:
+        shown = source
     return {
         "shown": shown,
+        "blank": blank,
         "copy": shown == source,
         "texture_words": quality_keys_in(shown),
         "quotes": "「" in written or "」" in written,
@@ -230,6 +242,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "quotes": sum(r["quotes"] for r in live),
             "labels": sum(r["label"] for r in live),
             "broken": sum(bool(r["broken"]) for r in live),
+            "blank": sum(r["blank"] for r in live),
             "by_texture": {str(k): dict(v) for k, v in sorted(by_texture.items())},
             "by_context": {k: dict(v) for k, v in sorted(by_context.items())},
             "failures": dict(Counter(code for r in live for code in r["failures"])),
@@ -243,6 +256,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "quotes": sum(r["quotes"] for r in tweaks),
         "labels": sum(r["label"] for r in tweaks),
         "broken": sum(bool(r["broken"]) for r in tweaks),
+        "blank": sum(r["blank"] for r in tweaks),
         "failures": dict(Counter(code for r in tweaks for code in r["failures"])),
         "flags": dict(Counter(code for r in tweaks for code in r["flags"])),
     }
@@ -257,7 +271,8 @@ def print_summary(summary: Mapping[str, Any]) -> None:
         print(
             f"live under {system}: {live['copies']}/{live['calls']} copies, "
             f"{live['not_completed']} not completed; Trida wrote 「」 in {live['quotes']}, "
-            f"a label in {live['labels']}; {live['broken']} visibly broken"
+            f"a label in {live['labels']}; {live['broken']} visibly broken; "
+            f"{live['blank']} blank, shown as the starting caption"
         )
         for step, counts in live["by_texture"].items():
             print(
@@ -271,7 +286,7 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     print(
         f"second caption: {tweak['copies']}/{tweak['calls']} copies, {tweak['failed']} failed, "
         f"Trida wrote 「」 in {tweak['quotes']}, a label in {tweak['labels']}; "
-        f"{tweak['broken']} visibly broken"
+        f"{tweak['broken']} visibly broken; {tweak['blank']} blank, failed"
         f"\n  failures {tweak['failures']}  flags {tweak['flags']}"
     )
     ends = summary["tweak_degrees"]
@@ -382,7 +397,7 @@ def bench(
                         "error": result.get("error"),
                         "source": source.text,
                         "text": text,
-                        **measure(text, source.text, checks),
+                        **measure(text, source.text, checks, falls_back=True),
                     }
                 )
         for entry in session["clips"]:

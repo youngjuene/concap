@@ -150,6 +150,20 @@ def test_a_failed_caption_is_still_shown_under_the_display_rule() -> None:
     assert scheduler.ready()[0]["text"] == "차가 지�나간다"
 
 
+@pytest.mark.parametrize("written", ["자막:", "「」", "...", "  ", ""])
+def test_a_caption_never_goes_blank(written: str, tmp_path: Path) -> None:
+    # Researcher, 2026-10-20: nothing readable left of Trida's text shows the cue's starting caption.
+    service = LiveService(FakeAttempt([written]), tmp_path, check=None, clock=lambda: 0.0)
+    scheduler = LiveScheduler(stream(cues=1), job_for)
+    service.attach("session-a", scheduler)
+    service.settings(Spec(1, "specific", "참고 문장"), 0)
+    assert service.step()
+    assert service.ready()[0]["text"] == "차가 지나간다 0."
+    line = json.loads((tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8"))
+    assert line["output"]["text"] == written  # Trida's own text stays in the log
+    assert line["shown_text"] == "차가 지나간다 0." and line["shown_from"] == "starting caption"
+
+
 @pytest.mark.parametrize(
     ("status", "retried"),
     [("worker_lost", True), ("device_error", True), ("timeout", False), ("runner_error", False)],
@@ -202,8 +216,9 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
         json.loads(line)
         for line in (tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v2"
+    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v3"
     assert lines[0]["output"]["text"] == "자막: 「첫 자막」" and lines[0]["shown_text"] == "첫 자막"
+    assert lines[0]["shown_from"] == "trida"
     assert lines[0]["display_rule"] == "diff.display/v1"
     assert (
         lines[0]["cue"] == 0

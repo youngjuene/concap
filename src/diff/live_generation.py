@@ -26,7 +26,11 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
 * A caption is shown as Trida wrote it, under the display rule
   (``output_checks.DISPLAY_RULE``, researcher 2026-10-20): a leading prompt
   label and one wrapping pair of quotes are removed, nothing inside. The
-  attempt log keeps Trida's text and the shown text. A call that fails is
+  attempt log keeps Trida's text and the shown text.
+* A caption never goes blank (researcher, 2026-10-20). When nothing readable
+  is left of Trida's text (it wrote only "자막:", or only punctuation), the
+  band shows the cue's starting caption, the text Trida was given to
+  rewrite, and the log says so (``shown_from``). A call that fails is
   logged and not asked again, except for one identical retry after a transient worker or
   device failure (the brief's rule).
 
@@ -61,11 +65,12 @@ from typing import Any, Final
 from diff.caption_sources import CaptionSource
 from diff.generation_worker import TRANSIENT, WorkerStartupError
 from diff.job_plan import Job
-from diff.output_checks import DISPLAY_RULE, shown_text
+from diff.output_checks import DISPLAY_RULE, readable, shown_text
 from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 
 # v2 (2026-10-20): each attempt also records the shown text and the display rule.
-LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v2"
+# v3 (2026-10-20): and where the shown text came from, Trida or the cue's starting caption.
+LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v3"
 TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v2"
 LATENCY_WINDOW: Final = 20
 LATENCY_QUANTILE: Final = 0.9
@@ -74,6 +79,16 @@ LATENCY_START_MS: Final = 1000
 LOOKAHEAD_CUES: Final = 3
 LIVE_DEADLINE_S: Final = 30.0
 TEXTURE_STEPS: Final = LIVE_TEXTURE_MAX
+
+
+def live_caption(source: CaptionSource, written: str) -> tuple[str, str]:
+    """What the band shows for one live caption, and where it came from (``shown_from``).
+
+    Trida's text under the display rule; when nothing readable is left, the cue's starting
+    caption, so the band never goes blank.
+    """
+    shown = shown_text(written)
+    return (shown, "trida") if readable(shown) else (source.text, "starting caption")
 
 
 def slider_steps(texture: float, context: float) -> tuple[int, str]:
@@ -250,7 +265,7 @@ class LiveScheduler:
             result = self.results.get(job.job_id)
             if result is not None:
                 written = str((result.get("output") or {}).get("text", ""))
-                ready[cue] = {"job_id": job.job_id, "text": shown_text(written)}
+                ready[cue] = {"job_id": job.job_id, "text": live_caption(self.stream.cues[cue], written)[0]}
         return ready
 
 
@@ -285,12 +300,15 @@ def tweak_outcome(
     status = result.get("status")
     base = {"attempt": request.attempt, "result_status": status, "job_id": request.job.job_id}
     if status == "completed" and checks is not None and not checks.get("excluded"):
-        return {
-            **base,
-            "status": "ready",
-            "text": shown_text(result["output"]["text"]),
-            "checks": dict(checks),
-        }
+        text = shown_text(result["output"]["text"])
+        if not readable(text):  # a second caption never goes blank: the clip's second step is skipped
+            return {
+                **base,
+                "status": "failed",
+                "reason": "nothing readable after the display rule",
+                "checks": dict(checks),
+            }
+        return {**base, "status": "ready", "text": text, "checks": dict(checks)}
     if status == "completed":
         codes = [finding["code"] for finding in (checks or {}).get("failures", [])]
         reason = "check failed: " + ", ".join(codes) if codes else "no check result"
@@ -492,6 +510,9 @@ class LiveService:
         self, session_id: str, scheduler: LiveScheduler, request: LiveRequest, result: Mapping[str, Any]
     ) -> None:
         source = scheduler.stream.cues[request.cue]
+        shown, shown_from = (
+            live_caption(source, result["output"]["text"]) if result.get("output") else (None, None)
+        )
         record = {
             "schema": LIVE_ATTEMPT_SCHEMA,
             "session_id": session_id,
@@ -512,7 +533,8 @@ class LiveService:
             "latency_ms": result.get("latency_ms"),
             "wall_ms": result.get("wall_ms"),
             "output": result.get("output"),
-            "shown_text": shown_text(result["output"]["text"]) if result.get("output") else None,
+            "shown_text": shown,
+            "shown_from": shown_from,
             "display_rule": DISPLAY_RULE,
             "checks": dict(self.check(source, request.job, result))
             if self.check and result.get("output")
