@@ -61,6 +61,14 @@ engineering fixes found on the way to the user test.
   and `live serve --purpose participant` refuses while any cue it would serve
   has a problem. Unlike a bundle, a live cue needs no evidence events. Smoke
   runs still serve drafts.
+- **Phase-2 starting captions from a captions table.** The researcher writes
+  the starting captions per 10 s window with an audio captioner and a
+  translation, as a CSV. `python -m diff sources import-captions` turns that
+  table into the cue file, refusing a gap between windows or a caption over 96
+  characters, and marks the cues reviewed only with `--reviewed-by`. The first
+  table (2026-10-20) failed on length: its 90 Korean captions were 173–667
+  characters, so the researcher is re-running the pipeline for one sentence of
+  at most 96 characters per window.
 
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 

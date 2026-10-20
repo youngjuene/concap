@@ -22,7 +22,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from diff.study_protocol import MAX_CHARS, MAX_LINES, sha256_of
+from diff.study_protocol import LIVE_MAX_CHARS, MAX_CHARS, MAX_LINES, sha256_of
 
 SOURCES_SCHEMA: Final = "diff.caption-sources/v1"
 SOURCE_SCHEMA: Final = "diff.caption-source/v1"
@@ -461,6 +461,91 @@ def import_viewing_manifest(manifest: Mapping[str, Any], material: str = "partic
                 )
             )
     return SourceSet(tuple(sources))
+
+
+CAPTION_TABLE_COLUMNS: Final = ("video", "window", "start_s", "end_s")
+
+
+def import_live_captions(
+    rows: Sequence[Mapping[str, str]],
+    text_column: str,
+    *,
+    origin: str,
+    ends_ms: Mapping[str, int] | None = None,
+    reviewed_by: str | None = None,
+    reviewed_at: str | None = None,
+) -> tuple[SourceSet, list[str]]:
+    """Phase-2 starting captions from a captions table, one row per video window, and its problems.
+
+    The table has ``video``, ``window`` (0, 1, …), ``start_s``, ``end_s`` and the
+    text column; every other column is kept in the cue's note. Each video's
+    windows must run contiguously from 0 s, and each caption must fit the live
+    canvas (``LIVE_MAX_CHARS``). ``ends_ms`` moves a video's last window end
+    to the video's real end, which a fixed window length can miss.
+
+    With ``reviewed_by`` (the researcher read every caption in the table) the
+    cues are reviewed; otherwise they are drafts, which only smoke runs serve.
+    """
+    problems: list[str] = []
+    missing = [column for column in (*CAPTION_TABLE_COLUMNS, text_column) if rows and column not in rows[0]]
+    if not rows or missing:
+        return SourceSet(()), ["the table has no rows" if not rows else f"missing columns: {missing}"]
+    videos: dict[str, list[Mapping[str, str]]] = {}
+    for number, row in enumerate(rows, start=2):  # the header is line 1
+        try:
+            int(row["window"]), float(row["start_s"]), float(row["end_s"])
+        except ValueError:
+            problems.append(f"line {number}: window, start_s and end_s must be numbers")
+            continue
+        videos.setdefault(row["video"], []).append(row)
+    sources: list[CaptionSource] = []
+    for video, windows in videos.items():
+        windows = sorted(windows, key=lambda row: int(row["window"]))
+        if [int(row["window"]) for row in windows] != list(range(len(windows))):
+            problems.append(f"{video}: windows must run 0..{len(windows) - 1}")
+            continue
+        previous_end = 0
+        for index, row in enumerate(windows):
+            start_ms, end_ms = round(float(row["start_s"]) * 1000), round(float(row["end_s"]) * 1000)
+            if index == len(windows) - 1 and ends_ms and video in ends_ms:
+                if ends_ms[video] < end_ms or ends_ms[video] - end_ms > 2000:
+                    problems.append(
+                        f"{video}: the real end {ends_ms[video]} ms is not just after {end_ms} ms"
+                    )
+                end_ms = max(end_ms, ends_ms[video])
+            text = row[text_column].strip()
+            where = f"{video} window {index}"
+            if start_ms != previous_end or end_ms <= start_ms:
+                problems.append(f"{where}: {start_ms}–{end_ms} ms does not follow {previous_end} ms")
+            if not text:
+                problems.append(f"{where}: no caption")
+            elif len(text) > LIVE_MAX_CHARS:
+                problems.append(f"{where}: {len(text)} characters, over {LIVE_MAX_CHARS}")
+            previous_end = end_ms
+            kept = [
+                f"{key}: {value}"
+                for key, value in row.items()
+                if key not in (*CAPTION_TABLE_COLUMNS, text_column) and value
+            ]
+            sources.append(
+                CaptionSource(
+                    phase=2,
+                    unit_key=video,
+                    cue_index=index,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    text=text,
+                    events=(),
+                    provenance_text="model-draft-reviewed" if reviewed_by else "model-draft-unreviewed",
+                    provenance_evidence="none",
+                    status="reviewed" if reviewed_by else "draft",
+                    reviewed_by=(reviewed_by,) if reviewed_by else (),
+                    reviewed_at=reviewed_at if reviewed_by else None,
+                    origin=f"{origin}:{video}:window:{index}",
+                    note="; ".join(kept) or None,
+                )
+            )
+    return SourceSet(tuple(sources)), problems
 
 
 def import_regen_document(document: Mapping[str, Any], material: str = "participant") -> SourceSet:

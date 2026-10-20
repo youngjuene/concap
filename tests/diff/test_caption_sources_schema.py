@@ -14,6 +14,7 @@ from diff.caption_sources import (
     SourceError,
     SourceSet,
     bundle_problems,
+    import_live_captions,
     import_regen_document,
     import_viewing_manifest,
     parse_sources,
@@ -84,6 +85,64 @@ def test_a_starting_caption_serves_participants_only_once_reviewed(smoke_sources
     ]
     unreviewed = replace(reviewed, provenance_text="model-draft-unreviewed")
     assert "is not human or reviewed" in starting_caption_review_problems(unreviewed)[0]
+
+
+def table(*captions: str, video: str = "viewing-x", window_s: float = 10.0) -> list[dict[str, str]]:
+    """A captions table as the researcher's pipeline writes it, one row per window."""
+    return [
+        {
+            "video": video,
+            "window": str(index),
+            "start_s": str(index * window_s),
+            "end_s": str((index + 1) * window_s),
+            "ko": caption,
+            "en_source": "captioner",
+        }
+        for index, caption in enumerate(captions)
+    ]
+
+
+def test_a_captions_table_imports_as_drafts_or_reviewed_starting_captions() -> None:
+    rows = table("버스가 지나가는 소리", "사람들이 이야기하는 소리") + table(
+        "물 흐르는 소리", video="viewing-y"
+    )
+    drafts, problems = import_live_captions(
+        rows, "ko", origin="captions-table:t.csv", ends_ms={"viewing-x": 20300}
+    )
+    assert problems == [] and len(drafts.sources) == 3
+    first, last = drafts.sources[0], drafts.sources[1]
+    assert (first.phase, first.unit_key, first.cue_index, first.start_ms, first.end_ms) == (
+        2,
+        "viewing-x",
+        0,
+        0,
+        10000,
+    )
+    assert last.end_ms == 20300  # the last window reaches the video's real end
+    assert first.status == "draft" and starting_caption_review_problems(first)
+    assert first.note == "en_source: captioner" and first.origin == "captions-table:t.csv:viewing-x:window:0"
+    assert parse_sources(drafts.record()).sources == drafts.sources
+    reviewed, _ = import_live_captions(
+        rows, "ko", origin="t", reviewed_by="june", reviewed_at="2026-10-20T00:00:00+00:00"
+    )
+    assert all(starting_caption_review_problems(source) == [] for source in reviewed.sources)
+    assert reviewed.sources[0].reviewed_by == ("june",)
+
+
+@pytest.mark.parametrize(
+    ("rows", "problem"),
+    [
+        (table("가" * 97), "97 characters, over 96"),
+        (table(""), "no caption"),
+        (table("소리", "소리")[1:], "windows must run 0..0"),
+        ([{**table("소리")[0], "start_s": "1.0"}], "does not follow 0 ms"),
+        ([{**table("소리")[0], "window": "x"}], "must be numbers"),
+        ([{key: value for key, value in table("소리")[0].items() if key != "end_s"}], "missing columns"),
+    ],
+)
+def test_a_captions_table_must_fit_the_live_stream(rows: list[dict[str, str]], problem: str) -> None:
+    _, problems = import_live_captions(rows, "ko", origin="t")
+    assert any(problem in found for found in problems), problems
 
 
 def test_viewing_manifest_imports_as_unreviewed_drafts_without_events() -> None:

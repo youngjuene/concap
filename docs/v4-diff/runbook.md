@@ -225,6 +225,27 @@ uv run python -m diff live serve \
 - `--sources` is a `diff.caption-sources/v1` file with phase-2 cues (unit kind
   `video`). Each cue holds its starting caption (`text`, at most 96 characters,
   or `serve` refuses it) and its `start_ms` and `end_ms`. No evidence is needed.
+  Build it from a captions table, one row per video window:
+
+  ```sh
+  uv run python -m diff sources import-captions --input data/phase2/captions.csv \
+    --text-column ko --out data/phase2/phase2-cues.json \
+    --end viewing-1=299.679 --end viewing-2=300.259 --end viewing-3=300.142 \
+    [--reviewed-by <researcher>]
+  ```
+
+  - The table needs `video`, `window` (0, 1, …), `start_s`, `end_s` and the
+    caption column. Every other column is kept in each cue's note.
+  - Each video's windows must run contiguously from 0 s, and each caption must
+    fit in 96 characters. Otherwise nothing is written and the problems are
+    listed.
+  - `--end` gives a video's real end, so its last window reaches it.
+  - Pass `--reviewed-by` only once every caption in the table has been read;
+    without it the cues are drafts, which only smoke runs serve.
+
+  The user test's long videos are `data/phase2/viewing-1..3.mp4` (not in git),
+  served as `--video viewing-1=data/phase2/viewing-1.mp4` and so on, in watch
+  order.
 - `--video` gives one `ID=PATH` per video, in watch order. Settings carry over
   between videos.
 - `--items` holds the post-watch items:

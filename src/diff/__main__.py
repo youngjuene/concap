@@ -96,6 +96,35 @@ def sources_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def sources_import_captions(args: argparse.Namespace) -> int:
+    import csv
+    from datetime import UTC, datetime
+
+    from diff.caption_sources import import_live_captions
+
+    with args.input.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    ends = {}
+    for entry in args.end:
+        video, _, seconds = entry.partition("=")
+        ends[video] = round(float(seconds) * 1000)
+    imported, problems = import_live_captions(
+        rows,
+        args.text_column,
+        origin=f"captions-table:{args.input.name}",
+        ends_ms=ends,
+        reviewed_by=args.reviewed_by,
+        reviewed_at=datetime.now(UTC).isoformat(timespec="seconds") if args.reviewed_by else None,
+    )
+    if problems:
+        raise SystemExit(f"{len(problems)} problems; nothing written:\n  " + "\n  ".join(problems[:20]))
+    _write_json(args.out, imported.record(), force=args.force)
+    kind = f"reviewed by {args.reviewed_by}" if args.reviewed_by else "drafts, smoke runs only"
+    videos = sorted({source.unit_key for source in imported.sources})
+    print(f"wrote {len(imported.sources)} phase-2 starting captions for {videos} to {args.out} ({kind})")
+    return 0
+
+
 def plan_build(args: argparse.Namespace) -> int:
     from diff.job_plan import PlanError, build_phase1_plan, build_phase2_plan
 
@@ -774,6 +803,18 @@ def parser() -> argparse.ArgumentParser:
         imported.add_argument("--material", choices=("development", "participant"), default="participant")
         imported.add_argument("--force", action="store_true")
         imported.set_defaults(handler=sources_import, kind=kind)
+    captions = sources.add_parser(
+        "import-captions", help="a captions table (CSV, one row per video window) → phase-2 starting captions"
+    )
+    captions.add_argument("--input", type=Path, required=True)
+    captions.add_argument("--text-column", required=True, help="the column holding the Korean caption")
+    captions.add_argument("--out", type=Path, required=True)
+    captions.add_argument(
+        "--end", action="append", default=[], help="VIDEO=SECONDS, the video's real end, for its last window"
+    )
+    captions.add_argument("--reviewed-by", help="the researcher who reviewed every caption in the table")
+    captions.add_argument("--force", action="store_true")
+    captions.set_defaults(handler=sources_import_captions)
 
     plans = commands.add_parser("plan", help="build, freeze or measure generation plans").add_subparsers(
         dest="action", required=True
