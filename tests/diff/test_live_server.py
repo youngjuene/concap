@@ -298,6 +298,41 @@ def test_participant_sessions_need_reviewed_starting_captions(
         main([*argv, "--purpose", "participant"])
 
 
+def test_preflight_lists_every_blocker_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from diff.__main__ import main
+
+    monkeypatch.setattr("diff.__main__._gpu_free_mib", lambda: {"0": 1000})
+    sources = tmp_path / "sources.json"  # the test stream's cues are drafts
+    document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
+    sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    items = tmp_path / "items.json"
+    items.write_text(json.dumps(ITEMS, ensure_ascii=False), encoding="utf-8")
+    argv = ["live", "preflight", "--sources", str(sources), "--video", f"{VIDEO}={tmp_path / 'missing.mp4'}"]
+    argv += [
+        "--items",
+        str(items),
+        "--trida-dir",
+        str(tmp_path / "trida"),
+        "--store",
+        str(tmp_path / "s.sqlite"),
+    ]
+    assert main(argv) == 1
+    printed = capsys.readouterr().out
+    for blocker in (
+        "no video at",
+        "tuner system message is still provisional",
+        "second-caption prompt is still provisional",
+        "need phase 1",
+        "3 cues are not",
+        "Trida snapshot",
+        "GPU 0: 1000 MiB free",
+    ):
+        assert blocker in printed, blocker
+    assert "post-watch items: 1" in printed and "not created yet" in printed
+
+
 def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from diff.__main__ import main
 

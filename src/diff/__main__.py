@@ -621,6 +621,132 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     return {"status": "completed", "output": output, "latency_ms": 1500, "seed": None}
 
 
+def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> list[str]:
+    """Every gate a participant session waits on, given serve's arguments (empty when none)."""
+    from diff.caption_sources import starting_caption_review_problems
+    from diff.rewrite_prompts import TUNER_PROVISIONAL, TWEAK_PROVISIONAL
+
+    blockers = []
+    if TUNER_PROVISIONAL:
+        blockers.append(
+            "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "
+            "participant sessions wait for the researcher's role text"
+        )
+    if TWEAK_PROVISIONAL:
+        blockers.append(
+            "the second-caption prompt is still provisional (rewrite_prompts.TWEAK_P1); "
+            "participant sessions wait for the researcher's approval"
+        )
+    if args.phase1_setup is None:
+        blockers.append("participant sessions need phase 1: pass --phase1-setup")
+    unreviewed = [
+        problems
+        for video in videos
+        for cue in video.stream.cues
+        if (problems := starting_caption_review_problems(cue))
+    ]
+    if unreviewed:
+        blockers.append(
+            f"participant sessions need every phase-2 starting caption reviewed "
+            f"({len(unreviewed)} cues are not, first: {unreviewed[0][0]}); import with --reviewed-by"
+        )
+    return blockers
+
+
+def live_preflight(args: argparse.Namespace) -> int:
+    """[repository env] Everything that would stop participant sessions with these serve arguments."""
+    import shutil
+    import sqlite3
+    import subprocess
+
+    import diff.workbook_instrument as workbook_instrument
+    from diff.live_generation import LiveStream, starting_caption_problems
+    from diff.live_server import LiveVideo, rating_items
+    from diff.model_profile import TRIDA_7B, ProfileMismatch, verify_snapshot
+    from diff.phase1_setup import SetupError, read_setup, setup_problems
+    from diff.study_protocol import LIVE_MAX_CHARS
+
+    blockers: list[str] = []
+    notes: list[str] = []
+    sources = _sources(args.sources).sources
+    videos = []
+    for entry in args.video:
+        video_id, _, path = entry.partition("=")
+        try:
+            stream = LiveStream.from_sources(sources, video_id)
+        except ValueError as exc:
+            blockers.append(f"{video_id}: {exc}")
+            continue
+        videos.append(LiveVideo(video_id, Path(path), stream))
+        blockers += starting_caption_problems(stream, LIVE_MAX_CHARS)
+        cues = stream.cues
+        if cues[0].start_ms != 0 or any(a.end_ms != b.start_ms for a, b in zip(cues, cues[1:], strict=False)):
+            blockers.append(f"{video_id}: the cues do not run contiguously from 0 s")
+        if not Path(path).is_file():
+            blockers.append(f"{video_id}: no video at {path}")
+            continue
+        probe = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path]
+        found = subprocess.run(probe, capture_output=True, text=True) if shutil.which("ffprobe") else None
+        try:
+            seconds = float(found.stdout) if found is not None else None
+        except ValueError:
+            blockers.append(f"{video_id}: ffprobe cannot read {path}")
+            continue
+        if seconds is None:
+            notes.append(
+                f"{video_id}: ffprobe not found, so the video's length was not compared with its cues"
+            )
+        elif abs(seconds * 1000 - stream.duration_ms) > 1000:
+            blockers.append(
+                f"{video_id}: {path} runs {seconds:.3f} s, its cues end at {stream.duration_ms / 1000:.3f} s"
+            )
+        else:
+            notes.append(f"{video_id}: {len(cues)} cues over {seconds:.1f} s ({path})")
+    try:
+        notes.append(f"post-watch items: {len(rating_items(_read_json(args.items)))}")
+    except (OSError, ValueError, KeyError) as exc:
+        blockers.append(f"post-watch items ({args.items}): {exc}")
+    if args.phase1_setup is not None:
+        try:
+            setup = read_setup(args.phase1_setup)
+        except (OSError, SetupError) as exc:
+            blockers.append(f"phase-1 setup: {exc}")
+        else:
+            problems = setup_problems(setup, "participant", root=Path.cwd(), instrument=workbook_instrument)
+            blockers += [f"phase-1 setup: {problem}" for problem in problems]
+    blockers += _participant_blockers(args, videos)
+    try:
+        verify_snapshot(args.trida_dir, TRIDA_7B, weights=False)
+    except (OSError, ProfileMismatch) as exc:
+        blockers.append(f"Trida snapshot {args.trida_dir}: {exc}")
+    try:
+        free = _gpu_free_mib()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        free = {}
+        blockers.append(f"cannot read the GPUs: {exc}")
+    for gpu in args.gpus.split(","):
+        if free and free.get(gpu, 0) < LIVE_MIN_FREE_MIB:
+            blockers.append(
+                f"GPU {gpu}: {free.get(gpu, 0)} MiB free, a live worker needs {LIVE_MIN_FREE_MIB}"
+            )
+    store = args.store or PARTICIPANT_STORE
+    if store.exists():
+        db = sqlite3.connect(store.resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            total, finished = db.execute("SELECT COUNT(*), COUNT(finished_at) FROM sessions").fetchone()
+        finally:
+            db.close()
+        notes.append(f"store {store}: {total} sessions so far, {finished} finished")
+    else:
+        notes.append(f"store {store}: not created yet (the first entry creates it)")
+    print("\n".join(f"  · {note}" for note in notes))
+    if blockers:
+        print(f"{len(blockers)} blockers for participant sessions:\n  " + "\n  ".join(blockers))
+        return 1
+    print("ready for participant sessions")
+    return 0
+
+
 def live_serve(args: argparse.Namespace) -> int:
     """[repository env + GPU] The participant app: entry, phase 1, then live phase 2 on Trida."""
     import functools
@@ -638,7 +764,6 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.phase1_flow import Phase1
     from diff.phase1_setup import read_setup, setup_problems
     from diff.phase1_tweak import check_record, tweak_job_for
-    from diff.rewrite_prompts import TUNER_PROVISIONAL, TWEAK_PROVISIONAL
     from diff.session_store import SessionStore
     from diff.study_protocol import LIVE_MAX_CHARS
 
@@ -655,32 +780,11 @@ def live_serve(args: argparse.Namespace) -> int:
     if too_long:
         raise SystemExit("starting captions must fit the live canvas:\n  " + "\n  ".join(too_long))
     items = rating_items(_read_json(args.items))
-    if args.purpose == "participant" and TUNER_PROVISIONAL:
-        raise SystemExit(
-            "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "
-            "participant sessions wait for the researcher's role text (use --purpose smoke to test)"
-        )
-    if args.purpose == "participant" and TWEAK_PROVISIONAL:
-        raise SystemExit(
-            "the second-caption prompt is still provisional (rewrite_prompts.TWEAK_P1); "
-            "participant sessions wait for the researcher's approval (use --purpose smoke to test)"
-        )
-    if args.purpose == "participant" and args.phase1_setup is None:
-        raise SystemExit("participant sessions need phase 1: pass --phase1-setup")
     if args.purpose == "participant":
-        from diff.caption_sources import starting_caption_review_problems
-
-        unreviewed = [
-            problem
-            for video in videos
-            for cue in video.stream.cues
-            for problem in starting_caption_review_problems(cue)
-        ]
-        if unreviewed:
+        blockers = _participant_blockers(args, videos)
+        if blockers:
             raise SystemExit(
-                f"participant sessions need every phase-2 starting caption reviewed "
-                f"({len(unreviewed)} problems; use --purpose smoke to test):\n  "
-                + "\n  ".join(unreviewed[:5])
+                "participant sessions cannot start (use --purpose smoke to test):\n  " + "\n  ".join(blockers)
             )
     phase1 = None
     if args.phase1_setup is not None:
@@ -982,6 +1086,17 @@ def parser() -> argparse.ArgumentParser:
         "--fake-worker", action="store_true", help="placeholder captions, no GPU (interface walk)"
     )
     serve_live.set_defaults(handler=live_serve)
+    preflight = live_commands.add_parser(
+        "preflight", help="[repository env] list everything that stops participant sessions, without serving"
+    )
+    preflight.add_argument("--sources", type=Path, required=True)
+    preflight.add_argument("--video", action="append", required=True, help="ID=PATH, in watch order")
+    preflight.add_argument("--items", type=Path, required=True)
+    preflight.add_argument("--phase1-setup", type=Path)
+    preflight.add_argument("--store", type=Path, help=f"session store (default {PARTICIPANT_STORE})")
+    preflight.add_argument("--trida-dir", type=Path, required=True)
+    preflight.add_argument("--gpus", default="0", help="the GPUs live serve will use")
+    preflight.set_defaults(handler=live_preflight)
     return root
 
 

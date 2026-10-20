@@ -70,6 +70,19 @@ engineering fixes found on the way to the user test.
   characters, so the researcher is re-running the pipeline for one sentence of
   at most 96 characters per window.
 
+- **One list of what stops the study.** `live serve` stopped at the first
+  unmet participant gate, so an unready setup showed its problems one serve
+  at a time. The gates now come from one function, `serve` reports all of
+  them, and `python -m diff live preflight` lists, without serving:
+  - the gates;
+  - each video's cues against its real length;
+  - the post-watch items and the Trida snapshot;
+  - each GPU's free memory.
+
+  On 2026-10-20, with the long videos and the M1 captions, it listed: the
+  13 unapproved setup parts, the provisional tuner and second-caption
+  prompt, and 90 unreviewed starting captions.
+
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 
 The researcher supplied a review of the participant flow (14 findings) and an

@@ -271,6 +271,18 @@ uv run python -m diff live serve \
 
   Use `--purpose smoke` until then.
 
+**Before a study day,** run the same arguments through `live preflight`
+(without `--purpose`, `--log-dir` or `--port`). It serves nothing and lists, all
+at once, everything that would stop a participant session:
+- the gates: the tuner text, the second-caption prompt, the setup's approvals
+  and unreviewed starting captions;
+- each video's cues against the video's real length (with `ffprobe`);
+- the post-watch items, the Trida snapshot's small files, and each listed GPU's
+  free memory.
+
+It exits 1 while anything is listed and prints "ready for participant
+sessions" otherwise. `serve` itself now reports every unmet gate at once too.
+
 **Running a session:**
 - Open `http://<host>:8782/` and type the participant ID (`P1`, `P2`, …).
   Typing the same ID again resumes an unfinished session, and a finished ID is
