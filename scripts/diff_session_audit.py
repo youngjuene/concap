@@ -71,6 +71,7 @@ STEP1_PAGES = ("P2", "P3", "P4", "P5")
 SECOND_FIELDS = ("status", "second_caption", "attended_sound", "attended_object", *DIRECTIONS)
 RATINGS = ("S1", "S2", "S3")
 MASK_THRESHOLD = 127
+SUPERSEDED_MS = 1500  # a setting replaced this soon may never get a call: Trida takes about 1 s
 
 
 class Audit:
@@ -473,8 +474,14 @@ def audit_live(
         return watched.get(index) or (order[index] if index < len(order) else None)
 
     settings = [e for e in events if e["event"] == "settings"]
-    for change in settings:
+    for index, change in enumerate(settings):
         video_id = video(change["video_index"])
+        following = next(
+            (s for s in settings[index + 1 :] if s["video_index"] == change["video_index"]), None
+        )
+        if following is not None and following["position_ms"] - change["position_ms"] < SUPERSEDED_MS:
+            audit.note("live-settings", "replaced within 1.5 s, before a call")  # a burst of moves
+            continue
         after = [c for c in lives if c["spec"] == change["steps"] and c["video_id"] == video_id]
         estimates = [
             c["latency_estimate_ms"]
