@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import pytest
 from diff_fixtures import relabelled, smoke_document
@@ -17,6 +18,7 @@ from diff.caption_sources import (
     import_viewing_manifest,
     parse_sources,
     provenance_eligible,
+    starting_caption_review_problems,
 )
 from diff.study_protocol import sha256_of
 
@@ -70,6 +72,18 @@ def test_only_human_or_reviewed_provenance_enters_a_bundle(smoke_sources: Source
     assert provenance_eligible("human") and provenance_eligible("gemma-draft-reviewed")
     assert not provenance_eligible("gemma-draft-unreviewed") and not provenance_eligible("none")
     assert bundle_problems(smoke_sources.sources[0]) == []
+
+
+def test_a_starting_caption_serves_participants_only_once_reviewed(smoke_sources: SourceSet) -> None:
+    # Researcher, 2026-10-20: live cues need review but, unlike a bundle, no evidence events.
+    reviewed = replace(smoke_sources.sources[0], events=(), status="reviewed", provenance_text="human")
+    assert starting_caption_review_problems(reviewed) == []
+    draft = replace(reviewed, status="draft")
+    assert [p.split(": ", 1)[1] for p in starting_caption_review_problems(draft)] == [
+        "status is draft, not reviewed"
+    ]
+    unreviewed = replace(reviewed, provenance_text="model-draft-unreviewed")
+    assert "is not human or reviewed" in starting_caption_review_problems(unreviewed)[0]
 
 
 def test_viewing_manifest_imports_as_unreviewed_drafts_without_events() -> None:

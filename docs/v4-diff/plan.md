@@ -52,6 +52,16 @@ engineering fixes found on the way to the user test.
   seven answer profiles, seven slider styles) passed the session audit, and
   every caption the browser showed was the logged shown text.
 
+- **Participant sessions need reviewed starting captions** (researcher,
+  2026-10-20). The phase-2 starting captions come from models (an audio
+  captioner, then a translation), and `live serve` checked the tuner, the
+  second-caption prompt and the setup, but not them.
+  `caption_sources.starting_caption_review_problems` now refuses a cue whose
+  status is not `reviewed` or whose text provenance is not human or reviewed,
+  and `live serve --purpose participant` refuses while any cue it would serve
+  has a problem. Unlike a bundle, a live cue needs no evidence events. Smoke
+  runs still serve drafts.
+
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 
 The researcher supplied a review of the participant flow (14 findings) and an

@@ -194,6 +194,22 @@ class CaptionSource:
         return result
 
 
+def starting_caption_review_problems(source: CaptionSource) -> list[str]:
+    """Why a live phase-2 starting caption may not serve participants (empty when it may).
+
+    Researcher, 2026-10-20: the starting captions are model drafts until the
+    researcher reviews them, so a participant session needs every cue
+    reviewed. Unlike a bundle, a live cue needs no evidence events.
+    """
+    where = f"{source.unit_key} cue {source.cue_index}"
+    problems = []
+    if source.status != "reviewed":
+        problems.append(f"{where}: status is {source.status}, not reviewed")
+    if not provenance_eligible(source.provenance_text):
+        problems.append(f"{where}: text provenance {source.provenance_text!r} is not human or reviewed")
+    return problems
+
+
 def bundle_problems(source: CaptionSource) -> list[str]:
     """Why this source may not enter a stimulus bundle (empty when it may)."""
     problems = []

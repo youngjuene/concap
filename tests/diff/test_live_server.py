@@ -279,6 +279,25 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_tweak_pro
         main(argv)
 
 
+def test_participant_sessions_need_reviewed_starting_captions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from diff.__main__ import main
+
+    monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
+    monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
+    sources = tmp_path / "sources.json"  # the test stream's cues are drafts
+    document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
+    sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    items = tmp_path / "items.json"
+    items.write_text(json.dumps(ITEMS, ensure_ascii=False), encoding="utf-8")
+    argv = ["live", "serve", "--sources", str(sources), "--video", f"{VIDEO}={tmp_path / 'v.webm'}"]
+    argv += ["--items", str(items), "--log-dir", str(tmp_path / "logs"), "--fake-worker"]
+    argv += ["--phase1-setup", str(tmp_path / "setup.json")]
+    with pytest.raises(SystemExit, match="every phase-2 starting caption reviewed"):
+        main([*argv, "--purpose", "participant"])
+
+
 def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from diff.__main__ import main
 

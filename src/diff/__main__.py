@@ -638,6 +638,21 @@ def live_serve(args: argparse.Namespace) -> int:
         )
     if args.purpose == "participant" and args.phase1_setup is None:
         raise SystemExit("participant sessions need phase 1: pass --phase1-setup")
+    if args.purpose == "participant":
+        from diff.caption_sources import starting_caption_review_problems
+
+        unreviewed = [
+            problem
+            for video in videos
+            for cue in video.stream.cues
+            for problem in starting_caption_review_problems(cue)
+        ]
+        if unreviewed:
+            raise SystemExit(
+                f"participant sessions need every phase-2 starting caption reviewed "
+                f"({len(unreviewed)} problems; use --purpose smoke to test):\n  "
+                + "\n  ".join(unreviewed[:5])
+            )
     phase1 = None
     if args.phase1_setup is not None:
         setup = read_setup(args.phase1_setup)
