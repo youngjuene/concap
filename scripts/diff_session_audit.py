@@ -408,14 +408,24 @@ def audit_live(
             f"(v{LIVE_REWRITE.version}, rules v{LIVE_RULES_VERSION}); audit at the commit the session ran",
         )
 
-    # Events name the video by its index in the watch order. Videos are watched one after the other
-    # and each opens with its first cues written, so the attempts name them in the same order.
+    # Events name the video they belong to. Logs from before 2026-10-20 give only its index in the
+    # watch order; videos are watched one after the other and each opens with its first cues written,
+    # so the attempts name them in that same order.
     order = list(dict.fromkeys(call["video_id"] for call in lives))
-    watched = sorted({e["video_index"] for e in events if e["event"] == "watch_started"})
-    audit.ok("live-videos", len(order) == len(watched), f"{who}: watched {watched}, calls for {order}")
+    watched = {e["video_index"]: e.get("video_id") for e in events if e["event"] == "watch_started"}
+    audit.ok(
+        "live-videos", len(order) == len(watched), f"{who}: watched {sorted(watched)}, calls for {order}"
+    )
+    for index, named in watched.items():
+        if named is not None:
+            audit.ok(
+                "live-videos",
+                index < len(order) and order[index] == named,
+                f"{who}: video {index} is {named} in the events, {order[index : index + 1]} in the calls",
+            )
 
     def video(index: int) -> str | None:
-        return order[index] if index < len(order) else None
+        return watched.get(index) or (order[index] if index < len(order) else None)
 
     settings = [e for e in events if e["event"] == "settings"]
     for change in settings:

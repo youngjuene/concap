@@ -197,6 +197,9 @@ def add_live_routes(
     router = APIRouter(prefix=WATCH)
 
     def log(session: LiveSession, event: str, **data: Any) -> None:
+        # The watch order is the serve's --video order, so an index alone would not say which video it was.
+        if "video_index" in data:
+            data["video_id"] = videos[data["video_index"]].video_id
         live_event(log_dir, clock(), session.session_id, event, **data)
 
     def view(session: LiveSession) -> dict[str, Any]:

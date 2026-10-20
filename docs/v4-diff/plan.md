@@ -4,6 +4,19 @@ Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
 to Trida-7B (both model changes below). Written against `main` at `3842302`.
 Where the brief and the PRD disagree, the brief wins.
 
+## Readiness fixes (2026-10-20)
+
+The 2026-10-19 smoke run with three agent pseudo participants on real Trida
+found the wiring correct and the captions weak. The researcher asked for the
+engineering fixes found on the way to the user test.
+
+- **The watch log names the video.** Every live event that carries
+  `video_index` (`watch_started`, `settings`, `playback`, `exposures`,
+  `video_ended`) now also carries `video_id`. The watch order is the serve's
+  `--video` order, so the index alone did not say which video an event
+  belonged to. `scripts/diff_session_audit.py` uses the ID, and for older logs
+  infers it from the order of the attempts.
+
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 
 The researcher supplied a review of the participant flow (14 findings) and an

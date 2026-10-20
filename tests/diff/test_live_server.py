@@ -198,6 +198,8 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     events = [json.loads(line) for line in session_log.read_text(encoding="utf-8").splitlines()]
     kinds = [event["event"] for event in events if event["event"] != "playback"]
     assert kinds == ["session_started", "watch_started", "settings", "exposures", "video_ended", "ratings"]
+    on_video = [event for event in events if "video_index" in event]
+    assert on_video and all(event["video_id"] == VIDEO for event in on_video)  # the log names the video
     assert events[0]["calibration"]["heard_observations"] == {}  # no phase 1 in a smoke run
     assert next(e for e in events if e["event"] == "exposures")["entries"][0]["job_id"].startswith("job-")
     pauses = [(e["position_ms"], e["hidden"]) for e in events if e["event"] == "playback"]
