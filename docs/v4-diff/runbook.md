@@ -402,8 +402,13 @@ docstring gives the candidate file's format.
 It reports:
 - how often an output copies its starting caption;
 - whether texture words appear as each texture step asks;
-- check failures and flags;
+- check failures and flags, on the shown text;
+- how often Trida's own text has 「」 or a leading label, which the display rule removes;
+- a rough count of visibly broken text ("소" cut from "소리", ",,", "..");
 - how many second captions change between 0% and 100% degrees.
+
+The broken-text count misses typos, so a fluent reader still rates the chosen
+wording before it is approved.
 
 The baseline inputs are `artifacts/diff/bench/inputs-smoke-20261019.json`,
 from the 2026-10-19 smoke run with three agent pseudo participants. The file

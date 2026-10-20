@@ -29,6 +29,9 @@ It reports:
 - whether a live output has as many texture words as its step asks (0, 1 or 2);
 - check failures and flags, from the server's own checks on the shown text (the display rule);
 - how often Trida's own text has 「」 or a leading prompt label, which the display rule removes;
+- visibly broken text in what is shown: "소" cut from "소리", doubled commas or full stops. The
+  count is rough (it misses typos such as "웅거림" and would count the animal 소), so a fluent
+  reader still rates the chosen wording;
 - how many second captions change between 0% and 100% degrees.
 
 A candidate is a JSON file that replaces any of the checkout's wordings for this run only:
@@ -47,6 +50,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -79,6 +83,9 @@ REPORT_SCHEMA = "diff.prompt-bench-report/v1"
 PURPOSE = "smoke"
 KEPT_PAGES = ("P2", "P3", "P4", "P5", "P10")
 DEGREE_ENDS = ("0", "100")
+# Defects Trida's parallel decoding leaves that no check catches: a word cut to "소" (from "소리"),
+# and doubled commas or full stops ("..." is an ellipsis and passes).
+BROKEN = re.compile(r"(?<![가-힣])소(?![가-힣])|,,|(?<!\.)\.\.(?!\.)")
 
 
 def sha256_file(path: Path) -> str:
@@ -197,6 +204,7 @@ def measure(text: str | None, source: str, checks: Mapping[str, Any] | None) -> 
         "texture_words": quality_keys_in(shown),
         "quotes": "「" in written or "」" in written,
         "label": written.startswith(LABEL_PREFIXES),
+        "broken": [match.group(0) for match in BROKEN.finditer(shown)],
         "failures": [f["code"] for f in (checks or {}).get("failures", [])],
         "flags": [f["code"] for f in (checks or {}).get("flags", [])],
     }
@@ -221,6 +229,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "not_completed": sum(r["status"] != "completed" for r in live),
             "quotes": sum(r["quotes"] for r in live),
             "labels": sum(r["label"] for r in live),
+            "broken": sum(bool(r["broken"]) for r in live),
             "by_texture": {str(k): dict(v) for k, v in sorted(by_texture.items())},
             "by_context": {k: dict(v) for k, v in sorted(by_context.items())},
             "failures": dict(Counter(code for r in live for code in r["failures"])),
@@ -233,6 +242,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "failed": sum(r["status"] != "completed" or bool(r["failures"]) for r in tweaks),
         "quotes": sum(r["quotes"] for r in tweaks),
         "labels": sum(r["label"] for r in tweaks),
+        "broken": sum(bool(r["broken"]) for r in tweaks),
         "failures": dict(Counter(code for r in tweaks for code in r["failures"])),
         "flags": dict(Counter(code for r in tweaks for code in r["flags"])),
     }
@@ -247,7 +257,7 @@ def print_summary(summary: Mapping[str, Any]) -> None:
         print(
             f"live under {system}: {live['copies']}/{live['calls']} copies, "
             f"{live['not_completed']} not completed; Trida wrote 「」 in {live['quotes']}, "
-            f"a label in {live['labels']}"
+            f"a label in {live['labels']}; {live['broken']} visibly broken"
         )
         for step, counts in live["by_texture"].items():
             print(
@@ -260,7 +270,8 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     tweak = summary["tweak"]
     print(
         f"second caption: {tweak['copies']}/{tweak['calls']} copies, {tweak['failed']} failed, "
-        f"Trida wrote 「」 in {tweak['quotes']}, a label in {tweak['labels']}"
+        f"Trida wrote 「」 in {tweak['quotes']}, a label in {tweak['labels']}; "
+        f"{tweak['broken']} visibly broken"
         f"\n  failures {tweak['failures']}  flags {tweak['flags']}"
     )
     ends = summary["tweak_degrees"]
