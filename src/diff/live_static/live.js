@@ -1,11 +1,12 @@
-// Live phase 2: the caption changes only at cue boundaries; the previous one stays until a new one is ready.
+// Live phase 2: the caption changes only at cue boundaries, and each cue shows its own caption as the
+// server serves it: under the current settings when written, else under earlier ones, else its starting caption.
 //
 // UI review of 2026-10-19 ("Diff Flow Improved"):
 // - phase 1's theme and caption band, so ratings and steering judge the same presentation;
 // - each slider has the three stops its axis really has (texture 0–2, context
 //   broad/specific/relation); it sends 0, 0.5 or 1, and only when the stop changes;
 // - a chip says when a change will show: a countdown to the next cue boundary,
-//   then "applied" for 2 s, or "kept" while the new caption is still being written;
+//   then "applied" for 2 s, or "waiting" while this cue still shows a caption from earlier settings;
 // - a hidden tab pauses the video behind phase 1's overlay, so no caption counts as seen unseen;
 // - the ratings use phase 1's scale cards and sticky bar;
 // - the last screen keeps the participant for the oral interview, and a held
@@ -29,7 +30,7 @@ const CHIP = {
   idle: "조절 막대는 영상을 보는 동안 언제든 움직일 수 있습니다",
   pending: "바뀐 설정은 다음 자막부터 반영됩니다",
   applied: "새 설정이 반영되었습니다",
-  waiting: "새 자막을 준비하는 동안 이전 자막이 유지됩니다",
+  waiting: "새 자막을 준비하는 동안 이전 설정의 자막이 표시됩니다",
 };
 
 let state = null;
@@ -162,7 +163,7 @@ function setChip(next) {
 
 const unsent = () => AXES.some((axis) => stops[axis] !== sent[axis]);
 
-// At a cue boundary: the change shows if the server has it and this cue's caption was written under it.
+// At a cue boundary: the change shows if the server has it and this cue's caption is current under it.
 function boundaryReached(written) {
   if (chip !== "pending" && chip !== "waiting") return;
   if (unsent() || debounce !== null) { paintChip(); return; }
@@ -181,10 +182,10 @@ function paint(ms) {
   if (next) {
     shown = { cue, token: next.token, text: next.text, from: ms };
   } else {
-    shown = { cue, token: shown.token, text: shown.text, from: ms };  // keep the previous caption
+    shown = { cue, token: shown.token, text: shown.text, from: ms };  // no reply yet: the last caption stays
   }
   $("caption").textContent = shown.text;
-  if (!first) boundaryReached(Boolean(next));
+  if (!first) boundaryReached(Boolean(next && next.current));
 }
 
 async function poll() {
@@ -195,7 +196,7 @@ async function poll() {
   captions = result.data.captions || {};
   fetchedEpoch = asked;
   if (state && state.stage === "ready") {
-    const ready = Boolean(captions["0"]);
+    const ready = Boolean(captions["0"] && captions["0"].settled);
     $("start").disabled = !ready;
     $("ready-status").textContent = ready ? "준비되었습니다." : "첫 자막을 준비하고 있습니다…";
   }
@@ -230,9 +231,8 @@ function sendSettings(origin) {
     if (!result.ok) { sent = previous; return; }
     epoch += 1;
     awaiting = true;
-    // Later cues' captions were written under the old settings, which the server no longer
-    // serves: drop them, so a boundary keeps the previous caption until a new one arrives.
-    captions = Object.fromEntries(Object.entries(captions).filter(([cue]) => Number(cue) <= shown.cue));
+    // Keep the cached captions: each cue's own caption under the old settings still beats the
+    // previous cue's, and the next poll brings the ones written under the new settings.
     poll();
   }, DEBOUNCE_MS);
 }

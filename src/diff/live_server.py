@@ -261,7 +261,9 @@ def add_live_routes(
         session = current(request)
         if session.stage != "ready":
             raise HTTPException(status_code=409, detail="지금은 시청을 시작할 수 없습니다.")
-        if 0 not in session.service.ready():
+        # The first window opens with Trida's caption at the starting settings, or with its starting
+        # caption once that attempt is over and unusable: not before Trida has had its turn.
+        if not session.service.ready().get(0, {}).get("settled"):
             raise HTTPException(status_code=409, detail="첫 자막을 준비하고 있습니다.")
         session.stage = "watch"
         log(session, "watch_started", video_index=session.video_index)
@@ -325,7 +327,13 @@ def add_live_routes(
         for cue, entry in ready.items():
             token = opaque_token(key, session.session_id, entry["job_id"])
             session.tokens[token] = entry["job_id"]
-            served[str(cue)] = {"token": token, "text": entry["text"]}
+            # current: written under the settings in force; settled: nothing better is coming for this cue.
+            served[str(cue)] = {
+                "token": token,
+                "text": entry["text"],
+                "current": entry["current"],
+                "settled": entry["settled"],
+            }
         return {"captions": served}
 
     @router.post("/api/exposures")

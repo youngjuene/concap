@@ -16,21 +16,25 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
 * While the worker is idle it keeps filling later cues under the current spec,
   up to three cues ahead. A cue that would end before its caption could be
   ready is skipped.
-* At a cue boundary with nothing new ready, the previous caption stays (the
-  browser does this). A finished caption for an older spec is kept in the
-  cache, never shown for the newer one, and served again if the participant
-  returns to that spec. A model call cannot be cancelled without killing the
-  worker.
+* Every window shows a caption about its own audio (researcher, 2026-10-20).
+  At a cue boundary the browser shows the cue's caption as the scheduler
+  serves it, the first of: Trida's caption under the current spec; Trida's
+  latest usable caption for this cue under earlier settings (after a move too
+  late for the next boundary, or while the worker is busy, failing or
+  restarting); the cue's starting caption. Never the previous cue's caption.
+  A finished caption for an older spec stays in the cache and is current
+  again if the participant returns to that spec. A model call cannot be
+  cancelled without killing the worker.
 * Before playback, the first cues are written at the calibrated settings, so a
   video opens with Trida's rewrite.
 * A caption is shown as Trida wrote it, under the display rule
   (``output_checks.DISPLAY_RULE``, researcher 2026-10-20): a leading prompt
   label and one wrapping pair of quotes are removed, nothing inside. The
   attempt log keeps Trida's text and the shown text.
-* A caption never goes blank (researcher, 2026-10-20). When nothing readable
-  is left of Trida's text (it wrote only "자막:", or only punctuation), the
-  band shows the cue's starting caption, the text Trida was given to
-  rewrite, and the log says so (``shown_from``). A call that fails is
+* A caption is usable (:func:`usable`) when something readable is left of it
+  under the display rule and its check found no failure and no repetition.
+  Trida writing only "자막:", a cut-off caption or a word loop is therefore
+  never shown; the next choice above is. A call that fails is
   logged and not asked again, except for one identical retry after a transient worker or
   device failure (the brief's rule).
 
@@ -70,7 +74,9 @@ from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 
 # v2 (2026-10-20): each attempt also records the shown text and the display rule.
 # v3 (2026-10-20): and where the shown text came from, Trida or the cue's starting caption.
-LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v3"
+# v4 (2026-10-20): ``usable`` instead; which caption each window showed is in the exposure log.
+LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v4"
+STARTING_CAPTION: Final = "starting-caption"
 TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v2"
 LATENCY_WINDOW: Final = 20
 LATENCY_QUANTILE: Final = 0.9
@@ -81,14 +87,16 @@ LIVE_DEADLINE_S: Final = 30.0
 TEXTURE_STEPS: Final = LIVE_TEXTURE_MAX
 
 
-def live_caption(source: CaptionSource, written: str) -> tuple[str, str]:
-    """What the band shows for one live caption, and where it came from (``shown_from``).
+def usable(result: Mapping[str, Any]) -> bool:
+    """Whether a completed live caption may be shown (researcher, 2026-10-20).
 
-    Trida's text under the display rule; when nothing readable is left, the cue's starting
-    caption, so the band never goes blank.
+    Something readable is left under the display rule, and its check found no failure and no
+    repetition.
     """
-    shown = shown_text(written)
-    return (shown, "trida") if readable(shown) else (source.text, "starting caption")
+    written = str((result.get("output") or {}).get("text", ""))
+    checks = result.get("checks") or {}
+    repeated = any(finding.get("code") == "repetition" for finding in checks.get("flags", []))
+    return readable(shown_text(written)) and not checks.get("failures") and not repeated
 
 
 def slider_steps(texture: float, context: float) -> tuple[int, str]:
@@ -199,6 +207,7 @@ class LiveScheduler:
     results: dict[str, dict[str, Any]] = field(default_factory=dict)
     failures: dict[str, list[str]] = field(default_factory=dict)
     in_flight: set[str] = field(default_factory=set)
+    written: dict[int, list[str]] = field(default_factory=dict)  # completed job IDs per cue, in order
 
     def position(self, now: float) -> int:
         if not self.playing:
@@ -250,22 +259,38 @@ class LiveScheduler:
         self.in_flight.discard(request.job.job_id)
         if result.get("status") == "completed":
             self.results[request.job.job_id] = dict(result)
+            self.written.setdefault(request.cue, []).append(request.job.job_id)
             if result.get("latency_ms") is not None:
                 self.estimator.observe(int(result["latency_ms"]))
         else:
             self.failures.setdefault(request.job.job_id, []).append(str(result.get("status")))
 
     def ready(self) -> dict[int, dict[str, Any]]:
-        """Captions written under the current spec, by cue, as shown (the display rule)."""
+        """Every cue's caption as the browser would show it now, each about its own window.
+
+        The first of: Trida's usable caption under the current spec (``current``); its latest
+        usable caption for this cue under earlier settings; the cue's starting caption, whose
+        ``job_id`` is ``starting-caption:<video>:<cue>``. ``settled``: the current spec's attempt
+        for this cue is over (written, unusable or failed for good), so nothing better is coming.
+        """
         if self.spec is None:
             return {}
         ready: dict[int, dict[str, Any]] = {}
-        for cue in range(len(self.stream.cues)):
-            job = self.job(cue)
-            result = self.results.get(job.job_id)
-            if result is not None:
-                written = str((result.get("output") or {}).get("text", ""))
-                ready[cue] = {"job_id": job.job_id, "text": live_caption(self.stream.cues[cue], written)[0]}
+        for cue, source in enumerate(self.stream.cues):
+            job_id = self.job(cue).job_id
+            settled = job_id in self.results or not self.may_try(job_id)
+            choices = [job_id, *reversed(self.written.get(cue, []))]
+            shown = next((j for j in choices if j in self.results and usable(self.results[j])), None)
+            if shown is None:
+                ready[cue] = {
+                    "job_id": f"{STARTING_CAPTION}:{self.stream.video_id}:{cue}",
+                    "text": source.text,
+                    "current": False,
+                    "settled": settled,
+                }
+            else:
+                text = shown_text(str(self.results[shown]["output"]["text"]))
+                ready[cue] = {"job_id": shown, "text": text, "current": shown == job_id, "settled": settled}
         return ready
 
 
@@ -436,6 +461,9 @@ class LiveService:
         if request is None or scheduler is None or session_id is None:
             return False
         result = self._call(request.job)
+        if self.check and result.get("output"):  # the scheduler shows a caption only if it is usable
+            source = scheduler.stream.cues[request.cue]
+            result = {**result, "checks": dict(self.check(source, request.job, result))}
         with self.lock:
             scheduler.complete(request, result)
             self._log(session_id, scheduler, request, result)
@@ -509,10 +537,6 @@ class LiveService:
     def _log(
         self, session_id: str, scheduler: LiveScheduler, request: LiveRequest, result: Mapping[str, Any]
     ) -> None:
-        source = scheduler.stream.cues[request.cue]
-        shown, shown_from = (
-            live_caption(source, result["output"]["text"]) if result.get("output") else (None, None)
-        )
         record = {
             "schema": LIVE_ATTEMPT_SCHEMA,
             "session_id": session_id,
@@ -533,12 +557,10 @@ class LiveService:
             "latency_ms": result.get("latency_ms"),
             "wall_ms": result.get("wall_ms"),
             "output": result.get("output"),
-            "shown_text": shown,
-            "shown_from": shown_from,
+            "shown_text": shown_text(result["output"]["text"]) if result.get("output") else None,
+            "usable": usable(result) if result.get("output") else False,
             "display_rule": DISPLAY_RULE,
-            "checks": dict(self.check(source, request.job, result))
-            if self.check and result.get("output")
-            else None,
+            "checks": result.get("checks"),
         }
         self.log_dir.mkdir(parents=True, exist_ok=True)
         with (self.log_dir / f"live-{session_id}.jsonl").open("a", encoding="utf-8") as handle:

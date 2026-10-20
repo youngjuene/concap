@@ -149,6 +149,7 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     drain(service)
     ready = keep(client.get("/watch/api/captions")).json()["captions"]
     assert sorted(ready) == ["0", "1", "2"] and ready["0"]["text"] == "다시 쓴 자막 0번"
+    assert ready["0"]["current"] is True and ready["0"]["settled"] is True
     media_url = started.json()["video"]["media"]
     assert keep(client.get("/watch/" + media_url)).status_code == 200
     assert client.get("/watch/media/wrong-token").status_code == 404

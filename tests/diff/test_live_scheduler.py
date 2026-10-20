@@ -127,27 +127,81 @@ def test_a_tweak_targets_the_first_boundary_one_latency_later() -> None:
     assert later is not None and later.cue == 4
 
 
-def test_an_older_spec_is_never_shown_but_comes_back_from_the_cache() -> None:
+STARTING = f"starting-caption:{VIDEO}"
+
+
+def test_each_cue_shows_its_own_caption_and_an_older_spec_comes_back_from_the_cache() -> None:
+    # Researcher, 2026-10-20: a cue shows its caption under the current spec, else under earlier
+    # settings, else its starting caption; never another cue's caption.
     scheduler = LiveScheduler(stream(), job_for)
+    assert scheduler.ready() == {}  # no settings yet
     scheduler.set_spec(Spec(2, "specific"), 0, 0.0)
     first = scheduler.next_request(0.0)
     assert first is not None
     scheduler.set_spec(Spec(0, "broad"), 0, 1.0)  # the participant moved on during the call
     scheduler.complete(first, completed("이전 설정의 자막"))
-    assert scheduler.ready() == {}
+    ready = scheduler.ready()
+    assert ready[0] == {
+        "job_id": first.job.job_id,
+        "text": "이전 설정의 자막",
+        "current": False,
+        "settled": False,
+    }
+    assert ready[1] == {
+        "job_id": f"{STARTING}:1",
+        "text": "차가 지나간다 1.",
+        "current": False,
+        "settled": False,
+    }
     scheduler.set_spec(Spec(2, "specific"), 0, 2.0)  # and came back
-    assert scheduler.ready()[0]["text"] == "이전 설정의 자막"
+    assert scheduler.ready()[0] == {**ready[0], "current": True, "settled": True}
     assert scheduler.next_request(2.0).cue == 1  # type: ignore[union-attr]
 
 
-def test_a_failed_caption_is_still_shown_under_the_display_rule() -> None:
-    # The display rule (2026-10-20) removes the leading label; nothing inside is repaired.
+def test_after_a_late_move_the_next_cue_keeps_its_own_caption_under_the_old_settings() -> None:
+    scheduler = LiveScheduler(stream(), job_for)
+    scheduler.set_spec(Spec(1, "specific"), 0, 0.0)
+    for _ in range(3):  # the worker wrote cues 0-2 ahead under the starting settings
+        request = scheduler.next_request(0.0)
+        assert request is not None
+        scheduler.complete(request, completed(f"이전 설정 {request.cue}", latency_ms=900))
+    scheduler.set_playback(4900, True, 0.0)
+    scheduler.set_spec(Spec(2, "relation"), 4900, 0.0)  # 0.1 s before cue 1, too late to write it
+    request = scheduler.next_request(0.0)
+    assert request is not None and request.cue == 2
+    shown = scheduler.ready()[1]
+    assert shown["text"] == "이전 설정 1" and shown["current"] is False  # cue 1's own caption, not cue 0's
+
+
+@pytest.mark.parametrize(
+    "checks",
+    [
+        {"failures": [{"code": "undecodable_bytes", "detail": "1"}], "flags": []},
+        {"failures": [], "flags": [{"code": "repetition", "detail": "가로 가로 가로"}]},
+    ],
+)
+def test_an_unusable_caption_gives_way_to_the_starting_caption(checks: dict[str, Any]) -> None:
     scheduler = LiveScheduler(stream(), job_for)
     scheduler.set_spec(Spec(2, "specific"), 0, 0.0)
     request = scheduler.next_request(0.0)
     assert request is not None
-    scheduler.complete(request, completed("자막: 차가 지�나간다"))
-    assert scheduler.ready()[0]["text"] == "차가 지�나간다"
+    scheduler.complete(request, {**completed("자막: 차가 지\ufffd나간다"), "checks": checks})
+    assert scheduler.ready()[0] == {
+        "job_id": f"{STARTING}:0",
+        "text": "차가 지나간다 0.",
+        "current": False,
+        "settled": True,  # nothing better is coming, so the video may start on it
+    }
+
+
+def test_a_usable_caption_is_shown_under_the_display_rule() -> None:
+    # The display rule (2026-10-20) removes the leading label and the wrapping quotes, nothing inside.
+    scheduler = LiveScheduler(stream(), job_for)
+    scheduler.set_spec(Spec(2, "specific"), 0, 0.0)
+    request = scheduler.next_request(0.0)
+    assert request is not None
+    scheduler.complete(request, completed("자막: 「차가 천천히 지나간다」"))
+    assert scheduler.ready()[0]["text"] == "차가 천천히 지나간다" and scheduler.ready()[0]["current"]
 
 
 @pytest.mark.parametrize("written", ["자막:", "「」", "...", "  ", ""])
@@ -158,10 +212,15 @@ def test_a_caption_never_goes_blank(written: str, tmp_path: Path) -> None:
     service.attach("session-a", scheduler)
     service.settings(Spec(1, "specific", "참고 문장"), 0)
     assert service.step()
-    assert service.ready()[0]["text"] == "차가 지나간다 0."
+    assert service.ready()[0] == {
+        "job_id": f"{STARTING}:0",
+        "text": "차가 지나간다 0.",
+        "current": False,
+        "settled": True,
+    }
     line = json.loads((tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8"))
     assert line["output"]["text"] == written  # Trida's own text stays in the log
-    assert line["shown_text"] == "차가 지나간다 0." and line["shown_from"] == "starting caption"
+    assert line["usable"] is False
 
 
 @pytest.mark.parametrize(
@@ -209,16 +268,17 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
         service.attach("session-b", LiveScheduler(stream(), job_for))
     service.settings(Spec(2, "specific", "참고 문장"), 0)
     assert service.step() and service.step() and service.step() and not service.step()
-    assert [cue for cue in sorted(service.ready())] == [0, 1, 2]
+    assert [cue for cue, entry in sorted(service.ready().items()) if entry["current"]] == [0, 1, 2]
+    assert service.ready()[3]["job_id"] == f"{STARTING}:3"  # the rest show their starting captions
     assert service.ready()[0]["text"] == "첫 자막"  # shown under the display rule
     assert attempt.calls[0][1] == 30.0
     lines = [
         json.loads(line)
         for line in (tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v3"
+    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v4"
     assert lines[0]["output"]["text"] == "자막: 「첫 자막」" and lines[0]["shown_text"] == "첫 자막"
-    assert lines[0]["shown_from"] == "trida"
+    assert lines[0]["usable"] is True
     assert lines[0]["display_rule"] == "diff.display/v1"
     assert (
         lines[0]["cue"] == 0

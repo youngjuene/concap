@@ -32,8 +32,8 @@ It reports:
 - visibly broken text in what is shown: "소" cut from "소리", doubled commas or full stops. The
   count is rough (it misses typos such as "웅거림" and would count the animal 소), so a fluent
   reader still rates the chosen wording;
-- blank outputs, nothing readable left: a live caption then shows its starting caption (counted as
-  a copy), and a second caption fails;
+- unusable live captions (nothing readable left, a check failure or a repetition), which show
+  their starting caption instead (counted as a copy), and blank second captions, which fail;
 - how many second captions change between 0% and 100% degrees.
 
 A candidate is a JSON file that replaces any of the checkout's wordings for this run only:
@@ -69,6 +69,7 @@ from diff import rewrite_prompts  # noqa: E402
 from diff.caption_sources import CaptionSource, parse_sources  # noqa: E402
 from diff.job_plan import Job, PlanError, live_job  # noqa: E402
 from diff.live_calibration import calibrate  # noqa: E402
+from diff.live_generation import usable  # noqa: E402
 from diff.output_checks import (  # noqa: E402
     LABEL_PREFIXES,
     check_output,
@@ -202,16 +203,20 @@ def measure(
 ) -> dict[str, Any]:
     """Copies and texture words in what is shown; quotes and labels in what Trida wrote.
 
-    ``falls_back``: a live caption, which shows its starting caption when nothing readable is left.
+    ``falls_back``: a live caption, which shows its starting caption when it is not usable (nothing
+    readable left, a check failure or a repetition; ``live_generation.usable``). The bench has no
+    earlier settings' caption to show instead.
     """
     written = text or ""
     shown = shown_text(written)
     blank = not readable(shown)
-    if blank and falls_back:
+    unusable = falls_back and not usable({"output": {"text": written}, "checks": checks or {}})
+    if unusable:
         shown = source
     return {
         "shown": shown,
         "blank": blank,
+        "unusable": unusable,
         "copy": shown == source,
         "texture_words": quality_keys_in(shown),
         "quotes": "「" in written or "」" in written,
@@ -243,6 +248,7 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "labels": sum(r["label"] for r in live),
             "broken": sum(bool(r["broken"]) for r in live),
             "blank": sum(r["blank"] for r in live),
+            "unusable": sum(r["unusable"] for r in live),
             "by_texture": {str(k): dict(v) for k, v in sorted(by_texture.items())},
             "by_context": {k: dict(v) for k, v in sorted(by_context.items())},
             "failures": dict(Counter(code for r in live for code in r["failures"])),
@@ -272,7 +278,7 @@ def print_summary(summary: Mapping[str, Any]) -> None:
             f"live under {system}: {live['copies']}/{live['calls']} copies, "
             f"{live['not_completed']} not completed; Trida wrote 「」 in {live['quotes']}, "
             f"a label in {live['labels']}; {live['broken']} visibly broken; "
-            f"{live['blank']} blank, shown as the starting caption"
+            f"{live['unusable']} unusable ({live['blank']} blank), shown as the starting caption"
         )
         for step, counts in live["by_texture"].items():
             print(

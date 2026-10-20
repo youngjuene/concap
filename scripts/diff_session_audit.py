@@ -45,6 +45,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
+from diff.live_generation import STARTING_CAPTION, usable  # noqa: E402
 from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
 from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
@@ -214,6 +215,12 @@ def shown_on_screen(
     ):
         return attempt.get("shown_text")
     expected = shown_text(written)
+    if "usable" in attempt:  # live attempts from diff.live-attempt/v4 on
+        audit.ok(
+            "display",
+            attempt["usable"] == usable(attempt),
+            f"{where}: logged usable {attempt['usable']}, its text and check say {usable(attempt)}",
+        )
     if "shown_from" in attempt:
         fell_back = not readable(expected)
         audit.ok(
@@ -491,15 +498,32 @@ def audit_live(
         if e["event"] == "exposures"
         for entry in e["entries"]
     ]
+    # From diff.live-attempt/v4 on, every window shows a caption about its own audio: a usable one
+    # Trida wrote for that cue (under any settings) or that cue's starting caption.
+    own_window = any(c["schema"].endswith("/v4") for c in lives)
     for shown in exposures:
-        written = by_job.get(shown.get("job_id", ""))
-        if audit.ok("exposures", written is not None, f"{who}: exposure {shown} has no live call"):
-            assert written is not None
+        video_id, job_id = video(shown["video_index"]), str(shown.get("job_id") or "")
+        if own_window and job_id.startswith(f"{STARTING_CAPTION}:"):
             audit.ok(
                 "exposures",
-                written["cue"] <= shown["cue"] and written["video_id"] == video(shown["video_index"]),
+                job_id == f"{STARTING_CAPTION}:{video_id}:{shown['cue']}",
+                f"{who}: cue {shown['cue']} of {video_id} showed {job_id}",
+            )
+            audit.note("exposures", "starting caption shown")
+            continue
+        written = by_job.get(job_id)
+        if audit.ok("exposures", written is not None, f"{who}: exposure {shown} has no live call"):
+            assert written is not None
+            same_video = written["video_id"] == video_id
+            if own_window:
+                fits = same_video and written["cue"] == shown["cue"] and written.get("usable") is True
+            else:  # before v4 a cue kept the previous cue's caption until a new one was ready
+                fits = same_video and written["cue"] <= shown["cue"]
+            audit.ok(
+                "exposures",
+                fits,
                 f"{who}: cue {shown['cue']} of video {shown['video_index']} showed a caption written "
-                f"for {written['video_id']}#{written['cue']}",
+                f"for {written['video_id']}#{written['cue']} (usable: {written.get('usable')})",
             )
     latencies = [c["latency_ms"] for c in lives if c.get("latency_ms") is not None]
     return {

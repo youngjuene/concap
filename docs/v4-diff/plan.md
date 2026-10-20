@@ -83,6 +83,30 @@ engineering fixes found on the way to the user test.
   13 unapproved setup parts, the provisional tuner and second-caption
   prompt, and 90 unreviewed starting captions.
 
+- **Every window shows a caption about its own audio** (researcher,
+  2026-10-20). A move in a window's last ~1.4 s (the 300 ms debounce plus
+  Trida's ~1.1 s) lands one window later, and the browser then kept the
+  previous window's caption over the next window's audio for its whole
+  10 s: 16 of 360 windows in the M1 rehearsal. Live captions whose check
+  failed or looped were shown as written (3.8% loops on M1). Now
+  `LiveScheduler.ready` serves, for every window, the first of:
+  - Trida's usable caption under the current settings (`current`);
+  - its latest usable caption for that window under earlier settings;
+  - the window's starting caption (`starting-caption:<video>:<cue>`).
+
+  Usable (`live_generation.usable`) means something readable is left under the
+  display rule, and the live check found no failure and no repetition. On the
+  M1 timing run, 74 of 810 rewrites (9%) are not usable. This replaces the
+  blank-only fallback. Start waits until the first window's attempt is
+  `settled`, so a video still opens with Trida's rewrite at the middle
+  settings. The browser keeps its cached captions after a move and marks a
+  change applied only when its window's caption is `current`. The waiting
+  chip now reads "새 자막을 준비하는 동안 이전 설정의 자막이 표시됩니다"
+  (wording for the researcher's approval). Attempt logs move to
+  `diff.live-attempt/v4` (`usable`), and the exposure log names the job or
+  the starting caption each window showed. The audit checks that every
+  window showed its own caption.
+
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 
 The researcher supplied a review of the participant flow (14 findings) and an
