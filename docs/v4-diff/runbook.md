@@ -152,9 +152,8 @@ uv run ruff check src/diff tests/diff && uv run ruff format --check src/diff tes
 uv run mypy
 ```
 
-`make check` also checks `envs/diff-generator/uv.lock`. Its lint and the regen
-detachment test currently trip over `src/dpo/regen/.omx/`, scratch copies
-excluded from git only by `.git/info/exclude`. That failure predates diff.
+`make check` runs these over the whole repository and also checks
+`envs/diff-generator/uv.lock`.
 
 ## 6. Phase-1 setup (researcher review)
 
@@ -235,6 +234,13 @@ uv run python -m diff live serve \
   `artifacts/diff/participants.sqlite`, one store for the whole study, because
   IDs are unique across it. Smoke runs get `<log-dir>/smoke-sessions.sqlite`,
   so a test `P1` never blocks a real one.
+- `--gpus` lists the cards to use, one live session per card. `serve` refuses
+  to start unless every listed card has at least 17 GB free
+  (`LIVE_MIN_FREE_MIB`). Other jobs on this machine also use GPU 0, so check
+  `nvidia-smi` and list only the free cards.
+  - A session holds its card from entry until its last video ends. With one
+    card, participants therefore come strictly one after another: a second ID
+    entered meanwhile is told to wait ("잠시 후", 503).
 - `--purpose participant` is refused in any of these cases:
   - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
   - the second-caption prompt is provisional (`rewrite_prompts.TWEAK_P1`);
