@@ -264,6 +264,7 @@ uv run python -m diff live serve \
     entered meanwhile is told to wait ("잠시 후", 503).
 - `--purpose participant` is refused in any of these cases:
   - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
+  - the nine live prompts are provisional (`rewrite_prompts.LIVE_CELL_PROMPTS`);
   - the second-caption prompt is provisional (`rewrite_prompts.TWEAK_P1`);
   - the setup has unapproved parts;
   - a phase-2 starting caption is not reviewed: every cue needs status
@@ -449,7 +450,8 @@ envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
 
 `scripts/diff_prompt_bench.py` runs candidate wordings of live-p2, tweak-p1
 and the tuner on fixed participant answers, at the study's settings. Its
-docstring gives the candidate file's format.
+docstring gives the candidate file's format. A live candidate replaces any of
+the nine cell prompts (`"cells": {"0-broad": "…{cue_text}…", …}`).
 - `inputs` keeps a run's answers and the slider steps of its live calls.
 - `run`, in the generator env on one GPU, rebuilds every prompt from those
   answers with the checkout's code (or a candidate's wording) and writes it

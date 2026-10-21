@@ -13,8 +13,8 @@ picked by a rule written down before the run.
   prefix. It won on the fewest outputs with a failure or a prompt leak.
 - The worked examples are invented (a distant dog), so they name no study clip.
 
-``LIVE_REWRITE`` (``live-p2``) is the live phase-2 prompt, chosen by the same
-procedure. A rendered
+``LIVE_CELL_PROMPTS`` (``live-p2``) are the live phase-2 prompts, one per
+slider cell, chosen by the same procedure on the phase-2 captions. A rendered
 prompt carries three identities: the template's hash, the rendered text's
 hash, and — added at plan freeze in the generator environment — the hash of the
 token IDs after the model's own chat template (:mod:`diff.job_plan`).
@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from diff.caption_sources import CATEGORIES_KO, CERTAINTY_KO, COUNTS_KO, QUALITIES, CaptionSource, SoundEvent
-from diff.study_protocol import CONTEXT_STEPS, SYSTEM_MESSAGE, sha256_text
+from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX, SYSTEM_MESSAGE, sha256_text
 
 
 @dataclass(frozen=True)
@@ -108,46 +108,130 @@ CONTEXT_RULES: Final[dict[str, str]] = {
 EMPTY_QUALITIES: Final = "없음"
 
 # Live phase 2 (researcher, 2026-10-11): the model rewrites a cue's starting caption
-# while the participant watches. There is no evidence list, so the texture
-# words come from the closed vocabulary and the context rules speak of the
-# original caption. The 「」 quoting and the closing no-prefix sentence answer
-# the label echo that G0 run 3 showed (10 of 18 outputs).
-# Version 2 (2026-10-12): texture steps 0-2 only (LIVE_TEXTURE_MAX); steps 3-4 broke
-# Dream's Korean most often on the held-out pre-check (kept for Trida).
-LIVE_RULES_VERSION: Final = 2
-LIVE_QUALITY_WORDS: Final = ", ".join(forms[0] for forms in QUALITIES.values())
-LIVE_TEXTURE_RULES: Final[dict[int, str]] = {
-    0: "소리의 질감을 나타내는 표현(크기, 높낮이, 규칙성, 거칠기 같은 것)은 쓰지 마세요.",
-    **{
-        count: f"소리의 질감을 나타내는 표현을 다음 목록에서 {count}개 골라 넣으세요: {LIVE_QUALITY_WORDS}."
-        for count in (1, 2)
-    },
-}
-LIVE_CONTEXT_RULES: Final[dict[str, str]] = {
-    "broad": (
-        "음원은 '사람 소리', '교통·기계 소리', '자연 소리' 같은 넓은 범주로만 부르고, "
-        "구체적인 이름이나 위치는 쓰지 마세요."
+# while the participant watches, under the session's tuner system message.
+# Version 4 (2026-10-21): one prompt per slider cell, nine in all (researcher: "9 different
+# prompts for rewriting the original caption to have noticeable semantical adjustments", then
+# "polish the prompts to be kind enough to deliver as soundscape descriptors"). Each cell writes
+# a short description of the sound scene. Context: broad groups the sounds into general kinds but
+# keeps what they do, specific names each source and what it does, relation places the sounds in
+# space around the first. Texture: how they sound, on no sound (0), the first sound (1), every
+# sound (2). The cue comes last, after worked examples that name no study clip: in the bench of
+# 2026-10-21 (artifacts/diff/cell-prompts, rule fixed before the runs) an example after the cue
+# was copied into unrelated cues, and no example at all left 56% of the captions unchanged.
+# Version 3's single prompt with a texture rule and a context rule changed too little (38 of 54
+# rewrites were copies). Until the researcher approves the nine texts, participant sessions are
+# refused.
+LIVE_PROMPTS_PROVISIONAL: Final = True
+LIVE_RULES_VERSION: Final = 3
+_LIVE_HEAD: Final = (
+    "영상 속 소리를 시청자가 편하게 읽을 수 있는 소리 풍경 묘사로 바꿔 쓰는 일입니다. "
+    "원래 자막에는 가장 두드러진 소리가 먼저 나옵니다.\n"
+    "지킬 것\n"
+    "- 원래 자막에 있는 소리만 쓰고, 없는 소리는 더하지 마세요. 소리의 순서는 그대로 두세요.\n"
+    "- 짧고 자연스러운 우리말로, 귀에 들리는 장면을 그리듯 쓰세요.\n"
+)
+_LIVE_TEXTURE: Final[dict[int, str]] = {
+    0: (
+        "- 소리가 어떻게 들리는지 나타내는 꾸밈말(크게, 낮게, 날카롭게, 웅웅거리는, 끼익거리는 같은 말)은 "
+        "쓰지 말고, 무엇이 무엇을 하는지만 담담하게 쓰세요.\n"
     ),
-    "specific": "원래 자막에 나온 음원 이름을 쓰되, 위치나 다른 대상과의 관계는 쓰지 마세요.",
-    "relation": "원래 자막에 나온 음원 이름과 함께, 원래 자막에 나온 위치나 관계도 쓰세요.",
+    1: (
+        "- 소리가 어떻게 들리는지 나타내는 꾸밈말은 가장 두드러진 첫 소리에만 하나 붙이세요"
+        "(예: 낮게, 날카롭게, 묵직하게, 희미하게, 일정하게). 다른 소리에는 붙이지 마세요.\n"
+    ),
+    2: (
+        "- 모든 소리에 어떻게 들리는지 나타내는 꾸밈말을 붙여 질감이 느껴지게 쓰세요. 첫 소리에는 두 개"
+        "(예: 낮고 묵직하게), 나머지 소리에는 하나씩 붙이세요(예: 날카롭게, 희미하게, 일정하게, 부드럽게).\n"
+    ),
 }
-# Version 2 (2026-10-12): at most 96 characters, to fit the live canvas.
-# Version 3 (2026-10-12): no guidance slot; the participant's profile is in the
-# session's tuner system message (TUNER_SYSTEM) instead.
-LIVE_REWRITE: Final = PromptTemplate(
-    template_id="live-p2",
-    version=3,
-    text=(
-        "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{cue_text}」\n"
-        "이 자막을 같은 내용의 새 문장으로 고쳐 쓰세요. "
-        "들리는 소리의 종류, 개수, 순서, 확실성은 바꾸지 말고, "
-        "원래 자막에 없는 소리를 더하지 마세요. {texture_rule} {context_rule}\n"
-        "예를 들어 「멀리서 개 한 마리가 짖는 소리」에 질감 표현을 하나 넣으면 "
-        "「멀리서 개 한 마리가 날카롭게 짖는 소리」처럼 쓸 수 있습니다.\n"
-        "96자 이내의 한 문장으로 쓰고, 고쳐 쓴 문장만 출력하세요. "
-        "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
+_LIVE_CONTEXT: Final[dict[str, str]] = {
+    "broad": (
+        "- 구체적인 음원 이름 대신 교통 소리, 사람들 소리, 음악 소리, 자연의 소리, 동물 소리 같은 큰 갈래로 "
+        "장면을 넓게 그리세요. 갈래가 같은 소리는 하나로 묶되, 그 소리들이 무엇을 하는지는 살리세요. "
+        "위치는 쓰지 마세요.\n"
+    ),
+    "specific": (
+        "- 음원은 원래 자막의 구체적인 이름으로 부르고, 각 소리가 무엇을 하는지 살려 쉼표로 이으세요. "
+        "위치나 다른 소리와의 관계는 쓰지 마세요.\n"
+    ),
+    "relation": (
+        "- 음원은 원래 자막의 구체적인 이름으로 부르고, 첫 소리를 앞에 두고 나머지 소리를 그 사이나 뒤, "
+        "배경에 놓아 공간이 그려지는 한 문장으로 쓰세요('사이로', '너머로', '뒤로', '배경에' 같은 말). "
+        "원래 자막의 위치(멀리서, 근처에서)는 살리세요.\n"
+    ),
+}
+# Each example: an invented caption and its rewrite in every cell, (texture, context) -> text.
+_LIVE_EXAMPLES: Final[tuple[tuple[str, dict[tuple[int, str], str]], ...]] = (
+    (
+        "공원에서 크게 웃는 아이들 소리, 어른들의 대화 소리, 멀리서 개가 짖는 소리",
+        {
+            (0, "broad"): "사람들이 웃고 이야기하는 소리와 동물이 우는 소리",
+            (1, "broad"): "사람들이 크게 웃고 이야기하는 소리와 동물이 우는 소리",
+            (2, "broad"): "사람들이 높고 크게 웃으며 이야기하는 소리와 동물이 날카롭게 우는 소리",
+            (0, "specific"): "아이들이 웃는 소리, 어른들이 이야기하는 소리, 개가 짖는 소리",
+            (1, "specific"): "아이들이 크게 웃는 소리, 어른들이 이야기하는 소리, 개가 짖는 소리",
+            (2, "specific"): (
+                "아이들이 높고 크게 웃는 소리, 어른들이 낮게 이야기하는 소리, 개가 날카롭게 짖는 소리"
+            ),
+            (0, "relation"): "공원의 아이들 웃음소리 사이로 어른들의 이야기가 들리고, 멀리서 개가 짖는다",
+            (1, "relation"): (
+                "공원에 아이들 웃음소리가 크게 퍼지는 사이로 어른들의 이야기가 들리고, 멀리서 개가 짖는다"
+            ),
+            (2, "relation"): (
+                "공원에 높고 크게 퍼지는 웃음소리 사이로 낮은 이야기 소리가 들리고, "
+                "멀리서 개가 날카롭게 짖는다"
+            ),
+        },
+    ),
+    (
+        "숲속에서 계속 지저귀는 새소리, 바람에 흔들리는 나뭇잎 소리",
+        {
+            (0, "broad"): "동물들이 우는 소리와 바람이 스치는 자연의 소리",
+            (1, "broad"): "동물들이 일정하게 우는 소리와 바람이 스치는 자연의 소리",
+            (2, "broad"): "동물들이 높고 일정하게 우는 소리와 바람이 부드럽게 스치는 자연의 소리",
+            (0, "specific"): "새들이 지저귀는 소리, 나뭇잎이 바람에 흔들리는 소리",
+            (1, "specific"): "새들이 일정하게 지저귀는 소리, 나뭇잎이 바람에 흔들리는 소리",
+            (2, "specific"): "새들이 높고 일정하게 지저귀는 소리, 나뭇잎이 부드럽게 흔들리는 소리",
+            (0, "relation"): "숲속에 새들이 지저귀는 소리 뒤로 나뭇잎이 바람에 흔들린다",
+            (1, "relation"): "숲속에 새들이 일정하게 지저귀는 소리 뒤로 나뭇잎이 바람에 흔들린다",
+            (2, "relation"): "숲속에 새들이 높고 일정하게 지저귀는 소리 뒤로 나뭇잎이 부드럽게 흔들린다",
+        },
+    ),
+    (
+        "시장에서 상인들이 외치는 소리, 손수레 바퀴가 덜컹거리는 소리",
+        {
+            (0, "broad"): "사람들이 외치는 소리와 수레가 오가는 기계 소리",
+            (1, "broad"): "사람들이 크게 외치는 소리와 수레가 오가는 기계 소리",
+            (2, "broad"): "사람들이 크고 높게 외치는 소리와 수레가 거칠게 오가는 기계 소리",
+            (0, "specific"): "상인들이 외치는 소리, 손수레 바퀴가 구르는 소리",
+            (1, "specific"): "상인들이 크게 외치는 소리, 손수레 바퀴가 구르는 소리",
+            (2, "specific"): "상인들이 크고 높게 외치는 소리, 손수레 바퀴가 거칠게 구르는 소리",
+            (0, "relation"): "시장의 상인들 외침 사이로 손수레 바퀴가 지나간다",
+            (1, "relation"): "시장에 상인들 외침이 크게 퍼지는 사이로 손수레 바퀴가 지나간다",
+            (2, "relation"): "시장에 크고 높게 퍼지는 외침 사이로 손수레 바퀴가 거칠게 지나간다",
+        },
     ),
 )
+_LIVE_TAIL: Final = (
+    "이제 아래 자막을 바꿔 쓰세요. 바꿔 쓴 자막만 한 줄로, 70자 이내로 출력하세요.\n원래 자막: {cue_text}"
+)
+
+
+def _live_cell_text(texture: int, context: str) -> str:
+    examples = "".join(
+        f"예시\n원래 자막: {caption}\n바꿔 쓴 자막: {rewrites[(texture, context)]}\n"
+        for caption, rewrites in _LIVE_EXAMPLES
+    )
+    return _LIVE_HEAD + _LIVE_TEXTURE[texture] + _LIVE_CONTEXT[context] + examples + _LIVE_TAIL
+
+
+LIVE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
+    (texture, context): PromptTemplate(
+        template_id="live-p2", version=4, text=_live_cell_text(texture, context)
+    )
+    for texture in range(LIVE_TEXTURE_MAX + 1)
+    for context in CONTEXT_STEPS
+}
 
 
 # The live session's system message: our own "audio caption tuner" role, built
@@ -338,24 +422,23 @@ def render_tuner_system(slots: Mapping[str, str]) -> str:
 
 
 def render_live(source: CaptionSource, texture: int, context: str, system_message: str) -> RenderedPrompt:
-    """The live phase-2 prompt: a cue's starting caption and the snapped steps, under the session's tuner."""
-    if context not in LIVE_CONTEXT_RULES:
+    """The live phase-2 prompt: the slider cell's own prompt over a cue's starting caption, under the tuner.
+
+    The nine prompts are ``LIVE_CELL_PROMPTS``; the job's cell names which one a call used.
+    """
+    if context not in CONTEXT_STEPS:
         raise ValueError(f"Unknown context step: {context}")
-    if type(texture) is not int or texture not in LIVE_TEXTURE_RULES:
+    if type(texture) is not int or not 0 <= texture <= LIVE_TEXTURE_MAX:
         raise ValueError("texture must be an integer step from 0 to 2")
     if not system_message:
         raise ValueError("a live prompt needs the session's tuner system message")
-    text = LIVE_REWRITE.text.format(
-        cue_text=source.text,
-        texture_rule=LIVE_TEXTURE_RULES[texture],
-        context_rule=LIVE_CONTEXT_RULES[context],
-    )
+    template = LIVE_CELL_PROMPTS[(texture, context)]
     return RenderedPrompt(
-        LIVE_REWRITE.template_id,
-        LIVE_REWRITE.version,
-        LIVE_REWRITE.sha256,
+        template.template_id,
+        template.version,
+        template.sha256,
         0,  # no evidence is rendered into a live prompt
         LIVE_RULES_VERSION,
-        text,
+        template.text.format(cue_text=source.text),
         system_message=system_message,
     )

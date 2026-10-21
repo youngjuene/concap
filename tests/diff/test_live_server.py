@@ -257,13 +257,13 @@ def test_rating_items_are_validated() -> None:
             rating_items(bad)
 
 
-@pytest.mark.parametrize("approved", ["", "TUNER_PROVISIONAL"])
-def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_tweak_prompt(
+@pytest.mark.parametrize("approved", ["", "TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL"])
+def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: str
 ) -> None:
     from diff.__main__ import main
 
-    if approved:  # the tuner text is in, the second-caption prompt still provisional
+    if approved:  # one of them approved, the others still provisional
         monkeypatch.setattr(f"diff.rewrite_prompts.{approved}", False)
 
     sources = tmp_path / "sources.json"
@@ -275,9 +275,14 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_tweak_pro
     media.write_bytes(b"x")
     argv = ["live", "serve", "--sources", str(sources), "--video", f"{VIDEO}={media}", "--items", str(items)]
     argv += ["--log-dir", str(tmp_path / "logs"), "--fake-worker", "--purpose", "participant"]
-    expected = "second-caption prompt is still provisional" if approved else "tuner system message"
-    with pytest.raises(SystemExit, match=expected):
+    with pytest.raises(SystemExit) as stopped:
         main(argv)
+    for blocker, flag in (
+        ("tuner system message", "TUNER_PROVISIONAL"),
+        ("nine live prompts are still provisional", "LIVE_PROMPTS_PROVISIONAL"),
+        ("second-caption prompt is still provisional", "TWEAK_PROVISIONAL"),
+    ):
+        assert (blocker in str(stopped.value)) is (flag != approved), blocker
 
 
 def test_participant_sessions_need_reviewed_starting_captions(
@@ -287,6 +292,7 @@ def test_participant_sessions_need_reviewed_starting_captions(
 
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
+    monkeypatch.setattr("diff.rewrite_prompts.LIVE_PROMPTS_PROVISIONAL", False)
     sources = tmp_path / "sources.json"  # the test stream's cues are drafts
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
     sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
@@ -324,6 +330,7 @@ def test_preflight_lists_every_blocker_at_once(
     for blocker in (
         "no video at",
         "tuner system message is still provisional",
+        "nine live prompts are still provisional",
         "second-caption prompt is still provisional",
         "need phase 1",
         "3 cues are not",
@@ -339,6 +346,7 @@ def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest
 
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
+    monkeypatch.setattr("diff.rewrite_prompts.LIVE_PROMPTS_PROVISIONAL", False)
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
     sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")

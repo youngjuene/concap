@@ -129,6 +129,34 @@ engineering fixes found on the way to the user test.
   caption the change was made in. Both wordings await the researcher's
   approval.
 
+- **Nine live prompts, one per slider cell** (researcher, 2026-10-21: "9
+  different prompts for rewriting the original caption to have noticeable
+  semantical adjustments", then "polish the prompts to be kind enough to
+  deliver as soundscape descriptors"). `live-p2` v3 was one prompt with a
+  texture rule and a context rule; on the final captions 38 of 54 rewrites
+  under the default tuner were copies, so the sliders barely showed.
+  - `rewrite_prompts.LIVE_CELL_PROMPTS` (`live-p2` v4, rules version 3): each
+    cell writes a short description of the sound scene. Context: broad groups
+    the sounds into general kinds but keeps what they do; specific names each
+    source and what it does; relation places the sounds in space around the
+    first. Texture: how they sound, on no sound (0), the first sound (1),
+    every sound (2).
+  - The cue comes last, after three invented examples (park, forest, market)
+    shown with their rewrite for that same cell.
+  - Chosen on the 90 final captions × 9 cells at the study's settings, by a
+    rule written before the first run (`artifacts/diff/cell-prompts/RULE.md`,
+    tightened twice, never loosened). Bench of 2026-10-21 on every third cue:
+    an example after the cue was copied into unrelated cues ("사람 소리, 동물
+    소리" for traffic); no example left 56% unchanged; the soundscape form
+    brought copies to 10% and gave every cell its own caption.
+  - No candidate passes the rule yet: 17% of rewrites show broken text,
+    two-thirds of it ",," (a display rule collapsing ",," would leave 7%);
+    broad keeps source names, and texture counts drift. Later wordings (v5,
+    v6) cut breakage to 13% but made broad repeat one phrase for most traffic
+    windows, so v4b stays. The prompts are provisional (`LIVE_PROMPTS_PROVISIONAL`), so
+    participant sessions are refused; smoke runs use them.
+  - The audit checks each call against its own cell's template.
+
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 
 The researcher supplied a review of the participant flow (14 findings) and an

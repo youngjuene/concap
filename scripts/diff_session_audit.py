@@ -59,7 +59,7 @@ from diff.phase1_tweak import (  # noqa: E402
     tweak_source,
 )
 from diff.rewrite_prompts import (  # noqa: E402
-    LIVE_REWRITE,
+    LIVE_CELL_PROMPTS,
     LIVE_RULES_VERSION,
     TUNER_SYSTEM,
     TWEAK_P1,
@@ -426,8 +426,9 @@ def audit_live(
             ).record()
         )
         prompt = call["job"]["prompt"]
-        if (prompt["template_sha256"], prompt["context_rules_version"]) != (
-            LIVE_REWRITE.sha256,
+        template = LIVE_CELL_PROMPTS.get((int(spec["texture"]), str(spec["context"])))
+        if template is None or (prompt["template_sha256"], prompt["context_rules_version"]) != (
+            template.sha256,
             LIVE_RULES_VERSION,
         ):
             stale = True
@@ -451,7 +452,8 @@ def audit_live(
             "versions",
             False,
             f"{who}: live calls ran another live-p2 template or rule version than this checkout "
-            f"(v{LIVE_REWRITE.version}, rules v{LIVE_RULES_VERSION}); audit at the commit the session ran",
+            f"(v{LIVE_CELL_PROMPTS[(0, 'broad')].version}, rules v{LIVE_RULES_VERSION}); "
+            "audit at the commit the session ran",
         )
 
     # Events name the video they belong to. Logs from before 2026-10-20 give only its index in the

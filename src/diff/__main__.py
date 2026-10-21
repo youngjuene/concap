@@ -624,9 +624,14 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
 def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> list[str]:
     """Every gate a participant session waits on, given serve's arguments (empty when none)."""
     from diff.caption_sources import starting_caption_review_problems
-    from diff.rewrite_prompts import TUNER_PROVISIONAL, TWEAK_PROVISIONAL
+    from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL, TWEAK_PROVISIONAL
 
     blockers = []
+    if LIVE_PROMPTS_PROVISIONAL:
+        blockers.append(
+            "the nine live prompts are still provisional (rewrite_prompts.LIVE_CELL_PROMPTS); "
+            "participant sessions wait for the researcher's approval"
+        )
     if TUNER_PROVISIONAL:
         blockers.append(
             "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "

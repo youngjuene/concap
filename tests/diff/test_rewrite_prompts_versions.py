@@ -6,6 +6,8 @@ import pytest
 
 from diff.caption_sources import SourceSet
 from diff.rewrite_prompts import (
+    LIVE_CELL_PROMPTS,
+    LIVE_PROMPTS_PROVISIONAL,
     PHASE1_REWRITE,
     PHASE1_REWRITE_V1,
     PHASE2_CELL,
@@ -52,19 +54,33 @@ def test_rewrite_v3_asks_for_new_wording_without_label_lines() -> None:
     assert PHASE1_REWRITE.text.count("{") == 2  # the worked example adds no slot
 
 
-def test_live_prompt_renders_the_steps_under_the_session_tuner(development_sources: SourceSet) -> None:
+def test_live_prompt_is_its_slider_cell_s_own_under_the_session_tuner(development_sources: SourceSet) -> None:
+    # Researcher, 2026-10-21: nine prompts, one per slider cell, written as soundscape descriptors.
     source = development_sources.phase(1)[0]
     tuner = render_tuner_system({"heard_families": "사람 소리 1번", "s1": "4", "s2": "3", "s3": "5"})
-    plain = render_live(source, 0, "broad", tuner)
-    assert (
-        plain.template_id == "live-p2" and plain.template_version == 3 and f"「{source.text}」" in plain.text
-    )
-    assert "질감을 나타내는 표현(크기" in plain.text and "넓은 범주로만" in plain.text
-    assert plain.system_message == tuner and "사람 소리 1번" in tuner and "{" not in tuner
-    textured = render_live(source, 2, "relation", tuner)
-    assert "2개 골라 넣으세요" in textured.text and "96자 이내의 한 문장" in textured.text
-    assert textured.text_sha256 != plain.text_sha256 and textured.context_rules_version == 2
-    assert "참고로" not in textured.text  # the guidance sentence moved into the system message
+    rendered = {
+        (t, c): render_live(source, t, c, tuner) for t in (0, 1, 2) for c in ("broad", "specific", "relation")
+    }
+    assert len({prompt.template_sha256 for prompt in rendered.values()}) == 9
+    assert LIVE_PROMPTS_PROVISIONAL is True  # until the researcher approves the nine texts
+    for (texture, context), prompt in rendered.items():
+        assert (prompt.template_id, prompt.template_version, prompt.context_rules_version) == (
+            "live-p2",
+            4,
+            3,
+        )
+        assert prompt.template_sha256 == LIVE_CELL_PROMPTS[(texture, context)].sha256
+        assert prompt.system_message == tuner and "{" not in prompt.text
+        # the cue comes last, after the examples, so an example's answer is not the last thing read
+        assert prompt.text.endswith(f"원래 자막: {source.text}") and prompt.text.count("예시\n") == 3
+    assert "쓰지 말고, 무엇이 무엇을 하는지만" in rendered[(0, "broad")].text
+    assert "첫 소리에만 하나" in rendered[(1, "specific")].text
+    assert "첫 소리에는 두 개" in rendered[(2, "relation")].text
+    assert "큰 갈래로" in rendered[(0, "broad")].text and "큰 갈래로" not in rendered[(0, "specific")].text
+    assert "공간이 그려지는" in rendered[(1, "relation")].text
+    # each cell shows the examples' rewrite for that same cell
+    assert "바꿔 쓴 자막: 사람들이 웃고 이야기하는 소리와 동물이 우는 소리" in rendered[(0, "broad")].text
+    assert "바꿔 쓴 자막: 사람들이 웃고 이야기하는 소리와 동물이 우는 소리" not in rendered[(1, "broad")].text
     with pytest.raises(ValueError, match="texture"):
         render_live(source, 3, "broad", tuner)  # capped at step 2 since 2026-10-12
     with pytest.raises(ValueError, match="context"):

@@ -38,9 +38,7 @@ It reports:
 
 A candidate is a JSON file that replaces any of the checkout's wordings for this run only:
     {"name": "…",
-     "live": {"text": "…{cue_text}…{texture_rule} {context_rule}…",
-              "texture_rules": {"0": "…", "1": "…", "2": "…"},
-              "context_rules": {"broad": "…", "specific": "…", "relation": "…"}},
+     "cells": {"0-broad": "…{cue_text}…", "0-specific": "…", …, "2-relation": "…"},
      "tweak": {"text": "…{caption}…{sounds}…"},
      "tuner": {"text": "…{heard_families}…{s1}…"}}
 Without one, the checkout's prompts run: the baseline.
@@ -167,13 +165,12 @@ def inputs(args: argparse.Namespace) -> int:
 def apply_candidate(candidate: Mapping[str, Any]) -> None:
     """Replace the checkout's wordings for this run; the render functions read them at call time."""
     replacements: dict[str, Any] = {}
-    live = candidate.get("live", {})
-    if "text" in live:
-        replacements["LIVE_REWRITE"] = replace(rewrite_prompts.LIVE_REWRITE, text=live["text"])
-    if "texture_rules" in live:
-        replacements["LIVE_TEXTURE_RULES"] = {int(step): rule for step, rule in live["texture_rules"].items()}
-    if "context_rules" in live:
-        replacements["LIVE_CONTEXT_RULES"] = dict(live["context_rules"])
+    if "cells" in candidate:  # a slider cell the candidate leaves out keeps the checkout's prompt
+        cells = dict(rewrite_prompts.LIVE_CELL_PROMPTS)
+        for key, text in candidate["cells"].items():
+            texture, context = key.split("-")
+            cells[(int(texture), context)] = replace(cells[(int(texture), context)], text=text)
+        replacements["LIVE_CELL_PROMPTS"] = cells
     for key, name in (("tweak", "TWEAK_P1"), ("tuner", "TUNER_SYSTEM")):
         if "text" in candidate.get(key, {}):
             replacements[name] = replace(getattr(rewrite_prompts, name), text=candidate[key]["text"])
@@ -339,14 +336,13 @@ def run(args: argparse.Namespace) -> int:
         "templates": {
             name: {"id": template.template_id, "version": template.version, "sha256": template.sha256}
             for name, template in (
-                ("live", rewrite_prompts.LIVE_REWRITE),
                 ("tweak", rewrite_prompts.TWEAK_P1),
                 ("tuner", rewrite_prompts.TUNER_SYSTEM),
             )
         },
-        "live_rules": {
-            "texture": rewrite_prompts.LIVE_TEXTURE_RULES,
-            "context": rewrite_prompts.LIVE_CONTEXT_RULES,
+        "live_cells": {
+            f"{texture}-{context}": {"id": t.template_id, "version": t.version, "sha256": t.sha256}
+            for (texture, context), t in rewrite_prompts.LIVE_CELL_PROMPTS.items()
         },
         "inputs": {
             "path": str(args.inputs),
