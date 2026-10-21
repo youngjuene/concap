@@ -239,6 +239,7 @@ p.lede {
 .figure-cues span { position: relative; height: 22px; border-radius: 5px; background: var(--muted-fill); border: 1px solid var(--hairline); }
 .figure-cues .moved::after { content: ""; position: absolute; left: 55%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
 .figure-cues .applied { background: var(--accent-wash); border: 2px solid var(--accent); }
+.figure-cues .swap { background: linear-gradient(90deg, var(--muted-fill) 62%, var(--accent-wash) 62%); border-color: var(--accent); }
 .figure-marks { font-size: 11.5px; color: var(--dim); text-align: center; }
 .figure-marks .applied { color: var(--accent); }
 
@@ -319,7 +320,6 @@ button.hold.holding::after { transform: scaleX(1); transition: transform 1s line
 .watch-chip { display: flex; justify-content: center; min-height: 38px; }
 .chip { display: inline-flex; align-items: center; gap: 10px; min-height: 38px; font-size: 14px; color: var(--dim); }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
-.chip .countdown { font: 500 12px var(--mono); color: var(--accent); }
 .chip[data-state="pending"], .chip[data-state="applied"] { padding: 0 14px; border-radius: var(--radius-sm); }
 .chip[data-state="pending"] { background: var(--accent-wash); border: 1px solid var(--accent); color: var(--ink); }
 .chip[data-state="pending"] .dot { background: var(--accent); }

@@ -5,14 +5,17 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
 * The participant moves two sliders at any time. A move is snapped to steps
   (texture 0–2, context broad/specific/relation) and becomes the session's
   current *spec*, together with the session's tuner system message.
-* Generation takes about ``L`` seconds, and a caption may only change at a cue
-  boundary, so a tweak at playback position ``p`` is written first for the
-  first cue that starts at or after ``p + L``: the earliest boundary at which
-  it can be ready. The delay the participant sees is therefore between ``L``
-  and ``L`` plus one cue. ``L`` follows the device's load (researcher,
+* A change shows as soon as it is written (researcher, 2026-10-21; until then
+  a caption changed only at a cue boundary). Generation takes about ``L``
+  seconds, so a tweak at playback position ``p`` is written first for the cue
+  playing at ``p + L``, and the browser swaps it in mid-cue when it arrives:
+  about a second after the move. Every caption stays on screen at least 3 s
+  before a swap replaces it, and a swap needs 3 s of its cue left (the
+  browser's ``MIN_READ_MS``), so quick slider moves never make the caption
+  flicker. When that cue would end within ``MIN_SHOWN_MS`` of ``p + L``, the
+  tweak goes to the next cue instead. ``L`` follows the device's load (researcher,
   2026-10-12, no floor): the 90th percentile of the last 20 live latencies,
-  starting at 1 s. With Trida at about 0.4 s a caption, a tweak shows at the
-  next cue boundary.
+  starting at 1 s.
 * While the worker is idle it keeps filling later cues under the current spec,
   up to three cues ahead. A cue that would end before its caption could be
   ready is skipped.
@@ -83,6 +86,8 @@ LATENCY_QUANTILE: Final = 0.9
 LATENCY_FLOOR_MS: Final = 0
 LATENCY_START_MS: Final = 1000
 LOOKAHEAD_CUES: Final = 3
+# A tweak for the cue playing needs this long left at p + L: the page's 3 s reading minimum + its 0.5 s poll.
+MIN_SHOWN_MS: Final = 3500
 LIVE_DEADLINE_S: Final = 30.0
 TEXTURE_STEPS: Final = LIVE_TEXTURE_MAX
 
@@ -232,16 +237,21 @@ class LiveScheduler:
     def next_request(self, now: float) -> LiveRequest | None:
         """The next cue worth writing under the current spec, or ``None`` when there is none.
 
-        Playing: start at the first boundary one latency from now. Paused or not
-        yet started: start at the next boundary from the current position (cue 0
-        before playback), which is where the caption can next change.
+        Playing: start at the cue that will be playing one latency from now, the
+        browser swapping it in mid-cue, unless that cue would end within
+        ``MIN_SHOWN_MS``; then at the next cue. Paused or not yet started: start
+        at the cue at the current position (cue 0 before playback).
         """
         if self.spec is None:
             return None
         estimate = self.estimator.estimate_ms()
         position = self.position(now)
         target = position + estimate if self.playing else position
-        first = self.stream.first_cue_from(target)
+        if target >= self.stream.duration_ms:
+            return None
+        first = self.stream.cue_at(target)
+        if self.playing and self.stream.cues[first].end_ms - target < MIN_SHOWN_MS:
+            first += 1
         for cue in range(first, min(first + self.lookahead, len(self.stream.cues))):
             job = self.job(cue)
             if job.job_id in self.results or job.job_id in self.in_flight or not self.may_try(job.job_id):

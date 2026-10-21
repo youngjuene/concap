@@ -113,18 +113,29 @@ def test_a_video_opens_with_rewrites_of_its_first_cues() -> None:
     assert [r.cue for r in requests if r] == [0, 1, 2] and requests[3] is None
 
 
-def test_a_tweak_targets_the_first_boundary_one_latency_later() -> None:
+def test_a_tweak_targets_the_cue_playing_one_latency_later() -> None:
+    # Researcher, 2026-10-21: a change shows as soon as it is written, mid-cue.
     scheduler = LiveScheduler(stream(), job_for)
     scheduler.set_spec(Spec(2, "specific"), 0, 0.0)
     scheduler.set_playback(10_000, True, 100.0)
     scheduler.set_spec(Spec(4, "relation"), 10_000, 100.0)
     request = scheduler.next_request(100.0)
-    # 10 s + L (1 s) = 11 s; the first boundary from there is cue 3 at 15 s
-    assert request is not None and request.target_ms == 11_000 and request.cue == 3
+    # 10 s + L (1 s) = 11 s, inside cue 2 (10-15 s) with 4 s to go: cue 2 itself
+    assert request is not None and request.target_ms == 11_000 and request.cue == 2
     assert request.revision == 2 and request.spec == Spec(4, "relation")
-    # 4 s later the playhead is at 14 s: 15 s gives cue 3, already being written, so cue 4
+    # 4 s later the playhead is at 14 s: 15 s is the start of cue 3
     later = scheduler.next_request(104.0)
-    assert later is not None and later.cue == 4
+    assert later is not None and later.cue == 3
+
+
+def test_a_tweak_too_close_to_a_cue_s_end_goes_to_the_next_cue() -> None:
+    # Researcher, 2026-10-21: every caption stays on screen at least 3 s.
+    scheduler = LiveScheduler(stream(), job_for)
+    scheduler.set_playback(11_200, True, 0.0)
+    scheduler.set_spec(Spec(1, "broad"), 11_200, 0.0)
+    request = scheduler.next_request(0.0)
+    # 11.2 s + 1 s = 12.2 s: cue 2 ends at 15 s, 2.8 s left is under MIN_SHOWN_MS (3 s reading + 0.5 s poll)
+    assert request is not None and request.cue == 3
 
 
 STARTING = f"starting-caption:{VIDEO}"
@@ -158,19 +169,19 @@ def test_each_cue_shows_its_own_caption_and_an_older_spec_comes_back_from_the_ca
     assert scheduler.next_request(2.0).cue == 1  # type: ignore[union-attr]
 
 
-def test_after_a_late_move_the_next_cue_keeps_its_own_caption_under_the_old_settings() -> None:
+def test_until_its_rewrite_is_ready_a_cue_keeps_its_own_caption_under_the_old_settings() -> None:
     scheduler = LiveScheduler(stream(), job_for)
     scheduler.set_spec(Spec(1, "specific"), 0, 0.0)
     for _ in range(3):  # the worker wrote cues 0-2 ahead under the starting settings
         request = scheduler.next_request(0.0)
         assert request is not None
         scheduler.complete(request, completed(f"이전 설정 {request.cue}", latency_ms=900))
-    scheduler.set_playback(4900, True, 0.0)
-    scheduler.set_spec(Spec(2, "relation"), 4900, 0.0)  # 0.1 s before cue 1, too late to write it
+    scheduler.set_playback(8500, True, 0.0)
+    scheduler.set_spec(Spec(2, "relation"), 8500, 0.0)  # late in cue 1: the tweak goes to cue 2
     request = scheduler.next_request(0.0)
     assert request is not None and request.cue == 2
-    shown = scheduler.ready()[1]
-    assert shown["text"] == "이전 설정 1" and shown["current"] is False  # cue 1's own caption, not cue 0's
+    shown = scheduler.ready()[2]
+    assert shown["text"] == "이전 설정 2" and shown["current"] is False  # cue 2's own caption, not cue 1's
 
 
 @pytest.mark.parametrize(

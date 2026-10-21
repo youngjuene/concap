@@ -1,19 +1,24 @@
-// Live phase 2: the caption changes only at cue boundaries, and each cue shows its own caption as the
-// server serves it: under the current settings when written, else under earlier ones, else its starting caption.
+// Live phase 2: each cue shows its own caption as the server serves it: under the current settings when
+// written, else under earlier ones, else its starting caption. A caption written under the current settings
+// replaces the one on screen as soon as it arrives, mid-cue, if each caption gets at least 3 s on screen
+// (researcher, 2026-10-21).
 //
 // UI review of 2026-10-19 ("Diff Flow Improved"):
 // - phase 1's theme and caption band, so ratings and steering judge the same presentation;
 // - each slider has the three stops its axis really has (texture 0–2, context
 //   broad/specific/relation); it sends 0, 0.5 or 1, and only when the stop changes;
-// - a chip says when a change will show: a countdown to the next cue boundary,
-//   then "applied" for 2 s, or "waiting" while this cue still shows a caption from earlier settings;
+// - a chip says a change is being written, then "applied" for 2 s once its caption is on screen,
+//   or "waiting" while a cue still shows a caption from earlier settings;
 // - a hidden tab pauses the video behind phase 1's overlay, so no caption counts as seen unseen;
 // - the ratings use phase 1's scale cards and sticky bar;
 // - the last screen keeps the participant for the oral interview, and a held
 //   button takes the experimenter back to the entry.
 "use strict";
 
-const POLL_MS = 1000;
+const POLL_MS = 500;  // a written caption reaches the screen within half a second
+// Researcher, 2026-10-21: a caption stays on screen at least 3 s before a mid-cue swap replaces it, and a
+// swap needs 3 s of its cue left, so quick slider moves never make the caption flicker.
+const MIN_READ_MS = 3000;
 const TICK_MS = 1000;
 const DEBOUNCE_MS = 300;
 const APPLIED_MS = 2000;
@@ -28,7 +33,7 @@ const STOP_LABELS = {
 };
 const CHIP = {
   idle: "조절 막대는 영상을 보는 동안 언제든 움직일 수 있습니다",
-  pending: "바뀐 설정은 다음 자막부터 반영됩니다",
+  pending: "새 설정으로 자막을 고쳐 쓰고 있습니다",
   applied: "새 설정이 반영되었습니다",
   waiting: "새 자막을 준비하는 동안 이전 설정의 자막이 표시됩니다",
 };
@@ -117,11 +122,6 @@ function cueAt(ms) {
   return index;
 }
 
-function nextBoundary(ms) {
-  const next = state.video.cues.find((cue) => cue.start_ms > ms);
-  return next ? next.start_ms : null;
-}
-
 function recordExposure(until) {
   if (shown.token !== null && until > shown.from) {
     exposures.push({ cue: shown.cue, token: shown.token, from_ms: shown.from, to_ms: until });
@@ -143,15 +143,6 @@ function paintChip() {
   node.textContent = "";
   if (chip === "pending" || chip === "applied") node.appendChild(element("span", undefined, "dot"));
   node.appendChild(document.createTextNode(CHIP[chip]));
-  if (chip === "pending" && state && state.stage === "watch") {
-    const ms = positionMs();
-    const boundary = nextBoundary(ms);
-    if (boundary !== null) {
-      const countdown = element("span", `${Math.max(1, Math.ceil((boundary - ms) / 1000))}초`, "countdown");
-      countdown.setAttribute("aria-hidden", "true");  // a live region must not read every tick
-      node.appendChild(countdown);
-    }
-  }
 }
 
 function setChip(next) {
@@ -175,7 +166,21 @@ function boundaryReached(written) {
 
 function paint(ms) {
   const cue = cueAt(ms);
-  if (cue === shown.cue) return;
+  if (cue === shown.cue) {
+    // Mid-cue: a caption written under the current settings replaces this cue's caption when it arrives,
+    // once the caption on screen has had MIN_READ_MS, while MIN_READ_MS of the cue is left, and only
+    // when no newer slider move is still on its way to the server.
+    const now = captions[String(cue)];
+    const settled = !unsent() && debounce === null && fetchedEpoch === epoch;
+    const room = ms - shown.from >= MIN_READ_MS && state.video.cues[cue].end_ms - ms >= MIN_READ_MS;
+    if (now && now.current && settled && room && now.token !== shown.token) {
+      recordExposure(ms);
+      shown = { cue, token: now.token, text: now.text, from: ms };
+      $("caption").textContent = shown.text;
+      if (chip === "pending" || chip === "waiting") { awaiting = false; setChip("applied"); }
+    }
+    return;
+  }
   const first = shown.cue === -1;
   const next = captions[String(cue)];
   recordExposure(ms);
@@ -487,7 +492,6 @@ function wire() {
     paint(ms);
     $("clock").textContent = `${clock(ms)} / ${clock(state.video.duration_ms)}`;
     $("elapsed").style.width = `${Math.min(100, (ms / state.video.duration_ms) * 100)}%`;
-    if (chip === "pending") paintChip();
   });
   video().addEventListener("play", () => {
     sendPlayback();

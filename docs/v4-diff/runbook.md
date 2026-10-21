@@ -319,9 +319,11 @@ sessions" otherwise. `serve` itself now reports every unmet gate at once too.
   2026-10-19), including the caption band. Every page but the watch shows the
   whole session's progress in six segments.
 - **The watch:** each slider has three stops, the steps its axis really has.
-  A move shows a chip that counts down to the next caption boundary, then
-  says the change is applied, or that this window still shows a caption from
-  the earlier settings while the new one is written. Hiding the tab pauses the video behind phase 1's
+  A move shows a chip saying the caption is being rewritten. The rewrite
+  replaces the caption on screen about a second later, mid-window, and the
+  chip says the change is applied. Late in a window, the change lands in the
+  next window, and until then the chip says that window shows a caption from
+  the earlier settings. Hiding the tab pauses the video behind phase 1's
   overlay.
 - **After a server restart:** phase 1 continues exactly where it was, and any
   second caption still pending is queued again when the participant's page
@@ -357,11 +359,14 @@ the store.
   caption, on its 128-token canvas, took 0.53 s (median; 2.2 s at most) in the
   smoke walk of 2026-10-19.
 - The texture slider has three steps (0–2), and the context slider has three.
-- `L` follows the device with no floor, so a change appears at the next window
-  boundary at least `L` (about 1 s) away: 1–10 s after the move with 10 s
-  windows, about 6 s on average. A move in a window's last second or so lands
-  one window later. If the worker is busy, it appears one call later; a model
-  call cannot be cancelled.
+- A change shows as soon as it is written: about 1–1.5 s after the move (the
+  300 ms debounce, Trida's ~0.6 s, the page's 0.5 s poll), in the window that
+  is playing. Every caption stays on screen at least 3 s (`MIN_READ_MS`):
+  a rewrite that arrives sooner waits, and one that would have less than 3 s
+  of its window left is not swapped in. When less than 3.5 s of the playing
+  window would be left at `p + L` (`MIN_SHOWN_MS`), the change lands in the
+  next window instead. If the worker is busy, it appears one call later; a
+  model call cannot be cancelled.
 - Every window shows a caption about its own audio: Trida's under the current
   settings; else its caption for that window under earlier settings (after a
   late move, or while the worker is busy or restarting); else the window's

@@ -107,6 +107,28 @@ engineering fixes found on the way to the user test.
   the starting caption each window showed. The audit checks that every
   window showed its own caption.
 
+- **A change shows as soon as it is written** (researcher, 2026-10-21,
+  replacing "a caption changes only at a cue boundary"). Trida writes a
+  rewrite in about 0.6 s, but the page waited up to a whole 10 s window to
+  show it.
+  - The scheduler writes a tweak first for the cue playing at `p + L`.
+  - The page swaps a caption written under the current settings into the cue
+    on screen as soon as it arrives, polling every 0.5 s instead of 1 s.
+  - Every caption stays on screen at least 3 s (researcher, 2026-10-21: "for
+    proper reading, and preventing instant rewrite by mistake"). The page
+    swaps only after the caption on screen has had 3 s and while 3 s of its
+    cue are left (`MIN_READ_MS`), and never while a newer slider move is
+    still on its way to the server.
+  - If that cue would end within `MIN_SHOWN_MS` (3.5 s: the 3 s plus one
+    poll) of `p + L`, the tweak goes to the next cue.
+  - A swapped cue logs two exposures, before and after the swap.
+
+  The chip no longer counts down to a boundary: it reads "새 설정으로 자막을
+  고쳐 쓰고 있습니다", then "applied". The handoff briefing now reads
+  "바꾼 설정은 잠시 뒤 자막에 바로 반영됩니다", and its figure turns the
+  caption the change was made in. Both wordings await the researcher's
+  approval.
+
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
 
 The researcher supplied a review of the participant flow (14 findings) and an

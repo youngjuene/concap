@@ -480,8 +480,9 @@ function cueFigure() {
   const figure = node("div", undefined, "figure");
   figure.setAttribute("aria-hidden", "true");
   const cues = node("div", undefined, "figure-cues"), marks = node("div", undefined, "figure-marks");
-  cues.append(node("span"), node("span", undefined, "moved"), node("span", undefined, "applied"), node("span", undefined, "applied"));
-  marks.append(node("span"), node("span", "조절"), node("span", "반영", "applied"), node("span"));
+  // The change lands in the caption it was made in (2026-10-21): the second box turns after the move.
+  cues.append(node("span"), node("span", undefined, "moved swap"), node("span", undefined, "applied"), node("span", undefined, "applied"));
+  marks.append(node("span"), node("span", "조절 → 반영", "applied"), node("span"), node("span"));
   figure.append(cues, marks);
   return figure;
 }
@@ -495,7 +496,7 @@ function renderHandoff(detail) {
     briefing.append(entry);
   };
   point(1, "두 조절 막대로 자막의 표현을 바꿀 수 있습니다", stepperFigure());
-  point(2, "바꾼 설정은 다음 자막부터 반영됩니다", cueFigure());
+  point(2, "바꾼 설정은 잠시 뒤 자막에 바로 반영됩니다", cueFigure());
   point(3, "영상은 멈추지 않고 이어집니다");
   shell.append(briefing);
   const next = button("2스테이지 시작", async () => {
