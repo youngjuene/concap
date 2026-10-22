@@ -21,12 +21,15 @@ engineering fixes found on the way to the user test.
   ("자막:", 7 of 163 live calls in the smoke baseline) or wraps the caption in
   「」 or quotes (7 of 36 second captions; 87 of 163 live calls under one probe
   wording). What a participant sees of a live caption or a second caption is
-  now Trida's text under `output_checks.DISPLAY_RULE` (`diff.display/v1`):
+  now Trida's text under `output_checks.DISPLAY_RULE` (`diff.display/v1`, v2 since 2026-10-22):
   - a leading label is removed ("자막", "바꿔/고쳐/다시 쓴 자막", "답",
     "출력", followed by colons);
   - one pair of quotes or 「」『』 wrapping the whole text is removed, only
     when that pair appears nowhere inside it;
-  - nothing inside the text changes, so a broken word is still shown.
+  - nothing inside the text changes, so a broken word is still shown;
+  - version 2 (researcher, 2026-10-22): a run of commas inside (",,", ", ,")
+    becomes one. ",," was two-thirds of the visible damage in the nine-prompt
+    bench; a stuttered word is still shown.
 
   The checks of those captions run on the shown text, so a quoted copy is
   still flagged as a copy. The attempt logs (`diff.live-attempt/v2`,
@@ -150,7 +153,7 @@ engineering fixes found on the way to the user test.
     소리" for traffic); no example left 56% unchanged; the soundscape form
     brought copies to 10% and gave every cell its own caption.
   - No candidate passes the rule yet: 17% of rewrites show broken text,
-    two-thirds of it ",," (a display rule collapsing ",," would leave 7%);
+    two-thirds of it ",," (collapsed on display since 2026-10-22, leaving 7%);
     broad keeps source names, and texture counts drift. Later wordings (v5,
     v6) cut breakage to 13% but made broad repeat one phrase for most traffic
     windows, so v4b stays. The prompts are provisional (`LIVE_PROMPTS_PROVISIONAL`), so

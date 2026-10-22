@@ -20,7 +20,9 @@ is versioned by ``CHECKS_VERSION``.
 One exception to "never repair", for what a participant sees (researcher,
 2026-10-20): a live caption or a second caption is shown under
 ``DISPLAY_RULE``, which removes a leading prompt label ("자막:") and one pair
-of quotes or 「」 wrapping the whole text, and changes nothing inside it. The
+of quotes or 「」 wrapping the whole text. Inside it, version 2 (researcher,
+2026-10-22) collapses a run of commas (",,", ", ,") into one, two-thirds of
+the visible damage in Trida's live rewrites; nothing else inside changes. The
 checks of those captions run on the shown text (:func:`displayed`), so a
 quoted copy still counts as a copy. The model's own text stays in every record.
 """
@@ -51,9 +53,10 @@ LABEL_PREFIXES: Final = (
     "출력:",
 )
 FORMAT_MARKERS: Final = ("음원:", "개수:", "확실성:", "음향 특성:")
-DISPLAY_RULE: Final = "diff.display/v1"
+DISPLAY_RULE: Final = "diff.display/v2"
 _DISPLAY_LABEL: Final = re.compile(r"^(?:바꿔 쓴 자막|고쳐 쓴 자막|다시 쓴 자막|자막|답|출력)\s*:+\s*")
 _WRAPPING: Final = (("「", "」"), ("『", "』"), ('"', '"'), ("“", "”"), ("'", "'"), ("‘", "’"))
+_COMMA_RUN: Final = re.compile(r",(?:\s*,)+")
 _EVIDENCE_LINE: Final = re.compile(r"소리 \d+\s*—")
 _PUNCTUATION: Final = ".,!?;:…·'\"“”‘’()[]{}「」『』<>~-—"
 _HANGUL_RANGES: Final = (
@@ -99,14 +102,15 @@ class GeneratedOutput:
 
 
 def shown_text(text: str) -> str:
-    """What a participant sees of a caption: ``DISPLAY_RULE``'s edges removed, nothing inside changed."""
+    """What a participant sees of a caption: ``DISPLAY_RULE``'s edges removed and comma runs collapsed."""
     shown = _DISPLAY_LABEL.sub("", text.strip(), count=1)
     for opening, closing in _WRAPPING:
         inner = shown[1:-1]
         wraps = len(shown) >= 2 and shown.startswith(opening) and shown.endswith(closing)
         if wraps and opening not in inner and closing not in inner:
-            return inner.strip()
-    return shown
+            shown = inner.strip()
+            break
+    return _COMMA_RUN.sub(",", shown)
 
 
 def readable(text: str) -> bool:

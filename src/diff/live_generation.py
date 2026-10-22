@@ -32,8 +32,9 @@ Researcher's design of 2026-10-11 (plan "Live phase 2"):
   video opens with Trida's rewrite.
 * A caption is shown as Trida wrote it, under the display rule
   (``output_checks.DISPLAY_RULE``, researcher 2026-10-20): a leading prompt
-  label and one wrapping pair of quotes are removed, nothing inside. The
-  attempt log keeps Trida's text and the shown text.
+  label and one wrapping pair of quotes are removed, and inside, a run of
+  commas becomes one (version 2, 2026-10-22). The attempt log keeps Trida's
+  text and the shown text.
 * A caption is usable (:func:`usable`) when something readable is left of it
   under the display rule and its check found no failure and no repetition.
   Trida writing only "자막:", a cut-off caption or a word loop is therefore

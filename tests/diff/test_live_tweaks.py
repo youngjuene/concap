@@ -107,7 +107,7 @@ def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
     assert lines[0]["schema"] == "diff.tweak-attempt/v2"
     assert lines[0]["output"]["text"] == "자막: 「버스가 낮게 공회전한다.」"
     assert (
-        lines[0]["shown_text"] == "버스가 낮게 공회전한다." and lines[0]["display_rule"] == "diff.display/v1"
+        lines[0]["shown_text"] == "버스가 낮게 공회전한다." and lines[0]["display_rule"] == "diff.display/v2"
     )
 
 

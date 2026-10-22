@@ -290,7 +290,7 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
     assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v4"
     assert lines[0]["output"]["text"] == "자막: 「첫 자막」" and lines[0]["shown_text"] == "첫 자막"
     assert lines[0]["usable"] is True
-    assert lines[0]["display_rule"] == "diff.display/v1"
+    assert lines[0]["display_rule"] == "diff.display/v2"
     assert (
         lines[0]["cue"] == 0
         and lines[0]["system_message"] == "참고 문장"

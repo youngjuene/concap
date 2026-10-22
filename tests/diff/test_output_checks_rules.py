@@ -194,9 +194,14 @@ def test_a_live_check_can_hold_a_shorter_length_limit(development_sources: Sourc
         ('"자동차 소리""', '"자동차 소리""'),
         ("자막 소리가 들린다", "자막 소리가 들린다"),
         ("버스가 지나간다.", "버스가 지나간다."),
+        # version 2 (researcher, 2026-10-22): a run of commas becomes one, inside too
+        ("교회 종소리,, 군중 소리", "교회 종소리, 군중 소리"),
+        ("소음이 울리고, , 멀리서 경적이 울린다", "소음이 울리고, 멀리서 경적이 울린다"),
+        ("「엔진 소리,,, 타이어 소리」", "엔진 소리, 타이어 소리"),
+        ("경적 소리, 타이어 소리", "경적 소리, 타이어 소리"),
     ],
 )
-def test_the_display_rule_removes_only_the_edges(written: str, shown: str) -> None:
+def test_the_display_rule_removes_the_edges_and_comma_runs(written: str, shown: str) -> None:
     # Researcher, 2026-10-20: a leading prompt label and one wrapping pair of quotes.
     assert shown_text(written) == shown
 
