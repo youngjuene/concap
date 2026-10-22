@@ -129,8 +129,10 @@ engineering fixes found on the way to the user test.
   The chip no longer counts down to a boundary: it reads "새 설정으로 자막을
   고쳐 쓰고 있습니다", then "applied". The handoff briefing now reads
   "바꾼 설정은 잠시 뒤 자막에 바로 반영됩니다", and its figure turns the
-  caption the change was made in. Both wordings await the researcher's
-  approval.
+  caption the change was made in. The researcher approved both wordings on
+  2026-10-22, on condition that neither covers the video: the chip has its
+  own row below the sliders (checked at 1280 and 390 px wide), and the
+  briefing is on the handoff page, before the watch.
 
 - **Nine live prompts, one per slider cell** (researcher, 2026-10-21: "9
   different prompts for rewriting the original caption to have noticeable
