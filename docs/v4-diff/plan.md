@@ -154,12 +154,11 @@ engineering fixes found on the way to the user test.
     an example after the cue was copied into unrelated cues ("사람 소리, 동물
     소리" for traffic); no example left 56% unchanged; the soundscape form
     brought copies to 10% and gave every cell its own caption.
-  - No candidate passes the rule yet: 17% of rewrites show broken text,
-    two-thirds of it ",," (collapsed on display since 2026-10-22, leaving 7%);
-    broad keeps source names, and texture counts drift. Later wordings (v5,
-    v6) cut breakage to 13% but made broad repeat one phrase for most traffic
-    windows, so v4b stays. The prompts are provisional (`LIVE_PROMPTS_PROVISIONAL`), so
-    participant sessions are refused; smoke runs use them.
+  - The nine prompts do not pass that rule yet: 17% of rewrites show broken
+    text, two-thirds of it ",," (collapsed on display since 2026-10-22,
+    leaving 7%); broad keeps source names, and texture counts drift. They are
+    provisional (`LIVE_PROMPTS_PROVISIONAL`), so participant sessions are
+    refused; smoke runs use them.
   - The audit checks each call against its own cell's template.
 
 ## UI review fixes (2026-10-19, "Diff Flow Review and Fixes")
