@@ -602,7 +602,9 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     import re
 
     time.sleep(1.5)
-    match = re.search(r"「(.*?)」", str(payload["prompt"]["text"]), re.S)
+    # The live prompts end with the cue on a "원래 자막:" line (live-p2 v4); the tweak quotes it in 「」.
+    prompt = str(payload["prompt"]["text"])
+    match = re.search(r"원래 자막: (.*)\Z", prompt) or re.search(r"「(.*?)」", prompt, re.S)
     cell = payload.get("cell")
     marker = "시험용 · 두 번째 자막"
     if cell is not None:
