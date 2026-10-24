@@ -11,16 +11,19 @@ material at the study's settings, and pick by a rule written down before the run
 comparison for live-p2, tweak-p1 and the tuner.
 
 ``inputs`` keeps what those prompts are built from, out of a run's store and logs:
-- per session, each clip's first-step answers (P2–P5) and P10 ratings;
-- each clip's caption and options, and the phase-2 cues;
-- every cue and slider step a live call was written for.
-``run`` rebuilds every prompt from those answers with the checkout's own code. A candidate that
-changes the wording, or the checkout's slots, therefore runs on the same participants.
+- per session, each clip's first-step answers (P2–P5) and P10 ratings, and its follow/counter plan;
+- each clip's caption, options and scene part, and the phase-2 cues;
+- every cue and slider step a live call was written for;
+- each clip's second-caption slots in both modes, from the checkout's binding model. It reads the
+  click masks, which the generator env cannot (no Pillow), so this is decided here.
+``run`` rebuilds every prompt from those answers and slots with the checkout's own code. A
+candidate that changes the wording therefore runs on the same participants.
 
 ``run`` loads Trida on one GPU and writes, for each session:
 - every live (cue, texture, context) under the session's tuner, and the same prompts under the
   plain system message, which separates the prompt's effect from the tuner's;
-- each clip's second caption, and the same with all four degrees at 0% and at 100%.
+- each clip's second caption in the mode the binding model and the plan chose, and the same
+  answers in the other mode.
 Calls take the worker's own path (freeze_live, run_job) at the study's settings. Trida is
 deterministic at temperature 0, so a rerun gives the same outputs.
 
@@ -34,12 +37,22 @@ It reports:
   reader still rates the chosen wording;
 - unusable live captions (nothing readable left, a check failure or a repetition), which show
   their starting caption instead (counted as a copy), and blank second captions, which fail;
-- how many second captions change between 0% and 100% degrees.
+- how many second captions differ between the scene-aware and the acousmatic mode, and per mode
+  (the manipulation, before any participant): how long they are, how many name a place or an
+  object on screen outside the sounds' own names (:data:`PLACE_WORDS`; an acousmatic caption
+  should name none), how many scene-aware ones name one the prompt did not give, and how many
+  of the prompt's sounds they keep (``phase1_tweak.named_in``, rough); and both modes' captions
+  for the clips whose first caption contradicts their audio, for a reader;
+- the delivered-text gate the hypothesis team asked for (2026-10-24), per mode: near-copies of
+  the first caption (similarity at least :data:`NEAR_COPY`), a wrong sound of the first caption
+  that survives (:data:`FIRST_CAPTION_ONLY`), an R2 distractor named (which would make R2's
+  intended key wrong), a questionnaire item's wording echoed (:data:`ITEM_STEMS`), and a list of
+  sounds with no sentence (no sentence ends in "다").
 
 A candidate is a JSON file that replaces any of the checkout's wordings for this run only:
     {"name": "…",
      "cells": {"0-broad": "…{cue_text}…", "0-specific": "…", …, "2-relation": "…"},
-     "tweak": {"text": "…{caption}…{sounds}…"},
+     "tweak": {"scene": "…{caption}…{scene_elements}…", "acousmatic": "…{caption}…{space}…"},
      "tuner": {"text": "…{heard_families}…{s1}…"}}
 Without one, the checkout's prompts run: the baseline.
 """
@@ -47,6 +60,7 @@ Without one, the checkout's prompts run: the baseline.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -77,17 +91,54 @@ from diff.output_checks import (  # noqa: E402
     readable,
     shown_text,
 )
-from diff.phase1_tweak import DIRECTIONS, check_record, tweak_job_for, tweak_slots, tweak_source  # noqa: E402
+from diff.phase1_binding import COUNTER, FOLLOW, assignment_plan  # noqa: E402
+from diff.phase1_tweak import (  # noqa: E402
+    ELEMENTS_KO,
+    check_record,
+    named_in,
+    tweak_job_for,
+    tweak_source,
+    tweak_steer_all,
+)
 from diff.study_protocol import LIVE_MAX_CHARS, SYSTEM_MESSAGE  # noqa: E402
 
-INPUTS_SCHEMA = "diff.prompt-bench-inputs/v1"
+INPUTS_SCHEMA = "diff.prompt-bench-inputs/v2"  # v2: second-caption slots decided in `inputs`
 REPORT_SCHEMA = "diff.prompt-bench-report/v1"
 PURPOSE = "smoke"
 KEPT_PAGES = ("P2", "P3", "P4", "P5", "P10")
-DEGREE_ENDS = ("0", "100")
+STAGE_A = ("P2", "P3", "P4", "P5")
 # Defects Trida's parallel decoding leaves that no check catches: a word cut to "소" (from "소리"),
 # and doubled commas or full stops ("..." is an ellipsis and passes).
 BROKEN = re.compile(r"(?<![가-힣])소(?![가-힣])|,,|(?<!\.)\.\.(?!\.)")
+# The mask objects of regen's c2 frames, in Korean: things a caption can name on screen.
+OBJECTS_KO = ("건물", "사람", "도로", "차량", "인도", "하늘", "땅", "나무와 풀")
+# Words for a place or an object on screen: the objects, the scene elements and common street
+# places, two syllables or more ("길" and "강" would match "길게" and "강하게"; "거리" is also the
+# distance the acousmatic prompt asks for, so it is left out).
+PLACE_WORDS = tuple(
+    sorted(
+        {
+            word
+            for phrase in (*OBJECTS_KO, *ELEMENTS_KO.values())
+            for word in re.findall(r"[가-힣]{2,}", phrase.replace("와 ", " "))
+        }
+        | {"골목", "광장", "가게", "상점", "시장", "공원", "정류장", "화면", "장면", "도시", "카페", "보도"}
+    )
+)
+# The clips whose prepared first caption contradicts their audio (plan, 2026-10-18), and
+# singapore_067, which the hypothesis team flagged (2026-10-24).
+CONTRADICTING = ("amsterdam_012", "singapore_040", "amsterdam_057", "bangkok_034", "singapore_067")
+# Words of a first caption for a sound its orig_text does not name, read 2026-10-24 (bangkok_034's
+# caption names no wrong sound; it leaves the horn out).
+FIRST_CAPTION_ONLY = {
+    "amsterdam_012": ("기차",),
+    "amsterdam_057": ("경적", "대화"),
+    "singapore_040": ("오토바이",),
+    "singapore_067": ("경적", "체증"),
+}
+# Wording of the P4/P9 items a caption should not echo: E1/E3's place, E2's merging, BF's escape.
+ITEM_STEMS = ("화면 속 장소", "속해", "어우러", "벗어나")
+NEAR_COPY = 0.9
 
 
 def sha256_file(path: Path) -> str:
@@ -123,7 +174,7 @@ def inputs(args: argparse.Namespace) -> int:
         for index, key in enumerate(state["clip_order"]):
             pages = {page: records[(index, page)] for page in KEPT_PAGES if (index, page) in records}
             if pages:
-                kept.append({"key": key, "records": pages})
+                kept.append({"key": key, "index": index, "records": pages})
                 used.add(key)
         live: dict[tuple[str, int, int, str], None] = {}
         for log_dir in args.log_dir:
@@ -132,10 +183,30 @@ def inputs(args: argparse.Namespace) -> int:
                     if call.get("kind") != "tweak":
                         spec = call["spec"]
                         live[(call["video_id"], call["cue"], spec["texture"], spec["context"])] = None
+        plan = state.get("assignment", {}).get("plan") or assignment_plan(
+            int(state["order_seed"]), len(state["clip_order"])
+        )
+        complete = [entry for entry in kept if all(page in entry["records"] for page in STAGE_A)]
+        tweaks = []
+        if complete:
+            chosen = [clips[entry["key"]] for entry in complete]
+            answered = [entry["records"] for entry in complete]
+            planned = [plan[entry["index"]] for entry in complete]
+            flipped = [COUNTER if assignment == FOLLOW else FOLLOW for assignment in planned]
+            ways = (
+                tweak_steer_all(chosen, answered, planned, root=REPO_ROOT),
+                tweak_steer_all(chosen, answered, flipped, root=REPO_ROOT),
+            )
+            for entry, (slots, model), (other, _) in zip(complete, *ways, strict=True):
+                tweaks.append(
+                    {"key": entry["key"], "planned": slots, "other": other, "p_bound": model["p_bound"]}
+                )
         sessions.append(
             {
                 "participant": participant,
+                "plan": plan,
                 "clips": kept,
+                "tweaks": tweaks,
                 "live": [
                     {"video_id": video, "cue": cue, "texture": texture, "context": context}
                     for video, cue, texture, context in live
@@ -151,7 +222,8 @@ def inputs(args: argparse.Namespace) -> int:
             "sources_sha256": sha256_file(args.sources),
         },
         "clips": {
-            key: {name: clips[key][name] for name in ("key", "caption", "options")} for key in sorted(used)
+            key: {name: clips[key][name] for name in ("key", "caption", "options", "scene")}
+            for key in sorted(used)
         },
         "sources": {**sources, "sources": [s for s in sources["sources"] if s["phase"] == 2]},
         "sessions": sessions,
@@ -171,9 +243,13 @@ def apply_candidate(candidate: Mapping[str, Any]) -> None:
             texture, context = key.split("-")
             cells[(int(texture), context)] = replace(cells[(int(texture), context)], text=text)
         replacements["LIVE_CELL_PROMPTS"] = cells
-    for key, name in (("tweak", "TWEAK_P1"), ("tuner", "TUNER_SYSTEM")):
-        if "text" in candidate.get(key, {}):
-            replacements[name] = replace(getattr(rewrite_prompts, name), text=candidate[key]["text"])
+    if "tweak" in candidate:  # a mode the candidate leaves out keeps the checkout's prompt
+        modes = dict(rewrite_prompts.TWEAK_PROMPTS)
+        for mode, text in candidate["tweak"].items():
+            modes[mode] = replace(modes[mode], text=text)
+        replacements["TWEAK_PROMPTS"] = modes
+    if "text" in candidate.get("tuner", {}):
+        replacements["TUNER_SYSTEM"] = replace(rewrite_prompts.TUNER_SYSTEM, text=candidate["tuner"]["text"])
     for name, value in replacements.items():
         setattr(rewrite_prompts, name, value)
 
@@ -224,6 +300,29 @@ def measure(
     }
 
 
+def manipulation(shown: str, clip: Mapping[str, Any], slots: Mapping[str, str]) -> dict[str, Any]:
+    """What a second caption does with the screen: place words outside the sounds' names, those the
+    prompt did not give, and the prompt's sounds it keeps (roughly)."""
+    names = [o["label"] for o in clip["options"]["A1s"]] + [o["label"] for o in clip["options"]["R2"]]
+    places = [w for w in PLACE_WORDS if w in shown and not any(w in name for name in names)]
+    given = " ".join((slots.get("scene_elements", ""), slots.get("seen", ""), clip["caption"]["text"]))
+    sounds = [o["label"] for o in clip["options"]["R2"] if o.get("mentioned")]
+    distractors = [o["label"] for o in clip["options"]["R2"] if not o.get("mentioned")]
+    first = re.sub(r"\s+", "", clip["caption"]["text"])
+    return {
+        "chars": len(shown),
+        "place_words": places,
+        "invented_places": [w for w in places if w not in given],
+        "sounds_kept": sum(named_in(shown, name) for name in sounds),
+        "sounds": len(sounds),
+        "near_copy": difflib.SequenceMatcher(None, re.sub(r"\s+", "", shown), first).ratio() >= NEAR_COPY,
+        "wrong_sounds_kept": [w for w in FIRST_CAPTION_ONLY.get(clip["key"], ()) if w in shown],
+        "distractors_named": [name for name in distractors if named_in(shown, name)],
+        "item_stems": [stem for stem in ITEM_STEMS if stem in shown],
+        "list_form": bool(shown) and not re.search(r"다[.!?]?(\s|$)", shown),
+    }
+
+
 def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     for system in ("tuner", "plain"):
@@ -251,7 +350,8 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "failures": dict(Counter(code for r in live for code in r["failures"])),
             "flags": dict(Counter(code for r in live for code in r["flags"])),
         }
-    tweaks = [r for r in rows if r["kind"] == "tweak"]
+    every = [r for r in rows if r["kind"] == "tweak"]
+    tweaks = [r for r in every if r["planned"]]
     summary["tweak"] = {
         "calls": len(tweaks),
         "copies": sum(r["copy"] for r in tweaks),
@@ -263,8 +363,39 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "failures": dict(Counter(code for r in tweaks for code in r["failures"])),
         "flags": dict(Counter(code for r in tweaks for code in r["flags"])),
     }
-    ends = [r for r in rows if r["kind"] == "tweak-degrees"]
-    summary["tweak_degrees"] = {"pairs": len(ends), "differ": sum(r["differ"] for r in ends)}
+    pairs = [r for r in rows if r["kind"] == "tweak-modes"]
+    by_mode = {}
+    for mode in ("scene", "acousmatic"):
+        written = [r for r in every if r["mode"] == mode and not r["blank"]]
+        by_mode[mode] = {
+            "captions": len(written),
+            "mean_chars": round(sum(r["chars"] for r in written) / len(written), 1) if written else None,
+            "with_place_words": sum(bool(r["place_words"]) for r in written),
+            "with_invented_places": sum(bool(r["invented_places"]) for r in written),
+            "sounds_kept": sum(r["sounds_kept"] for r in written),
+            "sounds": sum(r["sounds"] for r in written),
+            "near_copies": sum(r["near_copy"] for r in written),
+            "wrong_sounds_kept": sum(bool(r["wrong_sounds_kept"]) for r in written),
+            "distractors_named": sum(bool(r["distractors_named"]) for r in written),
+            "item_stems": sum(bool(r["item_stems"]) for r in written),
+            "list_form": sum(r["list_form"] for r in written),
+            "place_words": dict(Counter(w for r in written for w in r["place_words"])),
+        }
+    summary["tweak_modes"] = {
+        "pairs": len(pairs),
+        "differ": sum(r["differ"] for r in pairs),
+        "by_mode": by_mode,
+        "contradicting": [
+            {
+                "participant": r["participant"],
+                "clip": r["clip"],
+                "scene": r["scene"],
+                "acousmatic": r["acousmatic"],
+            }
+            for r in pairs
+            if r["clip"] in CONTRADICTING
+        ],
+    }
     return summary
 
 
@@ -292,8 +423,29 @@ def print_summary(summary: Mapping[str, Any]) -> None:
         f"{tweak['broken']} visibly broken; {tweak['blank']} blank, failed"
         f"\n  failures {tweak['failures']}  flags {tweak['flags']}"
     )
-    ends = summary["tweak_degrees"]
-    print(f"  degrees 0% vs 100%: {ends['differ']}/{ends['pairs']} outputs differ")
+    pairs = summary["tweak_modes"]
+    print(f"  scene-aware vs acousmatic: {pairs['differ']}/{pairs['pairs']} outputs differ")
+    for mode, counts in pairs["by_mode"].items():
+        print(
+            f"  {mode}: {counts['captions']} captions, {counts['mean_chars']} chars on average; "
+            f"{counts['with_place_words']} name a place or object on screen "
+            f"({counts['with_invented_places']} one the prompt did not give); "
+            f"{counts['sounds_kept']}/{counts['sounds']} prompt sounds kept (rough)"
+        )
+        print(f"    place words: {counts['place_words']}")
+        print(
+            f"    gate: {counts['near_copies']} near-copies of the first caption, "
+            f"{counts['wrong_sounds_kept']} keep a wrong first-caption sound, "
+            f"{counts['distractors_named']} name an R2 distractor, {counts['item_stems']} echo an item, "
+            f"{counts['list_form']} are lists"
+        )
+    shown = set()
+    for pair in pairs["contradicting"]:
+        if pair["clip"] in shown:  # one participant's pair per clip is enough to read
+            continue
+        shown.add(pair["clip"])
+        print(f"  {pair['clip']} ({pair['participant']}):")
+        print(f"    scene: {pair['scene']}\n    acousmatic: {pair['acousmatic']}")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -336,7 +488,7 @@ def run(args: argparse.Namespace) -> int:
         "templates": {
             name: {"id": template.template_id, "version": template.version, "sha256": template.sha256}
             for name, template in (
-                ("tweak", rewrite_prompts.TWEAK_P1),
+                *((f"tweak-{mode}", t) for mode, t in rewrite_prompts.TWEAK_PROMPTS.items()),
                 ("tuner", rewrite_prompts.TUNER_SYSTEM),
             )
         },
@@ -402,42 +554,41 @@ def bench(
                         **measure(text, source.text, checks, falls_back=True),
                     }
                 )
-        for entry in session["clips"]:
-            clip, records = clips[entry["key"]], entry["records"]
-            if not all(page in records for page in ("P2", "P3", "P4", "P5")):
-                continue
-            slots = tweak_slots(clip, records)
+        for entry in session["tweaks"]:
+            clip = clips[entry["key"]]
             source = tweak_source(clip)
-            texts: dict[str, str | None] = {}
-            for kind, steer in (
-                ("tweak", slots),
-                *((f"degrees-{end}", {**slots, **dict.fromkeys(DIRECTIONS, end)}) for end in DEGREE_ENDS),
-            ):
+            texts: dict[str, str] = {}
+            for is_planned, steer in ((True, entry["planned"]), (False, entry["other"])):
                 _, job, _ = tweak_job_for(clip, steer, PURPOSE)
                 result = call(job)
-                texts[kind] = (result.get("output") or {}).get("text")
-                if kind == "tweak":
-                    checks = check_record(source, job, result) if result.get("output") else None
-                    rows.append(
-                        {
-                            "kind": "tweak",
-                            "participant": who,
-                            "clip": entry["key"],
-                            "slots": slots,
-                            "status": result["status"],
-                            "error": result.get("error"),
-                            "source": source.text,
-                            "text": texts[kind],
-                            **measure(texts[kind], source.text, checks),
-                        }
-                    )
+                text = (result.get("output") or {}).get("text")
+                checks = check_record(source, job, result) if result.get("output") else None
+                measured = measure(text, source.text, checks)
+                texts[steer["mode"]] = measured["shown"]
+                rows.append(
+                    {
+                        "kind": "tweak",
+                        "participant": who,
+                        "clip": entry["key"],
+                        "mode": steer["mode"],
+                        "planned": is_planned,
+                        "slots": steer,
+                        "p_bound": entry["p_bound"],
+                        "status": result["status"],
+                        "error": result.get("error"),
+                        "source": source.text,
+                        "text": text,
+                        **measured,
+                        **manipulation(measured["shown"], clip, steer),
+                    }
+                )
             rows.append(
                 {
-                    "kind": "tweak-degrees",
+                    "kind": "tweak-modes",
                     "participant": who,
                     "clip": entry["key"],
-                    **{f"at_{end}": texts[f"degrees-{end}"] for end in DEGREE_ENDS},
-                    "differ": shown_text(texts["degrees-0"] or "") != shown_text(texts["degrees-100"] or ""),
+                    **texts,
+                    "differ": texts["scene"] != texts["acousmatic"],
                 }
             )
     return rows

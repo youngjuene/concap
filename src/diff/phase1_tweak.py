@@ -1,61 +1,79 @@
-"""Phase 1's second caption: a participant's first-step answers as the tweak prompt's slots.
+"""Phase 1's second caption: a participant's first-step answers as the tweak prompt's mode and slots.
 
-Researcher's decisions of 2026-10-18: each clip is viewed twice. The second
-viewing shows a caption Trida writes by tweaking the clip's raw first caption,
-steered by that participant's answers to the clip's first step (P2–P5). The
-answers are processed into the slots of ``rewrite_prompts.TWEAK_P1``, which
-names each steering direction and its degree in percent.
+Researcher's decisions: each clip is viewed twice (2026-10-18), and the second
+viewing shows a caption Trida writes by tweaking the clip's raw first caption.
+Since 2026-10-23 the tweak takes one mode per clip, scene-aware or acousmatic,
+chosen by the binding model (:mod:`diff.phase1_binding`) from that participant's
+P2–P4 answers and the clip's Sa2VA scene part (:mod:`diff.phase1_scene`), and
+its wording varies with the scene. Since the design review of 2026-10-24 every
+clip's mode is decided when stage A ends (:func:`tweak_steer_all`). The mode's
+prompt is ``rewrite_prompts.TWEAK_PROMPTS[mode]``.
 
 The slots, for one participant and clip:
+- ``mode``: ``scene`` or ``acousmatic``;
 - ``caption``: the raw first caption the participant saw;
 - ``sounds``: the labels of the clip's mentioned R2 options, the sounds
   ``orig_text`` names. The prompt names them, so they are R2's key (the
   researcher's "key from the prompt");
 - ``attended_sound``: the A1s answer's label (P3);
-- ``attended_object``: the object the V1 point fell on (P2), in Korean, or
-  "없음" when it fell on no annotated object;
-- four degrees, ``round(mean / 6 × 100)`` of the 0–6 ratings behind each
-  direction (:data:`DIRECTIONS`). The degree *reflects* the answers: a higher
-  rating steers more strongly that way. Whether it should compensate instead,
-  ``(6 − mean) / 6``, is the researcher's call (:data:`DEGREE_RULE`).
+- scene-aware only: ``scene_elements``, the clip's distinctive element, then
+  its largest other element; ``seen``, the scene's setting: the distinctive
+  element (researcher, 2026-10-24: one setting per clip, so that every second
+  caption can be drafted and reviewed before the study; it was the object the
+  V1 point fell on, which gave 248 scene-aware prompts instead of 29);
+  ``visible_sounds``, the A1s sounds whose source the masks put on screen
+  (``phase1_scene.ON_SCREEN``), and the noticed one when the V1 point hit its
+  click mask; ``offscreen``, a sentence placing the sounds not on screen "here,
+  though unseen", or nothing when there are none. Sounds of the
+  recording itself (:data:`RECORDING_ARTEFACTS`, microphone wind) are never
+  placed: v2 spread them "in this scene" (hypothesis team, 2026-10-24);
+- acousmatic only: ``space``, a sentence on how the sound spreads, from the
+  scene's openness, and nothing when it is neither open nor enclosed.
 
-FA1 (visited) and FA3 (preference) are kept in the records and not used.
+FA1 (visited) is kept in the records and not used; the restoration subscales
+and FA2/FA3 are recorded as the clip's baseline (``model.baseline``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from statistics import mean
+import re
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any, Final
 
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
 from diff.output_checks import check_tweak, displayed, output_from_record
-from diff.rewrite_prompts import TWEAK_P1, TWEAK_PROVISIONAL, RenderedPrompt, render_tweak
+from diff.phase1_binding import FOLLOW, decide_all
+from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, RenderedPrompt, render_tweak
 from diff.study_protocol import TWEAK_MAX_CHARS
 
-TWEAK_POLICY: Final = "diff.phase1-tweak/v1"
-# The step-1 ratings behind each direction's degree (P4 restorativeness, P5 familiarity).
-DIRECTIONS: Final[dict[str, tuple[str, ...]]] = {
-    "fascination": ("F1", "F2", "F3"),
-    "being_away": ("BF1", "BF2", "BF3", "P1", "P2"),
-    "coherence": ("E1", "E2", "E3"),
-    "familiarity": ("FA2",),
-}
-DEGREE_RULE: Final = "reflect"
-SCALE_MAX: Final = 6
+# v5 (2026-10-24): the scene-aware setting is the clip's distinctive element, not the V1 object.
+TWEAK_POLICY: Final = "diff.phase1-tweak/v5"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
-# The mask objects of regen's c2 frames, in Korean, so no Latin letters reach the prompt.
-OBJECTS_KO: Final[dict[str, str]] = {
-    "building": "건물",
-    "person": "사람",
-    "road": "도로",
-    "road_transport": "차량",
-    "sidewalk": "인도",
-    "sky": "하늘",
-    "terrain": "땅",
-    "vegetation": "나무와 풀",
+# The scene's elements (phase1_scene.ELEMENTS) in Korean.
+ELEMENTS_KO: Final[dict[str, str]] = {
+    "nature": "나무와 풀",
+    "open": "하늘",
+    "traffic": "도로와 차량",
+    "built": "건물",
+    "people": "사람들",
 }
+# How a sound spreads, by the scene's openness, as the acousmatic prompt's last request (each
+# value starts with its own space); a scene neither open nor enclosed gets none.
+SPACE_KO: Final[dict[str, str]] = {
+    "open": " 소리가 넓게 트인 곳에서 멀리 퍼져 나가는 느낌도 살려 주세요.",
+    "enclosed": " 소리가 둘러싸인 곳에서 가깝게 들리는 느낌도 살려 주세요.",
+    "neutral": "",
+}
+# The scene-aware prompt's sentence for the sounds not on screen, one wording for everyone; it
+# avoids "화면 밖", which would echo E1's "화면 속 장소" (it starts with its own space).
+OFFSCREEN_KO: Final = (
+    " 화면에 음원이 보이지 않는 소리({sounds})는 "
+    "화면에는 보이지 않지만 이곳 어딘가에서 들려오는 소리로 쓰세요."
+)
+# AudioSet labels for sounds of the recording, not of the place: never placed in the scene.
+RECORDING_ARTEFACTS: Final = frozenset({"Wind noise (microphone)"})
 NOT_SEEN: Final = "없음"
 
 
@@ -63,33 +81,98 @@ class TweakError(ValueError):
     """A clip's first step is not complete enough to write its second caption."""
 
 
-def degree(values: list[float]) -> int:
-    """A direction's degree in percent from its 0–6 ratings."""
-    shown = mean(values) / SCALE_MAX
-    return round((shown if DEGREE_RULE == "reflect" else 1 - shown) * 100)
-
-
-def tweak_slots(clip: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
-    """The prompt's slots from one clip's setup and its first-step records (by page)."""
+def step_answers(records: Mapping[str, Mapping[str, Any]], clip_key: str) -> dict[str, Any]:
     missing = [page for page in STEP1_PAGES if page not in records]
     if missing:
-        raise TweakError(f"{clip['key']}: the first step has no {missing}")
+        raise TweakError(f"{clip_key}: the first step has no {missing}")
     answers: dict[str, Any] = {}
     for page in STEP1_PAGES:
         answers.update(records[page]["answers"])
+    return answers
+
+
+def scene_slots(clip: Mapping[str, Any], mode: str, model: Mapping[str, Any]) -> dict[str, str]:
+    """The mode's own slots, from the clip's scene part and whether the V1 point hit the noticed sound.
+
+    A noticed sound whose click mask the point hit counts as visible, whatever its judgement:
+    the participant found its source on screen.
+    """
+    scene = clip["scene"]
+    if mode == "acousmatic":
+        return {"space": SPACE_KO[scene["openness"]]}
+    distinctive = scene["distinctive"]
+    others = sorted(
+        (name for name in scene["elements"] if name != distinctive), key=lambda n: -scene["elements"][n]
+    )
+    hit = model["noticed"]["value"] if model["attention"]["status"] == "hit" else None
+    visible = [
+        option["label"]
+        for option in clip["options"]["A1s"]
+        if option["value"] == hit or on_screen(clip, option)
+    ]
+    unseen = [
+        option["label"]
+        for option in clip["options"]["A1s"]
+        if option["value"] != hit
+        and not on_screen(clip, option)
+        and option["audioset_label"] not in RECORDING_ARTEFACTS
+    ]
+    return {
+        "scene_elements": ", ".join(ELEMENTS_KO[name] for name in (distinctive, others[0])),
+        "seen": ELEMENTS_KO[distinctive],
+        "visible_sounds": ", ".join(dict.fromkeys(visible)) or NOT_SEEN,
+        "offscreen": OFFSCREEN_KO.format(sounds=", ".join(dict.fromkeys(unseen))) if unseen else "",
+    }
+
+
+def caption_variant(clip: Mapping[str, Any], mode: str) -> dict[str, Any]:
+    """The caption's variant for analysis: the mode and the scene characteristic it draws on."""
+    scene = clip["scene"]
+    if mode == "acousmatic":
+        return {"type": f"acousmatic/{scene['openness']}"}
+    return {"type": f"scene/{scene['distinctive']}"}
+
+
+def tweak_steer_all(
+    clips: Sequence[Mapping[str, Any]],
+    records: Sequence[Mapping[str, Mapping[str, Any]]],
+    plan: Sequence[str],
+    *,
+    root: Path,
+) -> list[tuple[dict[str, str], dict[str, Any]]]:
+    """Each clip's prompt slots and binding-model record, from the participant's whole stage A.
+
+    ``clips`` and ``records`` (each clip's first-step records, by page) run in stage-A order.
+    """
+    answers = [step_answers(step, str(clip["key"])) for clip, step in zip(clips, records, strict=True)]
+    matches = [(step["P2"].get("matches") or [None])[0] for step in records]
+    models = decide_all(clips, answers, matches, plan, root=root)
+    steered = []
+    for clip, given, model in zip(clips, answers, models, strict=True):
+        slots = tweak_slots(clip, model["mode"], given.get("A1s"), model)
+        model["caption"] = caption_variant(clip, model["mode"])
+        steered.append((slots, model))
+    return steered
+
+
+def tweak_slots(
+    clip: Mapping[str, Any], mode: str, attended: str | None, model: Mapping[str, Any]
+) -> dict[str, str]:
+    """One clip's prompt slots in ``mode``, from the attended sound (A1s) and the binding model's record."""
     sounds = {option["value"]: option["label"] for option in clip["options"]["A1s"]}
     mentioned = [option["label"] for option in clip["options"]["R2"] if option.get("mentioned")]
-    objects = [match.get("object_id") for match in records["P2"].get("matches", [])]
-    first = next((OBJECTS_KO.get(str(item), NOT_SEEN) for item in objects if item), NOT_SEEN)
-    slots = {
+    return {
+        "mode": mode,
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(mentioned),
-        "attended_sound": sounds.get(answers.get("A1s"), NOT_SEEN),
-        "attended_object": first,
+        "attended_sound": sounds.get(str(attended), NOT_SEEN),
+        **scene_slots(clip, mode, model),
     }
-    for direction, items in DIRECTIONS.items():
-        slots[direction] = str(degree([float(answers[item]) for item in items]))
-    return slots
+
+
+def on_screen(clip: Mapping[str, Any], option: Mapping[str, Any]) -> bool:
+    """Whether the masks put an A1s option's source on screen (its scene part's measured share)."""
+    return bool(clip["scene"]["sounds"][option["value"]]["visibility"]["on_screen"])
 
 
 def tweak_source(clip: Mapping[str, Any]) -> CaptionSource:
@@ -109,11 +192,28 @@ def tweak_source(clip: Mapping[str, Any]) -> CaptionSource:
     )
 
 
+def template_record(mode: str) -> dict[str, Any]:
+    template = TWEAK_PROMPTS[mode]
+    return {
+        "id": template.template_id,
+        "version": template.version,
+        "mode": mode,
+        "sha256": template.sha256,
+        "provisional": TWEAK_PROVISIONAL,
+    }
+
+
 def tweak_request(
-    clip: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]], purpose: str
+    clip: Mapping[str, Any],
+    records: Mapping[str, Mapping[str, Any]],
+    purpose: str,
+    *,
+    root: Path,
+    assignment: str = FOLLOW,
 ) -> tuple[CaptionSource, Job, dict[str, Any]]:
-    """The source, the job and the record of what steered it, for one participant and clip."""
-    return tweak_job_for(clip, tweak_slots(clip, records), purpose)
+    """The source, the job and its steering record for one clip decided alone (no other clips)."""
+    ((slots, _),) = tweak_steer_all([clip], [records], [assignment], root=root)
+    return tweak_job_for(clip, slots, purpose)
 
 
 def tweak_job_for(
@@ -125,18 +225,18 @@ def tweak_job_for(
     job = tweak_job(source, prompt, purpose)
     record = {
         "policy": TWEAK_POLICY,
-        "template": {
-            "id": TWEAK_P1.template_id,
-            "version": TWEAK_P1.version,
-            "sha256": TWEAK_P1.sha256,
-            "provisional": TWEAK_PROVISIONAL,
-        },
-        "degree_rule": DEGREE_RULE,
+        "template": template_record(slots["mode"]),
         "slots": dict(slots),
         "intended_r2_key": intended_r2_key(clip),
         "job_id": job.job_id,
     }
     return source, job, record
+
+
+def named_in(text: str, label: str) -> bool:
+    """Whether a caption seems to name the sound an option's label stands for: any word of the label
+    but "소리", by its first two syllables. Rough: it misses "새가" for "새소리"."""
+    return any(word[:2] in text for word in re.findall(r"[가-힣]{2,}", label) if word != "소리")
 
 
 def intended_r2_key(clip: Mapping[str, Any]) -> list[str]:

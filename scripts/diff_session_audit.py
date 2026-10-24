@@ -6,8 +6,11 @@
         --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir DIR [--log-dir DIR …]
 
 ``check`` runs on every pilot and participant session before analysis. The answer side is
-recomputed here rather than by diff: the object under each P2 point (re-reading the masks), each
-direction's degree, the attended sound, the tuner's heard families and rating means. diff's own
+recomputed here rather than by diff: the object under each P2 point (re-reading the masks), the
+binding model over the whole stage A (the point against the noticed sound's click mask, E1/E3
+centred on the participant's mean, the tendency from the other clips' points, P(bound)), the
+balanced plan from the order seed, each clip's mode and slots, the V2 point against the noticed
+source, the attended sound, the tuner's heard families and rating means. diff's own
 prompt functions then render what those values should have produced, and every logged call is
 compared with that, so new prompt wording needs no change here. A session that ran an older
 template than the checkout is reported once, not call by call. It also checks that:
@@ -31,7 +34,9 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
+import random
 import sqlite3
 import statistics
 import sys
@@ -47,13 +52,23 @@ from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # 
 from diff.job_plan import live_job  # noqa: E402
 from diff.live_generation import STARTING_CAPTION, usable  # noqa: E402
 from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
+from diff.phase1_binding import (  # noqa: E402
+    AREA_FLOOR,
+    ASSIGNMENT_POLICY,
+    CONGRUENCE_ITEMS,
+    CONGRUENCE_K,
+    CONGRUENCE_SPAN,
+    DRAWN,
+    GRID_SIZE,
+    THRESHOLD,
+)
 from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
-    DEGREE_RULE,
-    DIRECTIONS,
+    ELEMENTS_KO,
     NOT_SEEN,
-    OBJECTS_KO,
-    SCALE_MAX,
+    OFFSCREEN_KO,
+    RECORDING_ARTEFACTS,
+    SPACE_KO,
     check_record,
     tweak_job_for,
     tweak_source,
@@ -62,13 +77,16 @@ from diff.rewrite_prompts import (  # noqa: E402
     LIVE_CELL_PROMPTS,
     LIVE_RULES_VERSION,
     TUNER_SYSTEM,
-    TWEAK_P1,
+    TWEAK_PROMPTS,
     render_tuner_system,
 )
 from diff.study_protocol import sha256_of  # noqa: E402
 
 STEP1_PAGES = ("P2", "P3", "P4", "P5")
-SECOND_FIELDS = ("status", "second_caption", "attended_sound", "attended_object", *DIRECTIONS)
+OTHER_MODE = {"scene": "acousmatic", "acousmatic": "scene"}
+SECOND_SLOTS = ("attended_sound", "seen")
+SECOND_MODEL = ("recommended", "assignment", "mode", "p_bound")
+SECOND_FIELDS = ("status", "second_caption", *SECOND_SLOTS, *SECOND_MODEL)
 RATINGS = ("S1", "S2", "S3")
 MASK_THRESHOLD = 127
 SUPERSEDED_MS = 1500  # a setting replaced this soon may never get a call: Trida takes about 1 s
@@ -157,39 +175,131 @@ def formal_records(state: Mapping[str, Any]) -> dict[tuple[int, str], dict[str, 
     return records
 
 
-def object_at(frame: Mapping[str, Any], x: float, y: float) -> str | None:
-    """The annotated object under a point: the smallest mask containing it, as regen matches."""
+def mask_at(path: Path, x: float, y: float) -> tuple[bool, int]:
+    """Whether the mask holds the pixel nearest the normalised point, and the mask's area."""
     import numpy as np
     from PIL import Image
 
+    inside = np.asarray(Image.open(path).convert("L")) > MASK_THRESHOLD
+    height, width = inside.shape
+    hit = bool(inside[min(height - 1, round(y * (height - 1))), min(width - 1, round(x * (width - 1)))])
+    return hit, int(inside.sum())
+
+
+def object_at(frame: Mapping[str, Any], x: float, y: float) -> str | None:
+    """The annotated object under a point: the smallest mask containing it, as regen matches."""
     best: tuple[str, int] | None = None
     for obj in frame["objects"]:
-        inside = np.asarray(Image.open(REPO_ROOT / obj["mask"]).convert("L")) > MASK_THRESHOLD
-        height, width = inside.shape
-        if inside[min(height - 1, round(y * (height - 1))), min(width - 1, round(x * (width - 1)))]:
-            area = int(inside.sum())
-            if best is None or area < best[1]:
-                best = (str(obj["id"]), area)
+        hit, area = mask_at(REPO_ROOT / obj["mask"], x, y)
+        if hit and (best is None or area < best[1]):
+            best = (str(obj["id"]), area)
     return best[0] if best else None
 
 
-def expected_slots(clip: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
-    """The tweak slots, recomputed from the clip's first-step answers."""
+def expected_plan(seed: int, count: int) -> list[str]:
+    """The balanced follow/counter plan drawn from the order seed."""
+    plan = ["follow"] * (count // 2) + ["counter"] * (count - count // 2)
+    random.Random(f"{ASSIGNMENT_POLICY}:{seed}").shuffle(plan)
+    return plan
+
+
+def bound_given(pi: float, visibility: float) -> float:
+    return 1 / (1 + math.exp(-(math.log(pi / (1 - pi)) + math.log(visibility / (1 - visibility)))))
+
+
+def point_on_source(clip: Mapping[str, Any], noticed: str, point: Mapping[str, Any]) -> tuple[str, float]:
+    """A point against the noticed sound's click mask on its frame: the status and its log ratio."""
+    sound = clip["scene"]["sounds"][noticed]
+    click = sound["click_frames"].get(str(int(point["frame_id"])), {})
+    if not sound["visibility"]["on_screen"] or not click.get("mask") or not click.get("shown"):
+        return "source not seen", 0.0
+    area = max(float(click["area"]), AREA_FLOOR)
+    hit, _ = mask_at(REPO_ROOT / click["mask"], float(point["x"]), float(point["y"]))
+    return ("hit", math.log((DRAWN + (1 - DRAWN) * area) / area)) if hit else ("miss", math.log(1 - DRAWN))
+
+
+def expected_bindings(
+    clips: Sequence[Mapping[str, Any]],
+    answers: Sequence[Mapping[str, Any]],
+    points: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """The binding model over a whole stage A, recomputed from the answers and the masks on disk."""
+    grid = [(index + 0.5) / GRID_SIZE for index in range(GRID_SIZE)]
+    noticed = [str(given["A1s"]) for given in answers]
+    visibility = [
+        float(clip["scene"]["sounds"][value]["visibility"]["mean"])
+        for clip, value in zip(clips, noticed, strict=True)
+    ]
+    seen = [
+        point_on_source(clip, value, point) for clip, value, point in zip(clips, noticed, points, strict=True)
+    ]
+    fits = [statistics.mean(float(given[item]) for item in CONGRUENCE_ITEMS) for given in answers]
+    centre = statistics.mean(fits)
+    results = []
+    for index in range(len(clips)):
+        weights = [1.0] * GRID_SIZE
+        for other in range(len(clips)):
+            if other == index:
+                continue
+            ratio = math.exp(seen[other][1])
+            weights = [
+                w * (1 - bound_given(pi, visibility[other]) + bound_given(pi, visibility[other]) * ratio)
+                for w, pi in zip(weights, grid, strict=True)
+            ]
+            weights = [w / sum(weights) for w in weights]
+        log_ratio = seen[index][1] + CONGRUENCE_K * (fits[index] - centre) / CONGRUENCE_SPAN
+        q = visibility[index]
+        bound = sum(w * bound_given(pi, q) * math.exp(log_ratio) for w, pi in zip(weights, grid, strict=True))
+        detached = sum(w * (1 - bound_given(pi, q)) for w, pi in zip(weights, grid, strict=True))
+        p_bound = bound / (bound + detached)
+        results.append(
+            {
+                "visibility": q,
+                "attention": seen[index][0],
+                "p_bound": p_bound,
+                "recommended": "scene" if p_bound >= THRESHOLD else "acousmatic",
+            }
+        )
+    return results
+
+
+def expected_slots(
+    clip: Mapping[str, Any],
+    records: Mapping[str, Mapping[str, Any]],
+    mode: str,
+    binding: Mapping[str, Any],
+) -> dict[str, str]:
+    """The tweak slots for the mode, recomputed from the clip's first-step answers and its scene part."""
     answers: dict[str, Any] = {}
     for page in STEP1_PAGES:
         answers.update(records[page]["answers"])
     sounds = {option["value"]: option["label"] for option in clip["options"]["A1s"]}
-    matched = [match["object_id"] for match in records["P2"].get("matches", []) if match.get("object_id")]
+    scene = clip["scene"]
     slots = {
+        "mode": mode,
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(option["label"] for option in clip["options"]["R2"] if option.get("mentioned")),
         "attended_sound": sounds.get(answers.get("A1s"), NOT_SEEN),
-        "attended_object": OBJECTS_KO.get(matched[0], NOT_SEEN) if matched else NOT_SEEN,
     }
-    for direction, items in DIRECTIONS.items():
-        shown = statistics.mean(float(answers[item]) for item in items) / SCALE_MAX
-        slots[direction] = str(round((shown if DEGREE_RULE == "reflect" else 1 - shown) * 100))
-    return slots
+    if mode == "acousmatic":
+        return {**slots, "space": SPACE_KO[scene["openness"]]}
+    distinctive = scene["distinctive"]
+    shares = {name: share for name, share in scene["elements"].items() if name != distinctive}
+    second = max(shares, key=lambda name: shares[name])  # the first of equal shares, as diff sorts
+    hit = answers["A1s"] if binding["attention"] == "hit" else None
+    shown = {value: clip["scene"]["sounds"][value]["visibility"]["on_screen"] for value in sounds}
+    visible = [sounds[value] for value in sounds if value == hit or shown[value]]
+    artefacts = {o["value"] for o in clip["options"]["A1s"] if o["audioset_label"] in RECORDING_ARTEFACTS}
+    unseen = [
+        sounds[value] for value in sounds if value != hit and not shown[value] and value not in artefacts
+    ]
+    return {
+        **slots,
+        "scene_elements": f"{ELEMENTS_KO[distinctive]}, {ELEMENTS_KO[second]}",
+        "seen": ELEMENTS_KO[distinctive],
+        "visible_sounds": ", ".join(dict.fromkeys(visible)) or NOT_SEEN,
+        "offscreen": OFFSCREEN_KO.format(sounds=", ".join(dict.fromkeys(unseen))) if unseen else "",
+    }
 
 
 def plain(value: Any) -> Any:
@@ -246,29 +356,34 @@ def audit_phase1(
     records = formal_records(state)
     rows: list[dict[str, Any]] = []
     ran: set[str] = set()
-    for index, key in enumerate(state["clip_order"]):
-        clip = clips[key]
-        step1 = {page: records[(index, page)] for page in STEP1_PAGES if (index, page) in records}
+    plan = expected_plan(int(state["order_seed"]), len(state["clip_order"]))
+    audit.ok("tweak-model", state["assignment"]["plan"] == plan, f"{who}: the stored plan is not the seed's")
+    order = list(state["clip_order"])
+    steps = [
+        {page: records[(index, page)] for page in STEP1_PAGES if (index, page) in records}
+        for index in range(len(order))
+    ]
+    if any(len(step1) < len(STEP1_PAGES) for step1 in steps):  # the modes are decided as stage A closes
+        audit.ok("tweak-slots", not state["second_captions"], f"{who}: second captions before stage A closed")
+        return rows
+    answers_of = [
+        {k: v for page in STEP1_PAGES for k, v in step1[page]["answers"].items()} for step1 in steps
+    ]
+    points = [step1["P2"]["answers"]["V1"][0] for step1 in steps]
+    bindings = expected_bindings([clips[key] for key in order], answers_of, points)
+    for index, key in enumerate(order):
+        clip, step1 = clips[key], steps[index]
         entry = state["second_captions"].get(key)
-        if len(step1) < len(STEP1_PAGES):
-            if entry is not None:
-                audit.ok("tweak-slots", False, f"{who} {key}: a second caption without a complete first step")
-            continue
         if not audit.ok("tweak-slots", entry is not None, f"{who} {key}: no second-caption entry"):
             continue
         assert entry is not None
-        expect = expected_slots(clip, step1)
-        audit.ok(
-            "tweak-slots",
-            entry["slots"] == expect,
-            f"{who} {key}: stored slots differ in {differing(expect, entry['slots'])}",
-        )
-        point = step1["P2"]["answers"]["V1"][0]
+        point = points[index]
         frame = next(
             (f for i, f in enumerate(clip["frames"]) if int(f.get("index", i)) == int(point["frame_id"])),
             None,
         )
         matched = [m["object_id"] for m in step1["P2"].get("matches", []) if m.get("object_id")]
+        under = None
         if audit.ok("tweak-slots", frame is not None, f"{who} {key}: P2 point on unknown frame {point}"):
             assert frame is not None
             under = object_at(frame, float(point["x"]), float(point["y"]))
@@ -277,6 +392,37 @@ def audit_phase1(
                 under == (matched[0] if matched else None),
                 f"{who} {key}: the masks put {point} on {under}, the record matched {matched}",
             )
+        binding = bindings[index]
+        p7 = records.get((index, "P7"))
+        if p7 is not None:
+            status, _ = point_on_source(clip, str(answers_of[index]["A1s"]), p7["answers"]["V2"][0])
+            logged = (p7.get("source_attention") or {}).get("status")
+            audit.ok(
+                "source-attention",
+                logged == status,
+                f"{who} {key}: V2 on the source {logged}, recomputed {status}",
+            )
+        mode = binding["recommended"] if plan[index] == "follow" else OTHER_MODE[binding["recommended"]]
+        model = entry.get("model", {})
+        audit.ok(
+            "tweak-model",
+            abs(float(model.get("p_bound", -1)) - binding["p_bound"]) <= 1e-4
+            and (
+                model.get("attention", {}).get("status"),
+                model.get("recommended"),
+                model.get("assignment"),
+                model.get("mode"),
+            )
+            == (binding["attention"], binding["recommended"], plan[index], mode),
+            f"{who} {key}: stored model {model.get('p_bound')} {model.get('mode')}, recomputed "
+            f"{binding['p_bound']:.4f} {mode} ({binding['attention']})",
+        )
+        expect = expected_slots(clip, step1, mode, binding)
+        audit.ok(
+            "tweak-slots",
+            entry["slots"] == expect,
+            f"{who} {key}: stored slots differ in {differing(expect, entry['slots'])}",
+        )
         attempts = [t for t in tweaks if t["clip"] == key]
         if not audit.ok("tweak-call", bool(attempts), f"{who} {key}: no tweak call logged"):
             continue
@@ -286,7 +432,7 @@ def audit_phase1(
         )
         _, job, _ = tweak_job_for(clip, expect, str(last["job"]["purpose"]))
         expected_job = plain(job.record())
-        if entry["template"]["sha256"] != TWEAK_P1.sha256:
+        if entry["template"]["sha256"] != TWEAK_PROMPTS[expect["mode"]].sha256:
             ran.add(str(entry["template"]["sha256"]))
         else:
             audit.ok(
@@ -343,8 +489,9 @@ def audit_phase1(
         audit.ok(
             "versions",
             False,
-            f"{who}: the second captions ran tweak-p1 {sorted(sha[:12] for sha in ran)}, this checkout "
-            f"renders {TWEAK_P1.sha256[:12]}; audit at the commit the session ran",
+            f"{who}: the second captions ran tweak-p1 {sorted(sha[:12] for sha in ran)}, "
+            f"this checkout renders {sorted(t.sha256[:12] for t in TWEAK_PROMPTS.values())}; "
+            "audit at the commit the session ran",
         )
     return rows
 
@@ -602,11 +749,12 @@ def audit_export(
                 key = (sid, str(record["clip_index"]), viewing, str(record["page"]), str(item))
                 phase1[key] = cell(record["answers"].get(item))
         for clip, entry in state.get("second_captions", {}).items():
-            slots = entry.get("slots", {})
+            slots, model = entry.get("slots", {}), entry.get("model", {})
             seconds[(sid, clip)] = {
                 "status": entry["status"],
                 "second_caption": entry.get("text") or "",
-                **{name: slots.get(name, "") for name in SECOND_FIELDS[2:]},
+                **{name: slots.get(name, "") for name in SECOND_SLOTS},
+                **{name: str(model.get(name, "")) for name in SECOND_MODEL},
             }
         for item, answer in state.get("live", {}).get("answers", {}).items():
             post_watch[(sid, item)] = str(answer)

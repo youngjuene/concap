@@ -163,6 +163,8 @@ prepared metadata and then approved by the researcher:
 
 ```sh
 uv run python -m diff phase1 draft-setup      # → artifacts/diff/phase1/setup-draft.json
+# write the options (with each A1s option's audioset_label), then:
+uv run python -m diff phase1 scene --setup artifacts/diff/phase1/setup-draft.json  # ~1 min
 uv run python -m diff phase1 show --setup artifacts/diff/phase1/setup-draft.json
 uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.json \
   --by <name> --clip amsterdam_012 [--clip …] [--practice]
@@ -184,12 +186,39 @@ The options are written into the draft by hand and marked
 `assistant-draft-unreviewed`. They keep `orig_text`, so R2's answer key is
 relative to `orig_text`, not to the shown caption:
 - **A1s:** one option per sound `orig_text` names. Each option has a Korean
-  label, a family, and `orig_phrase`, the words of `orig_text` it renders.
+  label, a family, `orig_phrase`, the words of `orig_text` it renders, and
+  `audioset_label`, the clip's AudioSet label whose Sa2VA audio masks stand
+  for its source. Whether that source is on screen is measured from the
+  masks by `phase1 scene`, never judged.
 - **R2:** the same sounds marked `mentioned` with their phrases, plus
   distractors that quote nothing.
 - **Practice:** its options come from the practice clip's `orig_text`.
 
 `show` and `approve` refuse a phrase that is not in `orig_text`.
+
+**What `phase1 scene` adds** (the binding model's inputs, `diff.phase1_scene`), from
+the Sa2VA run `--sa2va` (default `…/Sa2VA/avmask/runs/60fps-windowed/masks`),
+every 10th frame:
+- the scene's composition, with each pixel given to its smallest mask, in five
+  elements;
+- its distinctive element: the largest share relative to the 12 clips' mean,
+  or the largest element when no lift reaches 1.5;
+- its openness from the sky's share: open from 0.15, enclosed up to 0.07,
+  neutral between, where the acousmatic caption says nothing of the space;
+- per A1s sound, its AudioSet groups and where they can be seen
+  (`phase1_scene.PLAUSIBLE`);
+- per A1s sound, its visibility (researcher, 2026-10-24: measured, never
+  judged):
+  - the share of its audio mask on those categories, averaged over frames,
+    with unlabelled pixels counting against it;
+  - on screen from 0.5;
+  - the share's Beta posterior mean, the binding model's `q`.
+
+  An old `source_visible` judgement is dropped;
+- its audio mask on each P2 frame, widened by 1.5% of the frame's width and
+  written to `data/live/regen-media/<clip>/audio-masks/<frame>/<value>.png`.
+
+It rewrites the scene part of every clip, so every clip needs approving again.
 
 The setup file holds clip keys, `orig_text`, families and the R2 answer key,
 so it stays on this machine.
@@ -403,9 +432,11 @@ It reads the store (`--store`, default the participant store) and every
 - `second_captions.csv`: one row per participant × clip:
   - the status, and the reason for a skipped step;
   - the first and second captions;
-  - the attended sound and object, and the four degrees;
+  - the attended sound, and the binding model's inputs, P(bound),
+    recommendation, follow or counter, mode and caption type;
   - the intended R2 key, the template hash and whether it was provisional;
   - the job and the check flags;
+  - `v2_attention`, whether the V2 point fell on the noticed sound's source;
 - `post_watch.csv`;
 - `manifest.json`, with file hashes.
 
@@ -452,10 +483,13 @@ envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
 and the tuner on fixed participant answers, at the study's settings. Its
 docstring gives the candidate file's format. A live candidate replaces any of
 the nine cell prompts (`"cells": {"0-broad": "…{cue_text}…", …}`).
-- `inputs` keeps a run's answers and the slider steps of its live calls.
+- `inputs` keeps a run's answers and the slider steps of its live calls. It
+  also decides each clip's second-caption slots in both modes with the
+  checkout's binding model, because that reads the click masks and the
+  generator env has no Pillow (inputs schema v2).
 - `run`, in the generator env on one GPU, rebuilds every prompt from those
-  answers with the checkout's code (or a candidate's wording) and writes it
-  with Trida.
+  answers and slots with the checkout's code (or a candidate's wording) and
+  writes it with Trida.
 
 It reports:
 - how often an output copies its starting caption;
@@ -471,3 +505,4 @@ wording before it is approved.
 The baseline inputs are `artifacts/diff/bench/inputs-smoke-20261019.json`,
 from the 2026-10-19 smoke run with three agent pseudo participants. The file
 is not tracked, because it holds the long videos' draft cues.
+

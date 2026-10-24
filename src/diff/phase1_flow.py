@@ -15,13 +15,22 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   ``step`` and ``progress`` (a segment of the whole session and how far
   into it), and the handoff briefs phase 2.
 - **Clip order:** random per participant, from a seed recorded in the state.
+  The same seed draws the participant's balanced plan of which clips follow the
+  binding model's recommended mode and which counter it
+  (:func:`diff.phase1_binding.assignment_plan`, 2026-10-23).
 - **Captions:** P1 shows the clip's prepared caption raw. P6 shows the caption
   Trida wrote from it and the participant's first-step answers
-  (:mod:`diff.phase1_tweak`): P5's submit records the clip's steering slots
-  and marks its second caption pending; the server queues the job and writes
-  the outcome back (:meth:`Phase1.record_tweak`). Reaching P6 before the
-  caption is ready shows a waiting page; a clip whose second caption failed
-  has its second step skipped (``skip-second``), with the reason recorded.
+  (:mod:`diff.phase1_tweak`). The last P5's submit closes stage A: it runs the
+  binding model over every clip's first step at once (design review,
+  2026-10-24: each clip's tendency comes from the other eleven, and E1/E3 are
+  centred on the participant's own mean), records each result and its
+  steering slots, and marks every second caption pending in stage-B order; the
+  server queues the jobs and writes each outcome back
+  (:meth:`Phase1.record_tweak`). Reaching P6 before the caption is ready shows
+  a waiting page; a clip whose second caption failed has its second step
+  skipped (``skip-second``), with the reason recorded. P7's record also tests
+  the V2 point against the noticed sound's click mask (``source_attention``),
+  the behavioural check of what the second caption did to the eye.
 - **Binding:** P2–P5 bind to the P1 viewing and P7–P11 to the P6 viewing, as in
   regen's ``sheet_protocol``.
 
@@ -53,13 +62,13 @@ from typing import Any, Final
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
+from diff.phase1_binding import ASSIGNMENT_POLICY, assignment_plan, attention
 from diff.phase1_setup import stripped_options
-from diff.phase1_tweak import tweak_slots
-from diff.rewrite_prompts import TWEAK_P1, TWEAK_PROVISIONAL
+from diff.phase1_tweak import template_record, tweak_steer_all
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
-PROTOCOL: Final = "diff.phase1/v3"
+PROTOCOL: Final = "diff.phase1/v5"
 STEP_A: Final = ("P1", "P2", "P3", "P4", "P5")
 STEP_B: Final = ("P6", "P7", "P8", "P9", "P10", "P11")
 CLIP_PAGES: Final = STEP_A + STEP_B
@@ -184,6 +193,7 @@ class Phase1:
             "clip_index": 0,
             "order_seed": seed,
             "clip_order": clip_order(sorted(self.clips), seed),
+            "assignment": {"policy": ASSIGNMENT_POLICY, "plan": assignment_plan(seed, len(self.clips))},
             "instrument_hash": self.instrument.snapshot()["hash"],
             "setup_sha256": sha256_of(self.setup),
             "consent": None,
@@ -512,9 +522,11 @@ class Phase1:
             record["matches"] = [match.record() for match in matches]
             record["labels"] = list(points.matched_labels(matches))
             record["visual_metrics"] = [measurement.metrics for measurement in measured]
+            if page == "P7":
+                record["source_attention"] = self._source_attention(state, record["matches"])
         state["responses"].append(record)
         if page == "P5":
-            self._request_second(state, now)
+            self._request_seconds(state, now)
         self._advance(state)
 
     def step_records(self, state: Mapping[str, Any], clip_index: int, pages: Sequence[str]) -> dict[str, Any]:
@@ -523,23 +535,33 @@ class Phase1:
             r["page"]: r for r in state["responses"] if r["clip_index"] == clip_index and r["page"] in pages
         }
 
-    def _request_second(self, state: dict[str, Any], now: float) -> None:
-        """P5 closes the clip's first step: record its steering slots and mark its second caption pending."""
+    def _source_attention(
+        self, state: Mapping[str, Any], matches: Sequence[Mapping[str, Any]]
+    ) -> dict[str, Any]:
+        """The V2 point against the click mask of the sound noticed at P3, as V1's is tested."""
         clip = self.clip(state)
-        records = self.step_records(state, state["clip_index"], STEP_A[1:])
-        state["second_captions"][clip["key"]] = {
-            "status": "pending",
-            "clip_index": state["clip_index"],
-            "slots": tweak_slots(clip, records),
-            "template": {
-                "id": TWEAK_P1.template_id,
-                "version": TWEAK_P1.version,
-                "sha256": TWEAK_P1.sha256,
-                "provisional": TWEAK_PROVISIONAL,
-            },
-            "attempts": [],
-            "requested_at": now,
-        }
+        noticed = str(self.step_records(state, state["clip_index"], ("P3",))["P3"]["answers"]["A1s"])
+        match = matches[0] if matches else None
+        return attention(clip["scene"]["sounds"][noticed], match, self.root)
+
+    def _request_seconds(self, state: dict[str, Any], now: float) -> None:
+        """The last P5 closes stage A: decide every clip's mode at once, record each with its slots."""
+        count = len(state["clip_order"])
+        if state["clip_index"] + 1 < count:
+            return
+        clips = [self.clips[key] for key in state["clip_order"]]
+        records = [self.step_records(state, index, STEP_A[1:]) for index in range(count)]
+        steered = tweak_steer_all(clips, records, state["assignment"]["plan"], root=self.root)
+        for index, (clip, (slots, model)) in enumerate(zip(clips, steered, strict=True)):
+            state["second_captions"][clip["key"]] = {
+                "status": "pending",
+                "clip_index": index,
+                "slots": slots,
+                "model": model,
+                "template": template_record(slots["mode"]),
+                "attempts": [],
+                "requested_at": now,
+            }
 
     def _skip_second(self, state: dict[str, Any], now: float) -> None:
         second = self.second(state)

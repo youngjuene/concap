@@ -495,13 +495,56 @@ def phase1_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def phase1_scene(args: argparse.Namespace) -> int:
+    """Add each clip's scene part from a Sa2VA run, with each sound's measured visibility, and write
+    its click masks; voids changed approvals."""
+    from diff.phase1_scene import SceneError, add_scenes
+    from diff.phase1_setup import read_setup
+
+    drafted = read_setup(args.setup)
+    try:
+        updated = add_scenes(
+            drafted, run=args.sa2va, ontology=args.ontology, root=Path.cwd(), stride=args.stride
+        )
+    except SceneError as exc:
+        raise SystemExit(f"cannot build the scene parts: {exc}") from exc
+    _write_json(args.setup, updated, force=True)
+    for clip in updated["clips"]:
+        print(f"[{clip['key']}]")
+        _print_scene(clip)
+    print(f"wrote the scene parts of {len(updated['clips'])} clips to {args.setup}; approve the clips again")
+    return 0
+
+
+def _print_scene(clip: Any) -> None:
+    scene = clip.get("scene")
+    if not scene:
+        print("  scene: (none; run `python -m diff phase1 scene`)")
+        return
+    elements = ", ".join(f"{name} {share:.2f}" for name, share in scene["elements"].items())
+    print(
+        f"  scene: {elements}; distinctive {scene['distinctive']} (by {scene['distinctive_by']}), "
+        f"{scene['openness']}"
+    )
+    for value, sound in scene["sounds"].items():
+        seen = sound["visibility"]
+        print(
+            f"  {value} {sound['audioset_label']} {sound['groups']} → {sound['plausible'] or 'never seen'}: "
+            f"{seen['share']:.2f} of its audio mask on them, {'on' if seen['on_screen'] else 'off'} screen, "
+            f"q {seen['mean']:.2f}"
+        )
+
+
 def _print_sounds(part: Any) -> None:
     print(f"  orig_text: {part['orig_text']}")
     labels = ", ".join(f"{entry['label']} ({entry['family']})" for entry in part["audioset_labels"])
     print(f"  AudioSet labels (families only): {labels}")
     for option in part["options"]["A1s"]:
         label = option["label"] or "(empty)"
-        print(f"  A1s {option['value']}: {label} [{option.get('family')}] ← {option.get('orig_phrase')!r}")
+        print(
+            f"  A1s {option['value']}: {label} [{option.get('family')}, {option.get('audioset_label')}] "
+            f"← {option.get('orig_phrase')!r}"
+        )
 
 
 def _print_setup(drafted: Any) -> None:
@@ -517,6 +560,7 @@ def _print_setup(drafted: Any) -> None:
         for option in clip["options"]["R2"]:
             mark = f"mentioned ← {option.get('orig_phrase')!r}" if option.get("mentioned") else "distractor"
             print(f"  R2 {option['value']}: {option['label']} [{mark}]")
+        _print_scene(clip)
 
 
 def _approved(part: Any) -> bool:
@@ -606,10 +650,15 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     prompt = str(payload["prompt"]["text"])
     match = re.search(r"원래 자막: (.*)\Z", prompt) or re.search(r"「(.*?)」", prompt, re.S)
     cell = payload.get("cell")
-    marker = "시험용 · 두 번째 자막"
-    if cell is not None:
+    quoted = match.group(1) if match else ""
+    if cell is None:  # a second caption: cut the quoted first caption so the text fits its limit
+        from diff.study_protocol import TWEAK_MAX_CHARS
+
+        marker = "시험용 · 두 번째 자막"
+        quoted = quoted.replace("\n", " ")[: TWEAK_MAX_CHARS - len(marker) - 3].rstrip()
+    else:
         marker = f"시험용 · 질감 {cell['quality_limit']} · {cell['context']}"
-    text = f"{match.group(1) if match else ''} ({marker})"
+    text = f"{quoted} ({marker})"
     output = {
         "raw_text": text,
         "text": text,
@@ -626,6 +675,7 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
 def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> list[str]:
     """Every gate a participant session waits on, given serve's arguments (empty when none)."""
     from diff.caption_sources import starting_caption_review_problems
+    from diff.phase1_binding import BINDING_PROVISIONAL
     from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL, TWEAK_PROVISIONAL
 
     blockers = []
@@ -641,7 +691,12 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
         )
     if TWEAK_PROVISIONAL:
         blockers.append(
-            "the second-caption prompt is still provisional (rewrite_prompts.TWEAK_P1); "
+            "the second-caption prompts are still provisional (rewrite_prompts.TWEAK_PROMPTS); "
+            "participant sessions wait for the researcher's approval"
+        )
+    if BINDING_PROVISIONAL:
+        blockers.append(
+            "the binding model's parameters and plan are still provisional (phase1_binding); "
             "participant sessions wait for the researcher's approval"
         )
     if args.phase1_setup is None:
@@ -1051,6 +1106,19 @@ def parser() -> argparse.ArgumentParser:
     show.add_argument("--setup", type=Path, required=True)
     show.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     show.set_defaults(handler=phase1_show)
+    scene = phase1.add_parser("scene", help="add each clip's scene part from a Sa2VA run (voids approvals)")
+    scene.add_argument("--setup", type=Path, required=True)
+    scene.add_argument(
+        "--sa2va",
+        type=Path,
+        default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/runs/60fps-windowed/masks"),
+        help="the run's masks folder, holding visual/<clip>/<Category> and audio/<clip>/<label>",
+    )
+    scene.add_argument(
+        "--ontology", type=Path, default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json")
+    )
+    scene.add_argument("--stride", type=int, default=10, help="read every n-th frame")
+    scene.set_defaults(handler=phase1_scene)
     sign = phase1.add_parser("approve", help="record the researcher's approval of clips or the practice")
     sign.add_argument("--setup", type=Path, required=True)
     sign.add_argument("--by", required=True)

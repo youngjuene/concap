@@ -363,54 +363,79 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 
 # Phase 1's second caption (researcher, 2026-10-18): Trida tweaks a clip's raw
 # first caption, steered by this participant's answers to that clip's first
-# step. diff.phase1_tweak fills the slots: {caption}; {sounds}, the clip's
-# sounds from orig_text, which this prompt names and which are therefore R2's
-# key; {attended_sound} (A1s) and {attended_object} (V1, or "없음"); and four
-# degrees in percent from the restorativeness and familiarity ratings. The
-# researcher approves the wording; until then it is provisional and
-# participant sessions are refused.
+# step. Since 2026-10-23 it takes one mode per clip, chosen by the binding model
+# (diff.phase1_binding): scene-aware, which sets the sounds in the scene on screen,
+# or acousmatic, which describes them as heard without the screen. Each mode has
+# its own text, and its slots vary with the clip's scene (diff.phase1_tweak):
+# {caption}; {sounds}, the clip's sounds from orig_text, which the prompt names and
+# which are therefore R2's key (both modes keep every sound's name, so the key holds);
+# {attended_sound} (A1s); scene-aware: {scene_elements}, {seen}, {visible_sounds};
+# acousmatic: {space}. The researcher approves the wording; until then it is
+# provisional and participant sessions are refused. Version 2 (design review,
+# 2026-10-24): the scene-aware prompt no longer asks for two centres (the attended
+# sound and the V1 object) and ties each sound only to its own source, since an
+# unrelated V1 object invited a made-up link; the acousmatic prompt makes the space
+# a separate, optional request, left out when the scene is neither open nor enclosed.
+# Version 3 (hypothesis team, 2026-10-24): one shared sentence places the sounds not on
+# screen "here, though unseen" ({offscreen}, empty when there are none, never
+# microphone wind), and the caption is held to 80 characters, since 160 take about 13 s
+# to read at 12 characters per second, longer than the 10 s clip.
 TWEAK_PROVISIONAL: Final = True
-TWEAK_P1: Final = PromptTemplate(
-    template_id="tweak-p1",
-    version=0,
-    text=(
-        "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"
-        "이 영상에서 들리는 소리: {sounds}.\n"
-        "이 시청자가 가장 주의를 기울인 소리는 「{attended_sound}」이고, "
-        "화면에서 가장 먼저 눈에 들어온 것은 「{attended_object}」입니다.\n"
-        "시청자의 응답에 맞춰 아래 방향으로 이 자막을 고쳐 쓰세요. 퍼센트는 조정의 정도이며, "
-        "0%는 그 방향으로 바꾸지 않고 100%는 가장 강하게 바꾸라는 뜻입니다.\n"
-        "- 소리의 매력과 흥미로움을 살리기: {fascination}%\n"
-        "- 일상에서 벗어난 느낌을 살리기: {being_away}%\n"
-        "- 소리가 화면 속 장소에 어울리는 정도를 드러내기: {coherence}%\n"
-        "- 소리의 음원을 구체적으로 부르기: {familiarity}%\n"
-        "위에 적힌 소리 외에 새로운 소리를 더하지 마세요. 160자 이내로 쓰고, 고쳐 쓴 자막만 출력하세요. "
-        "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
+_TWEAK_HEAD: Final = (
+    "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"
+    "이 영상에서 들리는 소리: {sounds}.\n"
+    "이 시청자가 가장 주의를 기울인 소리: {attended_sound}.\n"
+)
+_TWEAK_TAIL: Final = (
+    "위에 적힌 소리 외에 새로운 소리를 더하지 마세요. 80자 이내로 쓰고, 고쳐 쓴 자막만 출력하세요. "
+    "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
+)
+TWEAK_PROMPTS: Final[dict[str, PromptTemplate]] = {
+    "scene": PromptTemplate(
+        template_id="tweak-p1",
+        version=3,
+        text=(
+            _TWEAK_HEAD + "화면에서 두드러지는 것: {scene_elements}. 장면의 배경: {seen}. "
+            "화면에 음원이 보이는 소리: {visible_sounds}.\n"
+            "이 자막을 소리가 화면 속 장면 안에 자리 잡도록 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
+            "중심에 두고, 장면의 배경은 소리가 들리는 곳으로 쓰세요. 음원이 화면에 보이는 소리는 그 소리를 "
+            "내는 대상과만 이어 주세요.{offscreen} 소리를 그 소리를 내지 않는 대상에 잇거나 "
+            "화면에 없는 대상을 지어내지 마세요.\n" + _TWEAK_TAIL
+        ),
     ),
-)
-TWEAK_SLOTS: Final = (
-    "caption",
-    "sounds",
-    "attended_sound",
-    "attended_object",
-    "fascination",
-    "being_away",
-    "coherence",
-    "familiarity",
-)
+    "acousmatic": PromptTemplate(
+        template_id="tweak-p1",
+        version=3,
+        text=(
+            _TWEAK_HEAD
+            + "이 자막을 화면을 보지 않고 귀로만 듣는 것처럼 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
+            "중심에 두고, 각 소리가 무슨 소리인지는 그대로 밝히되 화면 속 대상이나 장소는 말하지 마세요. "
+            "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요.{space}\n" + _TWEAK_TAIL
+        ),
+    ),
+}
+_TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound")
+TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {
+    "scene": (*_TWEAK_COMMON, "scene_elements", "seen", "visible_sounds", "offscreen"),
+    "acousmatic": (*_TWEAK_COMMON, "space"),
+}
 
 
 def render_tweak(slots: Mapping[str, str]) -> RenderedPrompt:
-    """Phase 1's second-caption prompt with every slot filled; no evidence, the fixed system message."""
-    if set(slots) != set(TWEAK_SLOTS):
-        raise ValueError(f"the tweak prompt needs exactly the slots {list(TWEAK_SLOTS)}")
+    """Phase 1's second-caption prompt for the slots' mode, every slot filled; the fixed system message."""
+    mode = slots.get("mode")
+    if mode not in TWEAK_PROMPTS:
+        raise ValueError(f"the tweak prompt's mode must be one of {sorted(TWEAK_PROMPTS)}, not {mode!r}")
+    if set(slots) != set(TWEAK_SLOTS[mode]):
+        raise ValueError(f"the {mode} tweak prompt needs exactly the slots {list(TWEAK_SLOTS[mode])}")
+    template = TWEAK_PROMPTS[mode]
     return RenderedPrompt(
-        TWEAK_P1.template_id,
-        TWEAK_P1.version,
-        TWEAK_P1.sha256,
+        template.template_id,
+        template.version,
+        template.sha256,
         0,  # no evidence is rendered into a tweak prompt
         None,
-        TWEAK_P1.text.format(**slots),
+        template.text.format(**slots),
     )
 
 

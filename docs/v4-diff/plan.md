@@ -4,6 +4,209 @@ Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
 to Trida-7B (both model changes below). Written against `main` at `3842302`.
 Where the brief and the PRD disagree, the brief wins.
 
+## Phase 1's second caption — a Bayesian binding model (researcher, 2026-10-23)
+
+**Asked:** the second caption takes one mode per clip, scene-aware or acousmatic,
+and its wording varies with the clip's scene. A Bayesian algorithm chooses the
+mode from the response scales, the visual mask proportions, and the match
+between the Sa2VA audio mask and the sound the participant noticed (AudioSet
+label, grouped). The goal is restoration. The researcher asked for the most
+HCI-fitting way to find the restorative direction. The answer, built here, is a
+theory-driven model, validated by a randomised, balanced within-subject
+comparison and analysed with Bayesian multilevel models. Phase 2 is untouched.
+
+**The model** (`diff.phase1_binding`, `diff.phase1-binding/v3`, provisional;
+v1 of 2026-10-23 was revised twice the next day, below):
+- `b` says whether the participant hears the noticed sound (A1s) as part of the
+  scene on screen. `π` is their tendency to bind, uniform on a 100-point grid.
+  The clip's prior is `logit P(b) = logit π + logit q`, where `q` is the
+  noticed sound's measured visibility (v3, below): the Beta posterior mean
+  of the share of its audio mask on the visual labels its source can be.
+- **When:** every clip's mode is decided once, at the last P5, since stage A
+  holds every clip's first step before any second viewing. The 12 jobs are
+  then queued in stage-B order; the interlude covers the first.
+- **Attention evidence:** is the V1 point inside the noticed sound's click
+  mask (its Sa2VA audio mask, widened by 1.5% of the frame's width) on its
+  frame? Chance is the click mask's share `a` of the frame, floored at 0.05. A
+  bound viewer's eye is drawn to the source with probability 0.2.
+  - A hit gives `(0.2 + 0.8a)/a`; a miss gives 0.8.
+  - The ratio is 1 when the source is not on screen on that frame, or not
+    on screen on average.
+- **Congruence evidence:** E1 and E3, the sheet's axis-1 check items, against
+  the participant's own mean over their 12 clips:
+  `log ratio = ln 3 · (C − C̄)/3`.
+- **Tendency:** each clip's `π` is updated by the other 11 clips' attention
+  evidence only.
+- **Decision:** scene-aware when P(b) ≥ 0.5, otherwise acousmatic. A
+  caption that matches how the sound is heard should cost no directed
+  attention (ART's compatibility).
+- **Assignment:** a balanced plan per participant drawn from the order seed
+  (`diff.phase1-assignment/balanced-v1`). Six clips follow the
+  recommendation and six take the other mode. Because follow vs counter is
+  independent of the recommendation, each mode is shown with probability 1/2
+  whatever P(b) is, so P(b) is a moderator fixed before the outcome.
+- **Not steering:** F, BF, E, PRS, FA2 and FA3 are recorded as the baseline
+  (`model.baseline`), the first measure of the outcome. FA1 is unused.
+- **Manipulation check:** P7's record tests the V2 point against the noticed
+  sound's click mask in the same way (`source_attention`, exported as
+  `v2_attention`). S2 does not check the mode, since an acousmatic caption
+  can still fit the scene.
+
+**Design review, 2026-10-24** (before any Trida run; what v1 got wrong):
+- **Rating style built up in `π`.** v1 fed E1/E3 into `π` clip by clip, so a
+  participant's rating level accumulated. Simulated on the 12 clips: rating
+  E1/E3 at 4.5 rather than 3 took the scene-aware share from 23% to 89% by the
+  twelfth clip. The fix is the whole-stage decision with centred E1/E3 and a
+  tendency learnt from the other clips' points.
+- **Visibility depended on an arbitrary rule.** v1's `q` was the Beta mean of
+  the share of frames whose audio mask lay at least half inside the plausible
+  categories. Under the other rule (less than half outside them), 10 of the 27
+  seeable sounds moved by more than 0.1, and 3 crossed 0.5. Sa2VA's visual
+  masks miss things: singapore_067's speech mask sits on two distant talkers
+  that the Person mask does not cover, which gave 0.08. amsterdam_012's siren
+  mask sits on the passing tram, so a mask shows "a plausible source on
+  screen", not the true one. The fix is the researcher's judgement per option
+  (drafted from the share) and the second rule for the per-frame test.
+- **The click evidence was over-weighted.** V1 asks what first caught the eye,
+  which visual salience drives, so v1's 0.5 for a bound viewer clicking the
+  source made most points misses and pushed toward acousmatic. At neutral
+  ratings, 0.5 vs 0.2 moved the scene-aware share from 0.27 to 0.41. Several
+  click masks covered under 0.5% of the frame with no tolerance.
+- **Caption types:**
+  - The sky median split put 0.084 (enclosed) and 0.094 (open) on opposite
+    sides; it is now three levels with a neutral band.
+  - Two distinctive picks had lifts of 1.12 and 1.18; under 1.5 the largest
+    element stands instead.
+  - The scene-aware prompt asked for two centres, which invited invented
+    links; v2 sets the V1 object as the setting and ties each sound only to
+    its own source.
+
+**v3: visibility measured, one setting per clip** (researcher, 2026-10-24,
+after the second captions were drafted for review):
+- **Visibility follows the masks strictly, with no judgement.** It is the
+  share of the noticed sound's audio mask (its AudioSet label, the audio
+  caption's category match) that lies on the visual labels its source can
+  be (`PLAUSIBLE`), averaged over the sampled frames. Unlabelled pixels count
+  against it. `q` is the share's Beta posterior mean (0.08–0.92 for a 10 s
+  clip). A source is on screen from a share of 0.5 (`ON_SCREEN`): on average
+  for the caption and for counting a click, and per frame for a click.
+  - Of the three readings compared, this one changed 7 of the 29 v2 drafts.
+    For example, singapore_067's speech went from 0.32 to 0.01: the distant
+    talkers lie outside the Person mask. amsterdam_202's engine went from
+    0.90 to 0.24: its mask lies mostly on unlabelled pixels.
+  - The 29 drafted AudioSet labels stand as the category match.
+- **One setting per clip** (`diff.phase1-tweak/v5`). The scene-aware setting
+  is the clip's distinctive element, not the V1 object. A second caption
+  then depends only on the mode and the attended sound, so the 12 clips have
+  58 possible captions, and every one is reviewed before the study.
+
+**Caption types:**
+- `scene/<distinctive element>` names the distinctive element and the largest
+  other one, and takes the distinctive element as its setting. It lists the
+  sounds on screen, and the noticed sound when the point hit its mask.
+- `acousmatic/<open|neutral|enclosed>` describes the sounds as heard, keeping
+  every name so that R2's key holds. It names nothing on screen, and an open or
+  enclosed scene adds one request about how the sound spreads.
+
+The prompts are `rewrite_prompts.TWEAK_PROMPTS` (`tweak-p1` v3, one text per
+mode, provisional). The four % degrees (`tweak-p1` v0) are gone.
+
+**Prompt v3 and the R2 key** (after the hypothesis team's report,
+`artifacts/diff/hypotheses/report-20261024.md`; the researcher said "go ahead"
+on 2026-10-24):
+- **One off-screen sentence.** The scene-aware prompt names the sounds not on
+  screen in one shared sentence: "화면에 음원이 보이지 않는 소리(…)는 화면에는
+  보이지 않지만 이곳 어딘가에서 들려오는 소리로 쓰세요". It is left out when there
+  are none, and never includes microphone wind (`RECORDING_ARTEFACTS`). v2 told
+  Trida to spread every unseen sound "in this scene", mic wind included. The
+  wording avoids "화면 밖", which would echo E1's "화면 속 장소".
+- **80 characters.** `TWEAK_MAX_CHARS` is 80 and the prompts say "80자 이내로".
+  160 characters take about 13 s to read at 12 characters per second, longer
+  than the 10 s clip. A longer output fails the check and the clip's second
+  step is skipped, so the bench must show how often that happens. The fake
+  worker cuts its echoed caption to fit.
+- **A fifth contradicting first caption.** singapore_067's names 경적 and
+  교통 체증, where orig_text has a talking crowd and an idling truck.
+- **The bench gate**, per mode:
+  - near-copies of the first caption (similarity ≥ 0.9);
+  - wrong first-caption sounds kept (기차, 경적/대화, 오토바이, 경적/체증);
+  - R2 distractors named;
+  - questionnaire wording echoed (화면 속 장소, 속해, 어우러, 벗어나);
+  - lists with no sentence.
+
+  On the 2026-10-20 bench, which ran the old `tweak-p1` v0, 10 of 36 second
+  captions copied the first one, and 기차, 경적 and 오토바이 survived 3/3. v3
+  has not yet run on Trida.
+- **Not done; the researcher's to decide:**
+  - sound qualities written after listening, for the acousmatic prompt;
+  - unchanged anchor clips (the sheet's "일부 영상은 유지 조건", against the
+    10-18 decision to rewrite every clip);
+  - the counter-centring pilot.
+
+**Analysis, to pre-register:**
+`P9 ~ P4 + mode × p_bound + (1|participant) + (1|clip)`, Bayesian multilevel
+(Kay et al., CHI 2016), with the P4 score as a covariate rather than change
+scores. E1/E3 feed P(b), so the main effect of P(b) on the E change carries
+regression to the mean; the causal estimate is the mode × P(b) interaction,
+which is the compatibility effect. Since the mode's propensity is 1/2 for every
+clip, the same data also compare three policies: the model's, always
+scene-aware and always acousmatic. The primary outcome subscale is still to
+be named. The four clips whose first caption contradicts their audio get a
+correction in both modes, so they enter as a covariate.
+
+**Measured on the 12 c2 clips** (setup draft, rebuilt 2026-10-24):
+- Measured visibility (v3): 13 of 29 sounds on screen and 16 off. Most
+  vehicles are on screen. Speech is on screen only at bangkok_209 (0.61).
+  - In four clips no source is on screen, so their scene-aware caption
+    places every sound "here, though unseen": amsterdam_057, amsterdam_202,
+    bangkok_328 and singapore_067.
+  - Before v3 the drafts were 14 visible, 8 partly and 7 not.
+- Distinctive elements: traffic 3, people 3, built 3, nature 2 and open 1
+  (amsterdam_181). amsterdam_012 and bangkok_209 have no lift of 1.5, so their
+  largest element, built, stands; 43% of amsterdam_012's frame is unlabelled
+  café furniture. Openness: 3 open, 4 neutral, 5 enclosed.
+- **The judgement dominated (v2, before measured visibility).** In the
+  pseudo walk, every visible source was
+  recommended scene-aware and every invisible one acousmatic. The answers
+  decided only the partly visible ones (binders 5/5 scene-aware, detachers
+  0/6). At 0.75/0.5/0.25, the participant's own points override the judgement
+  in both directions: detachers got 8/10 scene-aware on visible sources, and
+  binders 7/7 on invisible ones. This is the researcher's call.
+
+**Verified (2026-10-24):**
+- 6 pseudo participants walked phase 1 on the rebuilt setup, with the fake
+  worker, over the app's HTTP API. P(bound) had a median of 0.92 for binders
+  and 0.43 for detachers. The tendency was 0.64–0.72 vs 0.40–0.46. The plan
+  split follow/counter 36/36, the modes went 37/35, and all 8 caption types
+  occurred.
+- `scripts/diff_session_audit.py` recomputes the whole-stage model, the plan,
+  the slots and V2's test independently. It found 0 mismatches and caught a
+  tampered P(bound) and a tampered V2 status. The export audit passed.
+- `make check` passed (1903 tests, after prompt v3). The v3 walk and audit
+  were also clean: 0 mismatches.
+- The bench (`scripts/diff_prompt_bench.py`) runs both modes per clip and
+  reports per mode:
+  - length;
+  - place or on-screen words outside the sounds' names, and those the prompt
+    did not give;
+  - prompt sounds kept;
+  - the four contradicting clips side by side.
+
+**Open for the researcher:**
+- the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide
+  visibility on their own;
+- the parameters: 0.2 drawn, the 0.05 floor, the 1.5% click tolerance, ln 3,
+  the uniform tendency prior, the 0.5 threshold, the sky cut-offs, the 1.5
+  lift, and the `PLAUSIBLE` table;
+- the 29 drafted `audioset_label`s;
+- the two prompt texts and the Korean element, space and off-screen phrases;
+- the balanced plan, and the primary outcome subscale (the hypothesis
+  team suggests the sign of scene × centred E1/E3 on BF1_2, with the built
+  model's positive sign as the rival).
+
+Until then `BINDING_PROVISIONAL` and `TWEAK_PROVISIONAL` refuse participant
+sessions, and the setup's clips need approving again.
+
 ## Readiness fixes (2026-10-20)
 
 The 2026-10-19 smoke run with three agent pseudo participants on real Trida
@@ -318,7 +521,8 @@ of the instrument:
 This is plan Stage 4's detach for this module, done early.
 `dpo.regen.sheet_instrument` is no longer imported.
 
-**The tweak prompt** (`rewrite_prompts.TWEAK_P1`, `tweak-p1` v0) is
+**The tweak prompt** (`rewrite_prompts.TWEAK_P1`, `tweak-p1` v0; replaced on 2026-10-23 by the
+binding model's two modes, above) was
 **provisional**. `live serve --purpose participant` refuses until the
 researcher approves or rewrites it. `phase1_tweak` fills the slots from that
 clip's step-1 answers:

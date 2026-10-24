@@ -1,4 +1,4 @@
-"""Phase 1's second caption: the slots from first-step answers, the prompt, the job and its check."""
+"""Phase 1's second caption: the mode and slots from first-step answers, the prompt, the job and its check."""
 
 from __future__ import annotations
 
@@ -11,19 +11,35 @@ from phase1_fixtures import approved_setup
 
 from diff.job_plan import PlanError
 from diff.output_checks import GeneratedOutput, check_tweak
-from diff.phase1_tweak import NOT_SEEN, TweakError, degree, tweak_request, tweak_slots, tweak_source
-from diff.rewrite_prompts import TWEAK_PROVISIONAL, TWEAK_SLOTS, render_tweak
+from diff.phase1_tweak import (
+    TweakError,
+    named_in,
+    tweak_request,
+    tweak_source,
+    tweak_steer_all,
+)
+from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, TWEAK_SLOTS, render_tweak
 from diff.study_protocol import LIVE_CONDITION, TWEAK_MAX_CHARS
 
 RATINGS = ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")
+ON_THE_ROAD = (0.5, 0.9)  # the road, and kyoto's bus
 
 
 def first_step(
-    *, sound: str = "s2", obj: str | None = "road", fascination: int = 6, rest: int = 3
+    *,
+    sound: str = "s1",
+    obj: str | None = "road",
+    point: tuple[float, float] = ON_THE_ROAD,
+    fit: int = 6,
+    rest: int = 3,
 ) -> dict[str, dict[str, Any]]:
-    ratings = {item: (fascination if item.startswith("F") else rest) for item in RATINGS}
+    ratings = {item: (fit if item in ("E1", "E3") else rest) for item in RATINGS}
+    x, y = point
     return {
-        "P2": {"answers": {"V1": []}, "matches": [{"object_id": obj}]},
+        "P2": {
+            "answers": {"V1": [{"frame_id": "0", "x": x, "y": y}]},
+            "matches": [{"order": 0, "frame": 0, "x": x, "y": y, "object_id": obj}],
+        },
         "P3": {"answers": {"A1s": sound}},
         "P4": {"answers": ratings},
         "P5": {"answers": {"FA1": "no", "FA2": 0, "FA3": 6}},
@@ -31,59 +47,122 @@ def first_step(
 
 
 @pytest.fixture
-def clip(tmp_path: Path) -> dict[str, Any]:
-    return approved_setup(tmp_path)["clips"][0]  # kyoto_101
+def root(tmp_path: Path) -> Path:
+    return tmp_path
 
 
-def test_the_slots_carry_the_answers_and_the_degrees(clip: dict[str, Any]) -> None:
-    slots = tweak_slots(clip, first_step())
-    assert set(slots) == set(TWEAK_SLOTS)
+@pytest.fixture
+def clip(root: Path) -> dict[str, Any]:
+    return approved_setup(root)["clips"][0]  # kyoto_101
+
+
+def steer(
+    clip: dict[str, Any], records: dict[str, dict[str, Any]], assignment: str, root: Path
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """One clip decided alone: no other clips inform its tendency or centre its E1/E3."""
+    ((slots, model),) = tweak_steer_all([clip], [records], [assignment], root=root)
+    return slots, model
+
+
+def test_a_bound_sound_followed_is_written_scene_aware(clip: dict[str, Any], root: Path) -> None:
+    slots, model = steer(clip, first_step(), "follow", root)
+    assert (model["recommended"], model["mode"], model["attention"]["status"]) == ("scene", "scene", "hit")
+    assert set(slots) == set(TWEAK_SLOTS["scene"])
     assert slots == {
+        "mode": "scene",
         "caption": "버스가 공회전하는 소리",
         "sounds": "버스 소리",
-        "attended_sound": "남자의 말소리",
-        "attended_object": "도로",
-        "fascination": "100",
-        "being_away": "50",
-        "coherence": "50",
-        "familiarity": "0",
+        "attended_sound": "버스 소리",
+        "scene_elements": "하늘, 도로와 차량",
+        "seen": "하늘",  # the distinctive element, wherever the V1 point fell (on the road)
+        "visible_sounds": "버스 소리, 남자의 말소리",  # the man is judged partly visible
+        "offscreen": "",  # kyoto has no sound judged not visible
     }
-    assert degree([0, 6]) == 50 and degree([5, 4, 6]) == 83
+    assert model["caption"] == {"type": "scene/open"}
+    assert model["baseline"]["fascination"] == 3 and model["baseline"]["extent_coherence"] == 5
 
 
-def test_a_point_on_no_object_and_a_missing_page(clip: dict[str, Any]) -> None:
-    assert tweak_slots(clip, first_step(obj=None))["attended_object"] == NOT_SEEN
+def test_countering_it_writes_it_acousmatic_from_the_scene_s_openness(
+    clip: dict[str, Any], root: Path
+) -> None:
+    slots, model = steer(clip, first_step(), "counter", root)
+    assert (model["recommended"], model["mode"], model["assignment"]) == ("scene", "acousmatic", "counter")
+    assert slots == {
+        "mode": "acousmatic",
+        "caption": "버스가 공회전하는 소리",
+        "sounds": "버스 소리",
+        "attended_sound": "버스 소리",
+        "space": " 소리가 넓게 트인 곳에서 멀리 퍼져 나가는 느낌도 살려 주세요.",
+    }
+    assert model["caption"] == {"type": "acousmatic/open"}
+    neutral = {**clip, "scene": {**clip["scene"], "openness": "neutral"}}
+    assert steer(neutral, first_step(), "counter", root)[0]["space"] == ""
+
+
+def test_the_setting_is_the_clip_s_whatever_the_point_and_a_missing_page_stops(
+    clip: dict[str, Any], root: Path
+) -> None:
+    on_road, on_nothing = (
+        steer(clip, first_step(), "follow", root),
+        steer(clip, first_step(obj=None), "follow", root),
+    )
+    assert on_road == on_nothing
     records = first_step()
     del records["P4"]
     with pytest.raises(TweakError, match=r"no \['P4'\]"):
-        tweak_slots(clip, records)
+        steer(clip, records, "follow", root)
 
 
-def test_the_prompt_names_every_slot_in_korean_only(clip: dict[str, Any]) -> None:
-    prompt = render_tweak(tweak_slots(clip, first_step()))
-    for text in (
-        "「버스가 공회전하는 소리」",
-        "이 영상에서 들리는 소리: 버스 소리.",
-        "「남자의 말소리」",
-        "「도로」",
-        ": 100%",
-    ):
-        assert text in prompt.text
-    assert not re.search(r"[A-Za-z]", prompt.text)
+def test_a_source_judged_unseen_is_placed_here_unless_it_is_the_recording_s_own(root: Path) -> None:
+    setup = approved_setup(root)
+    lima, oslo = setup["clips"][1], setup["clips"][2]  # lima's horn and oslo's mic wind: never visible
+    slots, model = steer(lima, first_step(sound="s1"), "follow", root)
+    assert slots["visible_sounds"] == "차량이 오가는 소리" and model["attention"]["status"] == "hit"
+    assert slots["offscreen"] == (
+        " 화면에 음원이 보이지 않는 소리(경적 소리)는 "
+        "화면에는 보이지 않지만 이곳 어딘가에서 들려오는 소리로 쓰세요."
+    )
+    assert steer(oslo, first_step(sound="s1"), "follow", root)[0]["offscreen"] == ""
+
+
+def test_both_prompts_name_every_slot_in_korean_only(clip: dict[str, Any], root: Path) -> None:
+    for assignment, mode in (("follow", "scene"), ("counter", "acousmatic")):
+        slots, _ = steer(clip, first_step(), assignment, root)
+        prompt = render_tweak(slots)
+        assert prompt.template_sha256 == TWEAK_PROMPTS[mode].sha256
+        for text in (
+            "「버스가 공회전하는 소리」",
+            "이 영상에서 들리는 소리: 버스 소리.",
+            "주의를 기울인 소리: 버스 소리.",
+        ):
+            assert text in prompt.text
+        assert "{" not in prompt.text and not re.search(r"[A-Za-z]", prompt.text)
+    assert "화면 속 대상이나 장소는 말하지 마세요" in TWEAK_PROMPTS["acousmatic"].text
+    assert "그 소리를 내는 대상과만 이어 주세요." in TWEAK_PROMPTS["scene"].text
+    assert "화면에 없는 대상을 지어내지 마세요" in TWEAK_PROMPTS["scene"].text
+    assert {template.version for template in TWEAK_PROMPTS.values()} == {3}
+    assert all("80자 이내로" in template.text for template in TWEAK_PROMPTS.values())
+    assert "이 장면에 퍼져 있는 소리" not in TWEAK_PROMPTS["scene"].text and TWEAK_MAX_CHARS == 80
     assert TWEAK_PROVISIONAL is True
     with pytest.raises(ValueError, match="exactly the slots"):
+        render_tweak({"mode": "scene", "caption": "x"})
+    with pytest.raises(ValueError, match="mode must be one of"):
         render_tweak({"caption": "x"})
 
 
-def test_the_job_is_phase_one_at_the_live_condition_and_follows_the_answers(clip: dict[str, Any]) -> None:
-    source, job, record = tweak_request(clip, first_step(), "smoke")
+def test_the_job_is_phase_one_at_the_live_condition_and_follows_the_mode(
+    clip: dict[str, Any], root: Path
+) -> None:
+    source, job, record = tweak_request(clip, first_step(), "smoke", root=root)
     assert (job.phase, job.condition, job.cell) == (1, LIVE_CONDITION, None)
     assert job.spec()["generate"]["max_new_tokens"] == 128 and source.text == clip["caption"]["text"]
     assert record["intended_r2_key"] == ["m1"] and record["job_id"] == job.job_id
-    assert tweak_request(clip, first_step(), "smoke")[1].job_id == job.job_id
-    assert tweak_request(clip, first_step(fascination=0), "smoke")[1].job_id != job.job_id
+    assert record["template"]["mode"] == "scene"
+    assert tweak_request(clip, first_step(), "smoke", root=root)[1].job_id == job.job_id
+    countered = tweak_request(clip, first_step(), "smoke", root=root, assignment="counter")[1]
+    assert countered.job_id != job.job_id
     with pytest.raises(PlanError, match="participant session or a smoke run"):
-        tweak_request(clip, first_step(), "development")
+        tweak_request(clip, first_step(), "development", root=root)
 
 
 def output(text: str, terminator: str | None = "endoftext") -> GeneratedOutput:
@@ -110,3 +189,10 @@ def test_the_check_fails_only_what_cannot_be_shown(clip: dict[str, Any]) -> None
     copied = check_tweak(source, output(source.text), max_chars=TWEAK_MAX_CHARS)
     assert not copied.excluded and "identical_to_source" in codes(copied, "flags")
     assert copied.profile == "tweak-v3"
+
+
+def test_a_caption_names_a_sound_by_its_words_roughly() -> None:
+    assert named_in("경찰차 사이렌이 울린다.", "경찰차 사이렌 소리")
+    assert named_in("사람들의 말소리가 겹친다.", "사람들의 말소리")
+    assert not named_in("새가 지저귄다.", "새소리")  # the rule's known miss
+    assert not named_in("엔진 소리만 들린다.", "음악 소리")

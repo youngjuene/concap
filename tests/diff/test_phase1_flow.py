@@ -14,6 +14,7 @@ from phase1_fixtures import DURATION_MS, approved_setup
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.playback as regen_playback
+from diff.phase1_binding import assignment_plan
 from diff.phase1_flow import (
     HANDOFF_TEXT,
     PREPARING,
@@ -105,6 +106,29 @@ def through_practice(flow: Phase1, state: dict[str, Any]) -> None:
     flow.apply(state, "practice-complete", {"page": "practice", "answers": answers}, 2.0)
 
 
+def test_each_clip_s_mode_comes_from_the_model_and_the_balanced_plan(flow: Phase1) -> None:
+    state = flow.new_state("s-test", "P1", seed=7)
+    assert state["assignment"] == {
+        "policy": "diff.phase1-assignment/balanced-v1",
+        "plan": assignment_plan(7, 3),
+    }
+    through_practice(flow, state)
+    now = 10.0
+    for _ in range(2):
+        now = step(flow, state, now)
+    assert state["second_captions"] == {}  # nothing is decided before stage A closes
+    step(flow, state, now)
+    entries = list(state["second_captions"].values())
+    assert [entry["clip_index"] for entry in entries] == [0, 1, 2]  # queued in stage-B order
+    for index, entry in enumerate(entries):
+        model = entry["model"]
+        assert model["assignment"] == state["assignment"]["plan"][index]
+        assert entry["slots"]["mode"] == model["mode"] == entry["template"]["mode"]
+        assert (model["mode"] == model["recommended"]) is (model["assignment"] == "follow")
+        # Each clip's tendency comes from the other two clips' points, and E1/E3 are centred.
+        assert model["tendency"]["clips"] == 2 and model["congruence"]["centre"] == 4
+
+
 def test_a_whole_phase_one_walk(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=7)
     assert state["clip_order"] == clip_order(["kyoto_101", "lima_202", "oslo_303"], 7)
@@ -135,6 +159,8 @@ def test_a_whole_phase_one_walk(flow: Phase1) -> None:
     assert {view for page, view in views if page in STEP_B} == {"s-test-0-P6"}
     p2, p7 = (next(r for r in state["responses"] if r["page"] == page) for page in ("P2", "P7"))
     assert p2["labels"] == ["Road"] and p7["labels"] == ["Sky"]
+    # V2 against the noticed sound's click mask: the point in the sky misses the source.
+    assert p7["source_attention"]["status"] == "miss" and "source_attention" not in p2
     p9 = next(r for r in state["responses"] if r["page"] == "P9")
     assert p9["presented_order"] == [
         i["id"] for i in workbook_instrument.page_spec("P9", session_key="s-test")["items"]
@@ -168,18 +194,18 @@ def test_a_failed_second_caption_skips_that_clip_s_second_step(flow: Phase1) -> 
 def test_one_retry_is_kept_across_restarts_and_late_outcomes_are_ignored(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=7)
     through_practice(flow, state)
-    step(flow, state, 10.0)
-    ((key, slots, attempt),) = flow.pending_tweaks(state)
+    through_stage_a(flow, state, 10.0)
+    (key, slots, attempt), *_ = flow.pending_tweaks(state)
     assert attempt == 1 and slots == state["second_captions"][key]["slots"]
     retry = {"status": "retry", "attempt": 1, "result_status": "worker_lost", "reason": "worker_lost: x"}
     flow.record_tweak(state, key, retry, 20.0)
-    assert flow.pending_tweaks(state) == [(key, slots, 2)]
+    assert flow.pending_tweaks(state)[0] == (key, slots, 2)
     ready = {"status": "ready", "attempt": 2, "result_status": "completed", "job_id": "j", "text": "새 자막"}
     flow.record_tweak(state, key, ready, 21.0)
     flow.record_tweak(state, key, {**ready, "text": "늦게 온 자막"}, 22.0)
     entry = state["second_captions"][key]
     assert entry["status"] == "ready" and entry["text"] == "새 자막" and len(entry["attempts"]) == 2
-    assert flow.pending_tweaks(state) == []
+    assert key not in [pending for pending, _, _ in flow.pending_tweaks(state)]
 
 
 def test_every_page_says_where_it_sits_in_the_session(flow: Phase1) -> None:

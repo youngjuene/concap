@@ -19,7 +19,10 @@ Files written to ``--out``:
   R2, the intended key, the sounds the second-caption prompt named.
 - ``second_captions.csv``: one row per participant × clip: the status (and why
   a step was skipped), the first and second captions, what steered the second
-  (the attended sound and object, the four degrees) and its check flags.
+  (the attended sound, the binding model's evidence and P(bound), the
+  recommended mode, follow or counter, the mode used and the caption type), its
+  check flags, and whether the V2 point (P7) fell on the noticed sound's source,
+  the behavioural check of the mode.
 - ``post_watch.csv``: one row per participant × post-watch item.
 - ``manifest.json``: counts, the setup's hash and each file's SHA-256.
 """
@@ -36,7 +39,7 @@ from typing import Any, Final
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v2"
+EXPORT_SCHEMA: Final = "diff.export/v3"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -67,16 +70,26 @@ SECOND_CAPTION_COLUMNS: Final = (
     "first_caption",
     "second_caption",
     "attended_sound",
-    "attended_object",
-    "fascination",
-    "being_away",
-    "coherence",
-    "familiarity",
+    "noticed_audioset_label",
+    "on_screen",
+    "visibility",
+    "measured_visibility",
+    "attention",
+    "congruence",
+    "congruence_centre",
+    "tendency",
+    "p_bound",
+    "recommended",
+    "assignment",
+    "mode",
+    "caption_type",
+    "seen",
     "intended_r2_key",
     "template_sha256",
     "template_provisional",
     "job_id",
     "check_flags",
+    "v2_attention",
 )
 SOUND_ITEMS: Final = frozenset({"A1s", "A2s"})
 POINT_ITEMS: Final = frozenset({"V1", "V2"})
@@ -161,7 +174,13 @@ def second_caption_rows(
     for key, entry in entries:
         clip = clips.get(key, {})
         slots = entry.get("slots", {})
+        model = entry.get("model", {})
         flags = [finding["code"] for finding in (entry.get("checks") or {}).get("flags", [])]
+        v2 = [
+            r
+            for r in state.get("responses", [])
+            if r["page"] == "P7" and r["clip_index"] == entry["clip_index"] and not r.get("analysis_excluded")
+        ]
         yield {
             "participant": participant,
             "session_id": session_id,
@@ -174,11 +193,20 @@ def second_caption_rows(
             "first_caption": clip.get("caption", {}).get("text", ""),
             "second_caption": entry.get("text", ""),
             "attended_sound": slots.get("attended_sound", ""),
-            "attended_object": slots.get("attended_object", ""),
-            "fascination": slots.get("fascination", ""),
-            "being_away": slots.get("being_away", ""),
-            "coherence": slots.get("coherence", ""),
-            "familiarity": slots.get("familiarity", ""),
+            "noticed_audioset_label": model.get("noticed", {}).get("audioset_label", ""),
+            "on_screen": model.get("noticed", {}).get("on_screen", ""),
+            "visibility": model.get("visibility", ""),
+            "measured_visibility": model.get("measured_visibility", ""),
+            "attention": model.get("attention", {}).get("status", ""),
+            "congruence": model.get("congruence", {}).get("mean", ""),
+            "congruence_centre": model.get("congruence", {}).get("centre", ""),
+            "tendency": model.get("tendency", {}).get("mean", ""),
+            "p_bound": model.get("p_bound", ""),
+            "recommended": model.get("recommended", ""),
+            "assignment": model.get("assignment", ""),
+            "mode": model.get("mode", ""),
+            "caption_type": model.get("caption", {}).get("type", ""),
+            "seen": slots.get("seen", ""),
             "intended_r2_key": _cell(
                 [o["value"] for o in clip.get("options", {}).get("R2", []) if o.get("mentioned")]
             ),
@@ -186,6 +214,7 @@ def second_caption_rows(
             "template_provisional": entry.get("template", {}).get("provisional", ""),
             "job_id": entry.get("job_id", ""),
             "check_flags": _cell(flags),
+            "v2_attention": v2[-1].get("source_attention", {}).get("status", "") if v2 else "",
         }
 
 

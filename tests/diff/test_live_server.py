@@ -21,7 +21,7 @@ from diff.live_server import LivePool, LiveVideo, rating_items
 from diff.model_profile import TRIDA_7B
 from diff.participant_server import build_participant_app
 from diff.session_store import SessionStore
-from diff.study_protocol import CONTEXT_STEPS
+from diff.study_protocol import CONTEXT_STEPS, TWEAK_MAX_CHARS
 
 VIDEO = "live_test_video"
 ITEMS = {
@@ -257,14 +257,17 @@ def test_rating_items_are_validated() -> None:
             rating_items(bad)
 
 
-@pytest.mark.parametrize("approved", ["", "TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL"])
+@pytest.mark.parametrize(
+    "approved", ["", "TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL", "BINDING_PROVISIONAL"]
+)
 def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: str
 ) -> None:
     from diff.__main__ import main
 
     if approved:  # one of them approved, the others still provisional
-        monkeypatch.setattr(f"diff.rewrite_prompts.{approved}", False)
+        module = "phase1_binding" if approved == "BINDING_PROVISIONAL" else "rewrite_prompts"
+        monkeypatch.setattr(f"diff.{module}.{approved}", False)
 
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
@@ -280,7 +283,8 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
     for blocker, flag in (
         ("tuner system message", "TUNER_PROVISIONAL"),
         ("nine live prompts are still provisional", "LIVE_PROMPTS_PROVISIONAL"),
-        ("second-caption prompt is still provisional", "TWEAK_PROVISIONAL"),
+        ("second-caption prompts are still provisional", "TWEAK_PROVISIONAL"),
+        ("binding model's parameters and plan are still provisional", "BINDING_PROVISIONAL"),
     ):
         assert (blocker in str(stopped.value)) is (flag != approved), blocker
 
@@ -293,6 +297,7 @@ def test_participant_sessions_need_reviewed_starting_captions(
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.LIVE_PROMPTS_PROVISIONAL", False)
+    monkeypatch.setattr("diff.phase1_binding.BINDING_PROVISIONAL", False)
     sources = tmp_path / "sources.json"  # the test stream's cues are drafts
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
     sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
@@ -331,7 +336,8 @@ def test_preflight_lists_every_blocker_at_once(
         "no video at",
         "tuner system message is still provisional",
         "nine live prompts are still provisional",
-        "second-caption prompt is still provisional",
+        "second-caption prompts are still provisional",
+        "binding model's parameters and plan are still provisional",
         "need phase 1",
         "3 cues are not",
         "Trida snapshot",
@@ -347,6 +353,7 @@ def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.LIVE_PROMPTS_PROVISIONAL", False)
+    monkeypatch.setattr("diff.phase1_binding.BINDING_PROVISIONAL", False)
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
     sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
@@ -367,3 +374,13 @@ def test_the_fake_worker_quotes_the_cue_of_a_live_prompt(monkeypatch: pytest.Mon
     job = live_job(cue, 1, "broad", "튜너", "smoke")
     text = _fake_live_attempt(job.record(), 1.0)["output"]["text"]
     assert text == f"{cue.text} (시험용 · 질감 1 · broad)"
+
+
+def test_the_fake_worker_s_second_caption_fits_the_tweak_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from diff.__main__ import _fake_live_attempt
+
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+    long = "가" * 120
+    payload = {"prompt": {"text": f"자막입니다: 「{long}」\n고쳐 쓰세요."}, "cell": None}
+    text = _fake_live_attempt(payload, 1.0)["output"]["text"]
+    assert len(text) <= TWEAK_MAX_CHARS and text.endswith("(시험용 · 두 번째 자막)")

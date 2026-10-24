@@ -37,7 +37,7 @@ def requests(tmp_path: Path) -> list[TweakRequest]:
     setup = approved_setup(tmp_path)
     made = []
     for clip in setup["clips"]:
-        source, job, steer = tweak_request(clip, first_step(), "smoke")
+        source, job, steer = tweak_request(clip, first_step(), "smoke", root=tmp_path)
         made.append(TweakRequest("s1", clip["key"], source, job, steer))
     return made
 
@@ -69,7 +69,7 @@ def test_tweaks_run_in_order_and_only_for_the_claimed_session(
     assert all(o["status"] == "ready" and o["text"] == "버스가 낮게 공회전한다." for _, o in outcomes)
     lines = [json.loads(line) for line in (tmp_path / "logs" / "live-s1.jsonl").read_text().splitlines()]
     assert [line["kind"] for line in lines] == ["tweak"] * 3
-    assert lines[0]["steer"]["slots"]["fascination"] == "100" and lines[0]["outcome"] == "ready"
+    assert lines[0]["steer"]["slots"]["mode"] == "scene" and lines[0]["outcome"] == "ready"
     assert lines[0]["checks"]["profile"] == "tweak-v3"
 
 

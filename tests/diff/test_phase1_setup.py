@@ -8,7 +8,7 @@ from pathlib import Path
 
 import phase1_fixtures
 import pytest
-from phase1_fixtures import PREPARED, approved_setup, drafted, filled
+from phase1_fixtures import PREPARED, approved_setup, drafted, filled, with_scenes
 
 import diff.workbook_instrument as workbook_instrument
 from diff.__main__ import main
@@ -77,7 +77,7 @@ def test_the_prepared_captions_are_copied_raw(tmp_path: Path) -> None:
     setup = drafted(tmp_path)
     assert {clip["key"]: clip["caption"]["text"] for clip in setup["clips"]} == PREPARED
     assert setup["clips"][1]["caption"]["text"].count("\n") == 2  # three lines, kept and allowed
-    assert problems(filled(setup), "smoke", tmp_path) == []
+    assert problems(with_scenes(filled(setup), tmp_path), "smoke", tmp_path) == []
 
 
 def test_a_clip_without_a_prepared_caption_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,7 +87,7 @@ def test_a_clip_without_a_prepared_caption_is_named(tmp_path: Path, monkeypatch:
 
 
 def test_what_the_prepared_material_needs_no_longer_refuses(tmp_path: Path) -> None:
-    setup = filled(drafted(tmp_path))
+    setup = with_scenes(filled(drafted(tmp_path)), tmp_path)
     setup["clips"][0]["caption"]["text"] = "버스 " * 60  # long and raw
     setup["clips"][0]["options"]["A1s"] = setup["clips"][0]["options"]["A1s"][:1]  # one sound
     setup["clips"][0]["options"]["R2"][1].update(mentioned=True, orig_phrase="a man speaks")  # no distractor
@@ -102,7 +102,7 @@ def test_unwritten_options_block_even_smoke_sessions(tmp_path: Path) -> None:
 
 
 def test_participant_sessions_need_every_part_approved(tmp_path: Path) -> None:
-    setup = filled(drafted(tmp_path))
+    setup = with_scenes(filled(drafted(tmp_path)), tmp_path)
     found = problems(setup, "participant", tmp_path)
     assert len(found) == 4 and all("not approved" in problem for problem in found)
     assert problems(approved_setup(tmp_path / "again"), "participant", tmp_path / "again") == []
@@ -179,7 +179,9 @@ def test_approval_needs_a_name_and_known_clips(tmp_path: Path) -> None:
 def test_the_cli_shows_and_approves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "setup.json"
-    path.write_text(json.dumps(filled(drafted(tmp_path)), ensure_ascii=False), encoding="utf-8")
+    path.write_text(
+        json.dumps(with_scenes(filled(drafted(tmp_path)), tmp_path), ensure_ascii=False), encoding="utf-8"
+    )
     assert main(["phase1", "show", "--setup", str(path)]) == 0
     shown = capsys.readouterr().out
     assert "[kyoto_101]" in shown and "4 problems for participant sessions" in shown

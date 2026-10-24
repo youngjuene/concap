@@ -31,8 +31,13 @@ words (``orig_phrase``); nothing it names is dropped and no sound is added from
 the labels. R2 is asked after the second viewing, about Trida's caption, so
 its key is taken from the prompt (researcher, 2026-10-18): the mentioned
 options' labels are the sounds the second-caption prompt names, and so count
-as mentioned. Each part is approved by the researcher (:func:`approve`) against
-a hash of its content, so any later edit voids the approval.
+as mentioned. Each A1s option also names the AudioSet label that stands for its
+sound (``audioset_label``), whose Sa2VA audio masks the clip's scene part reads
+(``python -m diff phase1 scene``, :mod:`diff.phase1_scene`, 2026-10-23); the
+label keys the masks and never words an option. Whether its source is on
+screen is measured from those masks, never judged (researcher, 2026-10-24).
+Each part is approved by the researcher (:func:`approve`) against a hash of its
+content, so any later edit voids the approval.
 :func:`setup_problems` refuses a participant setup until every part is approved.
 """
 
@@ -48,6 +53,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from diff.caption_sources import CATEGORIES_KO
+from diff.phase1_scene import scene_problems
 from diff.study_protocol import sha256_of
 
 SETUP_SCHEMA: Final = "diff.phase1-setup/v1"
@@ -68,7 +74,7 @@ FAMILY_ORDER: Final = ("human", "animal", "music", "natural", "things", "other")
 OPTION_RULE: Final = (
     "each A1s option and each mentioned R2 option renders a sound orig_text names and quotes those "
     "words (orig_phrase); the mentioned R2 labels are the sounds the second-caption prompt names; "
-    "AudioSet labels only inform the families"
+    "AudioSet labels only inform the families and, as each A1s option's audioset_label, key its audio masks"
 )
 # Regen's document rule for a segment's annotated frames (dpo.regen.document).
 FRAMES_MIN: Final = 3
@@ -413,6 +419,11 @@ def _clip_problems(clip: Mapping[str, Any], root: Path, page_spec: Callable[...,
             problems.append(
                 f"{where}.A1s {option.get('value')}: family must be one of {sorted(CATEGORIES_KO)}"
             )
+        labels = {entry["label"] for entry in clip.get("audioset_labels", [])}
+        if option.get("audioset_label") not in labels:
+            problems.append(
+                f"{where}.A1s {option.get('value')}: audioset_label must be one of {sorted(labels)}"
+            )
     recall = clip["options"]["R2"]
     problems += _option_problems("P11", "R2", recall, page_spec, f"{where}.R2")
     if any(not isinstance(option.get("mentioned"), bool) for option in recall):
@@ -420,7 +431,7 @@ def _clip_problems(clip: Mapping[str, Any], root: Path, page_spec: Callable[...,
     for option in recall:
         if option.get("mentioned") is True:
             problems += _phrase_problems(option, orig_text, f"{where}.R2 {option.get('value')}")
-    return problems
+    return problems + scene_problems(clip, root)
 
 
 def _practice_problems(

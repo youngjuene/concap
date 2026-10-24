@@ -81,10 +81,17 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         "다시 쓴 두 번째 자막",
         clip["caption"]["text"],
     )
-    assert row["attended_sound"] == clip["options"]["A1s"][0]["label"] and row["attended_object"] == "하늘"
-    assert (
-        row["fascination"] == "33" and row["intended_r2_key"] == '["m1"]' and row["job_id"].startswith("job-")
+    assert row["attended_sound"] == clip["options"]["A1s"][0]["label"]
+    assert row["noticed_audioset_label"] == clip["options"]["A1s"][0]["audioset_label"]
+    assert row["on_screen"] == str(clip["scene"]["sounds"]["s1"]["visibility"]["on_screen"])
+    assert 0 < float(row["tendency"]) < 1 and row["congruence_centre"] != ""
+    assert row["v2_attention"] in ("hit", "miss", "source not seen")  # V2 on the noticed source
+    assert row["assignment"] in ("follow", "counter") and 0 < float(row["p_bound"]) < 1
+    assert row["mode"] == (row["recommended"] if row["assignment"] == "follow" else row["mode"])
+    assert row["caption_type"].startswith(row["mode"]) and row["seen"] == (
+        "하늘" if row["mode"] == "scene" else ""
     )
+    assert row["intended_r2_key"] == '["m1"]' and row["job_id"].startswith("job-")
     assert row["template_provisional"] == "True"
 
     with (out / "post_watch.csv").open(encoding="utf-8") as handle:
