@@ -514,3 +514,38 @@ The baseline inputs are `artifacts/diff/bench/inputs-smoke-20261019.json`,
 from the 2026-10-19 smoke run with three agent pseudo participants. The file
 is not tracked, because it holds the long videos' draft cues.
 
+## 11. Drafting every second caption for review
+
+A second caption's prompt depends on the participant only through the
+clip's mode and the attended sound (A1s). The scene-aware setting is the
+clip's own (`diff.phase1-tweak/v5`). The set of prompts is therefore small.
+On 2026-10-24 the researcher chose to draft them all and review every one
+before the study.
+
+```sh
+uv run python scripts/diff_second_captions.py variants \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json --out DIR/variants.json
+CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_second_captions.py draft \
+  --variants DIR/variants.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
+  --candidate artifacts/diff/bench/candidates-20261024/B-words.json \
+  --candidate artifacts/diff/bench/candidates-20261024/E-short-where.json \
+  --out DIR/drafts.json --sheet DIR/review.csv
+```
+
+`variants` lists every slot set a participant can reach, with
+`phase1_tweak.reachable_slots`, the function the app's gate uses. Each slot
+set is keyed by `phase1_tweak.variant_id`, a hash of the slots.
+
+`draft` writes every variant once per wording, at the study's settings. Each draft is scored with
+the server's check and the bench's measures. The output is a review sheet with one row per
+variant: the drafts and their issues side by side, then empty `approved_text`, `approved_from`
+and `note` columns.
+
+The setup of 2026-10-24 gives 58 variants: 29 per mode, one per sound. The
+first run, with the V1 object as the setting, gave 277; it is kept in
+`superseded-277/`. Instructions for the reviewer are in the output folder's
+`README.md` (`artifacts/diff/phase1/second-captions-20261024/`).
+
+Re-run both steps when the setup, the scene or `phase1_tweak` changes, since the IDs change with
+the slots. The app still generates second captions live: serving the approved ones is the next
+step.

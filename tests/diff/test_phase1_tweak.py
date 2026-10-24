@@ -14,9 +14,11 @@ from diff.output_checks import GeneratedOutput, check_tweak
 from diff.phase1_tweak import (
     TweakError,
     named_in,
+    reachable_slots,
     tweak_request,
     tweak_source,
     tweak_steer_all,
+    variant_id,
 )
 from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, TWEAK_SLOTS, render_tweak
 from diff.study_protocol import LIVE_CONDITION, TWEAK_MAX_CHARS
@@ -111,6 +113,18 @@ def test_the_setting_is_the_clip_s_whatever_the_point_and_a_missing_page_stops(
     del records["P4"]
     with pytest.raises(TweakError, match=r"no \['P4'\]"):
         steer(clip, records, "follow", root)
+
+
+def test_every_caption_a_participant_can_reach_is_listed_once_per_mode_and_sound(root: Path) -> None:
+    for clip in approved_setup(root)["clips"]:
+        listed = {variant_id(slots): slots for slots in reachable_slots(clip)}
+        assert len(listed) == 2 * len(clip["options"]["A1s"])
+        for option in clip["options"]["A1s"]:
+            for obj, point in (("road", ON_THE_ROAD), (None, (0.5, 0.1))):
+                for assignment in ("follow", "counter"):
+                    records = first_step(sound=option["value"], obj=obj, point=point)
+                    slots, _ = steer(clip, records, assignment, root)
+                    assert listed[variant_id(slots)] == slots
 
 
 def test_a_source_judged_unseen_is_placed_here_unless_it_is_the_recording_s_own(root: Path) -> None:

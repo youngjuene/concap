@@ -36,6 +36,8 @@ and FA2/FA3 are recorded as the clip's baseline (``model.baseline``).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -173,6 +175,28 @@ def tweak_slots(
 def on_screen(clip: Mapping[str, Any], option: Mapping[str, Any]) -> bool:
     """Whether the masks put an A1s option's source on screen (its scene part's measured share)."""
     return bool(clip["scene"]["sounds"][option["value"]]["visibility"]["on_screen"])
+
+
+def reachable_slots(clip: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Every slot set a participant can reach on this clip, so every second caption it can show.
+
+    The setting is the clip's, so only the mode and the attended sound (A1s, a required choice)
+    vary. A V1 point can hit the attended sound's source only where the masks put it on screen
+    (``phase1_binding.attention``); both outcomes are tried there.
+    """
+    found: dict[str, dict[str, str]] = {}
+    for option in clip["options"]["A1s"]:
+        for status in ("hit", "miss") if on_screen(clip, option) else ("miss",):
+            model = {"noticed": {"value": option["value"]}, "attention": {"status": status}}
+            for mode in TWEAK_PROMPTS:
+                slots = tweak_slots(clip, mode, option["value"], model)
+                found.setdefault(variant_id(slots), slots)
+    return list(found.values())
+
+
+def variant_id(slots: Mapping[str, str]) -> str:
+    """A second caption's key: a hash of its prompt's slots, by which a reviewed caption is found."""
+    return hashlib.sha256(json.dumps(slots, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def tweak_source(clip: Mapping[str, Any]) -> CaptionSource:

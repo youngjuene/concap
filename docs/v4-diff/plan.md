@@ -197,6 +197,114 @@ correction in both modes, so they enter as a covariate.
   - prompt sounds kept;
   - the four contradicting clips side by side.
 
+**Real Trida, 2026-10-24 (GPU 1, once the card was free).**
+- The six pseudo participants walked phase 1 again with the real worker, so
+  each one's 12 second captions ran through the app's queue.
+  - The audit found 0 mismatches.
+  - The token re-hash matched 72/72 prompts.
+  - The bench, given that walk's answers, reproduced every planned caption
+    exactly (72/72).
+- **The check failed 9 of 72 second captions**, so those clips' second
+  viewings were skipped. Seven were scene-aware, and singapore_286 failed 3
+  of 3 scene-aware captions. Trida either:
+  - copied the scene prompt's labelled slots ("화면에서 두드러:", "장면
+    배경:", "음원 보이는 소리:") until it ran out of room;
+  - looped ("차, 차, 차, …");
+  - or stopped after one word ("도로를").
+- **What passes is mostly a list of sound names.** On the bench's 144
+  captions (both modes):
+  - 100 have no sentence (scene-aware 54/72, acousmatic 46/72).
+  - The modes always differ in wording (72/72) but rarely in kind. 30 of 72
+    scene-aware captions name a place or object. A word for how a sound
+    sounds (distance, loudness, "희미한", "계속"; a rough count, often
+    carried over from the first caption) appears in 28 of 72 acousmatic and
+    13 of 72 scene-aware ones.
+  - Near-copies of the first caption: acousmatic 11/72, scene-aware 2/72.
+  - A wrong sound from the first caption survives in 32 of the 48 captions
+    of the four clips that have one (기차, 경적, 오토바이, 체증).
+  - Nine name an R2 distractor.
+  - Trida wrote a "자막:" label in 35 (17 of the 72 planned), and words
+    are visibly broken ("기기차", "엔진 엔진", "소리음").
+
+  tweak-p1 v3 therefore does not yet deliver the manipulation. The report is
+  `artifacts/diff/bench/tweak-v3-20261024.json`, and the walk is in
+  `artifacts/diff/walk-v3-real-20261024/` (both gitignored).
+
+**Wording round, 2026-10-24** (researcher: "draft and run the candidates").
+Six scratch candidates ran on the same inputs; none is a proposal. Everything
+is in `artifacts/diff/bench/candidates-20261024/`: the candidate files, their
+reports, `score.py`, and `RULE.md`. The selection rule was written before each
+round ran.
+- A caption counts as **delivered** when it:
+  - passes the server's check;
+  - is a sentence;
+  - is not a near-copy of the first caption;
+  - keeps no wrong first-caption sound and names no R2 distractor;
+  - has no visibly broken text.
+
+  A wording's score is the delivered count of its weaker mode, out of 72.
+
+| Wording | Scene-aware | Acousmatic | Weaker mode | With the stricter damage check |
+|---|---|---|---|---|
+| v3 (checkout) | 11 | 9 | 9 | 9 |
+| A, prose (slots inside sentences, no "label: value" lines) | 19 | 15 | 15 | 9 |
+| B, A plus concrete expressions | 38 | 46 | **38** | 28 |
+| C, A plus an unrelated example | 25 | 26 | 25 | 19 |
+| D, short | 40 | 30 | 30 | 20 |
+| E, D's scene-aware with where-to phrases, B's acousmatic | 35 | 47 | 35 | 27 |
+| F, B with where-to phrases | 12 | 47 | 12 | 10 |
+
+- **The rule picks B.** Its scene-aware text gives phrases like "…에서
+  들려온다", "…너머로 들린다"; its acousmatic text gives words like 멀리서,
+  낮게, 끊임없이, 희미하게, 또렷하게. Most of its captions are real sentences,
+  e.g. "사이렌 소리가 멀리서 들려오고, 차량들이 오가는 소리가 또렷하게
+  들린다."
+- **Costs of B:**
+  - In 10 of its 38 delivered scene-aware captions, a sound comes from
+    something that doesn't make it ("진행자의 목소리가 하늘에서 울린다").
+    E's scene-aware text has none of these (0 of 35), but E names fewer
+    places (manipulation 24 vs 32), and the rule's tie-break goes to B.
+  - The acousmatic qualities come from the prompt's word list, not from the
+    audio: "또렷하게" appears in 42 of 46. These need the researcher's
+    listened qualities.
+- **Visible damage is under-counted.** Cut verbs ("울려 퍼,", "흐,") and
+  doubled phrases slip past the bench's broken-text check. The last column
+  counts them as damage (a check added after the run, so it doesn't change
+  the pick). On it, B and E are level, about 28 of 72.
+- **Second captions could be prepared ahead.** A prompt depends on the
+  participant only through:
+  - the mode;
+  - the attended sound (A1s);
+  - the object under the V1 point (scene-aware only);
+  - whether that point hit an unseen source (scene-aware only).
+
+  That gives 29 acousmatic prompts and at most a few hundred scene-aware
+  ones. All of them could be generated and approved by a fluent reader
+  before the study, instead of the server showing whatever passes the
+  check. This is the researcher's decision.
+
+**All second captions drafted for review (researcher, 2026-10-24).** This
+first run, with the V1 object as the setting, is superseded by v3's 58
+variants (one setting per clip, measured visibility); it is kept in the
+folder's `superseded-277/`.
+- `scripts/diff_second_captions.py` lists every reachable prompt (runbook
+  §11): 277 variants, 29 acousmatic and 248 scene-aware. The list contains
+  every slot set from the bench and the real walk.
+- Trida drafted each one with both finalists, B and E. The drafts reproduce
+  the bench's outputs exactly (144/144 per wording).
+- 130 of the 277 rows have at least one draft with no flagged issue:
+  - 20 of the 29 acousmatic rows;
+  - 42% of the scene-aware rows, weighted by how often a V1 point lands on
+    each setting.
+- E fails the check on 120 of 248 scene-aware variants, against 16 of 72 on
+  the bench: it does worse on the settings the bench did not sample.
+- The sheet and the reviewer's guide are in
+  `artifacts/diff/phase1/second-captions-20261024/` (`review.csv`,
+  `README.md`).
+- After the review, the app has to serve the approved text by `variant_id`
+  instead of generating it live. That needs an importer and a change to
+  phase 1's flow, not yet built, and a decision on rows left unapproved.
+
 **Open for the researcher:**
 - the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide
   visibility on their own;
