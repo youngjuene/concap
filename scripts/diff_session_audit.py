@@ -14,7 +14,9 @@ source, the attended sound, the tuner's heard families and rating means. diff's 
 prompt functions then render what those values should have produced, and every logged call is
 compared with that, so new prompt wording needs no change here. A session that ran an older
 template than the checkout is reported once, not call by call. It also checks that:
-- each clip's second caption is the one Trida wrote and P6 showed, or that a failed one was skipped;
+- each clip's second caption is the researcher's approved text for its recomputed slots, shown at
+  P6 with no Trida call (2026-10-24), or, where none was approved (smoke), the one Trida wrote and
+  P6 showed, or that a failed one was skipped;
 - each attempt's shown text is Trida's text under the display rule (logs from 2026-10-20 on);
 - every slider change got a live call, unless no cue boundary was left to write;
 - every caption shown is one Trida wrote for that cue or an earlier one (the kept caption);
@@ -73,6 +75,7 @@ from diff.phase1_tweak import (  # noqa: E402
     check_record,
     tweak_job_for,
     tweak_source,
+    variant_id,
 )
 from diff.rewrite_prompts import (  # noqa: E402
     LIVE_CELL_PROMPTS,
@@ -87,7 +90,7 @@ STEP1_PAGES = ("P2", "P3", "P4", "P5")
 OTHER_MODE = {"scene": "acousmatic", "acousmatic": "scene"}
 SECOND_SLOTS = ("attended_sound", "seen")
 SECOND_MODEL = ("recommended", "assignment", "mode", "p_bound")
-SECOND_FIELDS = ("status", "second_caption", *SECOND_SLOTS, *SECOND_MODEL)
+SECOND_FIELDS = ("status", "second_caption", "caption_source", "variant_id", *SECOND_SLOTS, *SECOND_MODEL)
 RATINGS = ("S1", "S2", "S3")
 MASK_THRESHOLD = 127
 SUPERSEDED_MS = 1500  # a setting replaced this soon may never get a call: Trida takes about 1 s
@@ -351,9 +354,15 @@ def shown_on_screen(
 
 
 def audit_phase1(
-    audit: Audit, who: str, state: Mapping[str, Any], clips: Mapping[str, Any], tweaks: list[dict[str, Any]]
+    audit: Audit,
+    who: str,
+    state: Mapping[str, Any],
+    clips: Mapping[str, Any],
+    tweaks: list[dict[str, Any]],
+    approved: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    """Slots, the tweak call, its check and outcome, per clip; returns one report row per clip."""
+    """Slots, then the approved caption shown, or the tweak call, its check and outcome, per clip;
+    returns one report row per clip. ``approved`` is the setup's approved captions by variant ID."""
     records = formal_records(state)
     rows: list[dict[str, Any]] = []
     ran: set[str] = set()
@@ -425,6 +434,36 @@ def audit_phase1(
             f"{who} {key}: stored slots differ in {differing(expect, entry['slots'])}",
         )
         attempts = [t for t in tweaks if t["clip"] == key]
+        p6 = [v for v in state["viewings"] if v["clip_index"] == index and v["page"] == "P6"]
+        if entry.get("source") == "approved":
+            caption = approved.get(variant_id(expect))
+            audit.ok(
+                "approved",
+                entry.get("variant_id") == variant_id(expect) and caption is not None,
+                f"{who} {key}: no approved caption for the recomputed slots",
+            )
+            audit.ok(
+                "approved",
+                caption is not None and entry["status"] == "ready" and entry["text"] == caption["text"],
+                f"{who} {key}: the stored caption is not the approved one",
+            )
+            audit.ok("approved", not attempts, f"{who} {key}: Trida was called for an approved caption")
+            audit.ok(
+                "approved",
+                bool(p6) and p6[-1]["captions"][0]["text"] == entry["text"],
+                f"{who} {key}: the P6 viewing did not show the approved caption",
+            )
+            rows.append(
+                {
+                    "participant": who,
+                    "clip": key,
+                    "status": entry["status"],
+                    "source": "approved",
+                    "slots": entry["slots"],
+                    "second": entry["text"],
+                }
+            )
+            continue
         if not audit.ok("tweak-call", bool(attempts), f"{who} {key}: no tweak call logged"):
             continue
         last = attempts[-1]
@@ -460,7 +499,6 @@ def audit_phase1(
         if entry["status"] == "ready":
             audit.ok("tweak-outcome", not failed, f"{who} {key}: ready although the last attempt failed")
             audit.ok("tweak-outcome", entry["text"] == text, f"{who} {key}: stored caption != Trida's output")
-            p6 = [v for v in state["viewings"] if v["clip_index"] == index and v["page"] == "P6"]
             audit.ok(
                 "tweak-outcome",
                 bool(p6) and p6[-1]["captions"][0]["text"] == text,
@@ -754,6 +792,8 @@ def audit_export(
             seconds[(sid, clip)] = {
                 "status": entry["status"],
                 "second_caption": entry.get("text") or "",
+                "caption_source": entry.get("source", "trida"),
+                "variant_id": entry.get("variant_id", ""),
                 **{name: slots.get(name, "") for name in SECOND_SLOTS},
                 **{name: str(model.get(name, "")) for name in SECOND_MODEL},
             }
@@ -805,6 +845,7 @@ def check(args: argparse.Namespace) -> int:
     audit = Audit()
     setup = read_setup(args.phase1_setup)
     clips = {clip["key"]: clip for clip in setup["clips"]}
+    approved = (setup.get("second_captions") or {}).get("captions", {})
     with args.sources.open(encoding="utf-8") as handle:
         sources = parse_sources(json.load(handle)).sources
     cues = {(s.unit_key, s.cue_index): s for s in sources if s.phase == 2}
@@ -816,7 +857,7 @@ def check(args: argparse.Namespace) -> int:
         attempts = logs[session["session_id"]]["attempts"]
         tweaks = [a for a in attempts if a.get("kind") == "tweak"]
         lives = [a for a in attempts if a.get("kind") != "tweak"]
-        report["second_captions"] += audit_phase1(audit, who, state, clips, tweaks)
+        report["second_captions"] += audit_phase1(audit, who, state, clips, tweaks, approved)
         tuner = audit_tuner(audit, who, state, clips)
         row: dict[str, Any] = {"participant": who, "finished": session["finished_at"] is not None}
         if tuner is not None:

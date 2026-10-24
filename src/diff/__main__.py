@@ -607,6 +607,37 @@ def phase1_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+def phase1_import_second_captions(args: argparse.Namespace) -> int:
+    """Write the review sheet's approved second captions into the setup, replacing earlier ones."""
+    import csv
+
+    import diff.workbook_instrument as workbook_instrument
+    from diff.phase1_approved import import_sheet
+    from diff.phase1_setup import read_setup, setup_problems
+
+    with args.sheet.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+        columns = list(reader.fieldnames or ())
+    updated, problems, unapproved = import_sheet(
+        read_setup(args.setup),
+        rows,
+        columns,
+        reviewed_by=args.reviewed_by,
+        at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    )
+    if problems:
+        raise SystemExit(f"{args.sheet}: nothing imported:\n  " + "\n  ".join(problems))
+    _write_json(args.setup, updated, force=True)
+    captions = updated["second_captions"]["captions"]
+    print(f"imported {len(captions)} approved second captions, reviewed by {args.reviewed_by}")
+    for row in unapproved:
+        print(f"  not approved: {row}")
+    remaining = setup_problems(updated, "participant", root=Path.cwd(), instrument=workbook_instrument)
+    print(f"{len(remaining)} problems left for participant sessions")
+    return 0
+
+
 def export_run(args: argparse.Namespace) -> int:
     """Write the research export from the session store and the live logs (this machine only)."""
     from diff.export_bundle import export
@@ -676,7 +707,7 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
     """Every gate a participant session waits on, given serve's arguments (empty when none)."""
     from diff.caption_sources import starting_caption_review_problems
     from diff.phase1_binding import BINDING_PROVISIONAL
-    from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL, TWEAK_PROVISIONAL
+    from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL
 
     blockers = []
     if LIVE_PROMPTS_PROVISIONAL:
@@ -688,11 +719,6 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
         blockers.append(
             "the tuner system message is still provisional (rewrite_prompts.TUNER_SYSTEM); "
             "participant sessions wait for the researcher's role text"
-        )
-    if TWEAK_PROVISIONAL:
-        blockers.append(
-            "the second-caption prompts are still provisional (rewrite_prompts.TWEAK_PROMPTS); "
-            "participant sessions wait for the researcher's approval"
         )
     if BINDING_PROVISIONAL:
         blockers.append(
@@ -1125,6 +1151,16 @@ def parser() -> argparse.ArgumentParser:
     sign.add_argument("--clip", action="append", help="a clip key; repeatable")
     sign.add_argument("--practice", action="store_true")
     sign.set_defaults(handler=phase1_approve)
+    reviewed = phase1.add_parser(
+        "import-second-captions",
+        help="write the review sheet's approved second captions into the setup (replaces earlier ones)",
+    )
+    reviewed.add_argument("--setup", type=Path, required=True)
+    reviewed.add_argument(
+        "--sheet", type=Path, required=True, help="scripts/diff_second_captions.py's review.csv"
+    )
+    reviewed.add_argument("--reviewed-by", required=True)
+    reviewed.set_defaults(handler=phase1_import_second_captions)
     exported = commands.add_parser("export", help="research export from the session store and live logs")
     exported.add_argument("--store", type=Path, default=PARTICIPANT_STORE)
     exported.add_argument(

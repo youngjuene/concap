@@ -283,7 +283,6 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
     for blocker, flag in (
         ("tuner system message", "TUNER_PROVISIONAL"),
         ("nine live prompts are still provisional", "LIVE_PROMPTS_PROVISIONAL"),
-        ("second-caption prompts are still provisional", "TWEAK_PROVISIONAL"),
         ("binding model's parameters and plan are still provisional", "BINDING_PROVISIONAL"),
     ):
         assert (blocker in str(stopped.value)) is (flag != approved), blocker
@@ -295,7 +294,6 @@ def test_participant_sessions_need_reviewed_starting_captions(
     from diff.__main__ import main
 
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
-    monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.LIVE_PROMPTS_PROVISIONAL", False)
     monkeypatch.setattr("diff.phase1_binding.BINDING_PROVISIONAL", False)
     sources = tmp_path / "sources.json"  # the test stream's cues are drafts
@@ -336,7 +334,6 @@ def test_preflight_lists_every_blocker_at_once(
         "no video at",
         "tuner system message is still provisional",
         "nine live prompts are still provisional",
-        "second-caption prompts are still provisional",
         "binding model's parameters and plan are still provisional",
         "need phase 1",
         "3 cues are not",
@@ -351,7 +348,6 @@ def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest
     from diff.__main__ import main
 
     monkeypatch.setattr("diff.rewrite_prompts.TUNER_PROVISIONAL", False)
-    monkeypatch.setattr("diff.rewrite_prompts.TWEAK_PROVISIONAL", False)
     monkeypatch.setattr("diff.rewrite_prompts.LIVE_PROMPTS_PROVISIONAL", False)
     monkeypatch.setattr("diff.phase1_binding.BINDING_PROVISIONAL", False)
     sources = tmp_path / "sources.json"

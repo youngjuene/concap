@@ -302,8 +302,26 @@ folder's `superseded-277/`.
   `artifacts/diff/phase1/second-captions-20261024/` (`review.csv`,
   `README.md`).
 - After the review, the app has to serve the approved text by `variant_id`
-  instead of generating it live. That needs an importer and a change to
-  phase 1's flow, not yet built, and a decision on rows left unapproved.
+  instead of generating it live (built the same day, below).
+
+**Approved second captions served** (researcher, 2026-10-24: every row must
+be approved before participants).
+- `python -m diff phase1 import-second-captions` checks the filled sheet and
+  writes the approved texts into the setup's `second_captions` block, with
+  the reviewer, the time and a hash (`diff.phase1_approved`, runbook §11).
+- Participant sessions are refused until every caption the setup can show
+  is approved. The second-caption prompt's own provisional flag no longer
+  blocks them, since a participant never sees Trida's text.
+- At the last P5 the flow (`diff.phase1/v6`) takes each clip's approved
+  caption, ready at once, with no Trida job. A smoke session falls back to
+  Trida.
+- Export v5 marks each caption's source, variant and `approved_from`. The
+  audit checks the approved text against the recomputed slots, the P6
+  viewing, and that no Trida call was made.
+- **Verified:** six stand-in participants walked the real setup with 58
+  stand-in approvals. All 72 captions came from the approved set, with no
+  Trida call, and the audit found 0 mismatches. A changed approved text was
+  flagged in both sessions that showed it.
 
 **Open for the researcher:**
 - the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide

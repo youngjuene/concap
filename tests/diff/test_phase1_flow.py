@@ -11,9 +11,11 @@ from typing import Any
 
 import pytest
 from phase1_fixtures import DURATION_MS, approved_setup
+from test_phase1_approved import COLUMNS, sheet
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.playback as regen_playback
+from diff.phase1_approved import import_sheet
 from diff.phase1_binding import assignment_plan
 from diff.phase1_flow import (
     HANDOFF_TEXT,
@@ -169,6 +171,24 @@ def test_a_whole_phase_one_walk(flow: Phase1) -> None:
     family = flow.clips[first]["options"]["A1s"][0]["family"]
     assert observations[0] == {"heard": {family: True}, "labels": ["Road"]}
     assert ratings == [{"S1": 5, "S2": 2, "S3": 6}] * 3
+
+
+def test_an_approved_caption_is_shown_at_once_without_asking_trida(tmp_path: Path) -> None:
+    setup = approved_setup(tmp_path)
+    reviewed, _, _ = import_sheet(setup, sheet(setup), COLUMNS, reviewed_by="researcher", at="t")
+    flow = Phase1(reviewed, root=tmp_path)
+    state = flow.new_state("s-test", "P1", seed=7)
+    through_practice(flow, state)
+    now = through_stage_a(flow, state, 10.0)
+    assert flow.pending_tweaks(state) == []
+    entry = state["second_captions"][state["clip_order"][0]]
+    assert (entry["status"], entry["source"]) == ("ready", "approved") and "template" not in entry
+    assert entry["approved"] == {"approved_from": "B-words", "reviewed_by": "researcher", "reviewed_at": "t"}
+    assert entry["text"] == f"{entry['slots']['attended_sound']}가 들린다."
+    shown = flow.present(state, lambda name: name)
+    assert shown["kind"] == "view" and shown["media"]["captions"][0]["text"] == entry["text"]
+    step(flow, state, now)
+    assert state["viewings"][-1]["caption_source"] == "approved"
 
 
 def test_a_failed_second_caption_skips_that_clip_s_second_step(flow: Phase1) -> None:

@@ -24,8 +24,11 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   binding model over every clip's first step at once (design review,
   2026-10-24: each clip's tendency comes from the other eleven, and E1/E3 are
   centred on the participant's own mean), records each result and its
-  steering slots, and marks every second caption pending in stage-B order; the
-  server queues the jobs and writes each outcome back
+  steering slots, and takes each clip's second caption from the researcher's
+  approved ones (:mod:`diff.phase1_approved`, 2026-10-24: every caption is
+  reviewed before the study), ready at once. A clip with none approved, which
+  only a smoke session can reach, is marked pending in stage-B order; the
+  server queues its job and writes the outcome back
   (:meth:`Phase1.record_tweak`). Reaching P6 before the caption is ready shows
   a waiting page; a clip whose second caption failed has its second step
   skipped (``skip-second``), with the reason recorded. P7's record also tests
@@ -62,13 +65,14 @@ from typing import Any, Final
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
+from diff.phase1_approved import approved_caption
 from diff.phase1_binding import ASSIGNMENT_POLICY, assignment_plan, attention
 from diff.phase1_setup import stripped_options
-from diff.phase1_tweak import template_record, tweak_steer_all
+from diff.phase1_tweak import template_record, tweak_steer_all, variant_id
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
-PROTOCOL: Final = "diff.phase1/v5"
+PROTOCOL: Final = "diff.phase1/v6"
 STEP_A: Final = ("P1", "P2", "P3", "P4", "P5")
 STEP_B: Final = ("P6", "P7", "P8", "P9", "P10", "P11")
 CLIP_PAGES: Final = STEP_A + STEP_B
@@ -469,7 +473,7 @@ class Phase1:
                 "clip": clip["key"],
                 "page": page,
                 "condition": VIEW_PAGES[page],
-                "caption_source": "prepared" if page == "P1" else "trida",
+                "caption_source": "prepared" if page == "P1" else self.second(state).get("source", "trida"),
                 "captions": captions,
                 "caption_sha256": sha256_of(captions),
                 "coverage": saved["coverage"],
@@ -553,15 +557,25 @@ class Phase1:
         records = [self.step_records(state, index, STEP_A[1:]) for index in range(count)]
         steered = tweak_steer_all(clips, records, state["assignment"]["plan"], root=self.root)
         for index, (clip, (slots, model)) in enumerate(zip(clips, steered, strict=True)):
-            state["second_captions"][clip["key"]] = {
+            entry: dict[str, Any] = {
                 "status": "pending",
+                "source": "trida",
                 "clip_index": index,
+                "variant_id": variant_id(slots),
                 "slots": slots,
                 "model": model,
                 "template": template_record(slots["mode"]),
                 "attempts": [],
                 "requested_at": now,
             }
+            approved = approved_caption(self.setup, slots)
+            if approved is not None:  # the researcher's text, ready now: Trida is not asked
+                entry.update(status="ready", source="approved", text=approved["text"], decided_at=now)
+                entry["approved"] = {
+                    name: approved[name] for name in ("approved_from", "reviewed_by", "reviewed_at")
+                }
+                del entry["template"]
+            state["second_captions"][clip["key"]] = entry
 
     def _skip_second(self, state: dict[str, Any], now: float) -> None:
         second = self.second(state)

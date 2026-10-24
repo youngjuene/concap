@@ -431,7 +431,9 @@ It reads the store (`--store`, default the participant store) and every
   - for R2, the intended key, the sounds the second-caption prompt named;
 - `second_captions.csv`: one row per participant × clip:
   - the status, and the reason for a skipped step;
-  - the first and second captions;
+  - the first and second captions, and where the second came from
+    (`caption_source`: `approved` or, in a smoke session, `trida`), with its
+    `variant_id` and `approved_from`;
   - the attended sound, and the binding model's inputs, P(bound),
     recommendation, follow or counter, mode and caption type;
   - the intended R2 key, the template hash and whether it was provisional;
@@ -547,5 +549,27 @@ first run, with the V1 object as the setting, gave 277; it is kept in
 `README.md` (`artifacts/diff/phase1/second-captions-20261024/`).
 
 Re-run both steps when the setup, the scene or `phase1_tweak` changes, since the IDs change with
-the slots. The app still generates second captions live: serving the approved ones is the next
-step.
+the slots.
+
+Once the sheet is filled, import it into the setup:
+
+```sh
+uv run python -m diff phase1 import-second-captions --setup artifacts/diff/phase1/setup-draft.json \
+  --sheet DIR/review.csv --reviewed-by NAME
+```
+
+The import (`diff.phase1_approved`) checks every row and imports nothing if any row fails:
+- the row's variant is one the setup can reach (a stale sheet is refused);
+- an approved text has something readable and at most 80 characters;
+- `approved_from` names the draft taken as it is (and the text is that draft), or says
+  `edited` or `written`.
+
+It replaces any earlier import in the setup's `second_captions` block, with the reviewer, the time
+and a hash, and lists the rows left unapproved. Participant sessions are refused until every
+caption the setup can show is approved, and while the block differs from its hash (a hand edit).
+
+At the last P5 the app takes each clip's approved caption for its variant, ready at once, and
+asks Trida nothing. A smoke session falls back to Trida where none is approved. The export marks
+each second caption `approved` or `trida` (`caption_source`), with its `variant_id` and
+`approved_from`. The audit checks that an approved caption is the setup's text for the
+recomputed slots, that P6 showed it, and that Trida was not called.

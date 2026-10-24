@@ -18,7 +18,9 @@ Files written to ``--out``:
   ``orig_text`` words it renders; for V1 and V2, the matched objects; and for
   R2, the intended key, the sounds the second-caption prompt named.
 - ``second_captions.csv``: one row per participant × clip: the status (and why
-  a step was skipped), the first and second captions, what steered the second
+  a step was skipped), the first and second captions, where the second came
+  from (``approved``, the researcher's reviewed text for its ``variant_id``, and
+  which draft it was taken from, or ``trida`` in a smoke session), what steered it
   (the attended sound, the binding model's evidence and P(bound), the
   recommended mode, follow or counter, the mode used and the caption type), its
   check flags, and whether the V2 point (P7) fell on the noticed sound's source,
@@ -47,7 +49,7 @@ from diff.phase1_tweak import named_in
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v4"
+EXPORT_SCHEMA: Final = "diff.export/v5"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -77,6 +79,9 @@ SECOND_CAPTION_COLUMNS: Final = (
     "attempts",
     "first_caption",
     "second_caption",
+    "caption_source",
+    "variant_id",
+    "approved_from",
     "attended_sound",
     "noticed_audioset_label",
     "on_screen",
@@ -208,6 +213,9 @@ def second_caption_rows(
             "attempts": len(entry.get("attempts", [])),
             "first_caption": clip.get("caption", {}).get("text", ""),
             "second_caption": entry.get("text", ""),
+            "caption_source": entry.get("source", "trida"),
+            "variant_id": entry.get("variant_id", ""),
+            "approved_from": entry.get("approved", {}).get("approved_from", ""),
             "attended_sound": slots.get("attended_sound", ""),
             "noticed_audioset_label": model.get("noticed", {}).get("audioset_label", ""),
             "on_screen": model.get("noticed", {}).get("on_screen", ""),

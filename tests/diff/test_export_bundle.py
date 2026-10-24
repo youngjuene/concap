@@ -83,6 +83,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         clip["caption"]["text"],
     )
     assert row["attended_sound"] == clip["options"]["A1s"][0]["label"]
+    assert (row["caption_source"], row["approved_from"]) == ("trida", "") and len(row["variant_id"]) == 12
     assert row["noticed_audioset_label"] == clip["options"]["A1s"][0]["audioset_label"]
     assert row["on_screen"] == str(clip["scene"]["sounds"]["s1"]["visibility"]["on_screen"])
     assert 0 < float(row["tendency"]) < 1 and row["congruence_centre"] != ""
