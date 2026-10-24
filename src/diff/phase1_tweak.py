@@ -235,7 +235,8 @@ def tweak_job_for(
 
 def named_in(text: str, label: str) -> bool:
     """Whether a caption seems to name the sound an option's label stands for: any word of the label
-    but "소리", by its first two syllables. Rough: it misses "새가" for "새소리"."""
+    but "소리", by its first two syllables. Rough (it misses "새가" for "새소리"): a hint for the
+    researcher's blind coding of R2 against the shown caption, never the key itself."""
     return any(word[:2] in text for word in re.findall(r"[가-힣]{2,}", label) if word != "소리")
 
 

@@ -125,6 +125,11 @@ on 2026-10-24):
   than the 10 s clip. A longer output fails the check and the clip's second
   step is skipped, so the bench must show how often that happens. The fake
   worker cuts its echoed caption to fit.
+- **R2 is scored against the shown caption.** The intended key stays as
+  decided on 2026-10-18. The export adds a blind coding sheet
+  (`r2_coding.csv`) and a rough automatic hint (`r2_named_auto`). The reason:
+  amsterdam_057's first caption names "자동차 경적 소리", one of its R2
+  distractors.
 - **A fifth contradicting first caption.** singapore_067's names 경적 and
   교통 체증, where orig_text has a talking crowd and an idling truck.
 - **The bench gate**, per mode:
@@ -183,7 +188,7 @@ correction in both modes, so they enter as a covariate.
   the slots and V2's test independently. It found 0 mismatches and caught a
   tampered P(bound) and a tampered V2 status. The export audit passed.
 - `make check` passed (1903 tests, after prompt v3). The v3 walk and audit
-  were also clean: 0 mismatches.
+  were also clean: 0 mismatches, and the export check covers the coding sheet.
 - The bench (`scripts/diff_prompt_bench.py`) runs both modes per clip and
   reports per mode:
   - length;

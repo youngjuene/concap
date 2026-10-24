@@ -437,6 +437,14 @@ It reads the store (`--store`, default the participant store) and every
   - the intended R2 key, the template hash and whether it was provisional;
   - the job and the check flags;
   - `v2_attention`, whether the V2 point fell on the noticed sound's source;
+  - `caption_id`, and `r2_named_auto`, the R2 options the shown caption seems
+    to name (rough);
+- `r2_coding.csv`: one row per distinct shown second caption × R2 option, with
+  an empty `named` column. It holds no participant, mode or intended key, so
+  a coder can score blind which options each shown caption names; join it
+  back by `caption_id`. Score R2 against this, not the intended key: the
+  shown caption can drop a named sound or keep a wrong one from the first
+  caption (amsterdam_057's first caption names one of its R2 distractors);
 - `post_watch.csv`;
 - `manifest.json`, with file hashes.
 

@@ -22,7 +22,14 @@ Files written to ``--out``:
   (the attended sound, the binding model's evidence and P(bound), the
   recommended mode, follow or counter, the mode used and the caption type), its
   check flags, and whether the V2 point (P7) fell on the noticed sound's source,
-  the behavioural check of the mode.
+  the behavioural check of the mode. ``caption_id`` names the shown caption,
+  and ``r2_named_auto`` lists the R2 options it seems to name
+  (``phase1_tweak.named_in``, rough).
+- ``r2_coding.csv``: one row per distinct shown second caption × R2 option,
+  with an empty ``named`` column, for scoring R2 against what was shown rather
+  than the key the prompt intended (hypothesis team, 2026-10-24: amsterdam_057's
+  first caption names one of its R2 distractors). It carries no participant,
+  mode or intended key, so the coding is blind; ``caption_id`` joins it back.
 - ``post_watch.csv``: one row per participant × post-watch item.
 - ``manifest.json``: counts, the setup's hash and each file's SHA-256.
 """
@@ -36,10 +43,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
+from diff.phase1_tweak import named_in
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v3"
+EXPORT_SCHEMA: Final = "diff.export/v4"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -90,7 +98,10 @@ SECOND_CAPTION_COLUMNS: Final = (
     "job_id",
     "check_flags",
     "v2_attention",
+    "caption_id",
+    "r2_named_auto",
 )
+R2_CODING_COLUMNS: Final = ("caption_id", "clip", "caption", "option", "label", "named")
 SOUND_ITEMS: Final = frozenset({"A1s", "A2s"})
 POINT_ITEMS: Final = frozenset({"V1", "V2"})
 POST_WATCH_COLUMNS: Final = ("participant", "session_id", "finished", "item", "answer")
@@ -166,6 +177,11 @@ def phase1_rows(
             yield row
 
 
+def caption_id(clip: str, text: str) -> str:
+    """A shown caption's id: the same text on the same clip is one caption to code."""
+    return hashlib.sha256(f"{clip}\n{text}".encode()).hexdigest()[:12]
+
+
 def second_caption_rows(
     participant: str, session_id: str, finished: bool, state: Mapping[str, Any], clips: Mapping[str, Any]
 ) -> Iterable[dict[str, Any]]:
@@ -215,7 +231,32 @@ def second_caption_rows(
             "job_id": entry.get("job_id", ""),
             "check_flags": _cell(flags),
             "v2_attention": v2[-1].get("source_attention", {}).get("status", "") if v2 else "",
+            "caption_id": caption_id(key, entry["text"]) if entry.get("text") else "",
+            "r2_named_auto": _cell(
+                [
+                    o["value"]
+                    for o in clip.get("options", {}).get("R2", [])
+                    if entry.get("text") and named_in(entry["text"], o["label"])
+                ]
+            ),
         }
+
+
+def r2_coding_rows(seconds: Sequence[Mapping[str, Any]], clips: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Each distinct shown second caption × R2 option, in caption-id order, with ``named`` left empty."""
+    shown = {row["caption_id"]: (row["clip"], row["second_caption"]) for row in seconds if row["caption_id"]}
+    return [
+        {
+            "caption_id": cid,
+            "clip": clip,
+            "caption": text,
+            "option": o["value"],
+            "label": o["label"],
+            "named": "",
+        }
+        for cid, (clip, text) in sorted(shown.items())
+        for o in clips.get(clip, {}).get("options", {}).get("R2", [])
+    ]
 
 
 def _write_csv(path: Path, columns: Sequence[str], rows: Iterable[Mapping[str, Any]]) -> int:
@@ -276,6 +317,9 @@ def export(
         "phase1_rows": _write_csv(out / "phase1.csv", PHASE1_COLUMNS, phase1),
         "second_caption_rows": _write_csv(out / "second_captions.csv", SECOND_CAPTION_COLUMNS, seconds),
         "post_watch_rows": _write_csv(out / "post_watch.csv", POST_WATCH_COLUMNS, post_watch),
+        "r2_coding_rows": _write_csv(
+            out / "r2_coding.csv", R2_CODING_COLUMNS, r2_coding_rows(seconds, clips)
+        ),
     }
     files = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()

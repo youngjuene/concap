@@ -49,6 +49,7 @@ REPO_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # noqa: E402
+from diff.export_bundle import caption_id  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
 from diff.live_generation import STARTING_CAPTION, usable  # noqa: E402
 from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
@@ -769,10 +770,35 @@ def audit_export(
         for r in read_csv(export_dir / "second_captions.csv")
     }
     audit.ok("export", exported_seconds == seconds, "second_captions.csv differs from the store")
+    shown = {
+        (caption_id(clip, entry["text"]), option["value"])
+        for session in sessions
+        for clip, entry in session["state"].get("second_captions", {}).items()
+        if entry.get("text")
+        for option in setup_clips(setup)[clip]["options"]["R2"]
+    }
+    coding = read_csv(export_dir / "r2_coding.csv")
+    audit.ok(
+        "export",
+        {(r["caption_id"], r["option"]) for r in coding} == shown and len(coding) == len(shown),
+        "r2_coding.csv is not one row per shown caption and R2 option",
+    )
+    audit.ok(
+        "export",
+        all(
+            r["named"] == "" and set(r) == {"caption_id", "clip", "caption", "option", "label", "named"}
+            for r in coding
+        ),
+        "r2_coding.csv carries more than the blind coder may see, or a pre-filled answer",
+    )
     exported_post = {
         (r["session_id"], r["item"]): r["answer"] for r in read_csv(export_dir / "post_watch.csv")
     }
     audit.ok("export", exported_post == post_watch, "post_watch.csv differs from the store")
+
+
+def setup_clips(setup: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    return {clip["key"]: clip for clip in setup["clips"]}
 
 
 def check(args: argparse.Namespace) -> int:

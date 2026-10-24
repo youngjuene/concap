@@ -12,7 +12,7 @@ from test_live_server import drain
 from test_participant_server import Lab, through_phase_one
 
 from diff.__main__ import main
-from diff.export_bundle import PHASE1_COLUMNS, SECOND_CAPTION_COLUMNS, export
+from diff.export_bundle import PHASE1_COLUMNS, R2_CODING_COLUMNS, SECOND_CAPTION_COLUMNS, caption_id, export
 from diff.session_store import SessionStore
 
 
@@ -43,6 +43,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         "phase1_rows": 102,
         "second_caption_rows": 3,
         "post_watch_rows": 1,
+        "r2_coding_rows": 6,  # three shown captions, two R2 options each
     }
 
     records = [
@@ -86,6 +87,16 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     assert row["on_screen"] == str(clip["scene"]["sounds"]["s1"]["visibility"]["on_screen"])
     assert 0 < float(row["tendency"]) < 1 and row["congruence_centre"] != ""
     assert row["v2_attention"] in ("hit", "miss", "source not seen")  # V2 on the noticed source
+    assert row["caption_id"] == caption_id(row["clip"], "다시 쓴 두 번째 자막")
+
+    # One blind row per distinct shown caption and R2 option: no participant, mode or key.
+    with (out / "r2_coding.csv").open(encoding="utf-8") as handle:
+        coding = list(csv.DictReader(handle))
+    assert tuple(coding[0]) == R2_CODING_COLUMNS and {r["named"] for r in coding} == {""}
+    assert {(r["caption_id"], r["option"]) for r in coding if r["clip"] == row["clip"]} == {
+        (row["caption_id"], "m1"),
+        (row["caption_id"], "m2"),
+    }
     assert row["assignment"] in ("follow", "counter") and 0 < float(row["p_bound"]) < 1
     assert row["mode"] == (row["recommended"] if row["assignment"] == "follow" else row["mode"])
     assert row["caption_type"].startswith(row["mode"]) and row["seen"] == (
