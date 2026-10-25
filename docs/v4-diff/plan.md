@@ -115,12 +115,12 @@ mode, provisional). The four % degrees (`tweak-p1` v0) are gone.
 `artifacts/diff/hypotheses/report-20261024.md`; the researcher said "go ahead"
 on 2026-10-24):
 - **One off-screen sentence.** The scene-aware prompt names the sounds not on
-  screen in one shared sentence: "화면에 음원이 보이지 않는 소리(…)는 화면에는
-  보이지 않지만 이곳 어딘가에서 들려오는 소리로 쓰세요". It is left out when there
-  are none, and never includes microphone wind (`RECORDING_ARTEFACTS`). v2 told
-  Trida to spread every unseen sound "in this scene", mic wind included. The
-  wording avoids "화면 밖", which would echo E1's "화면 속 장소".
-- **80 characters.** `TWEAK_MAX_CHARS` is 80 and the prompts say "80자 이내로".
+  screen in one shared sentence, which asks Trida to write them as heard
+  somewhere here though not seen. It is left out when there are none, and
+  never includes microphone wind (`RECORDING_ARTEFACTS`). v2 told Trida to
+  spread every unseen sound "in this scene", mic wind included. The wording
+  avoids the word for off screen, which would echo E1's place on screen.
+- **80 characters.** `TWEAK_MAX_CHARS` is 80, and the prompts ask for no more.
   160 characters take about 13 s to read at 12 characters per second, longer
   than the 10 s clip. A longer output fails the check and the clip's second
   step is skipped, so the bench must show how often that happens. The fake
@@ -128,24 +128,27 @@ on 2026-10-24):
 - **R2 is scored against the shown caption.** The intended key stays as
   decided on 2026-10-18. The export adds a blind coding sheet
   (`r2_coding.csv`) and a rough automatic hint (`r2_named_auto`). The reason:
-  amsterdam_057's first caption names "자동차 경적 소리", one of its R2
+  amsterdam_057's first caption names a car horn, one of its R2
   distractors.
-- **A fifth contradicting first caption.** singapore_067's names 경적 and
-  교통 체증, where orig_text has a talking crowd and an idling truck.
+- **A fifth contradicting first caption.** singapore_067's names a horn and a
+  traffic jam, where orig_text has a talking crowd and an idling truck.
 - **The bench gate**, per mode:
   - near-copies of the first caption (similarity ≥ 0.9);
-  - wrong first-caption sounds kept (기차, 경적/대화, 오토바이, 경적/체증);
+  - wrong first-caption sounds kept (train, horn, talk, motorbike and
+    traffic jam, across the four contradicting clips);
   - R2 distractors named;
-  - questionnaire wording echoed (화면 속 장소, 속해, 어우러, 벗어나);
+  - questionnaire wording echoed (the items' words for the place on screen,
+    belonging, blending in and standing apart);
   - lists with no sentence.
 
   On the 2026-10-20 bench, which ran the old `tweak-p1` v0, 10 of 36 second
-  captions copied the first one, and 기차, 경적 and 오토바이 survived 3/3. v3
+  captions copied the first one, and the train, horn and motorbike survived
+  3/3. v3
   has not yet run on Trida.
 - **Not done; the researcher's to decide:**
   - sound qualities written after listening, for the acousmatic prompt;
-  - unchanged anchor clips (the sheet's "일부 영상은 유지 조건", against the
-    10-18 decision to rewrite every clip);
+  - unchanged anchor clips (the sheet's line keeping some clips as they are,
+    against the 10-18 decision to rewrite every clip);
   - the counter-centring pilot.
 
 **Analysis, to pre-register:**
@@ -207,24 +210,25 @@ correction in both modes, so they enter as a covariate.
 - **The check failed 9 of 72 second captions**, so those clips' second
   viewings were skipped. Seven were scene-aware, and singapore_286 failed 3
   of 3 scene-aware captions. Trida either:
-  - copied the scene prompt's labelled slots ("화면에서 두드러:", "장면
-    배경:", "음원 보이는 소리:") until it ran out of room;
-  - looped ("차, 차, 차, …");
-  - or stopped after one word ("도로를").
+  - copied the scene prompt's labelled slots (the distinctive element, the
+    background, the sounds whose source is seen) until it ran out of room;
+  - looped, repeating the word for car;
+  - or stopped after one word (road, with its particle).
 - **What passes is mostly a list of sound names.** On the bench's 144
   captions (both modes):
   - 100 have no sentence (scene-aware 54/72, acousmatic 46/72).
   - The modes always differ in wording (72/72) but rarely in kind. 30 of 72
     scene-aware captions name a place or object. A word for how a sound
-    sounds (distance, loudness, "희미한", "계속"; a rough count, often
+    sounds (distance, loudness, faintness, continuity; a rough count, often
     carried over from the first caption) appears in 28 of 72 acousmatic and
     13 of 72 scene-aware ones.
   - Near-copies of the first caption: acousmatic 11/72, scene-aware 2/72.
   - A wrong sound from the first caption survives in 32 of the 48 captions
-    of the four clips that have one (기차, 경적, 오토바이, 체증).
+    of the four clips that have one (train, horn, motorbike, traffic jam).
   - Nine name an R2 distractor.
-  - Trida wrote a "자막:" label in 35 (17 of the 72 planned), and words
-    are visibly broken ("기기차", "엔진 엔진", "소리음").
+  - Trida wrote a caption label (the word for caption and a colon) in 35
+    (17 of the 72 planned), and words are visibly broken: a doubled
+    syllable, a doubled word, two words for sound run together.
 
   tweak-p1 v3 therefore does not yet deliver the manipulation. The report is
   `artifacts/diff/bench/tweak-v3-20261024.json`, and the walk is in
@@ -254,20 +258,21 @@ round ran.
 | E, D's scene-aware with where-to phrases, B's acousmatic | 35 | 47 | 35 | 27 |
 | F, B with where-to phrases | 12 | 47 | 12 | 10 |
 
-- **The rule picks B.** Its scene-aware text gives phrases like "…에서
-  들려온다", "…너머로 들린다"; its acousmatic text gives words like 멀리서,
-  낮게, 끊임없이, 희미하게, 또렷하게. Most of its captions are real sentences,
-  e.g. "사이렌 소리가 멀리서 들려오고, 차량들이 오가는 소리가 또렷하게
-  들린다."
+- **The rule picks B.** Its scene-aware text gives where-phrases (heard from
+  a place, heard beyond something); its acousmatic text gives hearing adverbs
+  (from afar, low, unceasingly, faintly, clearly). Most of its captions are
+  real sentences, e.g. a siren heard from afar while passing cars are heard
+  clearly.
 - **Costs of B:**
   - In 10 of its 38 delivered scene-aware captions, a sound comes from
-    something that doesn't make it ("진행자의 목소리가 하늘에서 울린다").
+    something that doesn't make it (a presenter's voice ringing from the
+    sky).
     E's scene-aware text has none of these (0 of 35), but E names fewer
     places (manipulation 24 vs 32), and the rule's tie-break goes to B.
   - The acousmatic qualities come from the prompt's word list, not from the
-    audio: "또렷하게" appears in 42 of 46. These need the researcher's
-    listened qualities.
-- **Visible damage is under-counted.** Cut verbs ("울려 퍼,", "흐,") and
+    audio: the adverb for clearly appears in 42 of 46. These need the
+    researcher's listened qualities.
+- **Visible damage is under-counted.** Cut verbs (stems that stop mid-word) and
   doubled phrases slip past the bench's broken-text check. The last column
   counts them as damage (a check added after the run, so it doesn't change
   the pick). On it, B and E are level, about 28 of 72.
