@@ -89,7 +89,7 @@ from diff.study_protocol import sha256_of  # noqa: E402
 STEP1_PAGES = ("P2", "P3", "P4", "P5")
 OTHER_MODE = {"scene": "acousmatic", "acousmatic": "scene"}
 SECOND_SLOTS = ("attended_sound", "seen")
-SECOND_MODEL = ("recommended", "assignment", "mode", "p_bound")
+SECOND_MODEL = ("recommended", "assignment", "mode", "p_bound", "moderator_scene", "moderator_participant")
 SECOND_FIELDS = ("status", "second_caption", "caption_source", "variant_id", *SECOND_SLOTS, *SECOND_MODEL)
 RATINGS = ("S1", "S2", "S3")
 MASK_THRESHOLD = 127
@@ -207,8 +207,12 @@ def expected_plan(seed: int, count: int) -> list[str]:
     return plan
 
 
+def logit(p: float) -> float:
+    return math.log(p / (1 - p))
+
+
 def bound_given(pi: float, visibility: float) -> float:
-    return 1 / (1 + math.exp(-(math.log(pi / (1 - pi)) + math.log(visibility / (1 - visibility)))))
+    return 1 / (1 + math.exp(-(logit(pi) + logit(visibility))))
 
 
 def point_on_source(clip: Mapping[str, Any], noticed: str, point: Mapping[str, Any]) -> tuple[str, float]:
@@ -256,11 +260,14 @@ def expected_bindings(
         bound = sum(w * bound_given(pi, q) * math.exp(log_ratio) for w, pi in zip(weights, grid, strict=True))
         detached = sum(w * (1 - bound_given(pi, q)) for w, pi in zip(weights, grid, strict=True))
         p_bound = bound / (bound + detached)
+        no_answers = statistics.mean(bound_given(pi, q) for pi in grid)  # flat tendency, no evidence
         results.append(
             {
                 "visibility": q,
                 "attention": seen[index][0],
                 "p_bound": p_bound,
+                "moderator_scene": logit(q),
+                "moderator_participant": logit(p_bound) - logit(no_answers),
                 "recommended": "scene" if p_bound >= THRESHOLD else "acousmatic",
             }
         )
@@ -417,6 +424,10 @@ def audit_phase1(
         audit.ok(
             "tweak-model",
             abs(float(model.get("p_bound", -1)) - binding["p_bound"]) <= 1e-4
+            and all(
+                abs(float(model.get(name, math.inf)) - binding[name]) <= 1e-4
+                for name in ("moderator_scene", "moderator_participant")
+            )
             and (
                 model.get("attention", {}).get("status"),
                 model.get("recommended"),
@@ -424,8 +435,10 @@ def audit_phase1(
                 model.get("mode"),
             )
             == (binding["attention"], binding["recommended"], plan[index], mode),
-            f"{who} {key}: stored model {model.get('p_bound')} {model.get('mode')}, recomputed "
-            f"{binding['p_bound']:.4f} {mode} ({binding['attention']})",
+            f"{who} {key}: stored model {model.get('p_bound')} {model.get('mode')} "
+            f"({model.get('moderator_scene')}, {model.get('moderator_participant')}), recomputed "
+            f"{binding['p_bound']:.4f} {mode} ({binding['attention']}; "
+            f"{binding['moderator_scene']:.6f}, {binding['moderator_participant']:.6f})",
         )
         expect = expected_slots(clip, step1, mode, binding)
         audit.ok(

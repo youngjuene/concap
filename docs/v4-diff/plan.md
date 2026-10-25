@@ -44,7 +44,8 @@ v1 of 2026-10-23 was revised twice the next day, below):
   (`diff.phase1-assignment/balanced-v1`). Six clips follow the
   recommendation and six take the other mode. Because follow vs counter is
   independent of the recommendation, each mode is shown with probability 1/2
-  whatever P(b) is, so P(b) is a moderator fixed before the outcome.
+  whatever P(b) is, so P(b) is fixed before the outcome. The analysis takes it
+  as two moderators, the scene's and the participant's (below).
 - **Not steering:** F, BF, E, PRS, FA2 and FA3 are recorded as the baseline
   (`model.baseline`), the first measure of the outcome. FA1 is unused.
 - **Manipulation check:** P7's record tests the V2 point against the noticed
@@ -150,16 +151,55 @@ on 2026-10-24):
     against the 10-18 decision to rewrite every clip);
   - the counter-centring pilot.
 
-**Analysis, to pre-register:**
-`P9 ~ P4 + mode × p_bound + (1|participant) + (1|clip)`, Bayesian multilevel
+**Analysis, to pre-register** (moderators split by the researcher,
+2026-10-25):
+`P9 ~ P4 + mode × (v + u) + (1|participant) + (1|clip)`, Bayesian multilevel
 (Kay et al., CHI 2016), with the P4 score as a covariate rather than change
-scores. E1/E3 feed P(b), so the main effect of P(b) on the E change carries
-regression to the mean; the causal estimate is the mode × P(b) interaction,
-which is the compatibility effect. Since the mode's propensity is 1/2 for every
-clip, the same data also compare three policies: the model's, always
-scene-aware and always acousmatic. The primary outcome subscale is still to
-be named. The four clips whose first caption contradicts their audio get a
-correction in both modes, so they enter as a covariate.
+scores. `mode` is coded scene-aware +½, acousmatic −½. The binding model's
+`P(b)` enters as two moderators, both fixed before the outcome and both
+exported (`second_captions.csv`, export v6):
+- **`v`, the scene's part** (`moderator_scene`): `logit q`, the measured
+  visibility of the noticed sound's source. It depends on the participant
+  only through which sound they noticed. `v = 0` is a source on the line
+  (`q` = 0.5).
+- **`u`, the participant's part** (`moderator_participant`):
+  `logit P(b) − logit P₀(b)`, where `P₀` is the model with no answers (a flat
+  tendency and no evidence from the clip). It holds what the answers add: the
+  tendency from the other clips' points, the clip's own point, and E1/E3.
+  `u = 0` when the answers say nothing. `logit P(b) − logit q` would not do:
+  a flat tendency pulls P(b) toward 1/2 (by up to 0.8 in log odds at the
+  setup's `q`), so part of `q` would stay in it.
+
+Why two: P(b) mostly follows `q`. In a simulation on the 12 clips with
+assumed answer patterns, the recommendation was the scene-only rule
+(scene-aware when the source is on screen) in 80–96% of clips. One
+`mode × P(b)` term could not tell a participant's binding from a source's
+visibility. In the same simulation, `u`'s SD was 0.59 against `v`'s 1.39,
+and they correlated at 0.05.
+
+How the estimates are read:
+- **`mode × u` is the compatibility effect of binding,** the test of the
+  model's claim: answers that say "bound" should favour the scene-aware
+  caption beyond what visibility predicts.
+- **`mode × v` is the scene's part, not evidence of binding.** It also
+  carries how much the two modes differ, which grows with visibility: a
+  scene-aware caption ties a visible source to the screen, but can only
+  place an unseen one "here, though unseen". This is the visibility-only
+  rival.
+- `β(mode × u) − β(mode × v)` is reported. Equal coefficients give back the
+  one-moderator model `mode × logit P(b)`, kept as a secondary analysis.
+- `u`'s observed spread is reported before any estimate. A narrow `u` makes
+  `mode × u` weakly informative, so a null there is not evidence against
+  binding.
+
+E1/E3 feed `u`, so the main effect of `u` on the E change carries regression
+to the mean; the mode is randomised, so its interactions do not. Since the
+mode's propensity is 1/2 for every clip, the same data also compare three
+policies: the model's, always scene-aware and always acousmatic. The primary
+outcome subscale is still to be named. The five clips whose first caption
+contradicts their audio (amsterdam_012, amsterdam_057, bangkok_034,
+singapore_040, singapore_067) get a correction in both modes, so they enter
+as a covariate.
 
 **Measured on the 12 c2 clips** (setup draft, rebuilt 2026-10-24):
 - Measured visibility (v3): 13 of 29 sounds on screen and 16 off. Most

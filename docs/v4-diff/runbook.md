@@ -436,6 +436,8 @@ It reads the store (`--store`, default the participant store) and every
     `variant_id` and `approved_from`;
   - the attended sound, and the binding model's inputs, P(bound),
     recommendation, follow or counter, mode and caption type;
+  - the two pre-registered moderators: `moderator_scene` (`logit q`) and
+    `moderator_participant` (what the answers add to `logit P(bound)`);
   - the intended R2 key, the template hash and whether it was provisional;
   - the job and the check flags;
   - `v2_attention`, whether the V2 point fell on the noticed sound's source;

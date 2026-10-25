@@ -60,9 +60,20 @@ is heard (compatibility, in attention restoration theory). Each participant
 follows a balanced plan, drawn from the order seed at entry: half the clips
 take the recommended mode and half the other one. Following or countering is
 then randomised within participant and independent of every rating, so each
-mode is shown with probability 1/2 whatever P(b) is: P(b) is a moderator fixed
-before the outcome, and its interaction with the mode is the compatibility
-effect on P4→P9. The model's inputs enter only through the recommendation.
+mode is shown with probability 1/2 whatever P(b) is. The model's inputs enter
+only through the recommendation.
+
+**Moderators** (researcher, 2026-10-25, to pre-register). P(b) is fixed before
+the outcome, but on the 12 c2 clips it mostly follows ``q``, so the analysis
+takes it as two moderators of the mode's effect on P4→P9, both recorded:
+- ``moderator_scene``: ``logit q``, the noticed sound's measured visibility;
+- ``moderator_participant``: ``logit P(b) − logit P₀(b)``, what the
+  participant's answers add, where ``P₀`` is the model with no answers (a flat
+  tendency and no evidence from the clip). A flat tendency pulls P(b) toward
+  1/2, so ``logit q`` alone would leave part of ``q`` in it; this is 0 exactly
+  when the answers say nothing.
+Their interactions with the mode separate the compatibility effect of binding
+from that of visibility.
 
 The restoration subscales (F, BF, E, PRS) and FA2/FA3 are recorded as each
 clip's baseline, and never steer: they are the outcome's first measure.
@@ -248,6 +259,7 @@ def decide_all(
         fit = congruence(given, centre)
         log_ratio = round(seen[index]["log_ratio"] + fit["log_ratio"], 6)
         probability = p_bound(weights, visibility[index], log_ratio)
+        no_answers = p_bound(tendency(()), visibility[index], 0.0)
         recommended = MODES[0] if probability >= THRESHOLD else MODES[1]
         mode = recommended if plan[index] == FOLLOW else next(m for m in MODES if m != recommended)
         records.append(
@@ -267,6 +279,8 @@ def decide_all(
                 "log_ratio": log_ratio,
                 "tendency": {**summary(weights), "clips": len(others)},
                 "p_bound": round(probability, 4),
+                "moderator_scene": round(_logit(visibility[index]), 6),
+                "moderator_participant": round(_logit(probability) - _logit(no_answers), 6),
                 "recommended": recommended,
                 "assignment": plan[index],
                 "mode": mode,

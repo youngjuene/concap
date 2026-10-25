@@ -126,6 +126,28 @@ def test_a_rating_level_moves_nothing_and_a_clip_s_own_point_is_not_its_tendency
     )
 
 
+def test_the_moderators_split_p_bound_into_the_scene_s_part_and_the_answers(
+    setup: dict[str, Any], root: Path
+) -> None:
+    def logit(p: float) -> float:
+        return math.log(p / (1 - p))
+
+    # No points and level ratings: the answers say nothing.
+    clips, answers, matches = stage_a(setup, (3, 3, 3), sound="s2")
+    silent = decide_all(clips, answers, [None] * 3, [FOLLOW] * 3, root=root)[2]
+    assert silent["moderator_participant"] == 0.0
+    # The other clips' points alone move it, through the tendency.
+    assert decide_all(clips, answers, matches, [FOLLOW] * 3, root=root)[2]["moderator_participant"] != 0.0
+    assert silent["moderator_scene"] == pytest.approx(logit(silent["visibility"]), abs=1e-6)
+    # A flat tendency pulls P(b) toward 1/2, so logit q alone would not have been 0.
+    assert logit(silent["p_bound"]) - silent["moderator_scene"] > 0.5
+    # Points on the bus and a high rating add to P(b), and the moderator is all of that addition.
+    bound = decide_all(*stage_a(setup, (6, 3, 0)), [FOLLOW] * 3, root=root)[0]
+    alone = p_bound(UNIFORM, bound["visibility"], 0.0)
+    assert bound["moderator_participant"] > 0
+    assert logit(alone) + bound["moderator_participant"] == pytest.approx(logit(bound["p_bound"]), abs=1e-3)
+
+
 def test_decide_follows_or_counters_the_recommendation(setup: dict[str, Any], root: Path) -> None:
     clips, answers, matches = stage_a(setup, (3, 3, 3), sound="s2")  # oslo's wind: seen nowhere
     followed = decide_all(clips, answers, matches, [FOLLOW] * 3, root=root)[2]

@@ -22,7 +22,9 @@ Files written to ``--out``:
   from (``approved``, the researcher's reviewed text for its ``variant_id``, and
   which draft it was taken from, or ``trida`` in a smoke session), what steered it
   (the attended sound, the binding model's evidence and P(bound), the
-  recommended mode, follow or counter, the mode used and the caption type), its
+  recommended mode, follow or counter, the mode used and the caption type), the
+  analysis's two moderators (``moderator_scene``, ``logit q``, and
+  ``moderator_participant``, what the answers add; ``diff.phase1_binding``), its
   check flags, and whether the V2 point (P7) fell on the noticed sound's source,
   the behavioural check of the mode. ``caption_id`` names the shown caption,
   and ``r2_named_auto`` lists the R2 options it seems to name
@@ -49,7 +51,7 @@ from diff.phase1_tweak import named_in
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v5"
+EXPORT_SCHEMA: Final = "diff.export/v6"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -92,6 +94,8 @@ SECOND_CAPTION_COLUMNS: Final = (
     "congruence_centre",
     "tendency",
     "p_bound",
+    "moderator_scene",
+    "moderator_participant",
     "recommended",
     "assignment",
     "mode",
@@ -226,6 +230,8 @@ def second_caption_rows(
             "congruence_centre": model.get("congruence", {}).get("centre", ""),
             "tendency": model.get("tendency", {}).get("mean", ""),
             "p_bound": model.get("p_bound", ""),
+            "moderator_scene": model.get("moderator_scene", ""),
+            "moderator_participant": model.get("moderator_participant", ""),
             "recommended": model.get("recommended", ""),
             "assignment": model.get("assignment", ""),
             "mode": model.get("mode", ""),
