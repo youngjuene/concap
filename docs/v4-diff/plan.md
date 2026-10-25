@@ -357,12 +357,13 @@ engineering fixes found on the way to the user test.
   infers it from the order of the attempts.
 - **The display rule** (researcher's decision, relaxing "shown as written" of
   the live redesign of 2026-10-11). Trida often opens with a prompt label
-  ("자막:", 7 of 163 live calls in the smoke baseline) or wraps the caption in
+  (the word for caption and a colon, 7 of 163 live calls in the smoke
+  baseline) or wraps the caption in
   「」 or quotes (7 of 36 second captions; 87 of 163 live calls under one probe
   wording). What a participant sees of a live caption or a second caption is
   now Trida's text under `output_checks.DISPLAY_RULE` (`diff.display/v1`, v2 since 2026-10-22):
-  - a leading label is removed ("자막", "바꿔/고쳐/다시 쓴 자막", "답",
-    "출력", followed by colons);
+  - a leading label is removed (the words for caption, rewritten caption,
+    answer or output, followed by colons);
   - one pair of quotes or 「」『』 wrapping the whole text is removed, only
     when that pair appears nowhere inside it;
   - nothing inside the text changes, so a broken word is still shown;
@@ -378,7 +379,7 @@ engineering fixes found on the way to the user test.
   on the shown text but still counts the quotes and labels in Trida's own.
 - **A caption never goes blank** (researcher, 2026-10-20). On 13,216 real
   Trida outputs from 40 synthetic participants and all nine slider cells,
-  Trida twice wrote only the prompt's label "자막:" and stopped, which the
+  Trida twice wrote only the prompt's caption label and stopped, which the
   display rule left empty. Nothing makes Trida keep the caption it was given.
   - A live caption with nothing readable left (no letter or digit) shows the
     cue's starting caption, the text Trida was given to rewrite. The attempt
@@ -388,7 +389,7 @@ engineering fixes found on the way to the user test.
     display rule", or the check's `empty_text`), so that clip's second step is
     skipped, as for any failed second caption.
 
-  Replayed through Trida (deterministic), both cases write "자막:" again; the
+  Replayed through Trida (deterministic), both cases write the label again; the
   live one now shows its starting caption and the second caption fails. A
   15-session run of the app on both GPUs (unattended pseudo participants,
   seven answer profiles, seven slider styles) passed the session audit, and
@@ -443,8 +444,8 @@ engineering fixes found on the way to the user test.
   `settled`, so a video still opens with Trida's rewrite at the middle
   settings. The browser keeps its cached captions after a move and marks a
   change applied only when its window's caption is `current`. The waiting
-  chip now reads "새 자막을 준비하는 동안 이전 설정의 자막이 표시됩니다"
-  (wording for the researcher's approval). Attempt logs move to
+  chip now says that the earlier setting's captions show while the new ones
+  are prepared (wording for the researcher's approval). Attempt logs move to
   `diff.live-attempt/v4` (`usable`), and the exposure log names the job or
   the starting caption each window showed. The audit checks that every
   window showed its own caption.
@@ -465,9 +466,9 @@ engineering fixes found on the way to the user test.
     poll) of `p + L`, the tweak goes to the next cue.
   - A swapped cue logs two exposures, before and after the swap.
 
-  The chip no longer counts down to a boundary: it reads "새 설정으로 자막을
-  고쳐 쓰고 있습니다", then "applied". The handoff briefing now reads
-  "바꾼 설정은 잠시 뒤 자막에 바로 반영됩니다", and its figure turns the
+  The chip no longer counts down to a boundary: it says the caption is being
+  rewritten with the new settings, then "applied". The handoff briefing now
+  says a changed setting reaches the captions shortly, and its figure turns the
   caption the change was made in. The researcher approved both wordings on
   2026-10-22, on condition that neither covers the video: the chip has its
   own row below the sliders (checked at 1280 and 390 px wide), and the
@@ -490,8 +491,8 @@ engineering fixes found on the way to the user test.
   - Chosen on the 90 final captions × 9 cells at the study's settings, by a
     rule written before the first run (`artifacts/diff/cell-prompts/RULE.md`,
     tightened twice, never loosened). Bench of 2026-10-21 on every third cue:
-    an example after the cue was copied into unrelated cues ("사람 소리, 동물
-    소리" for traffic); no example left 56% unchanged; the soundscape form
+    an example after the cue was copied into unrelated cues (human and animal
+    sounds, for traffic); no example left 56% unchanged; the soundscape form
     brought copies to 10% and gave every cell its own caption.
   - The nine prompts do not pass that rule yet: 17% of rewrites show broken
     text, two-thirds of it ",," (collapsed on display since 2026-10-22,
@@ -523,26 +524,27 @@ screens end before the protocol does.
     later cues written under the old settings, so a boundary keeps the
     previous caption, as the scheduler intends.
 - **Where am I (F2, F14).** Every page except the watch has a six-segment
-  session progress bar (도입 · 연습 · 첫 번째 시청 · 두 번째 시청 · 긴 영상 ·
-  인터뷰), sized by expected time.
-  - Clip pages read "1스테이지 · 첫/두 번째 시청 · 영상 n / N", with the
-    count repeated as dots.
-  - The watch header shows "긴 영상 n / V" and the elapsed time.
+  session progress bar (introduction, practice, first viewing, second
+  viewing, long videos, interview), sized by expected time.
+  - Clip pages name stage 1, the first or second viewing and the clip's
+    number out of N, with the count repeated as dots.
+  - The watch header shows the long video's number out of V and the elapsed
+    time.
 - **Stage-B interstitial (F2).** A new page, `interlude`, sits between the
-  last P5 and the first P6, and is phase 1's one natural break. It reads
-  "첫 번째 시청을 마쳤습니다 / 앞에서 본 영상 N편을 한 번 더 봅니다." and has a
+  last P5 and the first P6, and is phase 1's one natural break. It says the
+  first viewing is over and the N clips will be watched once more, and has a
   start button.
   - It does not say that the captions differ: P0 already does, and saying it
     again would prime D1.
   - It is closed by `interlude-complete`, which is analysis-excluded.
   - The page order changed, so the protocol is now `diff.phase1/v3`.
-- **The end of the screens (F3).** The last screen reads "화면 과제가
-  끝났습니다" and asks the participant to take off the headphones in their
-  seat ("자리에서") and call the experimenter, because a short interview
-  follows.
+- **The end of the screens (F3).** The last screen says the on-screen tasks
+  are over and asks the participant to take off the headphones where they
+  sit and call the experimenter, because a short interview follows.
   - The interview (P12) and debrief (P13) stay outside the app, as decided on
     2026-10-18. The session still finishes when the ratings are saved.
-  - Holding "연구자 확인 · 다음 참가자" for 1 s returns to the entry.
+  - Holding the researcher's next-participant button for 1 s returns to the
+    entry.
 - **One theme (F5):** `live.html` links `participant_theme.css` and has no
   palette of its own.
 - **Briefing (F6):** the handoff is phase 2's briefing:
@@ -556,8 +558,8 @@ screens end before the protocol does.
 - **Ratings (F10):** the post-watch items use phase 1's scale cards, answered
   count and sticky bar.
 - **Waiting (F11):** while a second caption is written, P6 shows an
-  indeterminate bar (still under reduced motion). After 20 s it adds "시간이
-  걸리고 있습니다. 연구자에게 알려 주세요."
+  indeterminate bar (still under reduced motion). After 20 s it adds that
+  this is taking a while and asks the participant to tell the researcher.
 - **Items in cards of three (F12)**, with no subscale names. P9 keeps its
   shuffled order.
 - **Validation (F13):** the missing-item message moved into the sticky bar,
@@ -577,25 +579,26 @@ screens end before the protocol does.
   clip.
 
 **Wording, decided by the researcher on 2026-10-19:**
-- **Slider labels approved:** 없이 / 조금 / 많이 for texture (step 0 forbids
-  texture words, so "적게" became "없이") and 넓은 범주로 / 구체적인 음원 /
-  위치와 관계까지 for context.
-- **No steering goal:** the design's "정답은 없으니 읽기 편한 자막을 찾아 주세요"
-  stays out, so participants are given no goal for steering.
+- **Slider labels approved:** none, a little and a lot for texture (step 0
+  forbids texture words, so the design's "less" became "none") and broad
+  kinds, specific sources and places and relations for context.
+- **No steering goal:** the design's line saying there is no right answer and
+  asking for the easiest caption to read stays out, so participants are given
+  no goal for steering.
 - **The watch's change chip stays as designed.**
 - **Shorter screens:** the design's interstitial, briefing and end screen
   were too verbose for the user test, so each is cut to one or two lines:
-  - The interstitial has no remaining-steps list and no "잠시 쉬어도
-    괜찮습니다".
-  - The briefing has a one-line lead ("한 편은 약 N분이며, 보는 동안 자막을 직접
-    조절할 수 있습니다.") and three one-line points: two sliders change the
-    caption; a change shows from the next caption; the video keeps playing
-    ("영상은 멈추지 않고 이어집니다", F6's "no pausing"). The hidden-tab pause
-    is not briefed, because phase 1 already pauses the same way and the
+  - The interstitial has no remaining-steps list and no line saying a short
+    rest is fine.
+  - The briefing has a one-line lead (each video lasts about N minutes, and
+    the captions can be adjusted while watching) and three one-line points:
+    two sliders change the caption; a change shows from the next caption; the
+    video keeps playing without stopping (F6's "no pausing"). The hidden-tab
+    pause is not briefed, because phase 1 already pauses the same way and the
     overlay explains itself.
-  - The end screen has its title and one notice. The notice keeps
-    "자리에서", because keeping the participant in place for D1 is F3's
-    point.
+  - The end screen has its title and one notice. The notice still asks the
+    participant to stay where they sit, because keeping them in place for D1
+    is F3's point.
 
 **Verified:**
 - the `tests/diff` suite, ruff and mypy;
@@ -611,7 +614,7 @@ screens end before the protocol does.
 
 ## Phase 1 — two viewings per clip, the second caption by Trida (researcher, 2026-10-18, later)
 
-The researcher read the questionnaire spreadsheet (문항표; regen's copy was
+The researcher read the questionnaire spreadsheet (regen's copy was
 taken from the same sheet on 2026-10-04) and asked for phase 1 to follow it:
 each 10-second clip has two steps. This supersedes "one viewing per clip"
 and "it shows no model output" in the section below. The rest of that
@@ -643,12 +646,13 @@ by `P{n}`, the store and the export.
 - **P0 and titles:** the sheet's text, word for word, including the
   two-viewings and interview sentences. The interview (P12) and debrief (P13)
   happen out loud, outside the app.
-- **Long-video stage:** unchanged. The sheet has no items for it ("미정"), so
+- **Long-video stage:** unchanged. The sheet has no items for it (marked
+  undecided), so
   the post-watch items still come from the researcher.
 
 **The sheet as of 2026-10-18.** Since regen's copy, one cell changed: R1 now
-reads "영상을 보는 동안 자막을 어디까지 읽으셨습니까?". diff now has its own copy
-of the instrument:
+asks how far the participant read the captions while watching. diff now has
+its own copy of the instrument:
 - `workbook_instrument`, regen's `sheet_instrument` code unchanged;
 - over `src/diff/items/workbook-20261018.json`, which is regen's snapshot
   with that cell updated, checked against the sheet's export on all 886
@@ -666,9 +670,9 @@ clip's step-1 answers:
 | Slot | From | In the prompt |
 |---|---|---|
 | `{caption}` | the raw first caption | the text to tweak |
-| `{sounds}` | the labels of the mentioned R2 options (`orig_text` sounds) | "이 영상에서 들리는 소리"; also R2's intended key |
+| `{sounds}` | the labels of the mentioned R2 options (`orig_text` sounds) | the sounds heard in this video; also R2's intended key |
 | `{attended_sound}` | the P3 A1s answer's label | the sound the viewer attended to |
-| `{attended_object}` | the object under the P2 point, in Korean ("없음" off every mask) | what the viewer saw first |
+| `{attended_object}` | the object under the P2 point, in Korean (the word for none, off every mask) | what the viewer saw first |
 | `{fascination}` % | the F1–F3 mean | make the sounds' appeal and interest stand out |
 | `{being_away}` % | the BF1–BF3 and P1–P2 mean | bring out a sense of getting away from routine |
 | `{coherence}` % | the E1–E3 mean | show how the sounds belong to and fit the place |
@@ -704,7 +708,8 @@ are recorded, not used.
   - P5 records the clip's slots and marks its second caption pending.
   - The server queues the job after the answer commits and writes the outcome
     back.
-  - P6 shows regen's "다음 영상을 준비하고 있습니다…" while it waits, and a failed
+  - P6 shows regen's line saying the next video is being prepared while it
+    waits, and a failed
     clip is skipped (`skip-second`) without a participant step.
   - Pending captions are queued again at entry and at every phase-1 request,
     so a restart loses none.
@@ -740,11 +745,12 @@ are recorded, not used.
   - What the provisional prompt produced (not a quality rating):
     - three outputs are bare lists of sound names where the caption was a
       sentence or a single phrase (`singapore_040`, `amsterdam_012`,
-      `bangkok_034`). For example `amsterdam_012`: "달리는 기차의 소리" became
-      "기차 소리, 경찰차 사이렌, 차량 소리";
+      `bangkok_034`). For example, `amsterdam_012`'s phrase about a running
+      train became a list of train, police siren and vehicle sounds;
     - `amsterdam_181` copied its caption unchanged (flagged);
-    - `bangkok_034` starts with a broken word ("적 소리");
-    - `amsterdam_202` repeats "엔진";
+    - `bangkok_034` starts with a broken word (a word cut to its last
+      syllable);
+    - `amsterdam_202` repeats the word for engine;
     - `bangkok_316` kept the prompt's 「」 quotes.
 
     This bears on decision C.
@@ -820,7 +826,7 @@ the `orig_text` caption, so its options keep `orig_text`.
 - The first draft built A1s options from each clip's AudioSet labels and
   dropped any label that is an ancestor of another (regen media staging's
   rule). That is not a study decision. It let the options drift from the
-  caption. For example, `amsterdam_057` offered "트럼펫 소리", which
+  caption. For example, `amsterdam_057` offered a trumpet, which
   `orig_text` never names, and `bangkok_316` lost the traffic it names.
 - **A1s now has one option per sound `orig_text` names, in its order.**
   Nothing is dropped and nothing is added from the labels. Each option quotes
@@ -865,7 +871,8 @@ two lines while the video gives way.
 
 **Wording (researcher, 2026-10-18; superseded, the sheet's text is shown as is):** minimal edits for review.
 - The workbook's P0 told participants about a second viewing and an
-  interview, and its titles said "1차"/"2차". Both no longer fit.
+  interview, and its titles numbered the first and second rounds. Both no
+  longer fit.
 - The two sentences are deleted and the prefixes dropped. Item texts stay the
   workbook's.
 
@@ -1189,10 +1196,10 @@ Korean ability; that is G0's job.
   - `dream_k1`: 4 of its 6 completed outputs.
   - `dream_k2`: 9 of 18.
   - `dream_k4`: never.
-  - The six 원문 measure 31 tokens at the median and 45 at most (Dream
-    tokenizer). Completed outputs stopped after 8–46 tokens. Most of each
-    128/192 canvas is therefore end-of-text, and the canvas has not yet been
-    set from measured counts (CV-08, M0).
+  - The six source captions measure 31 tokens at the median and 45 at most
+    (Dream tokenizer). Completed outputs stopped after 8–46 tokens. Most of
+    each 128/192 canvas is therefore end-of-text, and the canvas has not yet
+    been set from measured counts (CV-08, M0).
 - **Script check:** `dream_k1` 2/18 under the implemented rule, `dream_k2`
   9/18, `dream_k4` 18/18, `qwen` 15/18.
   - The implemented rule counts empty output, U+FFFD, leftover masks and jobs
@@ -1240,8 +1247,8 @@ technical failures. Latency medians: `dream_k1` 16.1 s, `k2` 8.1 s, `k4`
 - **The smaller canvas did not cure the end-of-text fill at k1; it made it
   worse.** On the phase-1 cues, run 1 had 4/6 empty at canvas 128 and run 2
   had 6/6 at canvas 80.
-- **The two non-empty `dream_k1` outputs** are "차가 울린니다" and "차량
-  울린다".
+- **The two non-empty `dream_k1` outputs** are two-word sentences about a
+  car or vehicle sounding, the first misspelt.
 
 **G0 outcome:** under the rule decided on 2026-10-10, `dream_k1`'s script
 share is 11 % against 95 %. G0 fails whatever the rating, so the packet
@@ -1267,7 +1274,7 @@ all at k1 (steps = canvas), and was never G0 evidence.
 - The prompts, the cut at the first terminator and the output checks are the
   pipeline's own.
 
-| Variant | Settings | Empty | Exact copy of 원문 | Script pass | Median latency |
+| Variant | Settings | Empty | Exact copy of the source caption | Script pass | Median latency |
 |---|---|---|---|---|---|
 | control | greedy, canvas 80 (run 2's call) | 6/6 | 0 | 0/6 | 8.9 s |
 | greedy256 | greedy, canvas 256 | 5/6 | 1 | 1/6 | 49.6 s (max 66.6 s) |
@@ -1291,9 +1298,9 @@ all at k1 (steps = canvas), and was never G0 evidence.
 - **The README's sampling settings remove the empties.** Position 0 is
   committed at step 1 or 2. At canvas 80, no end-of-text is committed in the
   first quarter.
-- **What comes back is mostly the 원문.**
+- **What comes back is mostly the source caption.**
   - Exact copies: 9 of 18 at canvas 80, and 3 of 6 at 512.
-  - The rest are near-copies, three of them prefixed "자막:".
+  - The rest are near-copies, three of them prefixed with the caption label.
 - **The seeds made no difference here, but the call still uses randomness.**
   - The three seeds gave identical text for every cue.
   - The call consumes RNG, so two protocol rules would have to change: the
@@ -1317,10 +1324,10 @@ the same six cues at k1 and canvas 80, with the same script
 (`rngfree.jsonl`). Every call left the CPU and CUDA RNG state unchanged (6/6
 per variant).
 
-| Variant | Settings | Empty | Copies of 원문 | Script pass | Median latency |
+| Variant | Settings | Empty | Copies of the source caption | Script pass | Median latency |
 |---|---|---|---|---|---|
 | control, rerun | run 2's call | 6/6 | 0 | 0/6 | 8.9 s |
-| greedytopp80 | temperature 0, `top_p` 0.95, `entropy` | 4/6 | 1 exact, plus a fragment ("오디오 클립에 담긴 주요 소리는") | 2/6 | 9.5 s |
+| greedytopp80 | temperature 0, `top_p` 0.95, `entropy` | 4/6 | 1 exact, plus a fragment (the opening words of a sentence about the clip's main sounds) | 2/6 | 9.5 s |
 | maskgit80 | temperature 0, `alg="maskgit_plus"` | 4/6 | 1 exact, 1 near | 2/6 | 10.1 s |
 | margin80 | temperature 0, `alg="topk_margin"` | 2/6 | 2 exact, 2 near (one with U+FFFD) | 3/6 | 11.0 s |
 
@@ -1330,8 +1337,8 @@ per variant).
     sampling.
   - Without the division by 0.2, too few positions become one-hot, and
     end-of-text still dominates the first quarter.
-- **Every non-empty output across these variants copies the 원문, nearly
-  copies it, or is a fragment of it.** Copying is not specific to the
+- **Every non-empty output across these variants copies the source caption,
+  nearly copies it, or is a fragment of it.** Copying is not specific to the
   sampling settings.
 
 **What this means for the choice:**
@@ -1343,11 +1350,11 @@ per variant).
   - the no-RNG cap, which would become a recorded seed per job; the three
     seeds gave identical text for every cue;
   - possibly the meaning of k as confidence-ordered parallelism.
-- **Dream copies the 원문 under every setting that produces text.**
+- **Dream copies the source caption under every setting that produces text.**
   - Any Dream path would need a revised prompt.
   - G0's rule does not count copies against Dream: `identical_to_source` is a
-    flag, not a script failure. A rater shown human 원문 could therefore pass
-    the gate on copies.
+    flag, not a script failure. A rater shown human source captions could
+    therefore pass the gate on copies.
 - **Another model stays open.**
 
 ### Protocol v4, 2026-10-11 (researcher's decision)
@@ -1369,11 +1376,12 @@ implements the parts that do not depend on the prompt:
     to start if they differ.
   - It passed on the RTX 3090 on 2026-10-11.
   - Qwen stays greedy and keeps the no-RNG check.
-- **Copies.** An output identical to its cue's 원문 fails G0's script check,
-  like an empty one (`script_check_failing_flags`). Near-copies stay flags.
+- **Copies.** An output identical to its cue's source caption fails G0's
+  script check, like an empty one (`script_check_failing_flags`). Near-copies
+  stay flags.
 - **Prompt.** `rewrite-p1` is now version 2. The brief's text stays in code as
-  `PHASE1_REWRITE_V1`. The corner-cell prompt (`lattice-p2`) shows no 원문 and
-  is unchanged.
+  `PHASE1_REWRITE_V1`. The corner-cell prompt (`lattice-p2`) shows no source
+  caption and is unchanged.
 
 **How version 2 was chosen (2026-10-11, out of protocol; never G0).** The
 researcher asked the assistant to prepare the prompt from the captions on
@@ -1398,10 +1406,11 @@ hand.
 
 `v2b` became version 2. The script check misses most of what is wrong with
 these outputs, under every draft:
-- echoed evidence lines (`소리 1 — 음원: …`);
-- echoed labels (`자막:`, and under `v2b` four of 11 start with
-  `바꿔 쓴 자막:`);
-- broken characters (U+FFFD) and stray Latin letters ("지저 the다").
+- echoed evidence lines (the prompt's numbered sound and source fields);
+- echoed labels (the caption label, and under `v2b` four of 11 start with
+  the rewritten-caption label);
+- broken characters (U+FFFD) and stray Latin letters (an English word inside
+  a Korean verb).
 
 Output is never trimmed (brief), so the naturalness rating has to catch
 these. Script and results: `artifacts/diff/prompt-precheck-20261011/`
@@ -1417,7 +1426,7 @@ midsentence render had freed it, and warm-up's seeded calls agreed.
 - All 72 jobs completed, with no timeouts and no technical failures.
 - Latency medians: `dream_k1` 15.6 s, `k2` 7.8 s, `k4` 3.9 s, Qwen 0.7 s.
 
-| Condition | Script pass | Empty | Exact copies | Starts with a prompt label (`바꿔 쓴 자막:` / `자막:`) | U+FFFD |
+| Condition | Script pass | Empty | Exact copies | Starts with a prompt label (rewritten caption / caption) | U+FFFD |
 |---|---|---|---|---|---|
 | `dream_k1` | 18/18 | 0 | 0 | 10/18 | 0 |
 | `dream_k2` | 18/18 | 0 | 0 | 10/18 | 0 |
@@ -1430,8 +1439,8 @@ midsentence render had freed it, and warm-up's seeded calls agreed.
 - **The rating decides G0.** It needs ≥ 3/4 of `dream_k1` rated 3 or higher.
 - **Visible defects, in the output as written (never trimmed):**
   - 10 of 18 `dream_k1` outputs start with a label echoed from the prompt;
-  - a dropped first syllable ("동차 엔진", for 자동차);
-  - misspelt endings ("분니다");
+  - a dropped first syllable (car, missing its first syllable);
+  - misspelt endings (a polite verb ending spelt wrongly);
   - 3 sentence-ending mismatches.
 - **The corner cells barely respond to their cell.** For `amsterdam_181`,
   three of the four corners gave the identical sentence. That matters for G2,
@@ -1510,7 +1519,7 @@ The approved plan, with every decision: `~/.claude/plans/sunny-brewing-haven.md`
 | 4 | — | 5–6 of 22 |
 
 - At texture 4 many outputs that pass the checks are still unusable. Dream
-  dumps the quality list or loops ("소, 소, 소, …", "기기기기…").
+  dumps the quality list or loops on one syllable.
 - The prompt cannot remove broken characters, because they come from
   decoding.
 
@@ -1538,8 +1547,8 @@ step 2), on the same walk:
   was about 3 s waiting for the call in flight, then `L` = 6 s, then the
   boundary.
 - **Expected range:** about 6–17 s.
-- **Quality is still the weak point:** for example "기�기기 기�기기", "지
-  good을".
+- **Quality is still the weak point:** for example, repeated syllables broken
+  by U+FFFD, and an English word inside a Korean phrase.
 
 **Decided by the researcher on 2026-10-12 (protocol v5):**
 - **Live canvas: 80 tokens** (`LIVE_CANVAS_TOKENS`), at k2 with 40 steps.
@@ -1548,8 +1557,9 @@ step 2), on the same walk:
   - Starting captions and rewrites must fit 96 characters (`LIVE_MAX_CHARS`).
     `live serve` refuses a starting caption that does not.
 - **Wording approved:** the slider labels and the page text, as drafted.
-  - Texture slider: "소리의 질감 표현: 적게 ↔ 많이".
-  - Source slider: "음원 설명: 넓은 범주로 ↔ 위치와 관계까지".
+  - Texture slider: how the sounds' texture is described, from less to more.
+  - Source slider: how the sources are described, from broad kinds to places
+    and relations.
 - **Texture quality:** fixes were tested on held-out captions first.
   - Material: `artifacts/diff/prompt-precheck-texture-20261012/`, at canvas
     80, the same 11 held-out cues, 55 outputs per variant.
@@ -1579,7 +1589,7 @@ step 2), on the same walk:
 
 | ID | Content (follow-up) | Modules | Tests |
 |---|---|---|---|
-| G0 | Korean feasibility before any other Dream work: development cues (phase-1 prompt) + ≥ 12 corner cell prompts; `dream_k1/k2/k4` + `qwen`; automatic report; blind packet (`dream_k1` + `qwen`) rated 1–5 by one fluent Korean reader; pass = all `dream_k1` jobs terminal with no unresolved technical failure, ≥ 95 % script pass over every `dream_k1` job (incomplete, empty, missing and, since v4, exact copies of the 원문 count as failures), ≥ 3/4 naturalness ≥ 3; recorded as an `AnalysisDecision` with the run-manifest hash | `feasibility_gate`, `analysis_decisions`, `output_checks`, `dream_runner`, `qwen_runner`, `__main__ g0 …` | `test_feasibility_gate` |
+| G0 | Korean feasibility before any other Dream work: development cues (phase-1 prompt) + ≥ 12 corner cell prompts; `dream_k1/k2/k4` + `qwen`; automatic report; blind packet (`dream_k1` + `qwen`) rated 1–5 by one fluent Korean reader; pass = all `dream_k1` jobs terminal with no unresolved technical failure, ≥ 95 % script pass over every `dream_k1` job (incomplete, empty, missing and, since v4, exact copies of the source caption count as failures), ≥ 3/4 naturalness ≥ 3; recorded as an `AnalysisDecision` with the run-manifest hash | `feasibility_gate`, `analysis_decisions`, `output_checks`, `dream_runner`, `qwen_runner`, `__main__ g0 …` | `test_feasibility_gate` |
 | AC-20 | the bundle builder and lattice generator refuse unless a passing G0 decision exists for a run manifest with the current model profile | `job_plan.build_phase2_plan` (lattice generator), `analysis_decisions.gate_problems`; bundle builder in Stage 2 | `test_job_plan_identity` (AC-20 cases) |
 | AC-01 | synthetic logits: recomputed confidences, counts and selected positions equal the pinned code's | after G0: vendored `dream_generation_utils.py` + decode trace | pending G0 |
 | AC-02 | the §3 refusal list, including each missing required keyword | `dream_runner.checked_call`, `qwen_runner.checked_call` | `test_dream_runner_contract`, `test_qwen_runner_contract` |
@@ -1933,19 +1943,22 @@ is part of the hashed input (Q9).
 `{cue_evidence}` is a deterministic, versioned Korean rendering of the
 structured evidence. Events appear in order, each with its source (category),
 count, action, qualities in their Korean final forms, location or relation, and
-certainty. "종류, 개수, 순서, 확실성" in the phase-1 instruction therefore each
-have a field to come from.
+certainty. The phase-1 instruction's kind, count, order and certainty
+therefore each have a field to come from.
 
 Phase 2 renders three more slots:
 
 - **`{qualities}`:** the cue's evidence qualities, comma-joined.
 - **`{k}`:** the texture step's value.
 - **`{context_rule}`:** one of three draft sentences, to be approved (Q10):
-  - broad: "음원은 사람 소리, 동물 소리, 교통·기계 소리, 음악 소리, 자연 소리 같은 넓은 범주로만 쓰고 구체적인 음원 이름이나 위치는 쓰지 마세요."
-  - specific: "근거에 있는 음원 이름을 쓰되 위치나 다른 대상과의 관계는 쓰지 마세요."
-  - relation: "근거에 있는 음원 이름과 함께 근거에 있는 위치나 관계를 쓰세요."
+  - broad: write sources only as broad kinds (human, animal, traffic and
+    machine, music, nature), with no specific source names or places;
+  - specific: name the sources in the evidence, but not their places or
+    relations to other things;
+  - relation: name the sources in the evidence with the places or relations
+    it gives.
 
-Two edge cases are left as open questions (Q10): `k = 0` renders "0개까지만",
+Two edge cases are left as open questions (Q10): `k = 0` renders "up to 0",
 and evidence with no qualities renders an empty list.
 
 ### 4.3 Job plan and caps
@@ -2133,8 +2146,7 @@ and format rules:
 - script: any letter that is not Hangul, unless it appears in that cue's
   source or evidence. This is stricter than regen's "any Hangul passes".
 - CV-10 sentence-ending class differs from the source's, using a closed,
-  versioned set: declarative 다/ㄴ다/는다, nominal 음/ㅁ, noun-phrase ending,
-  polite 요.
+  versioned set: declarative, nominalised, noun-phrase ending, polite.
 
 **Flag rules** send the output to double review. These are content rules:
 
@@ -2319,7 +2331,8 @@ behaviour as regen; §7 is the parity map. Changes:
   (`/m/<token>`). The response carries `consent_sha256` so that consent binds
   to the text actually shown.
 - **Transition page.** Its id is `transition` instead of `generate`, with the
-  same title "두 번째 자막 준비" and the same button "다음 영상 준비". It looks up
+  same title (preparing the second caption) and the same button (prepare the
+  next video). It looks up
   the slot's condition and binds the bundle's track for P6, with no model
   call.
 - **Handoff.** It moves to phase 2 inside the same app (no continuation mount,
@@ -2425,13 +2438,13 @@ order, options, validation and transition.
 | 2 | practice: `practice_rating` (0–6), `practice_sound`, `practice_visual` → `practice-complete {page, answers}` | `sheet_practice[] {answers, analysis_excluded:true, at}` | same | practice row, `analysis_excluded` | same; practice frames ≠ formal frames |
 | 3 | P1 view (first track, no seek UI) → `playback {page, position_ms, playing, hidden, sequence}` …, `view-ended {page}`; gate cov ≥ d − min(300, 5 %), pos ≥ d − 100 | checkpoint; `sheet_viewings[] {view_id, clip_index, clip_id, condition:"first", captions, coverage, started_at, ended_at, …}` | P1 same; ticks + `clock_session_id`, `mono_ms` | checkpoint in state; viewing row {view_id, clip, viewing:"first", stimulus_id, coverage, …} | same gate (shared `record_playback`), same 409 text class |
 | 4–7 | P2 V1 → P3 A1s → P4 (11) → P5 FA1–FA3, each `submit {page, answers}` | `sheet_responses[] {page, clip_index, clip_id, view_id, condition, caption_strategy, stimulus_assignment, answers, items, presented_order, instrument_hash, submitted_at, client_submitted_at:null, …}` (+ matches, labels, visual_metrics for P2) | same pages → `submit {page, answers, timing}` | response row {page, view_id, viewing, stimulus_id, answers, presented_order, instrument_hash, submitted_at, client timing, timing_valid} (+ matches, labels, visual_metrics) | same items, order, validation; diff stores items by instrument hash |
-| 8 | `generate` (kind `generating`, "두 번째 자막 준비", button "다음 영상 준비") → `generate {page:"generate"}` | `sheet_regenerations[seg] {track, writer, strategy, selection_key, condition, caption_hash}` | `transition` (same title and button) → `transition {page:"transition"}` | second-track binding {view P6 → stimulus_id from slot} | page-id map `generate ↔ transition`; no model in either |
+| 8 | `generate` (kind `generating`, titled preparing the second caption, button to prepare the next video) → `generate {page:"generate"}` | `sheet_regenerations[seg] {track, writer, strategy, selection_key, condition, caption_hash}` | `transition` (same title and button) → `transition {page:"transition"}` | second-track binding {view P6 → stimulus_id from slot} | page-id map `generate ↔ transition`; no model in either |
 | 9 | P6 view (second track) | viewing, `condition:"second"` | P6 same | viewing row, `viewing:"second"` | same gate; caption text equal by construction (harness) |
-| 10–14 | P7 V2 → P8 A2s (A1s options) → P9 (11 `_2`, `page_item_order(P9, session_key)`) → P10 S1–S3 → P11 R1, R2 (+ exclusive 기억나지 않음) | as 4–7 | same | as 4–7 | same; P9 order is the same function of each system's session key |
-| 15 | after P11: next clip's P1, or `handoff` ("1스테이지 완료", button "2스테이지 시작") → `handoff {page:"handoff"}` → `next_url` | stage `ready`; profile, observations, `calibration_source` | same → `handoff {page}` | stage `phase2/ready`; no profile | same sequence; diff stays in one app |
-| 16 | ready: "사전 응답이 저장되었습니다" + interaction-only text, button "영상 시청 시작" → `start-viewing {}` (manifest re-read) | `viewing` (manifest order), `viewing_hash` | same → `start-viewing {}` | video order from slot | same page; order source differs by design |
-| 17 | watch: `settings {video_id, position_hint_ms, origin, texture, context}`, `playback {video_id, position_ms, sequence, playing, hidden, seek}`, `exposures {video_id, entries}`, then "영상 시청 완료" / "종료 후 인터뷰로" → `video-ended {video_id}`; gate cov ≥ d − 1,500, pos ≥ d − 500 | axes, `settings_revision`, jobs, exposures, `completions[]` | watch: lattice once; control events and exposures (append-only); `playback`; `video-ended {video}` | control_events, exposures, completions | same gate and transition; caption mechanics differ by design |
-| 18 | break "잠시 쉬어 가십시오" → `continue {}` | stage `watch` | same (text revised) | — | same position |
+| 10–14 | P7 V2 → P8 A2s (A1s options) → P9 (11 `_2`, `page_item_order(P9, session_key)`) → P10 S1–S3 → P11 R1, R2 (+ an exclusive "don't remember") | as 4–7 | same | as 4–7 | same; P9 order is the same function of each system's session key |
+| 15 | after P11: next clip's P1, or `handoff` (stage 1 done, button to start stage 2) → `handoff {page:"handoff"}` → `next_url` | stage `ready`; profile, observations, `calibration_source` | same → `handoff {page}` | stage `phase2/ready`; no profile | same sequence; diff stays in one app |
+| 16 | ready: a line saying the earlier answers are saved + interaction-only text, button to start watching → `start-viewing {}` (manifest re-read) | `viewing` (manifest order), `viewing_hash` | same → `start-viewing {}` | video order from slot | same page; order source differs by design |
+| 17 | watch: `settings {video_id, position_hint_ms, origin, texture, context}`, `playback {video_id, position_ms, sequence, playing, hidden, seek}`, `exposures {video_id, entries}`, then the watching-done and on-to-the-interview buttons → `video-ended {video_id}`; gate cov ≥ d − 1,500, pos ≥ d − 500 | axes, `settings_revision`, jobs, exposures, `completions[]` | watch: lattice once; control events and exposures (append-only); `playback`; `video-ended {video}` | control_events, exposures, completions | same gate and transition; caption mechanics differ by design |
+| 18 | break (a line asking the participant to rest) → `continue {}` | stage `watch` | same (text revised) | — | same position |
 | 19 | P12 interview prompts D1/D2 → `interview-complete {researcher_confirmed:true}` | `poststudy.interview_completion` | same | same | same |
 | 20 | P13 debrief text → `debrief-complete {researcher_confirmed, participant_acknowledged}` | `debrief_completion`; stage `done` | same | same; slot `completed` | same |
 | 21 | done: thanks + receipt (`session_id`) | — | same (opaque id) | — | same |
@@ -2535,9 +2548,9 @@ SHA-256 over canonical JSON (sorted keys, no NaN, UTF-8, compact separators).
  "unit": {"kind": "clip", "key": "<clip_key>"}, "cue_index": 0, "start_ms": 0, "end_ms": 2508,
  "text": "…",
  "properties": {"audiovisual_congruence": "congruent", "description_depth": "shallow"},
- "evidence": {"events": [{"event_id": "e1", "order": 0, "source": "버스", "category": "things",
-                          "count": "one", "action": "지나간다", "qualities": ["loud", "low_pitched"],
-                          "location": "오른쪽 차로", "relation": null, "certainty": "clear"}]},
+ "evidence": {"events": [{"event_id": "e1", "order": 0, "source": "<source>", "category": "things",
+                          "count": "one", "action": "<action>", "qualities": ["loud", "low_pitched"],
+                          "location": "<location>", "relation": null, "certainty": "clear"}]},
  "provenance": {"text": "human", "evidence": "human", "origin": "…",
                 "reviewed_by": ["R1"], "reviewed_at": "2026-…"},
  "status": "reviewed"}
@@ -2949,8 +2962,8 @@ G0 run and the k1 diagnostic, and each row wins over the rows above.
 | PRD | Change |
 |---|---|
 | §5.2 | **CV-05 / CV-12:** Dream samples at temperature 0.2 with `top_p` 0.95, the README's settings, because greedy decoding returned empty captions. Each call is seeded from its job ID, and the warm-up refuses a device where two seeded calls differ. Qwen stays greedy. |
-| §7 | **Prompts:** `rewrite-p1` version 2, aimed at Dream copying the 원문. The assistant drafted it at the researcher's request and chose it on held-out captions by a rule fixed beforehand (see "Protocol v4"). |
-| §11 | **G0 script check:** an exact copy of the cue's 원문 fails it. Near-copies stay flags. |
+| §7 | **Prompts:** `rewrite-p1` version 2, aimed at Dream copying the source caption. The assistant drafted it at the researcher's request and chose it on held-out captions by a rule fixed beforehand (see "Protocol v4"). |
+| §11 | **G0 script check:** an exact copy of the cue's source caption fails it. Near-copies stay flags. |
 
 **Live phase 2 decisions (researcher, 2026-10-11).** These follow G0 run 3,
 and each row wins over the rows above.
@@ -3010,9 +3023,9 @@ and each row wins over the rows above.
 3. **Q3 — generator env path.** *(Answered by default; renamed for the model change to
    `envs/diff-generator/`.)* `envs/trida-generator/` with its own lock (new
    top-level directory)?
-4. **Q4 — phase-1 source text.** The 원문 for each clip's four cues must be
-   authored. Is the Korean burnt-in caption, the English `orig_text` or new
-   copy the starting point? They disagree for at least three c2 clips.
+4. **Q4 — phase-1 source text.** The source caption for each clip's four cues
+   must be authored. Is the Korean burnt-in caption, the English `orig_text`
+   or new copy the starting point? They disagree for at least three c2 clips.
 5. **Q5 — phase-2 evidence.** Who restructures and reviews the 180 windows'
    evidence into events with source, action, qualities, location/relation and
    certainty, and who reviews the fallbacks?
@@ -3039,10 +3052,10 @@ and each row wins over the rows above.
 14. **Q14 — analysis code.** Are the §9 analysis models part of this change, or
     only the export tables?
 15. **Q15 — development evidence for G0.** G0 needs development-clip cues,
-    never participant clips. Each needs its 원문, structured evidence and
-    `material: development`; at least 3 cues give the 12 corner prompts. A cue
-    is one timed caption line, and regen's 10 s clips carry one each
-    (`cue_slots: 1`).
+    never participant clips. Each needs its source caption, structured
+    evidence and `material: development`; at least 3 cues give the 12 corner
+    prompts. A cue is one timed caption line, and regen's 10 s clips carry one
+    each (`cue_slots: 1`).
 
     **Drafted 2026-10-09 from regen's prepared c2 material** (the earlier "none
     exist" was wrong):
@@ -3050,7 +3063,7 @@ and each row wins over the rows above.
       (the live pair) and the three viewing videos.
     - **Development set (6):** `amsterdam_181`, `amsterdam_202`,
       `bangkok_209`, `bangkok_316`, `bangkok_328` and `singapore_134`.
-      - The 원문 is the Korean caption transcribed in
+      - The source caption is the Korean caption transcribed in
         `scripts/c2-korean-captions.json`, copied verbatim.
       - The evidence was drafted by the assistant from each clip's
         `tidy_data.csv` AudioSet labels, its `orig_text` and the Korean
