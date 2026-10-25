@@ -203,7 +203,9 @@ How the estimates are read:
   one-moderator model `mode × logit P(b)`, kept as a secondary analysis.
 - `u`'s observed spread is reported before any estimate. A narrow `u` makes
   `mode × u` weakly informative, so a null there is not evidence against
-  binding.
+  binding. A wide one is not evidence that `u` measures binding, though: V1
+  asks what first caught the eye, which visual salience also drives, and in
+  simulation `u` tracked the true tendency at r ≤ 0.18 (below).
 
 **`q` keeps its full weight** (researcher, 2026-10-25). A weaker pull, so that
 the answers move more recommendations, was simulated on the real setup. The
@@ -227,7 +229,10 @@ example pointing to where the noticed sound came from. That would change the
 sheet's instrument, so it is not planned.
 
 E1/E3 feed `u`, so the main effect of `u` on the E change carries regression
-to the mean; the mode is randomised, so its interactions do not. Since the
+to the mean; the mode is randomised, so its interactions do not. They are not
+free of ceiling effects, though: a clip rated high on E1/E3 has a high `u` and
+leaves the E items little room to rise, which can shrink `mode × u` on them
+(design review, 2026-10-25). Since the
 mode's propensity is 1/2 for every clip, the same data also compare three
 policies: the model's, always scene-aware and always acousmatic. The primary
 outcome subscale is still to be named. The five clips whose first caption
@@ -401,6 +406,23 @@ be approved before participants).
   Trida call, and the audit found 0 mismatches. A changed approved text was
   flagged in both sessions that showed it.
 
+**Design review, 2026-10-25** (a reviewer panel; the report is in
+`artifacts/diff/reviews/20261025-caption-design/`). Three fixes needed no
+decision:
+- **The sound-name hint.** `named_in` matched any word of an option's label
+  by its first two syllables anywhere in the caption. The siren's name matched
+  the word for "between", and the label's word for "heard" matched nearly
+  every caption, so dropped sounds looked kept. It now matches the label's
+  sound-naming word (`phase1_tweak.sound_name`) at the start of a caption's
+  word. `scripts/diff_second_captions.py rescore` scored the 116 drafts again
+  without Trida: 36 show no issue, against 44 before.
+- **`q` is described as candidate-source availability** (v3, above).
+- **Stale text corrected:** §11 and §12 marked superseded; the reading of
+  `u`'s spread and the ceiling caveat (above); the primary-outcome note
+  below.
+
+The panel's other proposals wait on the researcher's decisions.
+
 **Open for the researcher:**
 - the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide
   visibility on their own;
@@ -409,9 +431,12 @@ be approved before participants).
   lift, and the `PLAUSIBLE` table;
 - the 29 drafted `audioset_label`s;
 - the two prompt texts and the Korean element, space and off-screen phrases;
-- the balanced plan, and the primary outcome subscale (the hypothesis
-  team suggests the sign of scene × centred E1/E3 on BF1_2, with the built
-  model's positive sign as the rival).
+- the balanced plan, and the primary outcome subscale. The hypothesis team
+  suggested the sign of scene × centred E1/E3 on BF1_2, with the built
+  model's positive sign as the rival. That was before the moderator split,
+  under which centred E1/E3 is part of `u`. The sheet also notes that BF1's
+  loading shifted with environment type in Payne (2013) and may be unstable
+  for urban video.
 
 Until then `BINDING_PROVISIONAL` and `TWEAK_PROVISIONAL` refuse participant
 sessions, and the setup's clips need approving again.
@@ -2964,6 +2989,13 @@ importing regen and is skipped if `dpo` is absent.
 
 ## 11. PRD v1.1 changelog (from the brief's amendments)
 
+**Superseded for phase 1** (noted 2026-10-25). Since 2026-10-18 every clip's
+second caption is rewritten, so there is no `original` control and no τ
+comparison in phase 1. Since 2026-10-23 the second caption's mode comes from
+the binding model, and the analysis is the moderator model in the section at
+the top. The phase-1 parts of §1's research question, §5.1's IV-02 and §9's
+primary contrast below are therefore history. Phase 2 is still descriptive.
+
 **Amendments, by PRD section.**
 
 | PRD | Change |
@@ -3049,6 +3081,12 @@ and each row wins over the rows above.
 | §9, §11 | **G0:** the human rating is waived (recorded as `waived`). Participants answer the researcher's post-watch items. |
 
 ## 12. Open decisions (protocol data; default unless you decide otherwise)
+
+**Superseded** (noted 2026-10-25). This table predates the return to Trida
+(2026-10-12) and the phase-1 decisions of 2026-10-18 and 2026-10-23. Its
+phase-1 manipulation (`dream_k1`/`k2`/`k4` against `original`) and its
+decoding rows no longer apply. The open decisions are under "Open for the
+researcher" at the end of the section at the top.
 
 | Decision | Default | Alternative |
 |---|---|---|
