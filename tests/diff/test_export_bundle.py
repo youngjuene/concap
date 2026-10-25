@@ -13,6 +13,7 @@ from test_participant_server import Lab, through_phase_one
 
 from diff.__main__ import main
 from diff.export_bundle import PHASE1_COLUMNS, R2_CODING_COLUMNS, SECOND_CAPTION_COLUMNS, caption_id, export
+from diff.phase1_tweak import ELEMENTS_KO
 from diff.session_store import SessionStore
 
 
@@ -101,7 +102,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     assert row["assignment"] in ("follow", "counter") and 0 < float(row["p_bound"]) < 1
     assert row["mode"] == (row["recommended"] if row["assignment"] == "follow" else row["mode"])
     assert row["caption_type"].startswith(row["mode"]) and row["seen"] == (
-        "하늘" if row["mode"] == "scene" else ""
+        ELEMENTS_KO[clip["scene"]["distinctive"]] if row["mode"] == "scene" else ""
     )
     assert row["intended_r2_key"] == '["m1"]' and row["job_id"].startswith("job-")
     assert row["template_provisional"] == "True"
