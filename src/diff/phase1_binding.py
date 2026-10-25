@@ -25,15 +25,19 @@ researcher's to approve, and participant sessions are refused until then.
 judgement: the share of the noticed sound's audio mask (its AudioSet label, the
 audio caption's category match) on the visual categories its source can be seen
 in, averaged over frames (:mod:`diff.phase1_scene`). Its Beta posterior mean is
-``q``, and the source is on screen from ``phase1_scene.ON_SCREEN``.
+``q``, and the source is on screen from ``phase1_scene.ON_SCREEN``. Sa2VA makes
+that mask from the frames and the label's text, never the audio, so ``q`` is
+candidate-source availability: whether a plausible source of the sound's kind is
+in view, not whether the actual source is, nor whether it moves with the sound
+(design review, 2026-10-25).
 
 **Latent state.** ``b``: whether this participant hears the sound they noticed
 (P3 A1s) as belonging to the scene on screen. ``π``: their tendency to bind
 sounds to the scene, uniform on a grid of :data:`GRID_SIZE` points, updated by
 the attention evidence of their other clips. A clip's prior is
-``logit P(b) = logit π + logit q``, where ``q`` is the measured visibility of
-the noticed sound's source (the scene part's posterior mean, 0.08–0.92 for a
-10 s clip): a sound whose source is never seen is rarely bound to what is seen.
+``logit P(b) = logit π + logit q``, where ``q`` is the noticed sound's measured
+visibility (the scene part's posterior mean, 0.08–0.92 for a 10 s clip): a
+sound with no plausible source in view is rarely bound to what is seen.
 
 **Evidence**, as likelihood ratios of bound to detached:
 

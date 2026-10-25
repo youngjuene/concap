@@ -28,11 +28,19 @@ numbers, the stills' resolution):
 - **Visibility is measured from the masks, never judged** (researcher,
   2026-10-24, replacing the design review's per-option judgement): the share of
   the label's audio mask that lies on those categories (:func:`on_labels`),
-  averaged over the sampled frames, a frame with no audio mask counting 0.
-  Unlabelled pixels count against it, so a source Sa2VA's visual masks miss is
-  not seen (singapore_067's distant talkers, outside its Person mask). The source
-  is on screen from :data:`ON_SCREEN`: on average for the caption, per frame for
-  a click. The binding model's prior is the share's Beta posterior mean.
+  averaged over the sampled frames, a frame whose audio mask is empty counting 0
+  (a frame with no mask file is skipped). Unlabelled pixels count against it, so
+  a source Sa2VA's visual masks miss is not seen (singapore_067's distant
+  talkers, outside its Person mask). The source is on screen from
+  :data:`ON_SCREEN`: on average for the caption, per frame for a click. The
+  binding model's prior is the share's Beta posterior mean.
+- **What "visibility" means here: candidate-source availability** (design
+  review, 2026-10-25). Sa2VA never hears the audio: it draws an audio mask from
+  the frames and the label's text alone ("segment all possible sources of
+  {label} sound in the scene"). So the share says whether a plausible source of
+  the label's kind is in view, not whether the actual source is, and nothing
+  about whether anything on screen moves with the sound. The names in the code
+  (``visibility``, ``on_screen``) are unchanged.
 - **Click masks:** each sound's audio mask on each P2 frame, widened by
   :data:`CLICK_TOLERANCE` and copied next to the clip's media, so that the
   participant's point can be tested against it at P5. Several are under 0.5% of

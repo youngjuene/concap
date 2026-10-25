@@ -214,7 +214,10 @@ every 10th frame:
   - on screen from 0.5;
   - the share's Beta posterior mean, the binding model's `q`.
 
-  An old `source_visible` judgement is dropped;
+  An old `source_visible` judgement is dropped. Sa2VA draws the audio mask
+  from the frames and the label's text, never the audio, so "visibility" says
+  whether a plausible source of the sound's kind is in view, not whether the
+  actual source is (plan, v3);
 - its audio mask on each P2 frame, widened by 1.5% of the frame's width and
   written to `data/live/regen-media/<clip>/audio-masks/<frame>/<value>.png`.
 

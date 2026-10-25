@@ -91,6 +91,15 @@ after the second captions were drafted for review):
   against it. `q` is the share's Beta posterior mean (0.08–0.92 for a 10 s
   clip). A source is on screen from a share of 0.5 (`ON_SCREEN`): on average
   for the caption and for counting a click, and per frame for a click.
+  - **What `q` measures: candidate-source availability** (design review,
+    2026-10-25). Sa2VA never hears the audio. It draws each audio mask from
+    the frames and the label's text alone ("segment all possible sources of
+    {label} sound in the scene", in
+    `/mnt/hdd/research/2026/Sa2VA/avmask/bin/sa2va.py`). So `q` says
+    whether a plausible source of the sound's kind is in view, not whether
+    the actual source is, and nothing about whether anything on screen moves
+    with the sound. "Visibility" in this plan and in the code means this; the
+    code's names are unchanged.
   - Of the three readings compared, this one changed 7 of the 29 v2 drafts.
     For example, singapore_067's speech went from 0.32 to 0.01: the distant
     talkers lie outside the Person mask. amsterdam_202's engine went from
@@ -158,9 +167,10 @@ on 2026-10-24):
 scores. `mode` is coded scene-aware +½, acousmatic −½. The binding model's
 `P(b)` enters as two moderators, both fixed before the outcome and both
 exported (`second_captions.csv`, export v6):
-- **`v`, the scene's part** (`moderator_scene`): `logit q`, the measured
-  visibility of the noticed sound's source. It depends on the participant
-  only through which sound they noticed. `v = 0` is a source on the line
+- **`v`, the scene's part** (`moderator_scene`): `logit q`, the noticed
+  sound's measured visibility, i.e. whether a plausible source of its kind is
+  in view (v3, above). It depends on the participant only through which
+  sound they noticed. `v = 0` is a source on the line
   (`q` = 0.5).
 - **`u`, the participant's part** (`moderator_participant`):
   `logit P(b) − logit P₀(b)`, where `P₀` is the model with no answers (a flat
@@ -185,7 +195,10 @@ How the estimates are read:
   carries how much the two modes differ, which grows with visibility: a
   scene-aware caption ties a visible source to the screen, but can only
   place an unseen one "here, though unseen". This is the visibility-only
-  rival.
+  rival. What it tests is semantic: a source of the right kind in view, the
+  semantic route of the unity assumption (Chen and Spence 2017). `q` holds no
+  temporal or spatial coincidence with the sound, so this term is not a test
+  of synchrony.
 - `β(mode × u) − β(mode × v)` is reported. Equal coefficients give back the
   one-moderator model `mode × logit P(b)`, kept as a secondary analysis.
 - `u`'s observed spread is reported before any estimate. A narrow `u` makes
