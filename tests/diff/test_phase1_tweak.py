@@ -207,6 +207,18 @@ def test_the_check_fails_only_what_cannot_be_shown(clip: dict[str, Any]) -> None
 
 def test_a_caption_names_a_sound_by_its_words_roughly() -> None:
     assert named_in("경찰차 사이렌이 울린다.", "경찰차 사이렌 소리")
+    assert named_in("사이렌 소리가 멀리서 들린다.", "경찰차 사이렌 소리")
     assert named_in("사람들의 말소리가 겹친다.", "사람들의 말소리")
-    assert not named_in("새가 지저귄다.", "새소리")  # the rule's known miss
+    assert named_in("새가 지저귄다.", "새소리")
+    assert named_in("진행자의 목소리가 들린다.", "진행자인 남자의 말소리")
+    assert named_in("사람들이 크게 외치는 소리가 들린다.", "크게 외치는 소리")
+    assert named_in("차들이 오간다.", "차들이 오가는 소리")
     assert not named_in("엔진 소리만 들린다.", "음악 소리")
+    # Neither a fragment of another word nor a describing word names a sound (design review, I33).
+    assert not named_in("차량이 오가는 소리가 건물 사이를 지나간다.", "경찰차 사이렌 소리")
+    assert not named_in("버스 엔진 소리가 사람들 사이를 지나간다.", "사람들이 이야기하는 소리")
+    assert not named_in("엔진 소리가 가까이에서 들린다.", "가까이에서 말하는 여성의 목소리")
+    assert not named_in("자동차, 음악이 흐른다.", "자동차 경적 소리")
+    assert not named_in("사람들이 크게 외치는 소리가 들린다.", "많은 사람들이 이야기하는 소리")
+    assert not named_in("새로운 소리가 들린다.", "새소리")
+    assert not named_in("경적이 도로의 차량들 사이로 울린다.", "지나가는 자동차 소리")

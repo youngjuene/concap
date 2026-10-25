@@ -4,6 +4,8 @@
     CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_second_captions.py draft \\
         --variants VARIANTS.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \\
         [--candidate CANDIDATE.json …] --out DRAFTS.json --sheet REVIEW.csv
+    uv run python scripts/diff_second_captions.py rescore --variants VARIANTS.json \\
+        --drafts DRAFTS.json --sheet REVIEW.csv
 
 A second caption's prompt depends on the participant only through the clip's mode (the binding
 model's and the plan's) and the sound they attended to (A1s, a required choice); the scene-aware
@@ -21,6 +23,10 @@ the prompt bench's format), at the study's settings, and scores each draft with 
 and the bench's measures. It writes the drafts and a review sheet (UTF-8 with a byte-order mark, for
 spreadsheet programs): one row per variant, with its slots, the drafts side by side with their
 issues, and empty ``approved_text``, ``approved_from`` and ``note`` columns for the researcher.
+
+``rescore`` scores the drafts again from their stored text after a change to the measures (e.g.
+``phase1_tweak.named_in``, 2026-10-25), rewriting the drafts and the sheet in place without Trida.
+It keeps whatever the researcher has filled in on the sheet.
 """
 
 from __future__ import annotations
@@ -65,6 +71,7 @@ DAMAGE = re.compile(
     r"|에서에서|의에서|([가-힣]{2,}(?: 소리가)?)\s\1(?![가-힣])"
 )
 ODD_SOURCE = re.compile(r"(하늘|나무|풀|땅|인도)(에서|에서부터)\s*(들려|울려|울린|들린|흐른)")
+FILLED = ("approved_text", "approved_from", "note")  # the sheet's columns for the researcher
 
 
 def sha256_file(path: Path) -> str:
@@ -196,8 +203,39 @@ def draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def rescore(args: argparse.Namespace) -> int:
+    document = json.loads(args.variants.read_text(encoding="utf-8"))
+    report = json.loads(args.drafts.read_text(encoding="utf-8"))
+    if document.get("schema") != VARIANTS_SCHEMA or report.get("schema") != DRAFTS_SCHEMA:
+        raise SystemExit(f"{args.variants} and {args.drafts} must be {VARIANTS_SCHEMA} and {DRAFTS_SCHEMA}")
+    if report["variants"]["sha256"] != sha256_file(args.variants):
+        raise SystemExit(f"{args.drafts} was drafted from another {args.variants.name}")
+    variants = {v["variant_id"]: v for v in document["variants"]}
+    before = sum(not d["issues"] for d in report["drafts"])
+    for index, written in enumerate(report["drafts"]):
+        variant = variants[written["variant_id"]]
+        clip = document["clips"][variant["clip"]]
+        scored = {**written, **manipulation(written["shown"], clip, variant["slots"])}
+        report["drafts"][index] = {**scored, "issues": issues(scored, variant["mode"])}
+    with args.sheet.open(encoding="utf-8-sig", newline="") as handle:
+        kept = {row["variant_id"]: {c: row[c] for c in FILLED} for row in csv.DictReader(handle)}
+    args.drafts.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    write_sheet(args.sheet, document, report["drafts"], list(report["wordings"]), kept)
+    after = sum(not d["issues"] for d in report["drafts"])
+    filled = sum(any(row.values()) for row in kept.values())
+    print(
+        f"{args.drafts}: {len(report['drafts'])} drafts, {after} with no issue (was {before}); "
+        f"sheet {args.sheet}, {filled} filled rows kept"
+    )
+    return 0
+
+
 def write_sheet(
-    path: Path, document: Mapping[str, Any], drafts: Sequence[Mapping[str, Any]], names: Sequence[str]
+    path: Path,
+    document: Mapping[str, Any],
+    drafts: Sequence[Mapping[str, Any]],
+    names: Sequence[str],
+    kept: Mapping[str, Mapping[str, str]] | None = None,
 ) -> None:
     by_key = {(d["variant_id"], d["wording"]): d for d in drafts}
     columns = [
@@ -234,9 +272,7 @@ def write_sheet(
                 "space": slots.get("space", "").strip(),
                 "sounds": slots["sounds"],
                 "first_caption": slots["caption"],
-                "approved_text": "",
-                "approved_from": "",
-                "note": "",
+                **{column: (kept or {}).get(variant["variant_id"], {}).get(column, "") for column in FILLED},
             }
             for name in names:
                 written = by_key[(variant["variant_id"], name)]
@@ -266,6 +302,11 @@ def main() -> int:
     drafted.add_argument("--out", type=Path, required=True)
     drafted.add_argument("--sheet", type=Path, required=True)
     drafted.set_defaults(handler=draft)
+    rescored = commands.add_parser("rescore", help="[repository env] score the drafts again, keep the sheet")
+    rescored.add_argument("--variants", type=Path, required=True)
+    rescored.add_argument("--drafts", type=Path, required=True)
+    rescored.add_argument("--sheet", type=Path, required=True)
+    rescored.set_defaults(handler=rescore)
     args = parser.parse_args()
     return int(args.handler(args))
 

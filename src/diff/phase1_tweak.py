@@ -77,6 +77,18 @@ OFFSCREEN_KO: Final = (
 # AudioSet labels for sounds of the recording, not of the place: never placed in the scene.
 RECORDING_ARTEFACTS: Final = frozenset({"Wind noise (microphone)"})
 NOT_SEEN: Final = "없음"
+# For named_in: a label's words that describe its sound rather than name it, by their ending (a
+# verb before a noun, "달리는"; an adverb, "멀리서", "크게"; an object, "도로를") or as listed.
+DESCRIBING: Final = re.compile(r"(?:는|서|게|를|을)$")
+NOT_NAMING: Final = frozenset({"소리", "소음", "계속", "많은", "다른", "가까이"})
+# Sounds a caption may name in other words (speech, shouting); a describing word that starts with
+# one ("이야기하는", "외치는") names its sound. Vehicles stay out: "차량" is also a place in the
+# captions ("도로와 차량", "차량들 사이로"), so it would hide a dropped "자동차 소리".
+SOUND_WORDS: Final = (
+    ("말소리", "목소리", "이야기", "대화", "웅성", "말하", "말한", "말해"),
+    ("외치", "고함", "소리치"),
+)
+PARTICLES: Final = "(?:이|가|은|는|을|를|의|도|만|와|과|로)?"
 
 
 class TweakError(ValueError):
@@ -257,11 +269,45 @@ def tweak_job_for(
     return source, job, record
 
 
+def sound_name(label: str) -> str:
+    """The word of an option's label that names its sound: its last naming word, without particles
+    ("경찰차 사이렌 소리" → 사이렌, "진행자인 남자의 말소리" → 말소리, "크게 외치는 소리" → 외치)."""
+    names: list[str] = []
+    for word in re.findall(r"[가-힣]+", label):
+        if word in NOT_NAMING:
+            continue
+        if DESCRIBING.search(word):
+            names += [w for group in SOUND_WORDS for w in group if len(w) > 1 and word.startswith(w)][:1]
+            continue
+        if len(word) > 1:
+            word = re.sub(r"(?:의|이|가|인|에)$", "", word)
+        if len(word) > 1:
+            word = re.sub(r"들$", "", word)
+        names.append(word)
+    return names[-1] if names else ""
+
+
 def named_in(text: str, label: str) -> bool:
-    """Whether a caption seems to name the sound an option's label stands for: any word of the label
-    but "소리", by its first two syllables. Rough (it misses "새가" for "새소리"): a hint for the
-    researcher's blind coding of R2 against the shown caption, never the key itself."""
-    return any(word[:2] in text for word in re.findall(r"[가-힣]{2,}", label) if word != "소리")
+    """Whether a caption seems to name the sound an option's label stands for: a word of the caption
+    starts with the label's :func:`sound_name`, one of its :data:`SOUND_WORDS`, or the bird of
+    "새소리" ("새가"); a one-syllable name only with a particle after it. Rough: two options told
+    apart only by a describing word (bangkok_209's near and background women's voices) are named
+    together, a "차량" named as a place counts for a "차량" sound, and "자동차" does not count for
+    it. A hint for the researcher's blind coding of R2 against the shown caption, never the key
+    itself.
+
+    Until 2026-10-25 any word of the label matched by its first two syllables anywhere in the
+    caption, so "사이렌" matched "사이로" and "들리는" matched "들린다" (design review, I33)."""
+    name = sound_name(label)
+    if not name:
+        return False
+    group = next((g for g in SOUND_WORDS if name in g), (name,))
+    stems = group + ((name[:-2],) if name.endswith("소리") and len(name) > 2 else ())
+    return any(
+        word.startswith(stem) if len(stem) > 1 else re.fullmatch(f"{stem}(?:들)?(?:소리)?{PARTICLES}", word)
+        for word in re.findall(r"[가-힣]+", text)
+        for stem in stems
+    )
 
 
 def intended_r2_key(clip: Mapping[str, Any]) -> list[str]:
