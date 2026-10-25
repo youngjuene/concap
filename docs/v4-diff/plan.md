@@ -143,8 +143,7 @@ on 2026-10-24):
 
   On the 2026-10-20 bench, which ran the old `tweak-p1` v0, 10 of 36 second
   captions copied the first one, and the train, horn and motorbike survived
-  3/3. v3
-  has not yet run on Trida.
+  3/3. v3 has not yet run on Trida.
 - **Not done; the researcher's to decide:**
   - sound qualities written after listening, for the acousmatic prompt;
   - unchanged anchor clips (the sheet's line keeping some clips as they are,
