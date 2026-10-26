@@ -1138,7 +1138,11 @@ def parser() -> argparse.ArgumentParser:
         "--sa2va",
         type=Path,
         default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/runs/60fps-windowed/masks"),
-        help="the run's masks folder, holding visual/<clip>/<Category> and audio/<clip>/<label>",
+        help=(
+            "the run's masks folder, holding visual/<clip>/<Category> and audio/<clip>/<label>; "
+            "the default is the windowed run, which grounds each label again every 96 frames "
+            "(researcher, 2026-10-26; runbook §6)"
+        ),
     )
     scene.add_argument(
         "--ontology", type=Path, default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json")

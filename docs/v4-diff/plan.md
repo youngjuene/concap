@@ -114,12 +114,14 @@ after the second captions were drafted for review):
 - `scene/<distinctive element>` names the distinctive element and the largest
   other one, and takes the distinctive element as its setting. It lists the
   sounds on screen, and the noticed sound when the point hit its mask.
-- `acousmatic/<open|neutral|enclosed>` describes the sounds as heard, keeping
-  every name so that R2's key holds. It names nothing on screen, and an open or
-  enclosed scene adds one request about how the sound spreads.
+- `acousmatic` describes the sounds as heard, keeping every name so that R2's
+  key holds, and names nothing on screen. Until 2026-10-26 it was
+  `acousmatic/<open|neutral|enclosed>`: an open or enclosed scene added one
+  request about how the sound spreads (dropped, see "Decisions of
+  2026-10-26").
 
-The prompts are `rewrite_prompts.TWEAK_PROMPTS` (`tweak-p1` v3, one text per
-mode, provisional). The four % degrees (`tweak-p1` v0) are gone.
+The prompts are `rewrite_prompts.TWEAK_PROMPTS` (`tweak-p1`, one text per
+mode, provisional: scene-aware v3, acousmatic v4 since 2026-10-26). The four % degrees (`tweak-p1` v0) are gone.
 
 **Prompt v3 and the R2 key** (after the hypothesis team's report,
 `artifacts/diff/hypotheses/report-20261024.md`; the researcher said "go ahead"
@@ -162,7 +164,9 @@ on 2026-10-24):
 
 **Analysis, to pre-register** (moderators split by the researcher,
 2026-10-25):
-`P9 ~ P4 + mode × (v + u) + (1|participant) + (1|clip)`, Bayesian multilevel
+`P9 ~ P4 + mode × (v + u) + (1|participant) + (1|clip)` (superseded on
+2026-10-26: the model under "Decisions of 2026-10-26" adds mode slopes by
+clip and first-caption fidelity), Bayesian multilevel
 (Kay et al., CHI 2016), with the P4 score as a covariate rather than change
 scores. `mode` is coded scene-aware +½, acousmatic −½. The binding model's
 `P(b)` enters as two moderators, both fixed before the outcome and both
@@ -240,7 +244,9 @@ contradicts their audio (amsterdam_012, amsterdam_057, bangkok_034,
 singapore_040, singapore_067) get a correction in both modes, so they enter
 as a covariate.
 
-**Measured on the 12 c2 clips** (setup draft, rebuilt 2026-10-24):
+**Measured on the 12 c2 clips** (setup draft, rebuilt 2026-10-24 from the
+windowed Sa2VA run, which stays the measure after 2026-10-26's comparison
+with the full-clip run; see "Decisions of 2026-10-26"):
 - Measured visibility (v3): 13 of 29 sounds on screen and 16 off. Most
   vehicles are on screen. Speech is on screen only at bangkok_209 (0.61).
   - In four clips no source is on screen, so their scene-aware caption
@@ -423,14 +429,331 @@ decision:
 
 The panel's other proposals wait on the researcher's decisions.
 
+**Decisions of 2026-10-26** (researcher, after four checks; the report is
+`artifacts/diff/reviews/20261025-caption-design/checks-20261026.md`):
+- **Visibility stays with the windowed Sa2VA run, over the whole clip.** The
+  full-clip run (`artifacts/diff/sa2va-60fps-video/masks`, each label grounded
+  once with `sa2va.py --mode propagate --window 0`) was adopted in the morning.
+  It was reverted the same day after the filter audit found that it loses
+  tracks. The scene parts and click masks are again those of 2026-10-24, and
+  the levelled practice clip stays.
+  - **Why the full-clip run was reverted.** It grounds each label on the
+    first frames and then only tracks it, so a lost track is never found
+    again.
+    - bangkok_034's passing car is masked only in the first sampled frame,
+      and singapore_286's engine disappears after frame 90. The windowed run,
+      which grounds each label again every 96 frames, finds both later.
+    - 6 of the 9 sounds on which the runs disagree are lost tracks.
+    - Under the full-clip run, 8 of 29 sounds would be on screen instead of
+      13.
+  - **Where the runs agree.** The comparison uses 26 usable sounds: it leaves
+    out the two winds, which have no visual category, and counts bangkok_209's
+    duplicate label once.
+    - **Over the first 96 frames (16% of each clip) the runs are the same
+      computation.** The windowed run's first window and the full-clip run
+      start from the same grounding, and their masks there are identical
+      (IoU 1.00; all 26 flags agree). Agreement in that span is built in and
+      is not evidence of reliability.
+    - **On the frames grounded independently** (from frame 96), the runs
+      agree on 18 of 26 on-screen flags: kappa 0.34, ICC of logit q 0.38,
+      IoU between the runs' visual masks 0.56. Over frames 96–149 alone,
+      kappa is 0.49 and ICC 0.51.
+    - The full-clip run's detection rate falls from 0.64 in the first 10% of
+      the clip to about 0.4 after 30%. The windowed run's stays between 0.54
+      and 0.69. 9 of the full-clip run's 14 lost tracks are lost within the
+      first 20% of the clip.
+    - **Corrected the same day.** A first-25% comparison (kappa 0.85, ICC
+      0.93) had been read as evidence that the grounding is reproducible.
+      The window curve showed that 16 of its 25 points are the identical
+      span. So no early-window percentage supports a reliability claim
+      (`checks-20261026/window_curve.py` in the review folder).
+  - **What q measures.** Over the 29 sounds' sampled frames, 40% of the
+    windowed run's audio masks are empty, and an empty frame counts as not on
+    screen.
+    - Within the run, a sound's share follows how often it is detected
+      (r = 0.86).
+    - Over the whole clip the runs agree on 20 of 29 flags. None of the other
+      rules tried (empty frames skipped, unlabelled pixels left out, every
+      frame) raised that above 22.
+  - **Rationale for the window: 100% of the clip.** q covers the span over
+    which the experiment shows and asks about the sound.
+    - The second caption is on screen from 0 to 10 s.
+    - The five P2 stills, on which the V1 point is placed and tested, sit at
+      1, 3, 5, 7 and 9 s (10–90% of the clip).
+    - The 16% boundary is not a design choice: it is where the windowed and
+      full-clip runs stop being the same computation. Their comparison is
+      reported on the remaining 84%. The reliability the paper cites comes
+      from the independent 1 fps run (below).
+    - A kappa of at least 0.80 holds only in windows from the clip's start
+      that the shared frames dominate (up to 29%; ICC of at least 0.90 up to
+      27%). It never holds on independent frames, where kappa peaks at 0.57
+      and ICC at 0.54 (plot:
+      `checks-20261026/kappa_window.png` in the review folder).
+    - **Against the independent 1 fps run, no interval beats the whole clip.**
+      Every contiguous interval of whole seconds was checked, on two
+      disjoint sets: the 26 study sounds, and a held-out set of 99 corpus
+      labels from the 36 videos outside the study. The figure is
+      `checks-20261026/interval_choice.png`: ICC and kappa against interval
+      length, each the mean over start positions with a 95% bootstrap band
+      over sounds. The full grid is `interval_1fps.png`.
+      - ICC, which uses the continuous q the moderator is built from, rises
+        with interval length in both sets and is highest over the whole clip:
+        0.89 [0.77, 0.95] on the study sounds, and 0.77 [0.66, 0.85] held
+        out. The held-out curve flattens after about 6 s.
+      - Kappa on the binary flag does not favour any shorter interval. On the
+        study sounds it rises to about 0.8 and the whole clip sits within
+        noise (0.77 [0.52, 1.00]). Held out, it stays flat at 0.50–0.59
+        whatever the length (whole clip 0.55 [0.37, 0.71]).
+      - Single best intervals (3–7 s on the study sounds, 4–9 s across the
+        corpus) do not replicate between sets, and picking one would fit
+        noise. The whole clip is both the most reliable interval and the one
+        the experiment uses.
+      - **By city, the same shape and no plot.** ICC rises with length and
+        is highest at the whole clip in all three cities, in both sets.
+        - Held-out whole-clip ICC: Amsterdam 0.67 [0.43, 0.84], Bangkok 0.81
+          [0.65, 0.90], Singapore 0.82 [0.63, 0.92]. The intervals overlap,
+          and the study set has 7–10 sounds per city, too few to compare.
+        - City is confounded with content, so the per-city figures go in the
+          supplement's stimulus table only. Amsterdam's lower reliability is
+          covered by the per-clip reliability column and the leave-one-clip-out
+          refits.
+    - **Split by mask type, the disagreement is mostly in the audio masks.**
+      `kappa_window_av.png` varies one kind of mask at a time, with the
+      windowed run fixed for the other, as coloured lines in one plot
+      (`kappa_window_split.png` has the same as panels, with mask IoU). On
+      independent frames:
+      - when only the audio masks differ, kappa never reaches 0.80 (peak
+        0.65); over the whole clip it is 0.26, with ICC 0.28 and IoU 0.20
+        between the runs' audio masks;
+      - when only the visual masks differ, kappa is at least 0.80 for
+        windows of 19–40% (peak 0.92); over the whole clip it is 0.59, with
+        ICC 0.80 and IoU 0.56.
+      So the scene measures from the visual masks hold up across runs, and
+      the weak link in q is Sa2VA's audio grounding. The visual column reuses
+      the windowed audio masks, whose empty frames score 0 under either
+      visual map, which inflates its agreement somewhat.
+  - **An independent third run supports the windowed q.** The 1 fps run
+    grounds each second from scratch and shares no computation with the
+    windowed run beyond the model. It was compared on seconds 0–9
+    (`checks-20261026/onefps_compare.py` in the review folder).
+    - On the 26 study sounds the windowed run and the 1 fps run agree:
+      kappa 0.77, ICC 0.89.
+    - The full-clip run agrees with neither: kappa 0.14 against the 1 fps
+      run, and 0.28 against the windowed run.
+    - Of the 12 sounds on which the three runs disagree, the full-clip run is
+      the odd one out in 9, the 1 fps run in 3, and the windowed run in none.
+    - Across all 48 videos the visual scene measures reproduce: composition
+      ICC 0.96, distinctive element the same in 41 of 48 videos, openness in
+      47 of 48. Audio q over 127 corpus labels: kappa 0.61, ICC 0.80; on the
+      99 labels from the 36 videos outside the study: kappa 0.55, ICC 0.77.
+    - The windowed q from these 10 frames gives the same flags as from its 60
+      sampled frames (kappa 1.00).
+    - Both runs share the model, its text-only grounding and the `PLAUSIBLE`
+      table, so this is reliability, not validity.
+  - **Clip reliability over all 48 corpus clips, pooled** (a diagnostic, not
+    a selection rule: the adopted design excludes no clip for measurement).
+    The bars were fixed before looking (`checks-20261026/clip_filter.png`,
+    `clip_filter.json`):
+    - **Per sound:** the same on-screen flag in the windowed and 1 fps runs.
+    - **Per clip:** every sound passes, and the distinctive element (the
+      caption's setting) is the same in both runs.
+    - A second sound bar, |q_w − q_o| within q's own 95% Beta uncertainty,
+      removed no sound the flag bar keeps, so it is left out.
+
+    Results:
+    - 103 of 127 sounds and 24 of 48 clips pass. The passing clips spread
+      evenly over conditions (5–7 each) and cities (7–9 each). Failures spread
+      over sound groups (engine 5/22, vehicle 7/38, alarm 4/23, human voice
+      8/30).
+    - **7 of the 12 phase-1 clips pass.** bangkok_209 and singapore_134 fail
+      on the setting (built vs open; traffic vs built). The same holds
+      against the study's own 12-clip reference.
+    - amsterdam_057, bangkok_328 and singapore_067 fail on the one sound
+      each that only the 1 fps run puts on screen: male speech, engine and
+      idling truck.
+    - Only the 12 condition-2 clips have prepared captions and options. Any
+      other clip would need both before phase 1 could use it.
+  - **A q from the clip's start alone is not used** (researcher, 2026-10-26).
+    It would describe only the first seconds of a 10-second clip.
+    - It misses sources that arrive later: bangkok_034's passing car scores
+      0.20 in the first 25% and 0.78 after it, in the windowed run.
+    - It keeps sources that leave: singapore_286's speech scores 0.67 and 0.
+    - Its only rationale was the early agreement, which is built in.
+  - The blind human check of visibility was offered twice and not chosen.
+- **The acousmatic `space` slot is dropped** (`diff.phase1-tweak/v6`;
+  acousmatic text `tweak-p1` v4). The prompt used to ask for an open feel
+  when the scene's sky share was at least 0.15, and an enclosed one when it
+  was at most 0.07.
+  - **What changes.** The acousmatic prompt takes nothing from the picture.
+    Its inputs are the first caption, the sounds `orig_text` names and the
+    attended sound. Openness is still measured and recorded but reaches no
+    caption, so a change in sky share no longer changes an acousmatic
+    caption's key. The export's `caption_type` for this mode is `acousmatic`
+    (export v7).
+  - **What it costs.** The acousmatic mode loses its one systematic,
+    scene-specific element. What remains to set it apart is how the sounds
+    are heard (distance, loudness, continuity), which Trida takes from the
+    prompt's word list rather than from the audio (wording round, above). So
+    the two modes may differ less in kind.
+  - **Measured on the drafts.** The request was rarely realised.
+    - Of the 40 acousmatic drafts made with an open or enclosed request, 1
+      used a word for spreading or space, and none used the words for open or
+      enclosed.
+    - Without the request, acousmatic drafts are shorter (59 characters on
+      average, against 72), more of them pass the review hints (32 of 58,
+      against 25), and fewer name a place or object (2, against 6).
+    - The 18 drafts whose prompt did not change (neutral scenes) came out
+      identical. So the differences follow from the prompt change, not from
+      decoding noise.
+  - **Length.** Among drafts that pass the server's check, the modes are
+    about the same length (median 48 characters scene-aware, 50 acousmatic).
+    - 12 scene-aware and 4 acousmatic drafts are over the 80-character limit,
+      mostly looping drafts that cannot be approved.
+    - Approved texts must be 80 characters or fewer. Length is not otherwise
+      matched between the modes.
+    - The all-draft means first reported for the full-clip drafts (88 against
+      59 characters) were inflated by looping drafts; corrected after the
+      filter audit.
+- **The practice clip is staged at the clips' loudness.** `draft-setup` now
+  passes it through the same two loudnorm passes that staged the 12 clips
+  (`phase1_setup.level_audio`), into `data/live/regen-media/practice/`. The
+  corpus file is untouched, and the picture stream is copied.
+  - On loudnorm's meter the copy is at −23.0 LUFS, like the clips (−22.5 to
+    −23.1).
+  - On ffmpeg's ebur128 meter it is at −24.1, against −22.0 to −23.3 for the
+    clips; it was at −25.7.
+- **Stereo stays as recorded.** In 9 of the 12 clips the right channel is
+  1.3–7.5 dB louder; amsterdam_181 leans the most. This looks like a
+  recording-rig imbalance. Over headphones it places sounds to the right,
+  wherever their source is on screen. It is reported as a limitation.
+- **The playback level is left to the participant.** The app has no volume
+  control and records none, and participants may change the system volume at
+  any time. Loudness at the ear is therefore neither controlled nor known,
+  and the paper reports it as such.
+- **Second captions drafted again,** on the windowed setup with v6.
+  - Of the 58 variants, the 29 scene-aware keep their 2026-10-24 keys and
+    drafts, with identical text. The 29 acousmatic are new, since they have
+    no space slot.
+  - Trida drafted all 58 with the two wordings, minus the space request
+    (`artifacts/diff/bench/candidates-20261026/`). 43 of the 116 drafts show
+    no issue: 11 scene-aware and 32 acousmatic. At least one clean draft
+    exists for 9 of the 29 scene-aware rows and 21 of the 29 acousmatic rows.
+  - The sheet is `artifacts/diff/phase1/second-captions-20261026/review.csv`.
+    The full-clip drafts are in its `superseded-full-clip/`, and the
+    2026-10-24 folder is superseded.
+  - The setup's clips and practice need approving again.
+- **Clip quality: the reviewer panel's design, adopted in full.** Six
+  reviewers audited the first, tiered draft
+  (`artifacts/diff/reviews/20261025-caption-design/filter-audit-20261026.md`).
+  Five judged it acceptable with changes, one not acceptable, and all six
+  rejected its tiers. To pre-register:
+  - **All 12 clips, no tiers.** No clip is excluded, down-weighted or replaced
+    for run agreement, mask overlap, within-clip contrast, draft quality or
+    audio.
+    - The tiered "robust six" subset is dropped. It had no rule, and it skewed
+      the sound types.
+    - It also halved power: in the audit's simulation at N = 120, H1 fell
+      from 0.87 to 0.59.
+  - **The only exclusion rule: the approved captions deliver their mode.**
+    - Two fluent Korean raters who did not approve the captions classify each
+      approved caption as scene-aware or acousmatic, blind to its intended
+      mode.
+    - They also flag any caption that ties a sound to a source the video
+      contradicts.
+    - Captions that fail are rewritten and checked again. A clip is excluded
+      only if, after rewriting, fewer than 80% of its captions are classified
+      correctly by both raters.
+    - Kappa is reported.
+  - **Model.** `P9 ~ P4 + mode × (v + u) + fidelity + mode:fidelity +
+    (1 + mode | participant) + (1 + mode | clip)`.
+    - `(1 + mode | clip:sound)` is added if it converges, and dropped first
+      if not.
+    - **Merged levels.** Sounds count as one `clip:sound` level if they share
+      an AudioSet label, or if their audio masks overlap with mean IoU of at
+      least 0.8 over 20 or more shared sampled frames in the windowed run.
+      Provisional, the researcher's to confirm, this merges:
+      - bangkok_209's two women's voices;
+      - amsterdam_012's siren and traffic;
+      - amsterdam_181's vehicle and horn;
+      - bangkok_034's engine, passing car and horn.
+    - **Why the slopes.** The earlier model had no mode slope by clip. In the
+      audit's simulation, a clip-level slope SD of 0.4 raised false
+      positives for H1 and mode × v to 13–17%, against a nominal 2.5% one-sided.
+  - **v and its measurement error.** v = logit q from the windowed run over
+    the whole clip, as the primary measure.
+    - **One alternative is pre-registered: v from the 1 fps run**
+      (researcher, 2026-10-26). That run grounds one frame per second from
+      scratch, at seconds 0–9 (`avmask/releases/sa2va_{audio,visual}_mask_2026.zip`).
+      - Its per-sound q is computed now and frozen with the stimulus table
+        (`checks-20261026/onefps_compare.json`).
+      - It replaces the full-clip run, which was the odd one out in 9 of the
+        12 sounds on which the three runs disagree.
+    - A mode × v conclusion is drawn only if its sign holds in both versions,
+      and both estimates are reported.
+    - **What the paper cites.** The windowed run against the 1 fps run, at
+      their ten shared frames:
+      - on the 26 study sounds: 23 of 26 flags agree, kappa 0.77, ICC of
+        logit q 0.89;
+      - as a held-out replication, on the 99 corpus labels from the 36 videos
+        outside the study: kappa 0.55, ICC 0.77 (all 127 labels: 0.61 and
+        0.80).
+    - **Reported as methods notes:** the full-clip run's lost tracks, and the
+      3 sounds that only the 1 fps run puts on screen (amsterdam_057's male
+      speech, bangkok_328's engine, singapore_067's idling truck).
+  - **The former filters become a stimulus table.** Per sound: q in the
+    windowed and 1 fps runs, detection rate, shared-mask pairs, and whether its
+    sound group has a visual category. Per clip: loudness range, channel
+    level difference and first-caption fidelity.
+  - **First-caption fidelity replaces the contradiction flag.**
+    - Two Korean readers listen to each clip and code its first caption: the
+      share of A1s sounds it names, and the number of sounds it names that
+      are not in the audio. Kappa is reported.
+    - It enters the model as a covariate (above).
+    - bangkok_034's first caption leaves the horn out rather than naming a
+      wrong sound.
+  - **Draft quality is dropped as a clip measure.** It measures the generator
+    and its review hints, and every caption shown is approved.
+  - **Influence.** Leave-one-clip-out refits of every confirmatory term are
+    shown as a forest plot. A clip whose removal flips a sign is reported.
+  - **Next:** re-run the power check with mode slopes by clip before N is
+    fixed.
+- **The 12 condition-2 clips are confirmed as the phase-1 materials**
+  (researcher, 2026-10-26).
+  - **What the set is.** The caption-bearing condition of the earlier corpus,
+    one clip per cell of city (3) × feature space (2) × cluster type (2). It
+    is a stratified sample, not a powered one.
+  - **Why no subset is drawn.** The clips' scene profiles over the full 10 s
+    (`checks-20261026/profiles.png` in the review folder) give no
+    measurement-based reason to drop any clip.
+    - The sounds fall into three temporal types: persistent, intermittent,
+      and mostly undetected. The types mix within clips: only 2 of the 12
+      clips contain a single type.
+    - No profile measure has a gap that survives the comparison with the
+      1 fps run.
+    - A bar from the design's own logic (every sound keeps its on-screen
+      status for at least 80% of the clip, in both runs) would keep only 3
+      clips.
+    - So a subset would select sound types, not measurement quality.
+  - **What the paper states.** The stimulus set and its stratification; that
+    the count of 12 was inherited; and the mode-by-clip slope variance the
+    pilot estimates.
+    - That variance bounds generalisation: the SE of the mode terms cannot
+      fall below (clip-slope SD) / √12, for example 0.087 at an SD of 0.3.
+    - Claims are restricted to these scenes accordingly.
+  - **Each sound's temporal profile** (persistent, intermittent, mostly
+    undetected) goes into the stimulus table as a descriptor. So does the
+    unlabelled share of each frame, which counts against visibility. Neither
+    is used to select.
+
 **Open for the researcher:**
 - the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide
   visibility on their own;
 - the parameters: 0.2 drawn, the 0.05 floor, the 1.5% click tolerance, ln 3,
-  the uniform tendency prior, the 0.5 threshold, the sky cut-offs, the 1.5
+  the uniform tendency prior, the 0.5 threshold, the sky cut-offs (which
+  reach no caption since 2026-10-26), the 1.5
   lift, and the `PLAUSIBLE` table;
 - the 29 drafted `audioset_label`s;
-- the two prompt texts and the Korean element, space and off-screen phrases;
+- the two prompt texts and the Korean element and off-screen phrases;
 - the balanced plan, and the primary outcome subscale. The hypothesis team
   suggested the sign of scene × centred E1/E3 on BF1_2, with the built
   model's positive sign as the rival. That was before the moderator split,

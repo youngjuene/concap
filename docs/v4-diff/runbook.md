@@ -172,6 +172,10 @@ uv run python -m diff phase1 approve --setup artifacts/diff/phase1/setup-draft.j
 
 **What `draft-setup` fills in:**
 - media, frames and masks, from `data/live/regen-media`;
+- the practice clip (`--practice-clip`, a `c1_video_audio` clip), staged to
+  `data/live/regen-media/practice/<clip>.mp4` at the clips' loudness, through
+  the two loudnorm passes that staged them (researcher, 2026-10-26). The
+  corpus file is left as it is;
 - the prepared Korean captions, copied word for word from
   `scripts/c2-korean-captions.json` (`--captions`). They are shown raw, with
   their line breaks and no length or line limit;
@@ -197,14 +201,38 @@ relative to `orig_text`, not to the shown caption:
 `show` and `approve` refuse a phrase that is not in `orig_text`.
 
 **What `phase1 scene` adds** (the binding model's inputs, `diff.phase1_scene`), from
-the Sa2VA run `--sa2va` (default `…/Sa2VA/avmask/runs/60fps-windowed/masks`),
-every 10th frame:
+the Sa2VA run `--sa2va`, every 10th frame. The default is the windowed run,
+`…/Sa2VA/avmask/runs/60fps-windowed/masks`, which grounds each label again every 96 frames
+(researcher, 2026-10-26).
+
+v's pre-registered alternative is the 1 fps run (`…/Sa2VA/avmask/releases/sa2va_{audio,visual}_mask_2026.zip`),
+which grounds one frame per second from scratch. Its per-sound q is frozen in the review folder's
+`checks-20261026/onefps_compare.json`. The full-clip run, `artifacts/diff/sa2va-60fps-video/masks`,
+grounds each label once and tracks it, and loses tracks it never finds again. It is kept only for
+the methods note (plan, "Decisions of 2026-10-26"). It was made in the Sa2VA checkout's `avmask/`,
+one process per GPU. SAM3 keeps part of the model on `cuda:0`, so pick the card with `CUDA_VISIBLE_DEVICES`,
+never `--device cuda:1`:
+
+```sh
+cd /mnt/hdd/research/2026/Sa2VA/avmask && source bin/env.sh
+CUDA_VISIBLE_DEVICES=1 $AVMASK_VENV/bin/python bin/sa2va.py --mode propagate --window 0 --branch both \
+  --out-root /mnt/hdd/research/2026/concap/artifacts/diff/sa2va-60fps-video/masks \
+  --logs-dir /mnt/hdd/research/2026/concap/artifacts/diff/sa2va-60fps-video/logs \
+  --run-tag _s1 --videos <clip> [<clip> …]   # about 20 min a clip on one RTX 3090
+```
+
+The two runs agree on 20 of the 29 sounds' on-screen flags over the whole clip. They are
+identical over the first 96 frames (the windowed run's first window), so reliability is measured
+on the later frames: kappa 0.34 over the 26 usable sounds (`checks-20261026/window_curve.py` in
+the review folder).
+`phase1 scene` adds:
 - the scene's composition, with each pixel given to its smallest mask, in five
   elements;
 - its distinctive element: the largest share relative to the 12 clips' mean,
   or the largest element when no lift reaches 1.5;
 - its openness from the sky's share: open from 0.15, enclosed up to 0.07,
-  neutral between, where the acousmatic caption says nothing of the space;
+  neutral between. It is recorded only: since `diff.phase1-tweak/v6`
+  (2026-10-26) it reaches no caption;
 - per A1s sound, its AudioSet groups and where they can be seen
   (`phase1_scene.PLAUSIBLE`);
 - per A1s sound, its visibility (researcher, 2026-10-24: measured, never
@@ -249,6 +277,11 @@ uv run python -m diff live serve \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
   --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
+
+**Audio** (researcher, 2026-10-26). The 12 clips and the practice clip are at −23 LUFS on
+loudnorm's meter. They are stereo as recorded: in 9 of the 12 the right channel is 1.3–7.5 dB
+louder. The app has no volume control. Participants set the system volume themselves, and
+nothing records it.
 
 **The inputs:**
 - `--phase1-setup` is the approved setup (§6). It is required for
@@ -525,7 +558,8 @@ is not tracked, because it holds the long videos' draft cues.
 
 A second caption's prompt depends on the participant only through the
 clip's mode and the attended sound (A1s). The scene-aware setting is the
-clip's own (`diff.phase1-tweak/v5`). The set of prompts is therefore small.
+clip's own (since `diff.phase1-tweak/v5`), and the acousmatic prompt has no
+slot from the scene (v6). The set of prompts is therefore small.
 On 2026-10-24 the researcher chose to draft them all and review every one
 before the study.
 
@@ -534,8 +568,8 @@ uv run python scripts/diff_second_captions.py variants \
   --phase1-setup artifacts/diff/phase1/setup-draft.json --out DIR/variants.json
 CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_second_captions.py draft \
   --variants DIR/variants.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
-  --candidate artifacts/diff/bench/candidates-20261024/B-words.json \
-  --candidate artifacts/diff/bench/candidates-20261024/E-short-where.json \
+  --candidate artifacts/diff/bench/candidates-20261026/B-words.json \
+  --candidate artifacts/diff/bench/candidates-20261026/E-short-where.json \
   --out DIR/drafts.json --sheet DIR/review.csv
 ```
 
@@ -548,10 +582,15 @@ the server's check and the bench's measures. The output is a review sheet with o
 variant: the drafts and their issues side by side, then empty `approved_text`, `approved_from`
 and `note` columns.
 
-The setup of 2026-10-24 gives 58 variants: 29 per mode, one per sound. The
-first run, with the V1 object as the setting, gave 277; it is kept in
-`superseded-277/`. Instructions for the reviewer are in the output folder's
-`README.md` (`artifacts/diff/phase1/second-captions-20261024/`).
+The setup gives 58 variants: 29 per mode, one per sound. The current drafts
+(2026-10-26: the windowed run, v6, and the 2026-10-24 wordings without the
+space request, in `candidates-20261026/`) and the reviewer's instructions are
+in `artifacts/diff/phase1/second-captions-20261026/` (`README.md`). Superseded: the
+full-clip run's drafts (`superseded-full-clip/` there), the 2026-10-24 folder, and its first run
+with the V1 object as the setting (`superseded-277/`).
+
+`rescore --variants DIR/variants.json --drafts DIR/drafts.json --sheet DIR/review.csv` scores the
+drafts again after a change to the measures, without Trida, and keeps the sheet's filled columns.
 
 Re-run both steps when the setup, the scene or `phase1_tweak` changes, since the IDs change with
 the slots.
