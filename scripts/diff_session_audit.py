@@ -71,7 +71,6 @@ from diff.phase1_tweak import (  # noqa: E402
     NOT_SEEN,
     OFFSCREEN_KO,
     RECORDING_ARTEFACTS,
-    SPACE_KO,
     check_record,
     tweak_job_for,
     tweak_source,
@@ -285,7 +284,6 @@ def expected_slots(
     for page in STEP1_PAGES:
         answers.update(records[page]["answers"])
     sounds = {option["value"]: option["label"] for option in clip["options"]["A1s"]}
-    scene = clip["scene"]
     slots = {
         "mode": mode,
         "caption": clip["caption"]["text"],
@@ -293,7 +291,8 @@ def expected_slots(
         "attended_sound": sounds.get(answers.get("A1s"), NOT_SEEN),
     }
     if mode == "acousmatic":
-        return {**slots, "space": SPACE_KO[scene["openness"]]}
+        return slots
+    scene = clip["scene"]
     distinctive = scene["distinctive"]
     shares = {name: share for name, share in scene["elements"].items() if name != distinctive}
     second = max(shares, key=lambda name: shares[name])  # the first of equal shares, as diff sorts

@@ -2,7 +2,7 @@
 
 Researcher's decisions of 2026-10-24: every second caption is reviewed before the study, and a
 participant session needs every caption it could show approved. A caption's prompt depends on the
-participant only through the clip's mode and the attended sound (``diff.phase1-tweak/v5``), so each
+participant only through the clip's mode and the attended sound (since ``diff.phase1-tweak/v5``), so each
 clip has one per sound in each mode (:func:`diff.phase1_tweak.reachable_slots`), keyed by a hash of
 its slots (:func:`diff.phase1_tweak.variant_id`).
 

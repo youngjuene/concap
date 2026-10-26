@@ -369,8 +369,8 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # its own text, and its slots vary with the clip's scene (diff.phase1_tweak):
 # {caption}; {sounds}, the clip's sounds from orig_text, which the prompt names and
 # which are therefore R2's key (both modes keep every sound's name, so the key holds);
-# {attended_sound} (A1s); scene-aware: {scene_elements}, {seen}, {visible_sounds};
-# acousmatic: {space}. The researcher approves the wording; until then it is
+# {attended_sound} (A1s); scene-aware: {scene_elements}, {seen}, {visible_sounds},
+# {offscreen}; acousmatic: none of its own. The researcher approves the wording; until then it is
 # provisional and participant sessions are refused. Version 2 (design review,
 # 2026-10-24): the scene-aware prompt no longer asks for two centres (the attended
 # sound and the V1 object) and ties each sound only to its own source, since an
@@ -380,6 +380,9 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # screen "here, though unseen" ({offscreen}, empty when there are none, never
 # microphone wind), and the caption is held to 80 characters, since 160 take about 13 s
 # to read at 12 characters per second, longer than the 10 s clip.
+# Version 4 of the acousmatic text (researcher, 2026-10-26): the {space} request, a
+# sentence on an open or enclosed feel drawn from the scene's sky share, is gone, so the
+# acousmatic caption takes nothing from the picture. The scene-aware text stays at 3.
 TWEAK_PROVISIONAL: Final = True
 _TWEAK_HEAD: Final = (
     "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"
@@ -405,19 +408,19 @@ TWEAK_PROMPTS: Final[dict[str, PromptTemplate]] = {
     ),
     "acousmatic": PromptTemplate(
         template_id="tweak-p1",
-        version=3,
+        version=4,
         text=(
             _TWEAK_HEAD
             + "이 자막을 화면을 보지 않고 귀로만 듣는 것처럼 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
             "중심에 두고, 각 소리가 무슨 소리인지는 그대로 밝히되 화면 속 대상이나 장소는 말하지 마세요. "
-            "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요.{space}\n" + _TWEAK_TAIL
+            "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요.\n" + _TWEAK_TAIL
         ),
     ),
 }
 _TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound")
 TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {
     "scene": (*_TWEAK_COMMON, "scene_elements", "seen", "visible_sounds", "offscreen"),
-    "acousmatic": (*_TWEAK_COMMON, "space"),
+    "acousmatic": _TWEAK_COMMON,
 }
 
 

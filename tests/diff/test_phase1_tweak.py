@@ -84,7 +84,7 @@ def test_a_bound_sound_followed_is_written_scene_aware(clip: dict[str, Any], roo
     assert model["baseline"]["fascination"] == 3 and model["baseline"]["extent_coherence"] == 5
 
 
-def test_countering_it_writes_it_acousmatic_from_the_scene_s_openness(
+def test_countering_it_writes_it_acousmatic_from_the_audio_caption_alone(
     clip: dict[str, Any], root: Path
 ) -> None:
     slots, model = steer(clip, first_step(), "counter", root)
@@ -94,11 +94,11 @@ def test_countering_it_writes_it_acousmatic_from_the_scene_s_openness(
         "caption": "버스가 공회전하는 소리",
         "sounds": "버스 소리",
         "attended_sound": "버스 소리",
-        "space": " 소리가 넓게 트인 곳에서 멀리 퍼져 나가는 느낌도 살려 주세요.",
     }
-    assert model["caption"] == {"type": "acousmatic/open"}
-    neutral = {**clip, "scene": {**clip["scene"], "openness": "neutral"}}
-    assert steer(neutral, first_step(), "counter", root)[0]["space"] == ""
+    assert model["caption"] == {"type": "acousmatic"}
+    # The scene's openness reaches no acousmatic caption (v6): its slots and key stay the same.
+    enclosed = {**clip, "scene": {**clip["scene"], "openness": "enclosed"}}
+    assert steer(enclosed, first_step(), "counter", root)[0] == slots
 
 
 def test_the_setting_is_the_clip_s_whatever_the_point_and_a_missing_page_stops(
@@ -154,7 +154,8 @@ def test_both_prompts_name_every_slot_in_korean_only(clip: dict[str, Any], root:
     assert "화면 속 대상이나 장소는 말하지 마세요" in TWEAK_PROMPTS["acousmatic"].text
     assert "그 소리를 내는 대상과만 이어 주세요." in TWEAK_PROMPTS["scene"].text
     assert "화면에 없는 대상을 지어내지 마세요" in TWEAK_PROMPTS["scene"].text
-    assert {template.version for template in TWEAK_PROMPTS.values()} == {3}
+    assert (TWEAK_PROMPTS["scene"].version, TWEAK_PROMPTS["acousmatic"].version) == (3, 4)
+    assert "트인" not in TWEAK_PROMPTS["acousmatic"].text  # v4: no open or enclosed feel from the sky
     assert all("80자 이내로" in template.text for template in TWEAK_PROMPTS.values())
     assert "이 장면에 퍼져 있는 소리" not in TWEAK_PROMPTS["scene"].text and TWEAK_MAX_CHARS == 80
     assert TWEAK_PROVISIONAL is True

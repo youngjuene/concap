@@ -27,8 +27,10 @@ The slots, for one participant and clip:
   though unseen", or nothing when there are none. Sounds of the
   recording itself (:data:`RECORDING_ARTEFACTS`, microphone wind) are never
   placed: v2 spread them "in this scene" (hypothesis team, 2026-10-24);
-- acousmatic only: ``space``, a sentence on how the sound spreads, from the
-  scene's openness, and nothing when it is neither open nor enclosed.
+- acousmatic: no slot of its own. Until v6 it had ``space``, a sentence on how
+  the sound spreads, from the scene's openness (its sky share); the researcher
+  dropped it on 2026-10-26 so that the acousmatic caption draws on the audio
+  caption alone, with nothing taken from the picture.
 
 FA1 (visited) is kept in the records and not used; the restoration subscales
 and FA2/FA3 are recorded as the clip's baseline (``model.baseline``).
@@ -51,7 +53,8 @@ from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, RenderedPromp
 from diff.study_protocol import TWEAK_MAX_CHARS
 
 # v5 (2026-10-24): the scene-aware setting is the clip's distinctive element, not the V1 object.
-TWEAK_POLICY: Final = "diff.phase1-tweak/v5"
+# v6 (2026-10-26): the acousmatic prompt has no space slot, so the scene's openness reaches no caption.
+TWEAK_POLICY: Final = "diff.phase1-tweak/v6"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
 # The scene's elements (phase1_scene.ELEMENTS) in Korean.
 ELEMENTS_KO: Final[dict[str, str]] = {
@@ -60,13 +63,6 @@ ELEMENTS_KO: Final[dict[str, str]] = {
     "traffic": "도로와 차량",
     "built": "건물",
     "people": "사람들",
-}
-# How a sound spreads, by the scene's openness, as the acousmatic prompt's last request (each
-# value starts with its own space); a scene neither open nor enclosed gets none.
-SPACE_KO: Final[dict[str, str]] = {
-    "open": " 소리가 넓게 트인 곳에서 멀리 퍼져 나가는 느낌도 살려 주세요.",
-    "enclosed": " 소리가 둘러싸인 곳에서 가깝게 들리는 느낌도 살려 주세요.",
-    "neutral": "",
 }
 # The scene-aware prompt's sentence for the sounds not on screen, one wording for everyone; it
 # avoids "화면 밖", which would echo E1's "화면 속 장소" (it starts with its own space).
@@ -111,9 +107,9 @@ def scene_slots(clip: Mapping[str, Any], mode: str, model: Mapping[str, Any]) ->
     A noticed sound whose click mask the point hit counts as visible, whatever its judgement:
     the participant found its source on screen.
     """
-    scene = clip["scene"]
     if mode == "acousmatic":
-        return {"space": SPACE_KO[scene["openness"]]}
+        return {}
+    scene = clip["scene"]
     distinctive = scene["distinctive"]
     others = sorted(
         (name for name in scene["elements"] if name != distinctive), key=lambda n: -scene["elements"][n]
@@ -140,11 +136,10 @@ def scene_slots(clip: Mapping[str, Any], mode: str, model: Mapping[str, Any]) ->
 
 
 def caption_variant(clip: Mapping[str, Any], mode: str) -> dict[str, Any]:
-    """The caption's variant for analysis: the mode and the scene characteristic it draws on."""
-    scene = clip["scene"]
+    """The caption's variant for analysis: the mode, and for scene-aware the setting it draws on."""
     if mode == "acousmatic":
-        return {"type": f"acousmatic/{scene['openness']}"}
-    return {"type": f"scene/{scene['distinctive']}"}
+        return {"type": "acousmatic"}
+    return {"type": f"scene/{clip['scene']['distinctive']}"}
 
 
 def tweak_steer_all(

@@ -51,7 +51,7 @@ from diff.phase1_tweak import named_in
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v6"
+EXPORT_SCHEMA: Final = "diff.export/v7"  # v7 (2026-10-26): caption_type "acousmatic" carries no openness
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",

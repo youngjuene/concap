@@ -9,7 +9,7 @@
 
 A second caption's prompt depends on the participant only through the clip's mode (the binding
 model's and the plan's) and the sound they attended to (A1s, a required choice); the scene-aware
-setting is the clip's own (``diff.phase1-tweak/v5``). The set of prompts is therefore small and
+setting is the clip's own (since ``diff.phase1-tweak/v5``). The set of prompts is therefore small and
 finite, and the researcher reviews every caption before the study (2026-10-24) rather than the app
 showing whatever Trida writes and the check lets through: on the bench, the best wording delivered
 about half.
@@ -247,7 +247,6 @@ def write_sheet(
         "scene_elements",
         "visible_sounds",
         "offscreen",
-        "space",
         "sounds",
         "first_caption",
         *(column for name in names for column in (f"draft:{name}", f"issues:{name}")),
@@ -269,7 +268,6 @@ def write_sheet(
                 "scene_elements": slots.get("scene_elements", ""),
                 "visible_sounds": slots.get("visible_sounds", ""),
                 "offscreen": slots.get("offscreen", "").strip(),
-                "space": slots.get("space", "").strip(),
                 "sounds": slots["sounds"],
                 "first_caption": slots["caption"],
                 **{column: (kept or {}).get(variant["variant_id"], {}).get(column, "") for column in FILLED},
