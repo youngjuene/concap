@@ -19,6 +19,10 @@ so the setup carries no wording of its own beyond an optional ``consent_text``.
 
 :func:`draft_setup` fills in what the prepared metadata determines:
 - media, durations and frames, with each frame's per-object masks;
+- the practice clip, a ``c1_video_audio`` clip outside the 12, staged beside
+  them at their loudness (:func:`level_audio`; researcher, 2026-10-26: the
+  corpus file is about 3 dB quieter, so a volume set during practice would
+  play the clips louder);
 - the prepared Korean captions, copied verbatim;
 - ``orig_text``;
 - each clip's AudioSet labels, every one kept, with its family: a reference
@@ -83,6 +87,8 @@ OPTION_RULE: Final = (
 FRAMES_MIN: Final = 3
 FRAMES_MAX: Final = 9
 PRACTICE_AT_MS: Final = 5000
+# The loudness scripts/stage_regen_media.py staged the 12 clips at (EBU R128, LUFS).
+LOUDNESS: Final = -23.0
 # The staged clips' frames are 1280 px wide; the practice still matches them.
 FRAME_WIDTH: Final = 1280
 LATIN = re.compile(r"[A-Za-z]")
@@ -90,6 +96,7 @@ HANGUL = re.compile(r"[가-힣]")
 
 Probe = Callable[[Path], tuple[int, float]]
 Extract = Callable[[Path, int, Path], None]
+Level = Callable[[Path, Path], None]
 
 
 class SetupError(ValueError):
@@ -164,6 +171,34 @@ def probe_video(path: Path) -> tuple[int, float]:
     probed = json.loads(out)
     numerator, denominator = probed["streams"][0]["r_frame_rate"].split("/")
     return round(float(probed["format"]["duration"]) * 1000), int(numerator) / int(denominator)
+
+
+def level_audio(source: Path, target: Path) -> None:
+    """A copy of the video with its sound at the clips' loudness and its picture untouched.
+
+    The two passes of ``scripts/stage_regen_media.py``'s ``stage_clip``, which staged the 12
+    clips: ffmpeg's loudnorm measures the file, then corrects it to :data:`LOUDNESS`.
+    """
+    loudnorm = f"loudnorm=I={LOUDNESS}:TP=-1.5:LRA=11"
+    measured = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-i", str(source), "-af", f"{loudnorm}:print_format=json"]
+        + ["-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    report = json.loads(measured.stderr[measured.stderr.rindex("{") : measured.stderr.rindex("}") + 1])
+    corrected = (
+        f"{loudnorm}:measured_I={report['input_i']}:measured_TP={report['input_tp']}"
+        f":measured_LRA={report['input_lra']}:measured_thresh={report['input_thresh']}"
+        f":offset={report['target_offset']}:linear=true"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(source), "-af", corrected]
+        + ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(target)],
+        check=True,
+    )
 
 
 def extract_frame(video: Path, at_ms: int, out: Path) -> None:
@@ -242,6 +277,7 @@ def draft_setup(
     instrument: Any,
     probe: Probe = probe_video,
     extract: Extract = extract_frame,
+    level: Level = level_audio,
 ) -> dict[str, Any]:
     """Every part the prepared metadata determines; the options are left to write."""
     ids, roots = read_ontology(ontology)
@@ -253,9 +289,11 @@ def draft_setup(
     practice_rows = corpus_clips(corpus, "c1_video_audio")
     if practice_clip not in practice_rows:
         raise SetupError(f"practice clip {practice_clip!r} is not a c1_video_audio clip in {corpus}")
-    practice_video = video_root / practice_rows[practice_clip]["file_path"]
-    if not practice_video.is_file():
-        raise SetupError(f"practice clip video missing: {practice_video}")
+    corpus_video = video_root / practice_rows[practice_clip]["file_path"]
+    if not corpus_video.is_file():
+        raise SetupError(f"practice clip video missing: {corpus_video}")
+    practice_video = media_root / "practice" / f"{practice_clip}.mp4"
+    level(corpus_video, practice_video)
     clips = []
     for key in sorted(shown):
         clip_dir = media_root / key

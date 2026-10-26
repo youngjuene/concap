@@ -130,6 +130,11 @@ def fake_extract(video: Path, at_ms: int, out: Path) -> None:
     _png(out, colour="white")
 
 
+def fake_level(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes())
+
+
 def make_sa2va(run: Path) -> None:
     """A Sa2VA run's masks for the three clips: ``visual/<clip>/<Category>``, ``audio/<clip>/<label>``."""
     for clip in CLIPS:
@@ -200,6 +205,7 @@ def drafted(root: Path) -> dict[str, Any]:
         instrument=workbook_instrument,
         probe=fake_probe,
         extract=fake_extract,
+        level=fake_level,
     )
 
 
