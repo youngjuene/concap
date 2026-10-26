@@ -266,7 +266,10 @@ so it stays on this machine.
 
 The participant app runs in the repository environment. It starts one Trida
 worker per GPU in the generator environment, so `uv sync --project
-envs/diff-generator --frozen` must have run.
+envs/diff-generator --frozen` must have run. With phase 1 it also starts the
+second-caption writer, Qwen3.5-9B (researcher, 2026-10-26), on its own GPU. It runs
+in the repository environment, because Qwen3.5 needs transformers 5 and Trida's
+code pins the generator environment at 4.57.3.
 
 ```sh
 uv run python -m diff live serve \
@@ -275,7 +278,7 @@ uv run python -m diff live serve \
   --video <video_id>=path/to/video.mp4 \
   --items path/to/items.json \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
-  --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
+  --gpus 0 --writer-gpu 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
 **Audio** (researcher, 2026-10-26). The 12 clips and the practice clip are at −23 LUFS on
@@ -327,6 +330,15 @@ nothing records it.
   - A session holds its card from entry until its last video ends. With one
     card, participants therefore come strictly one after another: a second ID
     entered meanwhile is told to wait ("잠시 후", 503).
+- `--writer-gpu` is the card for the second-caption writer. It must not be one
+  of `--gpus`: Qwen3.5-9B (about 18 GB) and Trida (about 15 GB) do not fit one
+  24 GB card together. `serve` refuses unless it has 19 GB free
+  (`WRITER_MIN_FREE_MIB`). `--writer-dir` defaults to
+  `artifacts/diff/models/qwen3.5-9b-c2022362`, whose every file `serve` hashes
+  against the pinned profile (`model_profile.QWEN35_9B`) at start.
+  - A session holds the writer from entry to the handoff, so with one writer
+    participants also come one at a time. This holds until phase 2 moves to
+    Qwen3.5 too, after phase 1 is confirmed.
 - `--purpose participant` is refused in any of these cases:
   - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
   - the nine live prompts are provisional (`rewrite_prompts.LIVE_CELL_PROMPTS`);
@@ -468,9 +480,11 @@ It reads the store (`--store`, default the participant store) and every
 - `second_captions.csv`: one row per participant × clip:
   - the status, and the reason for a skipped step;
   - the first and second captions, and where the second came from
-    (`caption_source`: `approved` or, in a smoke session, `trida`), with its
-    `variant_id` and `approved_from`;
-  - the attended sound, and the binding model's inputs, P(bound),
+    (`caption_source`: `trida`, written live since 2026-10-26, with the
+    delivering `rung` and its τ `condition`; `approved` in sessions of
+    2026-10-24 to 26), with its `variant_id`;
+  - the attended sound, the restorative `emphasis` with the three centred
+    subscale means, and the binding model's inputs, P(bound),
     recommendation, follow or counter, mode and caption type;
   - the two pre-registered moderators: `moderator_scene` (`logit q`) and
     `moderator_participant` (what the answers add to `logit P(bound)`);
@@ -503,13 +517,14 @@ Run it on the pilot and on every participant session before analysis. It
 opens the store read-only and exits 1 on any mismatch. From each
 participant's answers it recomputes:
 - the object under each P2 point, by re-reading the masks;
-- each direction's degree and the other tweak slots;
+- each clip's mode, restorative emphasis and the other tweak slots;
 - the tuner's heard families and rating means.
 
 diff's own prompt functions render what those values should produce, and the
 audit compares that with every logged call. It also checks that:
-- each second caption is what Trida wrote and what P6 showed, or that a
-  failed one was skipped;
+- each second caption went down the τ ladder as the server must take it,
+  and is the caption the gate passed and P6 showed, or that a clip that
+  never passed was skipped;
 - every slider change got a live call;
 - every caption shown maps to a call;
 - the export matches the store.
@@ -517,12 +532,15 @@ audit compares that with every logged call. It also checks that:
 Audit with the commit the sessions ran: a session run on another template is
 reported once, as a version mismatch.
 
-When the model, its tokenizer or the generator environment changes, also
-check that the logged prompts are what the worker tokenized:
+When a model, its tokenizer or its environment changes, also check that the
+logged prompts are what each worker tokenized. Run it once per model, in that
+model's environment:
 
 ```sh
 envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir artifacts/diff/live-20261020
+uv run python scripts/diff_session_audit.py tokens \
+  --writer-dir artifacts/diff/models/qwen3.5-9b-c2022362 --log-dir artifacts/diff/live-20261020
 ```
 
 ## 10. Comparing prompt wordings
@@ -554,66 +572,68 @@ The baseline inputs are `artifacts/diff/bench/inputs-smoke-20261019.json`,
 from the 2026-10-19 smoke run with three agent pseudo participants. The file
 is not tracked, because it holds the long videos' draft cues.
 
-## 11. Drafting every second caption for review
+## 11. Second captions: written live, and the delivery bench
 
-A second caption's prompt depends on the participant only through the
-clip's mode and the attended sound (A1s). The scene-aware setting is the
-clip's own (since `diff.phase1-tweak/v5`), and the acousmatic prompt has no
-slot from the scene (v6). The set of prompts is therefore small.
-On 2026-10-24 the researcher chose to draft them all and review every one
-before the study.
+Since 2026-10-26 every second caption is written live, when stage A ends,
+and shown once it passes the gate (`diff.phase1_usable`). From 2026-10-24
+to 26 the researcher reviewed every caption before the study instead; that
+path (`diff.phase1_approved`, `phase1 import-second-captions`) is retired.
+
+The prompt depends on the participant through three things:
+- the clip's mode (the binding model's and the plan's);
+- the sound they attended to (A1s);
+- the restorative emphasis their P4 ratings reflect: the soundscape subscale
+  this clip stands highest on, centred on their own means
+  (`phase1_tweak.emphases`).
+
+The writer is Qwen3.5-9B, greedy, with thinking off. Each refused caption is
+written again in the next wording of `rewrite_prompts.TWEAK_LADDER`
+(every-sound, then checklist, then prose), because a greedy call repeats
+itself. A first version varied Trida's τ, which reproduced the same text in 61
+of 86 retries. The clip's second step is skipped only when the last rung is
+refused too. The gate (`diff.phase1_usable`, v4) refuses:
+- decoding damage: loops, cut or doubled words, a caption cut off mid-clause;
+- near-copies of the first caption, and lists of names (no predicate);
+- an unnamed attended sound;
+- a named R2 distractor;
+- the P4/P9 items' wording, and the emphasis sentence's own words;
+- a place named in an acousmatic caption, or a place the prompt did not give
+  in a scene-aware one.
+
+It flags, and never acts on, other unnamed sounds and spatial relations. The
+prompts and the gate are provisional, and participant sessions wait for the
+researcher's approval (`TWEAK_PROVISIONAL`).
+
+The delivery bench writes every caption a participant can reach down the
+ladder, as the server would:
 
 ```sh
 uv run python scripts/diff_second_captions.py variants \
   --phase1-setup artifacts/diff/phase1/setup-draft.json --out DIR/variants.json
-CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_second_captions.py draft \
-  --variants DIR/variants.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
-  --candidate artifacts/diff/bench/candidates-20261026/B-words.json \
-  --candidate artifacts/diff/bench/candidates-20261026/E-short-where.json \
-  --out DIR/drafts.json --sheet DIR/review.csv
+CUDA_VISIBLE_DEVICES=1 uv run python scripts/diff_second_captions.py draft \
+  --variants DIR/variants.json --out DIR/drafts.json --sheet DIR/sheet.csv
 ```
 
-`variants` lists every slot set a participant can reach, with
-`phase1_tweak.reachable_slots`, the function the app's gate uses. Each slot
-set is keyed by `phase1_tweak.variant_id`, a hash of the slots.
+`variants` lists every slot set with `phase1_tweak.reachable_slots`, one per
+mode, sound and emphasis: 174 on the setup, against 58 before the emphasis.
+`draft` runs each one down the ladder until the gate passes it. It reports
+how many were delivered at each rung and how many of those still carry one
+of the bench's rougher issues. The sheet is for reading only: one row per
+variant, with the delivering rung, the caption, what each refused rung failed
+on, and the issues.
 
-`draft` writes every variant once per wording, at the study's settings. Each draft is scored with
-the server's check and the bench's measures. The output is a review sheet with one row per
-variant: the drafts and their issues side by side, then empty `approved_text`, `approved_from`
-and `note` columns.
+`rescore --variants DIR/variants.json --drafts DIR/drafts.json --sheet DIR/sheet.csv`
+runs the gate and the measures again from the stored outputs, without Trida.
+It says when a changed gate would have left a ladder at an earlier rung, so
+that the bench should be drafted again.
 
-The setup gives 58 variants: 29 per mode, one per sound. The current drafts
-(2026-10-26: the windowed run, v6, and the 2026-10-24 wordings without the
-space request, in `candidates-20261026/`) and the reviewer's instructions are
-in `artifacts/diff/phase1/second-captions-20261026/` (`README.md`). Superseded: the
-full-clip run's drafts (`superseded-full-clip/` there), the 2026-10-24 folder, and its first run
-with the V1 object as the setting (`superseded-277/`).
+The export records each second caption's delivering rung and its wording
+(`rung`, `wording`), its emphasis and the three centred subscale means.
+The audit recomputes the emphasis and checks the whole ladder:
+- each attempt is the recomputed job at its rung;
+- re-running the check and the gate gives the logged verdict;
+- each rung was left only after a refusal;
+- P6 showed the caption the gate passed.
 
-`rescore --variants DIR/variants.json --drafts DIR/drafts.json --sheet DIR/review.csv` scores the
-drafts again after a change to the measures, without Trida, and keeps the sheet's filled columns.
-
-Re-run both steps when the setup, the scene or `phase1_tweak` changes, since the IDs change with
-the slots.
-
-Once the sheet is filled, import it into the setup:
-
-```sh
-uv run python -m diff phase1 import-second-captions --setup artifacts/diff/phase1/setup-draft.json \
-  --sheet DIR/review.csv --reviewed-by NAME
-```
-
-The import (`diff.phase1_approved`) checks every row and imports nothing if any row fails:
-- the row's variant is one the setup can reach (a stale sheet is refused);
-- an approved text has something readable and at most 80 characters;
-- `approved_from` names the draft taken as it is (and the text is that draft), or says
-  `edited` or `written`.
-
-It replaces any earlier import in the setup's `second_captions` block, with the reviewer, the time
-and a hash, and lists the rows left unapproved. Participant sessions are refused until every
-caption the setup can show is approved, and while the block differs from its hash (a hand edit).
-
-At the last P5 the app takes each clip's approved caption for its variant, ready at once, and
-asks Trida nothing. A smoke session falls back to Trida where none is approved. The export marks
-each second caption `approved` or `trida` (`caption_source`), with its `variant_id` and
-`approved_from`. The audit checks that an approved caption is the setup's text for the
-recomputed slots, that P6 showed it, and that Trida was not called.
+The 2026-10-26 review drafts (`artifacts/diff/phase1/second-captions-20261026/`)
+are superseded. They were drafted without the emphasis and for approval.

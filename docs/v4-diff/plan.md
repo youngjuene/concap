@@ -394,7 +394,8 @@ folder's `superseded-277/`.
   instead of generating it live (built the same day, below).
 
 **Approved second captions served** (researcher, 2026-10-24: every row must
-be approved before participants).
+be approved before participants; retired on 2026-10-26, when captions became
+live: see "Second captions: responsive, written live" below).
 - `python -m diff phase1 import-second-captions` checks the filled sheet and
   writes the approved texts into the setup's `second_captions` block, with
   the reviewer, the time and a hash (`diff.phase1_approved`, runbook §11).
@@ -744,6 +745,156 @@ The panel's other proposals wait on the researcher's decisions.
     undetected) goes into the stimulus table as a descriptor. So does the
     unlabelled share of each frame, which counts against visibility. Neither
     is used to select.
+
+**Second captions: responsive, written live** (researcher, 2026-10-26,
+after the check of the scene-aware rewriting, §11 of `checks-20261026.md` in
+the review folder).
+- **The goal.** The rewrite steers the audio caption from what the scene
+  holds to what this participant perceived and preferred, in the
+  attention-restorative direction. It is not a scene-descriptive rewrite.
+- **What steers the text.** Two answers, in both modes alike:
+  - the noticed sound (A1s), which the caption centres;
+  - the restorative appraisal (P4).
+
+  V1 and FA3 do not steer the text. V1 still enters the binding model.
+- **Reflect.** The emphasis is the soundscape subscale on which the clip
+  stands highest for this participant. The subscales are fascination, being
+  away from, and extent and coherence (Payne, 2013). Each subscale's mean on
+  the clip is taken minus the participant's own mean of it over their clips,
+  so neither scale use nor a subscale rated high everywhere moves it. A tie
+  goes to the higher raw mean, then to the questionnaire's order.
+  - The place's being away (P1–P2, Hartig et al., 1997) is left out: it
+    rates the picture, not the sounds the caption describes.
+  - Each subscale has one sentence, the same under both modes, and none
+    uses the items' own wording (`phase1_tweak.EMPHASIS_KO`).
+- **Live, made robust by engineering.** Every caption is written when stage
+  A ends. The approval of every caption before the study (2026-10-24) is
+  retired, with `diff.phase1_approved` and `phase1 import-second-captions`.
+  - A gate (`diff.phase1_usable`, v4) adds to the technical check the
+    defects the 2026-10-24 bench and the 2026-10-26 drafts showed it letting
+    through:
+    - decoding damage: loops, cut or doubled words, a caption cut off
+      mid-clause;
+    - near-copies, and lists of names: two or more comma-separated phrases
+      with no predicate (v2; researcher, 2026-10-26: a list is no rewrite);
+    - an unnamed attended sound, with the bare syllable for "car" counted among the vehicles (v3);
+    - a named R2 distractor;
+    - the items' wording: every P4/P9 item's own words since v3, against
+      four stems before; and the emphasis sentence's own words (v3), since a
+      caption should carry the quality, not state it;
+    - a place in an acousmatic caption, or one the prompt did not give in a
+      scene-aware caption.
+  - The caption's ending stays free (2026-10-18), so a caption may end on a
+    noun but not on a connective.
+  - A refused caption is written again in the next wording of
+    `rewrite_prompts.TWEAK_LADDER` (researcher: alternate wordings), since a
+    greedy call repeats itself. This replaces "no quality retries"
+    (2026-10-18). A first version varied Trida's τ instead; see the
+    measurements below.
+  - The clip's second step is skipped only when the last rung is refused.
+- **What phase 1 tests.** Following or countering the recommended mode, as
+  before. The emphasis is applied the same way under either mode and does
+  not depend on the plan, so the mode contrast stays clean of it. Testing the
+  modulation is phase 2's role, under the same rule (researcher). Nothing in
+  phase 2 is applied yet; that waits until phase 1 is confirmed.
+- **For the analysis.**
+  - The emphasis is chosen from P4, the first measure of the P4→P9 change.
+    The emphasised subscale is the clip's highest for the participant, so it
+    will tend to fall back toward their mean at P9 whatever the caption
+    does. A per-subscale reading must allow for that. The mode contrast is
+    not affected.
+  - Export v8 records the emphasis, whether it was a tie, the three centred
+    means, and the delivering rung and τ. The delivering τ is a covariate.
+- **Built:**
+  - tweak policy v7; scene-aware prompt v4 and acousmatic prompt v5, each
+    ending with `{emphasis}`;
+  - the gate; flow v7 (the rung in each entry);
+  - the server queues the next rung as soon as one is refused;
+  - the audit recomputes the emphasis and checks the whole ladder;
+  - the delivery bench (runbook §11) runs the 174 reachable variants down
+    the ladder.
+
+  Participant sessions wait again for the second-caption prompts' approval
+  (`TWEAK_PROVISIONAL`), now with the gate's.
+- **Verified:**
+  - `make check` passed (1920).
+  - Six stand-in participants walked the real setup with the fake worker.
+    A third of the first-rung captions came back as copies of the first
+    caption, which the gate refused.
+  - All 72 captions were delivered: 47 at the first rung and 25 at the
+    second.
+  - The audit found 0 mismatches over 194 ladder checks, and flagged a
+    tampered emphasis and rung.
+  - Each stand-in's emphases spread over all three subscales.
+- **Measured the same day** (delivery bench, 174 captions, 87 per mode;
+  `artifacts/diff/bench/candidates-20261026-live/RESULTS.md`):
+  - Trida does not deliver sentence rewrites at temperature 0. Asked for
+    sentences, it cuts verbs mid-word and loops; asked tersely, it writes
+    lists of names.
+  - With lists refused, its best first-call delivery in the weaker mode was
+    17 of 87, and τ 1.0 reproduced τ 0.9's text in 61 of 86 retries.
+  - The researcher then asked for a different model sized for rewriting
+    speed (Qwen3.5), with alternate wordings as the retries, so that no
+    fallback is needed.
+  - On the same gate (v3), Qwen3.5 at bf16 with thinking off, greedy, one
+    call (weaker mode of 87; median time per caption; peak memory):
+
+    | size | first call | median time | peak memory |
+    |---|---|---|---|
+    | 2B | 45–50 | 0.9 s | 4.2 GiB |
+    | 4B | 71 (75/71) | 1.2 s | 8.6 GiB |
+    | 9B | 72 (84/72) | 1.4 s | 17.7 GiB |
+
+    The 4B and 9B rows use the prose wording; the 9B result is under its
+    shorter wording, since it overruns under prose. The times are without
+    the linear-attention kernels.
+  - Two wordings on 4B (the prose one, then the short one) would deliver an
+    estimated 84 of 87 in each mode.
+  - The emphasis sentences were rewritten the same day: until then they used
+    F2's, BF2's and E2's own words.
+- **The writer** (researcher, 2026-10-26): Qwen3.5-9B replaces Trida for
+  rewriting Korean captions. Phase 1's second captions switch now; phase 2's
+  live captions stay on Trida until phase 1 is confirmed. The writer's
+  footprint ruled out 4B's memory advantage, since only one model is meant to
+  be loaded in the end.
+  - **The profile** is pinned at revision c2022362
+    (`model_profile.QWEN35_9B`). Every file and shard was hashed and matched
+    the Hub.
+  - **The call** is greedy with thinking off (`diff.qwen35_runner`). It runs
+    in the repository environment: Qwen3.5 needs transformers 5, and Trida's
+    code pins the generator environment at 4.57.3.
+  - **The ladder** has three wordings: every-sound (the bench's R1), then
+    checklist (R3), then prose (P2). Each was picked on the bench by the
+    pre-written rule (`RULE.md`, round 3).
+  - **The session's GPUs:** the writer runs on its own card (`live serve
+    --writer-gpu`), since 9B and Trida do not fit one 24 GB card. A session
+    holds the writer from its entry to the handoff.
+  - **Integrated bench** (`scripts/diff_second_captions.py draft`, 174
+    reachable captions): 173 delivered, 87 of 87 scene-aware and 86 of 87
+    acousmatic.
+    - By rung: 159 at the first, 11 at the second, 3 at the third.
+    - The first calls reproduce the scratch bench's text in 174 of 174.
+    - The one undelivered caption, bangkok_209's acousmatic one, names three
+      long sound labels and overruns 80 characters in every wording.
+    - The gate's shouting stem now matches its conjugated form; the bench
+      found one false refusal of that kind.
+  - **Through the server:** three stand-in participants walked phase 1 with
+    the real writer, and every one of the 36 captions was delivered (35 at
+    the first rung). The median time per caption was 1.2 s (p90 1.5 s). The
+    audit found 0 mismatches, and all 37 logged prompts re-tokenize to the
+    worker's hash.
+- **Open for the researcher:**
+  - the three emphasis sentences and the gate's rules (provisional);
+  - the writer's three wordings (provisional; a native read of 9B's Korean
+    before approval). One small fix is to add "Korean only": 9B sometimes
+    writes a sound in Cyrillic or Chinese, which the gate refuses;
+  - what the scene-aware prompt keeps of the scene. The setting is a
+    between-clip contrast that misnames some scenes, and its "here, though
+    unseen" sentence was never followed. Four clips have no sound with a
+    source on screen, so a countered scene-aware caption there can only bind
+    to the scene itself;
+  - a gate for sounds the first caption names but the audio lacks. It needs
+    those words per clip in the setup; the bench lists them for four clips.
 
 **Open for the researcher:**
 - the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide
