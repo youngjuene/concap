@@ -369,7 +369,7 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # its own text, and its slots vary with the clip's scene (diff.phase1_tweak):
 # {caption}; {sounds}, the clip's sounds from orig_text, which the prompt names and
 # which are therefore R2's key (both modes keep every sound's name, so the key holds);
-# {attended_sound} (A1s); scene-aware: {scene_elements}, {seen}, {visible_sounds},
+# {attended_sound} (A1s); {emphasis}; scene-aware: {scene_elements}, {seen}, {visible_sounds},
 # {offscreen}; acousmatic: none of its own. The researcher approves the wording; until then it is
 # provisional and participant sessions are refused. Version 2 (design review,
 # 2026-10-24): the scene-aware prompt no longer asks for two centres (the attended
@@ -382,7 +382,10 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # to read at 12 characters per second, longer than the 10 s clip.
 # Version 4 of the acousmatic text (researcher, 2026-10-26): the {space} request, a
 # sentence on an open or enclosed feel drawn from the scene's sky share, is gone, so the
-# acousmatic caption takes nothing from the picture. The scene-aware text stays at 3.
+# acousmatic caption takes nothing from the picture.
+# Scene-aware 4 and acousmatic 5 (researcher, 2026-10-26): both end with {emphasis}, the
+# restorative quality this participant perceived most in the clip (phase1_tweak.EMPHASIS_KO),
+# the same sentence under either mode.
 TWEAK_PROVISIONAL: Final = True
 _TWEAK_HEAD: Final = (
     "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"
@@ -396,28 +399,28 @@ _TWEAK_TAIL: Final = (
 TWEAK_PROMPTS: Final[dict[str, PromptTemplate]] = {
     "scene": PromptTemplate(
         template_id="tweak-p1",
-        version=3,
+        version=4,
         text=(
             _TWEAK_HEAD + "화면에서 두드러지는 것: {scene_elements}. 장면의 배경: {seen}. "
             "화면에 음원이 보이는 소리: {visible_sounds}.\n"
             "이 자막을 소리가 화면 속 장면 안에 자리 잡도록 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
             "중심에 두고, 장면의 배경은 소리가 들리는 곳으로 쓰세요. 음원이 화면에 보이는 소리는 그 소리를 "
             "내는 대상과만 이어 주세요.{offscreen} 소리를 그 소리를 내지 않는 대상에 잇거나 "
-            "화면에 없는 대상을 지어내지 마세요.\n" + _TWEAK_TAIL
+            "화면에 없는 대상을 지어내지 마세요. {emphasis}\n" + _TWEAK_TAIL
         ),
     ),
     "acousmatic": PromptTemplate(
         template_id="tweak-p1",
-        version=4,
+        version=5,
         text=(
             _TWEAK_HEAD
             + "이 자막을 화면을 보지 않고 귀로만 듣는 것처럼 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
             "중심에 두고, 각 소리가 무슨 소리인지는 그대로 밝히되 화면 속 대상이나 장소는 말하지 마세요. "
-            "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요.\n" + _TWEAK_TAIL
+            "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요. {emphasis}\n" + _TWEAK_TAIL
         ),
     ),
 }
-_TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound")
+_TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound", "emphasis")
 TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {
     "scene": (*_TWEAK_COMMON, "scene_elements", "seen", "visible_sounds", "offscreen"),
     "acousmatic": _TWEAK_COMMON,

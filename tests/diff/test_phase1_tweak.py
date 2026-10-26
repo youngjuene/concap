@@ -1,4 +1,5 @@
-"""Phase 1's second caption: the mode and slots from first-step answers, the prompt, the job and its check."""
+"""Phase 1's second caption: the mode, emphasis and slots from first-step answers, the prompt, the
+job and its check."""
 
 from __future__ import annotations
 
@@ -12,7 +13,10 @@ from phase1_fixtures import approved_setup
 from diff.job_plan import PlanError
 from diff.output_checks import GeneratedOutput, check_tweak
 from diff.phase1_tweak import (
+    EMPHASIS_KO,
+    RESTORATIVE,
     TweakError,
+    emphases,
     named_in,
     reachable_slots,
     tweak_request,
@@ -75,6 +79,8 @@ def test_a_bound_sound_followed_is_written_scene_aware(clip: dict[str, Any], roo
         "caption": "버스가 공회전하는 소리",
         "sounds": "버스 소리",
         "attended_sound": "버스 소리",
+        # Alone, the clip stands level with itself on every subscale: the raw means break the tie.
+        "emphasis": EMPHASIS_KO["extent_coherence"],
         "scene_elements": "하늘, 도로와 차량",
         "seen": "하늘",  # the distinctive element, wherever the V1 point fell (on the road)
         "visible_sounds": "버스 소리, 남자의 말소리",  # the man is judged partly visible
@@ -82,6 +88,7 @@ def test_a_bound_sound_followed_is_written_scene_aware(clip: dict[str, Any], roo
     }
     assert model["caption"] == {"type": "scene/open"}
     assert model["baseline"]["fascination"] == 3 and model["baseline"]["extent_coherence"] == 5
+    assert (model["emphasis"]["chosen"], model["emphasis"]["tied"]) == ("extent_coherence", True)
 
 
 def test_countering_it_writes_it_acousmatic_from_the_audio_caption_alone(
@@ -94,6 +101,7 @@ def test_countering_it_writes_it_acousmatic_from_the_audio_caption_alone(
         "caption": "버스가 공회전하는 소리",
         "sounds": "버스 소리",
         "attended_sound": "버스 소리",
+        "emphasis": EMPHASIS_KO["extent_coherence"],  # the same under either mode
     }
     assert model["caption"] == {"type": "acousmatic"}
     # The scene's openness reaches no acousmatic caption (v6): its slots and key stay the same.
@@ -115,10 +123,12 @@ def test_the_setting_is_the_clip_s_whatever_the_point_and_a_missing_page_stops(
         steer(clip, records, "follow", root)
 
 
-def test_every_caption_a_participant_can_reach_is_listed_once_per_mode_and_sound(root: Path) -> None:
+def test_every_caption_a_participant_can_reach_is_listed_once_per_mode_sound_and_emphasis(
+    root: Path,
+) -> None:
     for clip in approved_setup(root)["clips"]:
         listed = {variant_id(slots): slots for slots in reachable_slots(clip)}
-        assert len(listed) == 2 * len(clip["options"]["A1s"])
+        assert len(listed) == 2 * len(clip["options"]["A1s"]) * len(RESTORATIVE)
         for option in clip["options"]["A1s"]:
             for obj, point in (("road", ON_THE_ROAD), (None, (0.5, 0.1))):
                 for assignment in ("follow", "counter"):
@@ -148,13 +158,15 @@ def test_both_prompts_name_every_slot_in_korean_only(clip: dict[str, Any], root:
             "「버스가 공회전하는 소리」",
             "이 영상에서 들리는 소리: 버스 소리.",
             "주의를 기울인 소리: 버스 소리.",
+            EMPHASIS_KO["extent_coherence"],
         ):
             assert text in prompt.text
         assert "{" not in prompt.text and not re.search(r"[A-Za-z]", prompt.text)
     assert "화면 속 대상이나 장소는 말하지 마세요" in TWEAK_PROMPTS["acousmatic"].text
     assert "그 소리를 내는 대상과만 이어 주세요." in TWEAK_PROMPTS["scene"].text
     assert "화면에 없는 대상을 지어내지 마세요" in TWEAK_PROMPTS["scene"].text
-    assert (TWEAK_PROMPTS["scene"].version, TWEAK_PROMPTS["acousmatic"].version) == (3, 4)
+    assert (TWEAK_PROMPTS["scene"].version, TWEAK_PROMPTS["acousmatic"].version) == (4, 5)
+    assert all(prompt.text.count("{emphasis}") == 1 for prompt in TWEAK_PROMPTS.values())
     assert "트인" not in TWEAK_PROMPTS["acousmatic"].text  # v4: no open or enclosed feel from the sky
     assert all("80자 이내로" in template.text for template in TWEAK_PROMPTS.values())
     assert "이 장면에 퍼져 있는 소리" not in TWEAK_PROMPTS["scene"].text and TWEAK_MAX_CHARS == 80
@@ -163,6 +175,29 @@ def test_both_prompts_name_every_slot_in_korean_only(clip: dict[str, Any], root:
         render_tweak({"mode": "scene", "caption": "x"})
     with pytest.raises(ValueError, match="mode must be one of"):
         render_tweak({"caption": "x"})
+
+
+def ratings(fascination: float, away: float, coherence: float) -> dict[str, float]:
+    return {
+        **{item: fascination for item in ("F1", "F2", "F3")},
+        **{item: away for item in ("BF1", "BF2", "BF3")},
+        **{item: coherence for item in ("E1", "E2", "E3")},
+    }
+
+
+def test_the_emphasis_reflects_the_subscale_a_clip_stands_highest_on_for_this_participant() -> None:
+    # This participant rates coherence high everywhere; centring on their own means removes that,
+    # so each clip's emphasis is where it stands out for them, not their highest raw subscale.
+    answers = [ratings(5, 3, 6), ratings(3, 5, 6), ratings(3, 3, 6), ratings(3, 3, 6)]
+    chosen = [record["chosen"] for record in emphases(answers)]
+    assert chosen == ["fascination", "being_away_from", "extent_coherence", "extent_coherence"]
+    first = emphases(answers)[0]["subscales"]
+    assert (first["fascination"]["centre"], first["fascination"]["centred"]) == (3.5, 1.5)
+    assert first["extent_coherence"]["centred"] == 0
+    # A tie of centred means goes to the higher raw mean, then to the questionnaire's order.
+    flat = emphases([ratings(4, 4, 4), ratings(4, 4, 4)])
+    assert [r["chosen"] for r in flat] == ["fascination"] * 2 and all(r["tied"] for r in flat)
+    assert all(sentence for sentence in EMPHASIS_KO.values()) and set(EMPHASIS_KO) == set(RESTORATIVE)
 
 
 def test_the_job_is_phase_one_at_the_live_condition_and_follows_the_mode(

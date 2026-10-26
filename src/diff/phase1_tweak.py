@@ -4,10 +4,18 @@ Researcher's decisions: each clip is viewed twice (2026-10-18), and the second
 viewing shows a caption Trida writes by tweaking the clip's raw first caption.
 Since 2026-10-23 the tweak takes one mode per clip, scene-aware or acousmatic,
 chosen by the binding model (:mod:`diff.phase1_binding`) from that participant's
-P2–P4 answers and the clip's Sa2VA scene part (:mod:`diff.phase1_scene`), and
-its wording varies with the scene. Since the design review of 2026-10-24 every
-clip's mode is decided when stage A ends (:func:`tweak_steer_all`). The mode's
-prompt is ``rewrite_prompts.TWEAK_PROMPTS[mode]``.
+P2–P4 answers and the clip's Sa2VA scene part (:mod:`diff.phase1_scene`). Since
+the design review of 2026-10-24 every clip's mode is decided when stage A ends
+(:func:`tweak_steer_all`). The mode's prompt is ``rewrite_prompts.TWEAK_PROMPTS[mode]``.
+
+**Responsive** (researcher, 2026-10-26): the rewrite steers the audio caption
+from what the scene holds to what this participant perceived and preferred, in
+the attention-restorative direction; it is not a scene-descriptive rewrite. Two
+answers steer the text, in both modes alike: the noticed sound (A1s), which the
+caption centres, and the restorative appraisal (P4), whose emphasis *reflects* the
+quality the participant perceived most in this clip (:func:`emphases`). Phase 1
+tests the mode (follow or counter); the emphasis is applied the same way under
+either mode, and testing it is phase 2's role, under the same rule.
 
 The slots, for one participant and clip:
 - ``mode``: ``scene`` or ``acousmatic``;
@@ -16,24 +24,29 @@ The slots, for one participant and clip:
   ``orig_text`` names. The prompt names them, so they are R2's key (the
   researcher's "key from the prompt");
 - ``attended_sound``: the A1s answer's label (P3);
+- ``emphasis``: the sentence of :data:`EMPHASIS_KO` for the clip's reflected
+  subscale;
 - scene-aware only: ``scene_elements``, the clip's distinctive element, then
   its largest other element; ``seen``, the scene's setting: the distinctive
   element (researcher, 2026-10-24: one setting per clip, so that every second
   caption can be drafted and reviewed before the study; it was the object the
   V1 point fell on, which gave 248 scene-aware prompts instead of 29);
   ``visible_sounds``, the A1s sounds whose source the masks put on screen
-  (``phase1_scene.ON_SCREEN``), and the noticed one when the V1 point hit its
-  click mask; ``offscreen``, a sentence placing the sounds not on screen "here,
-  though unseen", or nothing when there are none. Sounds of the
-  recording itself (:data:`RECORDING_ARTEFACTS`, microphone wind) are never
-  placed: v2 spread them "in this scene" (hypothesis team, 2026-10-24);
+  (``phase1_scene.ON_SCREEN``); ``offscreen``, a sentence placing
+  the sounds not on screen "here, though unseen", or nothing when there are
+  none. Sounds of the recording itself (:data:`RECORDING_ARTEFACTS`, microphone
+  wind) are never placed: v2 spread them "in this scene" (hypothesis team,
+  2026-10-24). Until v7 a V1 point on the noticed sound's click mask also made it
+  visible, but a point can hit only a source already on screen
+  (``phase1_binding.attention``), so the clause never changed the list;
 - acousmatic: no slot of its own. Until v6 it had ``space``, a sentence on how
   the sound spreads, from the scene's openness (its sky share); the researcher
   dropped it on 2026-10-26 so that the acousmatic caption draws on the audio
   caption alone, with nothing taken from the picture.
 
-FA1 (visited) is kept in the records and not used; the restoration subscales
-and FA2/FA3 are recorded as the clip's baseline (``model.baseline``).
+FA1 (visited) is kept in the records and not used; FA2/FA3 and the place's being
+away (P1–P2) are recorded with the subscales as the clip's baseline
+(``model.baseline``).
 """
 
 from __future__ import annotations
@@ -43,18 +56,21 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from statistics import mean
 from typing import Any, Final
 
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
 from diff.output_checks import check_tweak, displayed, output_from_record
-from diff.phase1_binding import FOLLOW, decide_all
+from diff.phase1_binding import BASELINE, FOLLOW, decide_all
 from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, RenderedPrompt, render_tweak
 from diff.study_protocol import TWEAK_MAX_CHARS
 
 # v5 (2026-10-24): the scene-aware setting is the clip's distinctive element, not the V1 object.
 # v6 (2026-10-26): the acousmatic prompt has no space slot, so the scene's openness reaches no caption.
-TWEAK_POLICY: Final = "diff.phase1-tweak/v6"
+# v7 (2026-10-26): the restorative emphasis steers both modes.
+TWEAK_POLICY: Final = "diff.phase1-tweak/v7"
+EMPHASIS_POLICY: Final = "diff.phase1-emphasis/reflect-v1"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
 # The scene's elements (phase1_scene.ELEMENTS) in Korean.
 ELEMENTS_KO: Final[dict[str, str]] = {
@@ -73,6 +89,17 @@ OFFSCREEN_KO: Final = (
 # AudioSet labels for sounds of the recording, not of the place: never placed in the scene.
 RECORDING_ARTEFACTS: Final = frozenset({"Wind noise (microphone)"})
 NOT_SEEN: Final = "없음"
+# The restorative appraisal that steers the emphasis: the soundscape subscales of P4 (Payne, 2013),
+# in the questionnaire's order, which breaks a tie left after the raw means. The place's being away
+# (P1–P2, Hartig et al., 1997) rates the picture, not the sounds the caption describes.
+RESTORATIVE: Final = ("fascination", "being_away_from", "extent_coherence")
+# Each subscale's emphasis, one wording for everyone and both modes. None uses the P4/P9 items' own
+# words, which a caption must not echo before P9 rates them.
+EMPHASIS_KO: Final[dict[str, str]] = {
+    "fascination": "소리에서 귀를 사로잡는 점이 살아나도록 쓰세요.",
+    "being_away_from": "소리를 들으며 잠시 다른 곳에 와 있는 듯한 느낌이 살아나도록 쓰세요.",
+    "extent_coherence": "소리들이 따로 놀지 않고 서로 이어져 들리는 느낌이 살아나도록 쓰세요.",
+}
 # For named_in: a label's words that describe its sound rather than name it, by their ending (a
 # verb before a noun, "달리는"; an adverb, "멀리서", "크게"; an object, "도로를") or as listed.
 DESCRIBING: Final = re.compile(r"(?:는|서|게|를|을)$")
@@ -101,12 +128,44 @@ def step_answers(records: Mapping[str, Mapping[str, Any]], clip_key: str) -> dic
     return answers
 
 
-def scene_slots(clip: Mapping[str, Any], mode: str, model: Mapping[str, Any]) -> dict[str, str]:
-    """The mode's own slots, from the clip's scene part and whether the V1 point hit the noticed sound.
+def emphases(answers: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Each clip's reflected subscale, from the participant's whole stage A (in stage-A order).
 
-    A noticed sound whose click mask the point hit counts as visible, whatever its judgement:
-    the participant found its source on screen.
+    A subscale's mean on a clip is centred on the participant's own mean of it over their clips,
+    so how someone uses the scale, or rates one subscale above another everywhere, moves nothing.
+    The clip's emphasis is the subscale it stands highest on; a tie goes to the higher raw mean,
+    then to the order of :data:`RESTORATIVE`.
     """
+    means = [
+        {name: mean(float(given[item]) for item in BASELINE[name]) for name in RESTORATIVE}
+        for given in answers
+    ]
+    centre = {name: mean(clip[name] for clip in means) for name in RESTORATIVE}
+    records = []
+    for clip in means:
+        centred = {name: round(clip[name] - centre[name], 6) for name in RESTORATIVE}
+        rank = sorted(RESTORATIVE, key=lambda n: (-centred[n], -clip[n], RESTORATIVE.index(n)))
+        records.append(
+            {
+                "policy": EMPHASIS_POLICY,
+                "rule": "reflect",
+                "chosen": rank[0],
+                "tied": centred[rank[0]] == centred[rank[1]],
+                "subscales": {
+                    name: {
+                        "mean": round(clip[name], 4),
+                        "centre": round(centre[name], 4),
+                        "centred": centred[name],
+                    }
+                    for name in RESTORATIVE
+                },
+            }
+        )
+    return records
+
+
+def scene_slots(clip: Mapping[str, Any], mode: str) -> dict[str, str]:
+    """The mode's own slots, from the clip's scene part."""
     if mode == "acousmatic":
         return {}
     scene = clip["scene"]
@@ -114,18 +173,11 @@ def scene_slots(clip: Mapping[str, Any], mode: str, model: Mapping[str, Any]) ->
     others = sorted(
         (name for name in scene["elements"] if name != distinctive), key=lambda n: -scene["elements"][n]
     )
-    hit = model["noticed"]["value"] if model["attention"]["status"] == "hit" else None
-    visible = [
-        option["label"]
-        for option in clip["options"]["A1s"]
-        if option["value"] == hit or on_screen(clip, option)
-    ]
+    visible = [option["label"] for option in clip["options"]["A1s"] if on_screen(clip, option)]
     unseen = [
         option["label"]
         for option in clip["options"]["A1s"]
-        if option["value"] != hit
-        and not on_screen(clip, option)
-        and option["audioset_label"] not in RECORDING_ARTEFACTS
+        if not on_screen(clip, option) and option["audioset_label"] not in RECORDING_ARTEFACTS
     ]
     return {
         "scene_elements": ", ".join(ELEMENTS_KO[name] for name in (distinctive, others[0])),
@@ -149,25 +201,25 @@ def tweak_steer_all(
     *,
     root: Path,
 ) -> list[tuple[dict[str, str], dict[str, Any]]]:
-    """Each clip's prompt slots and binding-model record, from the participant's whole stage A.
+    """Each clip's prompt slots and steering record, from the participant's whole stage A.
 
-    ``clips`` and ``records`` (each clip's first-step records, by page) run in stage-A order.
+    ``clips`` and ``records`` (each clip's first-step records, by page) run in stage-A order. The
+    record is the binding model's, with the clip's ``emphasis`` and ``caption`` variant added.
     """
     answers = [step_answers(step, str(clip["key"])) for clip, step in zip(clips, records, strict=True)]
     matches = [(step["P2"].get("matches") or [None])[0] for step in records]
     models = decide_all(clips, answers, matches, plan, root=root)
     steered = []
-    for clip, given, model in zip(clips, answers, models, strict=True):
-        slots = tweak_slots(clip, model["mode"], given.get("A1s"), model)
+    for clip, given, model, emphasis in zip(clips, answers, models, emphases(answers), strict=True):
+        model["emphasis"] = emphasis
+        slots = tweak_slots(clip, model["mode"], given.get("A1s"), emphasis["chosen"])
         model["caption"] = caption_variant(clip, model["mode"])
         steered.append((slots, model))
     return steered
 
 
-def tweak_slots(
-    clip: Mapping[str, Any], mode: str, attended: str | None, model: Mapping[str, Any]
-) -> dict[str, str]:
-    """One clip's prompt slots in ``mode``, from the attended sound (A1s) and the binding model's record."""
+def tweak_slots(clip: Mapping[str, Any], mode: str, attended: str | None, emphasis: str) -> dict[str, str]:
+    """One clip's prompt slots in ``mode``, from the attended sound (A1s) and the reflected subscale."""
     sounds = {option["value"]: option["label"] for option in clip["options"]["A1s"]}
     mentioned = [option["label"] for option in clip["options"]["R2"] if option.get("mentioned")]
     return {
@@ -175,7 +227,8 @@ def tweak_slots(
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(mentioned),
         "attended_sound": sounds.get(str(attended), NOT_SEEN),
-        **scene_slots(clip, mode, model),
+        "emphasis": EMPHASIS_KO[emphasis],
+        **scene_slots(clip, mode),
     }
 
 
@@ -185,18 +238,13 @@ def on_screen(clip: Mapping[str, Any], option: Mapping[str, Any]) -> bool:
 
 
 def reachable_slots(clip: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Every slot set a participant can reach on this clip, so every second caption it can show.
-
-    The setting is the clip's, so only the mode and the attended sound (A1s, a required choice)
-    vary. A V1 point can hit the attended sound's source only where the masks put it on screen
-    (``phase1_binding.attention``); both outcomes are tried there.
-    """
+    """Every slot set a participant can reach on this clip, so every second caption it can show:
+    one per mode, attended sound (A1s, a required choice) and emphasis."""
     found: dict[str, dict[str, str]] = {}
     for option in clip["options"]["A1s"]:
-        for status in ("hit", "miss") if on_screen(clip, option) else ("miss",):
-            model = {"noticed": {"value": option["value"]}, "attention": {"status": status}}
-            for mode in TWEAK_PROMPTS:
-                slots = tweak_slots(clip, mode, option["value"], model)
+        for mode in TWEAK_PROMPTS:
+            for emphasis in RESTORATIVE:
+                slots = tweak_slots(clip, mode, option["value"], emphasis)
                 found.setdefault(variant_id(slots), slots)
     return list(found.values())
 

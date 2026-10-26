@@ -203,7 +203,7 @@ def test_the_cli_shows_and_approves(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         writer.writerows(sheet(json.loads(path.read_text(encoding="utf-8"))))
     reviewed = ["--sheet", str(review), "--reviewed-by", "researcher"]
     assert main(["phase1", "import-second-captions", "--setup", str(path), *reviewed]) == 0
-    assert "imported 12 approved second captions" in (out := capsys.readouterr().out)
+    assert "imported 36 approved second captions" in (out := capsys.readouterr().out)
     assert "0 problems left" in out
     with pytest.raises(SystemExit, match="name what you approve"):
         main(["phase1", "approve", "--setup", str(path), "--by", "researcher"])

@@ -80,7 +80,10 @@ Their interactions with the mode separate the compatibility effect of binding
 from that of visibility.
 
 The restoration subscales (F, BF, E, PRS) and FA2/FA3 are recorded as each
-clip's baseline, and never steer: they are the outcome's first measure.
+clip's baseline, the outcome's first measure, and none of them moves the mode
+(E1/E3 only as congruence, above). Since 2026-10-26 the soundscape subscales
+also set the caption's emphasis (``phase1_tweak.emphases``), the same way under
+either mode, so the mode's contrast stays clean of it.
 """
 
 from __future__ import annotations

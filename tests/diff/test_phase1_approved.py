@@ -19,6 +19,7 @@ from diff.phase1_approved import (
     reachable,
 )
 from diff.phase1_setup import setup_problems
+from diff.phase1_tweak import RESTORATIVE
 
 COLUMNS = (*SHEET_COLUMNS, "draft:B-words")
 
@@ -53,7 +54,10 @@ def imported(
 def test_a_full_sheet_approves_every_caption_and_opens_the_gate(
     setup: dict[str, Any], tmp_path: Path
 ) -> None:
-    assert len(reachable(setup)) == 2 * sum(len(clip["options"]["A1s"]) for clip in setup["clips"])
+    # One caption per mode, sound and emphasis (since diff.phase1-tweak/v7).
+    assert len(reachable(setup)) == 2 * len(RESTORATIVE) * sum(
+        len(clip["options"]["A1s"]) for clip in setup["clips"]
+    )
     assert approval_problems(setup) == [
         "second captions: none approved; run `python -m diff phase1 import-second-captions`"
     ]
@@ -73,7 +77,7 @@ def test_unapproved_rows_and_hand_edits_keep_participants_out(setup: dict[str, A
     rows[0].update(approved_text="", approved_from="")
     updated, problems, unapproved = imported(setup, rows)
     assert problems == [] and len(unapproved) == 1
-    assert approval_problems(updated) == [f"{rows[0]['clip']}: 1 of 4 second captions not approved"]
+    assert approval_problems(updated) == [f"{rows[0]['clip']}: 1 of 12 second captions not approved"]
     gate = setup_problems(updated, "participant", root=tmp_path, instrument=workbook_instrument)
     assert gate == approval_problems(updated)
     complete, _, _ = imported(setup, sheet(setup))

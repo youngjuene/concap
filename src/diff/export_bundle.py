@@ -21,8 +21,9 @@ Files written to ``--out``:
   a step was skipped), the first and second captions, where the second came
   from (``approved``, the researcher's reviewed text for its ``variant_id``, and
   which draft it was taken from, or ``trida`` in a smoke session), what steered it
-  (the attended sound, the binding model's evidence and P(bound), the
-  recommended mode, follow or counter, the mode used and the caption type), the
+  (the attended sound; the restorative emphasis it reflects and each subscale's
+  centred mean; the binding model's evidence and P(bound), the recommended mode,
+  follow or counter, the mode used and the caption type), the
   analysis's two moderators (``moderator_scene``, ``logit q``, and
   ``moderator_participant``, what the answers add; ``diff.phase1_binding``), its
   check flags, and whether the V2 point (P7) fell on the noticed sound's source,
@@ -47,11 +48,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from diff.phase1_tweak import named_in
+from diff.phase1_tweak import RESTORATIVE, named_in
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v7"  # v7 (2026-10-26): caption_type "acousmatic" carries no openness
+EXPORT_SCHEMA: Final = "diff.export/v8"  # v8 (2026-10-26): the restorative emphasis
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -85,6 +86,11 @@ SECOND_CAPTION_COLUMNS: Final = (
     "variant_id",
     "approved_from",
     "attended_sound",
+    "emphasis",
+    "emphasis_tied",
+    "fascination_centred",
+    "being_away_from_centred",
+    "extent_coherence_centred",
     "noticed_audioset_label",
     "on_screen",
     "visibility",
@@ -200,6 +206,7 @@ def second_caption_rows(
         clip = clips.get(key, {})
         slots = entry.get("slots", {})
         model = entry.get("model", {})
+        emphasis = model.get("emphasis", {})
         flags = [finding["code"] for finding in (entry.get("checks") or {}).get("flags", [])]
         v2 = [
             r
@@ -221,6 +228,12 @@ def second_caption_rows(
             "variant_id": entry.get("variant_id", ""),
             "approved_from": entry.get("approved", {}).get("approved_from", ""),
             "attended_sound": slots.get("attended_sound", ""),
+            "emphasis": emphasis.get("chosen", ""),
+            "emphasis_tied": emphasis.get("tied", ""),
+            **{
+                f"{name}_centred": emphasis.get("subscales", {}).get(name, {}).get("centred", "")
+                for name in RESTORATIVE
+            },
             "noticed_audioset_label": model.get("noticed", {}).get("audioset_label", ""),
             "on_screen": model.get("noticed", {}).get("on_screen", ""),
             "visibility": model.get("visibility", ""),

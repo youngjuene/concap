@@ -9,8 +9,9 @@
 recomputed here rather than by diff: the object under each P2 point (re-reading the masks), the
 binding model over the whole stage A (the point against the noticed sound's click mask, E1/E3
 centred on the participant's mean, the tendency from the other clips' points, P(bound)), the
-balanced plan from the order seed, each clip's mode and slots, the V2 point against the noticed
-source, the attended sound, the tuner's heard families and rating means. diff's own
+balanced plan from the order seed, each clip's mode, restorative emphasis (the subscale the clip
+stands highest on, centred on the participant's own means) and slots, the V2 point against the
+noticed source, the attended sound, the tuner's heard families and rating means. diff's own
 prompt functions then render what those values should have produced, and every logged call is
 compared with that, so new prompt wording needs no change here. A session that ran an older
 template than the checkout is reported once, not call by call. It also checks that:
@@ -68,6 +69,7 @@ from diff.phase1_binding import (  # noqa: E402
 from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     ELEMENTS_KO,
+    EMPHASIS_KO,
     NOT_SEEN,
     OFFSCREEN_KO,
     RECORDING_ARTEFACTS,
@@ -89,7 +91,21 @@ STEP1_PAGES = ("P2", "P3", "P4", "P5")
 OTHER_MODE = {"scene": "acousmatic", "acousmatic": "scene"}
 SECOND_SLOTS = ("attended_sound", "seen")
 SECOND_MODEL = ("recommended", "assignment", "mode", "p_bound", "moderator_scene", "moderator_participant")
-SECOND_FIELDS = ("status", "second_caption", "caption_source", "variant_id", *SECOND_SLOTS, *SECOND_MODEL)
+SECOND_FIELDS = (
+    "status",
+    "second_caption",
+    "caption_source",
+    "variant_id",
+    "emphasis",
+    *SECOND_SLOTS,
+    *SECOND_MODEL,
+)
+# The emphasis's subscales (P4, Payne 2013), in the order that breaks a tie left after the raw means.
+SUBSCALES = {
+    "fascination": ("F1", "F2", "F3"),
+    "being_away_from": ("BF1", "BF2", "BF3"),
+    "extent_coherence": ("E1", "E2", "E3"),
+}
 RATINGS = ("S1", "S2", "S3")
 MASK_THRESHOLD = 127
 SUPERSEDED_MS = 1500  # a setting replaced this soon may never get a call: Trida takes about 1 s
@@ -273,13 +289,25 @@ def expected_bindings(
     return results
 
 
+def expected_emphases(answers: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Each clip's reflected subscale: its mean minus the participant's own mean of it, highest wins."""
+    means = [
+        {name: statistics.mean(float(given[i]) for i in items) for name, items in SUBSCALES.items()}
+        for given in answers
+    ]
+    centre = {name: statistics.mean(m[name] for m in means) for name in SUBSCALES}
+    order = list(SUBSCALES)
+    return [min(order, key=lambda n: (-round(m[n] - centre[n], 6), -m[n], order.index(n))) for m in means]
+
+
 def expected_slots(
     clip: Mapping[str, Any],
     records: Mapping[str, Mapping[str, Any]],
     mode: str,
-    binding: Mapping[str, Any],
+    emphasis: str,
 ) -> dict[str, str]:
-    """The tweak slots for the mode, recomputed from the clip's first-step answers and its scene part."""
+    """The tweak slots for the mode, recomputed from the clip's first-step answers, its reflected
+    subscale and its scene part."""
     answers: dict[str, Any] = {}
     for page in STEP1_PAGES:
         answers.update(records[page]["answers"])
@@ -289,6 +317,7 @@ def expected_slots(
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(option["label"] for option in clip["options"]["R2"] if option.get("mentioned")),
         "attended_sound": sounds.get(answers.get("A1s"), NOT_SEEN),
+        "emphasis": EMPHASIS_KO[emphasis],
     }
     if mode == "acousmatic":
         return slots
@@ -296,13 +325,10 @@ def expected_slots(
     distinctive = scene["distinctive"]
     shares = {name: share for name, share in scene["elements"].items() if name != distinctive}
     second = max(shares, key=lambda name: shares[name])  # the first of equal shares, as diff sorts
-    hit = answers["A1s"] if binding["attention"] == "hit" else None
     shown = {value: clip["scene"]["sounds"][value]["visibility"]["on_screen"] for value in sounds}
-    visible = [sounds[value] for value in sounds if value == hit or shown[value]]
+    visible = [sounds[value] for value in sounds if shown[value]]
     artefacts = {o["value"] for o in clip["options"]["A1s"] if o["audioset_label"] in RECORDING_ARTEFACTS}
-    unseen = [
-        sounds[value] for value in sounds if value != hit and not shown[value] and value not in artefacts
-    ]
+    unseen = [sounds[value] for value in sounds if not shown[value] and value not in artefacts]
     return {
         **slots,
         "scene_elements": f"{ELEMENTS_KO[distinctive]}, {ELEMENTS_KO[second]}",
@@ -387,6 +413,7 @@ def audit_phase1(
     ]
     points = [step1["P2"]["answers"]["V1"][0] for step1 in steps]
     bindings = expected_bindings([clips[key] for key in order], answers_of, points)
+    emphases = expected_emphases(answers_of)
     for index, key in enumerate(order):
         clip, step1 = clips[key], steps[index]
         entry = state["second_captions"].get(key)
@@ -439,7 +466,13 @@ def audit_phase1(
             f"{binding['p_bound']:.4f} {mode} ({binding['attention']}; "
             f"{binding['moderator_scene']:.6f}, {binding['moderator_participant']:.6f})",
         )
-        expect = expected_slots(clip, step1, mode, binding)
+        audit.ok(
+            "tweak-model",
+            model.get("emphasis", {}).get("chosen") == emphases[index],
+            f"{who} {key}: stored emphasis {model.get('emphasis', {}).get('chosen')}, "
+            f"recomputed {emphases[index]}",
+        )
+        expect = expected_slots(clip, step1, mode, emphases[index])
         audit.ok(
             "tweak-slots",
             entry["slots"] == expect,
@@ -806,6 +839,7 @@ def audit_export(
                 "second_caption": entry.get("text") or "",
                 "caption_source": entry.get("source", "trida"),
                 "variant_id": entry.get("variant_id", ""),
+                "emphasis": model.get("emphasis", {}).get("chosen", ""),
                 **{name: slots.get(name, "") for name in SECOND_SLOTS},
                 **{name: str(model.get(name, "")) for name in SECOND_MODEL},
             }

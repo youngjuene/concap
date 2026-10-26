@@ -13,7 +13,7 @@ from test_participant_server import Lab, through_phase_one
 
 from diff.__main__ import main
 from diff.export_bundle import PHASE1_COLUMNS, R2_CODING_COLUMNS, SECOND_CAPTION_COLUMNS, caption_id, export
-from diff.phase1_tweak import ELEMENTS_KO
+from diff.phase1_tweak import ELEMENTS_KO, RESTORATIVE
 from diff.session_store import SessionStore
 
 
@@ -83,6 +83,8 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         "다시 쓴 두 번째 자막",
         clip["caption"]["text"],
     )
+    assert row["emphasis"] in RESTORATIVE and row["emphasis_tied"] in ("True", "False")
+    assert all(row[f"{name}_centred"] != "" for name in RESTORATIVE)
     assert row["attended_sound"] == clip["options"]["A1s"][0]["label"]
     assert (row["caption_source"], row["approved_from"]) == ("trida", "") and len(row["variant_id"]) == 12
     assert row["noticed_audioset_label"] == clip["options"]["A1s"][0]["audioset_label"]
