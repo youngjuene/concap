@@ -23,15 +23,16 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   (:mod:`diff.phase1_tweak`). The last P5's submit closes stage A: it runs the
   binding model over every clip's first step at once (design review,
   2026-10-24: each clip's tendency comes from the other eleven, and E1/E3 are
-  centred on the participant's own mean), records each result and its
-  steering slots, and takes each clip's second caption from the researcher's
-  approved ones (:mod:`diff.phase1_approved`, 2026-10-24: every caption is
-  reviewed before the study), ready at once. A clip with none approved, which
-  only a smoke session can reach, is marked pending in stage-B order; the
-  server queues its job and writes the outcome back
-  (:meth:`Phase1.record_tweak`). Reaching P6 before the caption is ready shows
-  a waiting page; a clip whose second caption failed has its second step
-  skipped (``skip-second``), with the reason recorded. P7's record also tests
+  centred on the participant's own mean), and records each result, its
+  restorative emphasis and its steering slots. Every clip's second caption is
+  then marked pending in stage-B order; the server queues its job and writes the
+  outcome back (:meth:`Phase1.record_tweak`). Since 2026-10-26 every caption is
+  written live (from 2026-10-24 the researcher's approved captions were shown
+  instead): one the gate refuses (:mod:`diff.phase1_usable`) stays pending at
+  the next rung of ``phase1_tweak.TWEAK_LADDER``, and fails only on the last.
+  Reaching P6 before the caption is ready shows a waiting page; a clip whose
+  second caption failed has its second step skipped (``skip-second``), with the
+  reason recorded. P7's record also tests
   the V2 point against the noticed sound's click mask (``source_attention``),
   the behavioural check of what the second caption did to the eye.
 - **Binding:** P2–P5 bind to the P1 viewing and P7–P11 to the P6 viewing, as in
@@ -65,14 +66,13 @@ from typing import Any, Final
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
-from diff.phase1_approved import approved_caption
 from diff.phase1_binding import ASSIGNMENT_POLICY, assignment_plan, attention
 from diff.phase1_setup import stripped_options
 from diff.phase1_tweak import template_record, tweak_steer_all, variant_id
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
-PROTOCOL: Final = "diff.phase1/v6"
+PROTOCOL: Final = "diff.phase1/v7"
 STEP_A: Final = ("P1", "P2", "P3", "P4", "P5")
 STEP_B: Final = ("P6", "P7", "P8", "P9", "P10", "P11")
 CLIP_PAGES: Final = STEP_A + STEP_B
@@ -557,7 +557,7 @@ class Phase1:
         records = [self.step_records(state, index, STEP_A[1:]) for index in range(count)]
         steered = tweak_steer_all(clips, records, state["assignment"]["plan"], root=self.root)
         for index, (clip, (slots, model)) in enumerate(zip(clips, steered, strict=True)):
-            entry: dict[str, Any] = {
+            state["second_captions"][clip["key"]] = {
                 "status": "pending",
                 "source": "trida",
                 "clip_index": index,
@@ -565,17 +565,10 @@ class Phase1:
                 "slots": slots,
                 "model": model,
                 "template": template_record(slots["mode"]),
+                "rung": 0,
                 "attempts": [],
                 "requested_at": now,
             }
-            approved = approved_caption(self.setup, slots)
-            if approved is not None:  # the researcher's text, ready now: Trida is not asked
-                entry.update(status="ready", source="approved", text=approved["text"], decided_at=now)
-                entry["approved"] = {
-                    name: approved[name] for name in ("approved_from", "reviewed_by", "reviewed_at")
-                }
-                del entry["template"]
-            state["second_captions"][clip["key"]] = entry
 
     def _skip_second(self, state: dict[str, Any], now: float) -> None:
         second = self.second(state)
@@ -593,29 +586,45 @@ class Phase1:
         state["page"] = "P11"  # the second step ends here; advance as after P11
         self._advance(state)
 
-    def pending_tweaks(self, state: Mapping[str, Any]) -> list[tuple[str, dict[str, str], int]]:
-        """Each pending second caption to (re)submit: clip key, slots and the attempt number.
+    def pending_tweaks(self, state: Mapping[str, Any]) -> list[tuple[str, dict[str, str], int, int]]:
+        """Each pending second caption to (re)submit: clip key, slots, the attempt number within
+        its rung, and the rung.
 
         Attempts that ended in a transient failure are recorded, so the one
-        identical retry holds across a server restart.
+        identical retry a rung allows holds across a server restart.
         """
         pending = []
         for key, entry in state.get("second_captions", {}).items():
-            if entry["status"] == "pending" and len(entry["attempts"]) < 2:
-                pending.append((key, dict(entry["slots"]), len(entry["attempts"]) + 1))
+            if entry["status"] != "pending":
+                continue
+            rung = int(entry.get("rung", 0))
+            tried = sum(int(attempt.get("rung", 0)) == rung for attempt in entry["attempts"])
+            if tried < 2:
+                pending.append((key, dict(entry["slots"]), tried + 1, rung))
         return pending
 
     def record_tweak(
         self, state: dict[str, Any], clip_key: str, outcome: Mapping[str, Any], now: float
     ) -> None:
-        """Write one attempt's outcome (``retry``, ``ready`` or ``failed``) into the clip's entry."""
+        """Write one attempt's outcome (``retry``, ``next``, ``ready`` or ``failed``) into the clip's
+        entry; ``next`` moves it to the next rung, still pending."""
         entry = state["second_captions"].get(clip_key)
-        if entry is None or entry["status"] != "pending":
+        if (
+            entry is None
+            or entry["status"] != "pending"
+            or int(outcome.get("rung", 0)) != entry.get("rung", 0)
+        ):
             return
         entry["attempts"].append(
-            {key: outcome.get(key) for key in ("attempt", "status", "result_status", "reason")} | {"at": now}
+            {
+                key: outcome.get(key)
+                for key in ("attempt", "rung", "status", "result_status", "reason", "job_id")
+            }
+            | {"failures": [f["code"] for f in (outcome.get("checks") or {}).get("failures", [])], "at": now}
         )
-        if outcome["status"] == "ready":
+        if outcome["status"] == "next":
+            entry["rung"] = int(entry.get("rung", 0)) + 1
+        elif outcome["status"] == "ready":
             entry.update(status="ready", text=outcome["text"], job_id=outcome["job_id"], decided_at=now)
             entry["checks"] = outcome.get("checks")
         elif outcome["status"] == "failed":

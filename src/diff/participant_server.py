@@ -76,7 +76,7 @@ ACTIONS: Final = frozenset(
         "handoff",
     }
 )
-TweakFor = Callable[[Mapping[str, Any], Mapping[str, str]], tuple[CaptionSource, Job, dict[str, Any]]]
+TweakFor = Callable[[Mapping[str, Any], Mapping[str, str], int], tuple[CaptionSource, Job, dict[str, Any]]]
 WATCH_URL: Final = "watch/"
 PHASE2_ONLY: Final = "diff.phase2-only/v1"
 MEDIA_TYPES: Final = {".png": "image/png", ".mp4": "video/mp4", ".webm": "video/webm"}
@@ -138,7 +138,8 @@ def build_participant_app(
 ) -> Any:
     """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
 
-    ``tweak_for(clip, slots)`` builds a clip's second-caption job; phase 1 needs it.
+    ``tweak_for(clip, slots, rung)`` builds a clip's second-caption job at a rung of its ladder;
+    phase 1 needs it.
     """
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -188,6 +189,8 @@ def build_participant_app(
             lambda state: phase1.record_tweak(state, request.clip, outcome, clock()),
             note,
         )
+        if outcome["status"] == "next":  # the gate refused it: queue the next rung now
+            submit_pending(request.session_id)
 
     def submit_pending(session_id: str) -> None:
         """Queue every pending second caption on the session's GPU (already queued ones are skipped)."""
@@ -202,8 +205,8 @@ def build_participant_app(
         service = pool.holder(session_id) or pool.acquire(session_id)
         if service is None:
             return
-        for clip_key, slots, attempt in pending:
-            source, job, steer = tweak_for(phase1.clips[clip_key], slots)
+        for clip_key, slots, attempt, rung in pending:
+            source, job, steer = tweak_for(phase1.clips[clip_key], slots, rung)
             service.submit_tweak(TweakRequest(session_id, clip_key, source, job, steer, attempt), tweak_done)
 
     def initial(participant: str) -> Callable[[str], dict[str, Any]]:

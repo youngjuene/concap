@@ -7,6 +7,7 @@ straight to the watch; tests/diff/test_participant_server.py covers phase 1.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -90,8 +91,10 @@ class FakeAttempt:
 
     def __call__(self, payload: Mapping[str, Any], timeout: float) -> dict[str, Any]:
         self.calls.append(payload["job_id"])
-        if payload.get("cell") is None:  # phase 1's second caption
-            return {"status": "completed", "output": full_output("다시 쓴 두 번째 자막"), "latency_ms": 400}
+        if payload.get("cell") is None:  # phase 1's second caption, naming the attended sound
+            attended = re.search(r"주의를 기울인 소리: (.*?)\.\n", payload["prompt"]["text"])
+            text = f"{attended.group(1) if attended else ''}가 또렷하게 들린다."
+            return {"status": "completed", "output": full_output(text), "latency_ms": 400}
         cue = payload["cue_index"]
         return {
             "status": "completed",

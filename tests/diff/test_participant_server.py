@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,8 @@ from diff.live_server import LivePool, LiveVideo, rating_items
 from diff.model_profile import TRIDA_7B
 from diff.participant_server import COOKIE, build_participant_app
 from diff.phase1_flow import HANDOFF_TEXT, Phase1
-from diff.phase1_tweak import check_record, tweak_job_for
+from diff.phase1_tweak import tweak_job_for
+from diff.phase1_usable import check_record
 from diff.session_store import SessionStore
 
 HEADERS = {"x-study-request": "1"}
@@ -57,7 +57,7 @@ class Lab:
             log_dir=self.root / "logs",
             job_for=job_for,
             phase1=Phase1(self.setup, root=self.root),
-            tweak_for=partial(tweak_job_for, purpose="smoke"),
+            tweak_for=lambda clip, slots, rung: tweak_job_for(clip, slots, "smoke", rung),
             secret=b"test-secret",
             clock=lambda: self.now[0],
         )
@@ -190,7 +190,11 @@ def test_a_whole_session_hands_phase_one_answers_to_the_tuner(lab: Lab) -> None:
     assert len(session.state["responses"]) == 27 and session.state["live"]["answers"] == {"L1": 4}
     seconds = session.state["second_captions"]
     assert {entry["status"] for entry in seconds.values()} == {"ready"}
-    assert {entry["text"] for entry in seconds.values()} == {"다시 쓴 두 번째 자막"}
+    assert all(
+        entry["text"] == f"{entry['slots']['attended_sound']}가 또렷하게 들린다."
+        for entry in seconds.values()
+    )
+    assert all(entry["rung"] == 0 and len(entry["attempts"]) == 1 for entry in seconds.values())
     assert lab.enter(lab.client()).status_code == 409
 
 

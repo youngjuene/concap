@@ -1,5 +1,5 @@
 """Phase 1's second caption: the mode, emphasis and slots from first-step answers, the prompt, the
-job and its check."""
+job on its ladder and its check."""
 
 from __future__ import annotations
 
@@ -15,15 +15,18 @@ from diff.output_checks import GeneratedOutput, check_tweak
 from diff.phase1_tweak import (
     EMPHASIS_KO,
     RESTORATIVE,
+    TWEAK_LADDER,
     TweakError,
     emphases,
     named_in,
     reachable_slots,
+    tweak_job_for,
     tweak_request,
     tweak_source,
     tweak_steer_all,
     variant_id,
 )
+from diff.phase1_usable import ECHO_STEMS, ITEM_STEMS
 from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, TWEAK_SLOTS, render_tweak
 from diff.study_protocol import LIVE_CONDITION, TWEAK_MAX_CHARS
 
@@ -198,6 +201,31 @@ def test_the_emphasis_reflects_the_subscale_a_clip_stands_highest_on_for_this_pa
     flat = emphases([ratings(4, 4, 4), ratings(4, 4, 4)])
     assert [r["chosen"] for r in flat] == ["fascination"] * 2 and all(r["tied"] for r in flat)
     assert all(sentence for sentence in EMPHASIS_KO.values()) and set(EMPHASIS_KO) == set(RESTORATIVE)
+    assert not any(stem in sentence for sentence in EMPHASIS_KO.values() for stem in ITEM_STEMS)
+    # Each emphasis sentence carries one echo stem the gate refuses in a caption, and only its own.
+    assert [
+        [bool(re.search(stem, sentence)) for stem in ECHO_STEMS] for sentence in EMPHASIS_KO.values()
+    ] == [
+        [True, False, False],
+        [False, True, False],
+        [False, False, True],
+    ]
+
+
+def test_a_refused_caption_is_written_again_at_the_next_tau_with_what_the_gate_needs(
+    clip: dict[str, Any], root: Path
+) -> None:
+    source, job, steer = tweak_request(clip, first_step(), "smoke", root=root)
+    rungs = [tweak_job_for(clip, steer["slots"], "smoke", rung) for rung in range(len(TWEAK_LADDER))]
+    assert [j.condition for _, j, _ in rungs] == list(TWEAK_LADDER) and rungs[0][1].job_id == job.job_id
+    assert [j.generate["threshold"] for _, j, _ in rungs] == [0.9, 1.0, 0.7]
+    assert len({j.job_id for _, j, _ in rungs}) == len(TWEAK_LADDER)  # each rung is its own call
+    assert [(r["rung"], r["rungs"], r["condition"]) for _, _, r in rungs] == [
+        (rung, len(TWEAK_LADDER), condition) for rung, condition in enumerate(TWEAK_LADDER)
+    ]
+    assert steer["gate"] == {"distractors": ["음악"], "names": ["남자의 말소리", "버스 소리", "음악"]}
+    with pytest.raises(ValueError, match="rungs 0 to 2"):
+        tweak_job_for(clip, steer["slots"], "smoke", len(TWEAK_LADDER))
 
 
 def test_the_job_is_phase_one_at_the_live_condition_and_follows_the_mode(
@@ -248,6 +276,7 @@ def test_a_caption_names_a_sound_by_its_words_roughly() -> None:
     assert named_in("새가 지저귄다.", "새소리")
     assert named_in("진행자의 목소리가 들린다.", "진행자인 남자의 말소리")
     assert named_in("사람들이 크게 외치는 소리가 들린다.", "크게 외치는 소리")
+    assert named_in("높은 목소리가 멀리서 크게 외쳐지며 울린다.", "크게 외치는 소리")  # conjugated
     assert named_in("차들이 오간다.", "차들이 오가는 소리")
     assert not named_in("엔진 소리만 들린다.", "음악 소리")
     # Neither a fragment of another word nor a describing word names a sound (design review, I33).

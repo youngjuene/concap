@@ -1,4 +1,5 @@
-"""Phase 1's second captions on the session's GPU: queue order, the one retry, checks and the log."""
+"""Phase 1's second captions on the session's GPU: queue order, the one retry, the ladder, checks and
+the log."""
 
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from test_phase1_tweak import first_step
 
 from diff.generation_worker import WorkerStartupError
 from diff.live_generation import LiveScheduler, LiveService, Spec, TweakRequest
-from diff.phase1_tweak import check_record, tweak_request
+from diff.phase1_tweak import TWEAK_LADDER, tweak_job_for, tweak_request
+from diff.phase1_usable import check_record
 
 
 class Scripted:
@@ -53,11 +55,23 @@ def run(service: LiveService) -> None:
         pass
 
 
+def written(text: str) -> dict[str, Any]:
+    return {"status": "completed", "output": full_output(text)}
+
+
+# Each fixture clip's second caption, naming its attended sound (s1), as the gate requires.
+NAMING = ("버스가 낮게 공회전한다.", "차량이 쉼 없이 오간다.", "새가 높게 지저귄다.")
+
+
+def last_rung(request: TweakRequest, clip: dict[str, Any]) -> TweakRequest:
+    source, job, steer = tweak_job_for(clip, request.steer["slots"], "smoke", len(TWEAK_LADDER) - 1)
+    return TweakRequest(request.session_id, request.clip, source, job, steer)
+
+
 def test_tweaks_run_in_order_and_only_for_the_claimed_session(
     requests: list[TweakRequest], tmp_path: Path
 ) -> None:
-    ok = {"status": "completed", "output": full_output("버스가 낮게 공회전한다.")}
-    service = service_with(Scripted(ok, ok, ok), tmp_path)
+    service = service_with(Scripted(*(written(text) for text in NAMING)), tmp_path)
     outcomes: list[tuple[str, dict[str, Any]]] = []
     for request in requests:
         assert service.submit_tweak(request, lambda r, o: outcomes.append((r.clip, o)))
@@ -66,28 +80,29 @@ def test_tweaks_run_in_order_and_only_for_the_claimed_session(
     assert not service.submit_tweak(stranger, lambda r, o: None)
     run(service)
     assert [clip for clip, _ in outcomes] == ["kyoto_101", "lima_202", "oslo_303"]
-    assert all(o["status"] == "ready" and o["text"] == "버스가 낮게 공회전한다." for _, o in outcomes)
+    assert [(o["status"], o["text"]) for _, o in outcomes] == [("ready", text) for text in NAMING]
     lines = [json.loads(line) for line in (tmp_path / "logs" / "live-s1.jsonl").read_text().splitlines()]
     assert [line["kind"] for line in lines] == ["tweak"] * 3
     assert lines[0]["steer"]["slots"]["mode"] == "scene" and lines[0]["outcome"] == "ready"
     assert lines[0]["checks"]["profile"] == "tweak-v3"
 
 
-def test_a_failed_check_ends_the_clip_s_tweak(requests: list[TweakRequest], tmp_path: Path) -> None:
-    service = service_with(Scripted({"status": "completed", "output": full_output("bus noise")}), tmp_path)
+def test_a_refused_caption_goes_up_the_ladder_and_fails_only_on_the_last_rung(
+    requests: list[TweakRequest], tmp_path: Path
+) -> None:
+    clip = approved_setup(tmp_path)["clips"][0]
+    service = service_with(Scripted(written("bus noise"), written("bus noise")), tmp_path)
     outcomes: list[dict[str, Any]] = []
     service.submit_tweak(requests[0], lambda r, o: outcomes.append(o))
+    run(service)  # the flow queues the next rung itself (participant_server.tweak_done)
+    service.submit_tweak(last_rung(requests[0], clip), lambda r, o: outcomes.append(o))
     run(service)
-    assert outcomes == [
-        {
-            "attempt": 1,
-            "result_status": "completed",
-            "job_id": requests[0].job.job_id,
-            "status": "failed",
-            "reason": "check failed: non_korean_script",
-            "checks": outcomes[0]["checks"],
-        }
+    reason = "check failed: non_korean_script, attended_unnamed"
+    assert [(o["rung"], o["status"], o["reason"]) for o in outcomes] == [
+        (0, "next", reason),
+        (len(TWEAK_LADDER) - 1, "failed", reason),
     ]
+    assert outcomes[0]["job_id"] == requests[0].job.job_id != outcomes[1]["job_id"]
 
 
 def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
@@ -118,12 +133,15 @@ def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
 def test_a_second_caption_with_nothing_readable_skips_the_step(
     requests: list[TweakRequest], tmp_path: Path, written: str, reason: str
 ) -> None:
-    # Researcher, 2026-10-20: a caption never goes blank; a blank second caption fails instead.
-    service = service_with(Scripted({"status": "completed", "output": full_output(written)}), tmp_path)
+    # Researcher, 2026-10-20: a caption never goes blank; a blank second caption is refused instead.
+    clip = approved_setup(tmp_path)["clips"][0]
+    output = {"status": "completed", "output": full_output(written)}
+    service = service_with(Scripted(output, output), tmp_path)
     outcomes: list[dict[str, Any]] = []
-    service.submit_tweak(requests[0], lambda r, o: outcomes.append(o))
-    run(service)
-    assert outcomes[0]["status"] == "failed" and outcomes[0]["reason"] == reason
+    for request in (requests[0], last_rung(requests[0], clip)):
+        service.submit_tweak(request, lambda r, o: outcomes.append(o))
+        run(service)
+    assert [(o["status"], o["reason"]) for o in outcomes] == [("next", reason), ("failed", reason)]
     assert "text" not in outcomes[0]
 
 
@@ -134,7 +152,7 @@ def test_one_identical_retry_after_a_transient_failure_and_none_after_a_timeout(
         {"status": "worker_lost", "error": "pipe closed"},
         {"status": "worker_lost", "error": "pipe closed"},
         WorkerStartupError("no GPU memory"),
-        {"status": "completed", "output": full_output("버스 소리가 들린다.")},
+        {"status": "completed", "output": full_output("차량 소리가 들린다.")},
         {"status": "timeout", "error": "30 s"},
     )
     service = service_with(attempt, tmp_path)

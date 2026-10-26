@@ -607,37 +607,6 @@ def phase1_approve(args: argparse.Namespace) -> int:
     return 0
 
 
-def phase1_import_second_captions(args: argparse.Namespace) -> int:
-    """Write the review sheet's approved second captions into the setup, replacing earlier ones."""
-    import csv
-
-    import diff.workbook_instrument as workbook_instrument
-    from diff.phase1_approved import import_sheet
-    from diff.phase1_setup import read_setup, setup_problems
-
-    with args.sheet.open(encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        rows = list(reader)
-        columns = list(reader.fieldnames or ())
-    updated, problems, unapproved = import_sheet(
-        read_setup(args.setup),
-        rows,
-        columns,
-        reviewed_by=args.reviewed_by,
-        at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-    )
-    if problems:
-        raise SystemExit(f"{args.sheet}: nothing imported:\n  " + "\n  ".join(problems))
-    _write_json(args.setup, updated, force=True)
-    captions = updated["second_captions"]["captions"]
-    print(f"imported {len(captions)} approved second captions, reviewed by {args.reviewed_by}")
-    for row in unapproved:
-        print(f"  not approved: {row}")
-    remaining = setup_problems(updated, "participant", root=Path.cwd(), instrument=workbook_instrument)
-    print(f"{len(remaining)} problems left for participant sessions")
-    return 0
-
-
 def export_run(args: argparse.Namespace) -> int:
     """Write the research export from the session store and the live logs (this machine only)."""
     from diff.export_bundle import export
@@ -677,19 +646,18 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     import re
 
     time.sleep(1.5)
-    # The live prompts end with the cue on a "원래 자막:" line (live-p2 v4); the tweak quotes it in 「」.
+    # The live prompts end with the cue on a "원래 자막:" line (live-p2 v4). A second caption names the
+    # attended sound from its prompt's line, so that it passes the gate (phase1_usable) as one must.
     prompt = str(payload["prompt"]["text"])
-    match = re.search(r"원래 자막: (.*)\Z", prompt) or re.search(r"「(.*?)」", prompt, re.S)
     cell = payload.get("cell")
-    quoted = match.group(1) if match else ""
-    if cell is None:  # a second caption: cut the quoted first caption so the text fits its limit
-        from diff.study_protocol import TWEAK_MAX_CHARS
-
-        marker = "시험용 · 두 번째 자막"
-        quoted = quoted.replace("\n", " ")[: TWEAK_MAX_CHARS - len(marker) - 3].rstrip()
+    if cell is None:
+        match = re.search(r"주의를 기울인 소리: (.*?)\.\n", prompt)
+        text = f"{match.group(1) if match else ''}가 들린다 (시험용 · 두 번째 자막)"
     else:
-        marker = f"시험용 · 질감 {cell['quality_limit']} · {cell['context']}"
-    text = f"{quoted} ({marker})"
+        match = re.search(r"원래 자막: (.*)\Z", prompt)
+        text = (
+            f"{match.group(1) if match else ''} (시험용 · 질감 {cell['quality_limit']} · {cell['context']})"
+        )
     output = {
         "raw_text": text,
         "text": text,
@@ -707,7 +675,7 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
     """Every gate a participant session waits on, given serve's arguments (empty when none)."""
     from diff.caption_sources import starting_caption_review_problems
     from diff.phase1_binding import BINDING_PROVISIONAL
-    from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL
+    from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL, TWEAK_PROVISIONAL
 
     blockers = []
     if LIVE_PROMPTS_PROVISIONAL:
@@ -724,6 +692,12 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
         blockers.append(
             "the binding model's parameters and plan are still provisional (phase1_binding); "
             "participant sessions wait for the researcher's approval"
+        )
+    if TWEAK_PROVISIONAL:
+        blockers.append(
+            "the second-caption prompts and their gate are still provisional "
+            "(rewrite_prompts.TWEAK_PROMPTS, phase1_usable); participant sessions wait for the "
+            "researcher's approval"
         )
     if args.phase1_setup is None:
         blockers.append("participant sessions need phase 1: pass --phase1-setup")
@@ -851,7 +825,8 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.participant_server import build_participant_app
     from diff.phase1_flow import Phase1
     from diff.phase1_setup import read_setup, setup_problems
-    from diff.phase1_tweak import check_record, tweak_job_for
+    from diff.phase1_tweak import tweak_job_for
+    from diff.phase1_usable import check_record
     from diff.session_store import SessionStore
     from diff.study_protocol import LIVE_MAX_CHARS
 
@@ -893,8 +868,8 @@ def live_serve(args: argparse.Namespace) -> int:
     def job_for(source: Any, spec: Any) -> Any:
         return live_job(source, spec.texture, spec.context, spec.system_message, args.purpose)
 
-    def tweak_for(clip: Any, slots: Any) -> Any:
-        return tweak_job_for(clip, slots, args.purpose)
+    def tweak_for(clip: Any, slots: Any, rung: int) -> Any:
+        return tweak_job_for(clip, slots, args.purpose, rung)
 
     def check(source: Any, job: Any, result: Any) -> Any:
         output = displayed(output_from_record(result["output"]))
@@ -1155,16 +1130,6 @@ def parser() -> argparse.ArgumentParser:
     sign.add_argument("--clip", action="append", help="a clip key; repeatable")
     sign.add_argument("--practice", action="store_true")
     sign.set_defaults(handler=phase1_approve)
-    reviewed = phase1.add_parser(
-        "import-second-captions",
-        help="write the review sheet's approved second captions into the setup (replaces earlier ones)",
-    )
-    reviewed.add_argument("--setup", type=Path, required=True)
-    reviewed.add_argument(
-        "--sheet", type=Path, required=True, help="scripts/diff_second_captions.py's review.csv"
-    )
-    reviewed.add_argument("--reviewed-by", required=True)
-    reviewed.set_defaults(handler=phase1_import_second_captions)
     exported = commands.add_parser("export", help="research export from the session store and live logs")
     exported.add_argument("--store", type=Path, default=PARTICIPANT_STORE)
     exported.add_argument(

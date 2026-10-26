@@ -1,32 +1,32 @@
-"""Draft every second caption phase 1 can show, for the researcher to review before the study.
+"""Draft every second caption phase 1 can show, down the τ ladder as the live server does.
 
     uv run python scripts/diff_second_captions.py variants --phase1-setup SETUP --out VARIANTS.json
     CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_second_captions.py draft \\
         --variants VARIANTS.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \\
-        [--candidate CANDIDATE.json …] --out DRAFTS.json --sheet REVIEW.csv
+        [--candidate CANDIDATE.json …] --out DRAFTS.json --sheet SHEET.csv
     uv run python scripts/diff_second_captions.py rescore --variants VARIANTS.json \\
-        --drafts DRAFTS.json --sheet REVIEW.csv
+        --drafts DRAFTS.json --sheet SHEET.csv
 
 A second caption's prompt depends on the participant only through the clip's mode (the binding
-model's and the plan's) and the sound they attended to (A1s, a required choice); the scene-aware
-setting is the clip's own (since ``diff.phase1-tweak/v5``). The set of prompts is therefore small and
-finite, and the researcher reviews every caption before the study (2026-10-24) rather than the app
-showing whatever Trida writes and the check lets through: on the bench, the best wording delivered
-about half.
+model's and the plan's), the sound they attended to (A1s, a required choice) and the restorative
+emphasis their P4 ratings reflect (one of three, since ``diff.phase1-tweak/v7``). The set of prompts
+is therefore small and finite. Since 2026-10-26 captions are written live and shown once they pass the
+gate (``diff.phase1_usable``); from 2026-10-24 to 26 the researcher reviewed every one before the
+study instead, on the sheet this script wrote.
 
-``variants`` lists that set from the setup with ``phase1_tweak.reachable_slots``, the function the
-app's gate uses. Each slot set is one variant, keyed by ``phase1_tweak.variant_id`` (a hash of its
-slots), by which an approved caption is looked up.
+``variants`` lists that set from the setup with ``phase1_tweak.reachable_slots``. Each slot set is one
+variant, keyed by ``phase1_tweak.variant_id`` (a hash of its slots).
 
-``draft`` writes every variant with Trida once per wording (the checkout's, or each candidate's in
-the prompt bench's format), at the study's settings, and scores each draft with the server's check
-and the bench's measures. It writes the drafts and a review sheet (UTF-8 with a byte-order mark, for
-spreadsheet programs): one row per variant, with its slots, the drafts side by side with their
-issues, and empty ``approved_text``, ``approved_from`` and ``note`` columns for the researcher.
+``draft`` writes every variant with Trida once per wording (the checkout's, or each candidate's in the
+prompt bench's format), at the study's settings, down ``phase1_tweak.TWEAK_LADDER`` until the gate
+passes one, as the server would: the delivery rate, rung by rung, and what the gate refused. Each
+delivered (or last) caption is also scored with the bench's rougher measures. It writes the drafts and a
+sheet for reading (UTF-8 with a byte-order mark, for spreadsheet programs): one row per variant, with
+its slots and the drafts side by side with the rung that delivered them and their issues.
 
-``rescore`` scores the drafts again from their stored text after a change to the measures (e.g.
-``phase1_tweak.named_in``, 2026-10-25), rewriting the drafts and the sheet in place without Trida.
-It keeps whatever the researcher has filled in on the sheet.
+``rescore`` runs the gate and the measures again from the stored outputs after a change to either,
+rewriting the drafts and the sheet in place without Trida; a variant whose ladder stopped early is
+marked when the new gate would have gone further. It keeps the sheet's notes.
 """
 
 from __future__ import annotations
@@ -50,28 +50,25 @@ from diff_prompt_bench import apply_candidate, manipulation, measure  # noqa: E4
 
 from diff import rewrite_prompts  # noqa: E402
 from diff.job_plan import PlanError  # noqa: E402
+from diff.output_checks import readable, shown_text  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
+    EMPHASIS_KO,
+    TWEAK_LADDER,
     TWEAK_POLICY,
-    check_record,
     reachable_slots,
     tweak_job_for,
     variant_id,
 )
+from diff.phase1_usable import DAMAGE, check_record  # noqa: E402
 
-VARIANTS_SCHEMA = "diff.second-caption-variants/v1"
-DRAFTS_SCHEMA = "diff.second-caption-drafts/v1"
+VARIANTS_SCHEMA = "diff.second-caption-variants/v2"  # v2: one variant per emphasis too
+DRAFTS_SCHEMA = "diff.second-caption-drafts/v2"  # v2: each variant down the ladder, the gate's verdicts
 PURPOSE = "smoke"  # drafts for review, not participant data
 MODES = ("scene", "acousmatic")
 WORDING_NAMES = ("LIVE_CELL_PROMPTS", "TWEAK_PROMPTS", "TUNER_SYSTEM")
-# Hints for the reviewer, not gates (the bench's wording round, 2026-10-24): a verb cut at a comma
-# ("퍼,", "흐,"), a stray syllable, a doubled word, and a sound said to come from the sky, the plants,
-# the ground or the pavement.
-DAMAGE = re.compile(
-    r"(?:퍼|흐|채)[,.](?!\.)|(?<!버)스[,.](?!\.)|(?:^|\s)(?:들|울|공|적|체)[,.\s]|(?<!경)적음"
-    r"|에서에서|의에서|([가-힣]{2,}(?: 소리가)?)\s\1(?![가-힣])"
-)
 ODD_SOURCE = re.compile(r"(하늘|나무|풀|땅|인도)(에서|에서부터)\s*(들려|울려|울린|들린|흐른)")
-FILLED = ("approved_text", "approved_from", "note")  # the sheet's columns for the researcher
+FILLED = ("note",)  # the sheet's column for the reader
+EMPHASIS_OF = {sentence: name for name, sentence in EMPHASIS_KO.items()}
 
 
 def sha256_file(path: Path) -> str:
@@ -88,6 +85,7 @@ def variants(args: argparse.Namespace) -> int:
             "attended": next(
                 o["value"] for o in clip["options"]["A1s"] if o["label"] == slots["attended_sound"]
             ),
+            "emphasis": EMPHASIS_OF[slots["emphasis"]],
             "slots": slots,
         }
         for clip in setup["clips"]
@@ -102,7 +100,7 @@ def variants(args: argparse.Namespace) -> int:
             clip["key"]: {name: clip[name] for name in ("key", "caption", "options", "scene")}
             for clip in setup["clips"]
         },
-        "variants": sorted(listed, key=lambda v: (v["clip"], v["mode"], v["attended"])),
+        "variants": sorted(listed, key=lambda v: (v["clip"], v["mode"], v["attended"], v["emphasis"])),
     }
     args.out.write_text(json.dumps(document, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     counts = {mode: sum(v["mode"] == mode for v in listed) for mode in MODES}
@@ -166,27 +164,26 @@ def draft(args: argparse.Namespace) -> int:
             }
             for variant in document["variants"]:
                 clip = clips[variant["clip"]]
-                source, job, _ = tweak_job_for(clip, variant["slots"], PURPOSE)
-                try:
-                    result = trida_runner.run_job(loaded, trida_runner.freeze_live(loaded, job))
-                except PlanError as exc:
-                    result = {"status": "refused", "error": str(exc)}
-                text = (result.get("output") or {}).get("text")
-                checks = check_record(source, job, result) if result.get("output") else None
-                measured = measure(text, source.text, checks)
-                scored = {**measured, **manipulation(measured["shown"], clip, variant["slots"])}
-                drafts.append(
-                    {
-                        "variant_id": variant["variant_id"],
-                        "wording": name,
-                        "job_id": job.job_id,
-                        "status": result["status"],
-                        "error": result.get("error"),
-                        "text": text,
-                        **scored,
-                        "issues": issues(scored, variant["mode"]),
-                    }
-                )
+                attempts = []
+                for rung in range(len(TWEAK_LADDER)):
+                    source, job, steer = tweak_job_for(clip, variant["slots"], PURPOSE, rung)
+                    try:
+                        result = trida_runner.run_job(loaded, trida_runner.freeze_live(loaded, job))
+                    except PlanError as exc:
+                        result = {"status": "refused", "error": str(exc)}
+                    attempts.append(
+                        {
+                            "rung": rung,
+                            "condition": TWEAK_LADDER[rung],
+                            "job_id": job.job_id,
+                            "status": result["status"],
+                            "error": result.get("error"),
+                            "output": result.get("output"),
+                        }
+                    )
+                    if judged(source, steer, attempts[-1])["delivered"]:
+                        break
+                drafts.append(scored_draft(variant, clip, name, attempts))
             print(f"{name}: {len(document['variants'])} drafts", flush=True)
     report = {
         "schema": DRAFTS_SCHEMA,
@@ -198,9 +195,61 @@ def draft(args: argparse.Namespace) -> int:
     }
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     write_sheet(args.sheet, document, drafts, [name for name, _ in wordings])
-    clean = sum(not d["issues"] for d in drafts)
-    print(f"{args.out}: {len(drafts)} drafts, {clean} with no issue; sheet {args.sheet}")
+    print(f"{args.out}: {delivery(drafts)}; sheet {args.sheet}")
     return 0
+
+
+def judged(source: Any, steer: Mapping[str, Any], attempt: dict[str, Any]) -> dict[str, Any]:
+    """One attempt with the gate's verdict, as the server reaches it (``live_generation.tweak_outcome``)."""
+    output = attempt.get("output")
+    checks = check_record(source, steer, {"output": output}) if output else None
+    shown = shown_text(output["text"]) if output else ""
+    delivered = attempt["status"] == "completed" and checks is not None and not checks["excluded"]
+    attempt.update(
+        shown=shown,
+        delivered=delivered and readable(shown),
+        failures=[f["code"] for f in (checks or {}).get("failures", [])],
+        flags=[f["code"] for f in (checks or {}).get("flags", [])],
+        checks=checks,
+    )
+    return attempt
+
+
+def scored_draft(
+    variant: Mapping[str, Any], clip: Mapping[str, Any], wording: str, attempts: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """A variant's ladder judged by the current gate, and its delivered (or last) caption scored."""
+    for attempt in attempts:
+        source, _, steer = tweak_job_for(clip, variant["slots"], PURPOSE, attempt["rung"])
+        judged(source, steer, attempt)
+    delivered = next((a for a in attempts if a["delivered"]), None)
+    last = delivered or attempts[-1]
+    stopped = delivered is not None and delivered is not attempts[-1]
+    text = (last.get("output") or {}).get("text")
+    measured = measure(text, clip["caption"]["text"], last["checks"])
+    scored = {**measured, **manipulation(measured["shown"], clip, variant["slots"])}
+    return {
+        "variant_id": variant["variant_id"],
+        "wording": wording,
+        "attempts": attempts,
+        "delivered_rung": delivered["rung"] if delivered else None,
+        "ladder_cut_short": stopped,
+        "job_id": last["job_id"],
+        "status": last["status"],
+        "error": last.get("error"),
+        "text": text,
+        **scored,
+        "issues": issues(scored, variant["mode"]),
+    }
+
+
+def delivery(drafts: Sequence[Mapping[str, Any]]) -> str:
+    """How many drafts the ladder delivered, at which rung, and how many of those have no issue."""
+    rungs = [sum(d["delivered_rung"] == rung for d in drafts) for rung in range(len(TWEAK_LADDER))]
+    delivered = sum(rungs)
+    clean = sum(d["delivered_rung"] is not None and not d["issues"] for d in drafts)
+    by_rung = ", ".join(f"{condition} {count}" for condition, count in zip(TWEAK_LADDER, rungs, strict=True))
+    return f"{len(drafts)} drafts, {delivered} delivered ({by_rung}), {clean} of them with no issue"
 
 
 def rescore(args: argparse.Namespace) -> int:
@@ -211,22 +260,19 @@ def rescore(args: argparse.Namespace) -> int:
     if report["variants"]["sha256"] != sha256_file(args.variants):
         raise SystemExit(f"{args.drafts} was drafted from another {args.variants.name}")
     variants = {v["variant_id"]: v for v in document["variants"]}
-    before = sum(not d["issues"] for d in report["drafts"])
+    before = delivery(report["drafts"])
     for index, written in enumerate(report["drafts"]):
         variant = variants[written["variant_id"]]
         clip = document["clips"][variant["clip"]]
-        scored = {**written, **manipulation(written["shown"], clip, variant["slots"])}
-        report["drafts"][index] = {**scored, "issues": issues(scored, variant["mode"])}
+        report["drafts"][index] = scored_draft(variant, clip, written["wording"], written["attempts"])
     with args.sheet.open(encoding="utf-8-sig", newline="") as handle:
-        kept = {row["variant_id"]: {c: row[c] for c in FILLED} for row in csv.DictReader(handle)}
+        kept = {row["variant_id"]: {c: row.get(c, "") for c in FILLED} for row in csv.DictReader(handle)}
     args.drafts.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     write_sheet(args.sheet, document, report["drafts"], list(report["wordings"]), kept)
-    after = sum(not d["issues"] for d in report["drafts"])
-    filled = sum(any(row.values()) for row in kept.values())
-    print(
-        f"{args.drafts}: {len(report['drafts'])} drafts, {after} with no issue (was {before}); "
-        f"sheet {args.sheet}, {filled} filled rows kept"
-    )
+    short = sum(d["ladder_cut_short"] for d in report["drafts"])
+    print(f"{args.drafts}: {delivery(report['drafts'])} (was: {before})")
+    if short:
+        print(f"  {short} ladders stopped before a rung the current gate now passes first: draft again")
     return 0
 
 
@@ -243,15 +289,18 @@ def write_sheet(
         "clip",
         "mode",
         "attended_sound",
+        "emphasis",
         "seen",
         "scene_elements",
         "visible_sounds",
         "offscreen",
         "sounds",
         "first_caption",
-        *(column for name in names for column in (f"draft:{name}", f"issues:{name}")),
-        "approved_text",
-        "approved_from",
+        *(
+            column
+            for name in names
+            for column in (f"rung:{name}", f"draft:{name}", f"failures:{name}", f"issues:{name}")
+        ),
         "note",
     ]
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -264,6 +313,7 @@ def write_sheet(
                 "clip": variant["clip"],
                 "mode": variant["mode"],
                 "attended_sound": slots["attended_sound"],
+                "emphasis": variant["emphasis"],
                 "seen": slots.get("seen", ""),
                 "scene_elements": slots.get("scene_elements", ""),
                 "visible_sounds": slots.get("visible_sounds", ""),
@@ -274,7 +324,14 @@ def write_sheet(
             }
             for name in names:
                 written = by_key[(variant["variant_id"], name)]
+                rung = written["delivered_rung"]
+                row[f"rung:{name}"] = "none" if rung is None else TWEAK_LADDER[rung]
                 row[f"draft:{name}"] = written["shown"]
+                row[f"failures:{name}"] = " | ".join(
+                    f"{a['condition']}: {', '.join(a['failures']) or a['status']}"
+                    for a in written["attempts"]
+                    if not a["delivered"]
+                )
                 row[f"issues:{name}"] = "; ".join(written["issues"])
             writer.writerow(row)
 
@@ -286,7 +343,7 @@ def main() -> int:
     listed.add_argument("--phase1-setup", type=Path, required=True)
     listed.add_argument("--out", type=Path, required=True)
     listed.set_defaults(handler=variants)
-    drafted = commands.add_parser("draft", help="[generator env, GPU] write every variant with Trida")
+    drafted = commands.add_parser("draft", help="[generator env, GPU] write every variant down the ladder")
     drafted.add_argument("--variants", type=Path, required=True)
     drafted.add_argument("--trida-dir", type=Path, required=True)
     drafted.add_argument(
@@ -300,7 +357,9 @@ def main() -> int:
     drafted.add_argument("--out", type=Path, required=True)
     drafted.add_argument("--sheet", type=Path, required=True)
     drafted.set_defaults(handler=draft)
-    rescored = commands.add_parser("rescore", help="[repository env] score the drafts again, keep the sheet")
+    rescored = commands.add_parser(
+        "rescore", help="[repository env] run the gate and measures again, keep the sheet's notes"
+    )
     rescored.add_argument("--variants", type=Path, required=True)
     rescored.add_argument("--drafts", type=Path, required=True)
     rescored.add_argument("--sheet", type=Path, required=True)

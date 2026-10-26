@@ -8,13 +8,18 @@ P2–P4 answers and the clip's Sa2VA scene part (:mod:`diff.phase1_scene`). Sinc
 the design review of 2026-10-24 every clip's mode is decided when stage A ends
 (:func:`tweak_steer_all`). The mode's prompt is ``rewrite_prompts.TWEAK_PROMPTS[mode]``.
 
-**Responsive** (researcher, 2026-10-26): the rewrite steers the audio caption
-from what the scene holds to what this participant perceived and preferred, in
-the attention-restorative direction; it is not a scene-descriptive rewrite. Two
-answers steer the text, in both modes alike: the noticed sound (A1s), which the
-caption centres, and the restorative appraisal (P4), whose emphasis *reflects* the
-quality the participant perceived most in this clip (:func:`emphases`). Phase 1
-tests the mode (follow or counter); the emphasis is applied the same way under
+**Responsive, generated live** (researcher, 2026-10-26): the rewrite steers the
+audio caption from what the scene holds to what this participant perceived and
+preferred, in the attention-restorative direction; it is not a scene-descriptive
+rewrite. Two answers steer the text, in both modes alike: the noticed sound (A1s),
+which the caption centres, and the restorative appraisal (P4), whose emphasis
+*reflects* the quality the participant perceived most in this clip
+(:func:`emphases`). Each caption is written when stage A ends and shown once it
+passes the gate (:mod:`diff.phase1_usable`); the researcher no longer approves
+every caption before the study (that design, 2026-10-24, is retired). Trida's call
+is deterministic, so a caption the gate refuses is written again at the next τ of
+:data:`TWEAK_LADDER` rather than resampled.
+Phase 1 tests the mode (follow or counter); the emphasis is applied the same way under
 either mode, and testing it is phase 2's role, under the same rule.
 
 The slots, for one participant and clip:
@@ -28,11 +33,9 @@ The slots, for one participant and clip:
   subscale;
 - scene-aware only: ``scene_elements``, the clip's distinctive element, then
   its largest other element; ``seen``, the scene's setting: the distinctive
-  element (researcher, 2026-10-24: one setting per clip, so that every second
-  caption can be drafted and reviewed before the study; it was the object the
-  V1 point fell on, which gave 248 scene-aware prompts instead of 29);
-  ``visible_sounds``, the A1s sounds whose source the masks put on screen
-  (``phase1_scene.ON_SCREEN``); ``offscreen``, a sentence placing
+  element (researcher, 2026-10-24: one setting per clip; it was the object the
+  V1 point fell on); ``visible_sounds``, the A1s sounds whose source the masks
+  put on screen (``phase1_scene.ON_SCREEN``); ``offscreen``, a sentence placing
   the sounds not on screen "here, though unseen", or nothing when there are
   none. Sounds of the recording itself (:data:`RECORDING_ARTEFACTS`, microphone
   wind) are never placed: v2 spread them "in this scene" (hypothesis team,
@@ -61,14 +64,13 @@ from typing import Any, Final
 
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
-from diff.output_checks import check_tweak, displayed, output_from_record
 from diff.phase1_binding import BASELINE, FOLLOW, decide_all
 from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, RenderedPrompt, render_tweak
-from diff.study_protocol import TWEAK_MAX_CHARS
+from diff.study_protocol import LIVE_CONDITION
 
 # v5 (2026-10-24): the scene-aware setting is the clip's distinctive element, not the V1 object.
 # v6 (2026-10-26): the acousmatic prompt has no space slot, so the scene's openness reaches no caption.
-# v7 (2026-10-26): the restorative emphasis steers both modes.
+# v7 (2026-10-26): the restorative emphasis steers both modes; captions are written live, on a τ ladder.
 TWEAK_POLICY: Final = "diff.phase1-tweak/v7"
 EMPHASIS_POLICY: Final = "diff.phase1-emphasis/reflect-v1"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
@@ -94,12 +96,15 @@ NOT_SEEN: Final = "없음"
 # (P1–P2, Hartig et al., 1997) rates the picture, not the sounds the caption describes.
 RESTORATIVE: Final = ("fascination", "being_away_from", "extent_coherence")
 # Each subscale's emphasis, one wording for everyone and both modes. None uses the P4/P9 items' own
-# words, which a caption must not echo before P9 rates them.
+# words (``phase1_usable.ITEM_STEMS``), which a caption must not echo before P9 rates them.
 EMPHASIS_KO: Final[dict[str, str]] = {
     "fascination": "소리에서 귀를 사로잡는 점이 살아나도록 쓰세요.",
     "being_away_from": "소리를 들으며 잠시 다른 곳에 와 있는 듯한 느낌이 살아나도록 쓰세요.",
     "extent_coherence": "소리들이 따로 놀지 않고 서로 이어져 들리는 느낌이 살아나도록 쓰세요.",
 }
+# The second caption's τ, rung by rung: the live condition's, then the slowest (fewest tokens
+# committed per step, so the fewest cut or doubled words), then the fastest.
+TWEAK_LADDER: Final = (LIVE_CONDITION, "trida_tau_100", "trida_tau_070")
 # For named_in: a label's words that describe its sound rather than name it, by their ending (a
 # verb before a noun, "달리는"; an adverb, "멀리서", "크게"; an object, "도로를") or as listed.
 DESCRIBING: Final = re.compile(r"(?:는|서|게|를|을)$")
@@ -109,7 +114,7 @@ NOT_NAMING: Final = frozenset({"소리", "소음", "계속", "많은", "다른",
 # captions ("도로와 차량", "차량들 사이로"), so it would hide a dropped "자동차 소리".
 SOUND_WORDS: Final = (
     ("말소리", "목소리", "이야기", "대화", "웅성", "말하", "말한", "말해"),
-    ("외치", "고함", "소리치"),
+    ("외치", "외쳐", "고함", "소리치"),  # "외쳐" as conjugated ("크게 외쳐지며"), 2026-10-26
 )
 PARTICLES: Final = "(?:이|가|은|는|을|를|의|도|만|와|과|로)?"
 
@@ -290,26 +295,43 @@ def tweak_request(
     root: Path,
     assignment: str = FOLLOW,
 ) -> tuple[CaptionSource, Job, dict[str, Any]]:
-    """The source, the job and its steering record for one clip decided alone (no other clips)."""
+    """The source, the first rung's job and its steering record for one clip decided alone."""
     ((slots, _),) = tweak_steer_all([clip], [records], [assignment], root=root)
     return tweak_job_for(clip, slots, purpose)
 
 
 def tweak_job_for(
-    clip: Mapping[str, Any], slots: Mapping[str, str], purpose: str
+    clip: Mapping[str, Any], slots: Mapping[str, str], purpose: str, rung: int = 0
 ) -> tuple[CaptionSource, Job, dict[str, Any]]:
-    """The source, the job and its steering record from slots already computed (and stored)."""
+    """The source, the job at ``rung`` of :data:`TWEAK_LADDER` and its steering record, from slots
+    already computed (and stored). The record carries what the gate needs to judge the output."""
+    if not 0 <= rung < len(TWEAK_LADDER):
+        raise ValueError(f"the ladder has rungs 0 to {len(TWEAK_LADDER) - 1}, not {rung}")
     prompt: RenderedPrompt = render_tweak(slots)
     source = tweak_source(clip)
-    job = tweak_job(source, prompt, purpose)
+    job = tweak_job(source, prompt, purpose, TWEAK_LADDER[rung])
     record = {
         "policy": TWEAK_POLICY,
         "template": template_record(slots["mode"]),
         "slots": dict(slots),
         "intended_r2_key": intended_r2_key(clip),
         "job_id": job.job_id,
+        "rung": rung,
+        "rungs": len(TWEAK_LADDER),
+        "condition": TWEAK_LADDER[rung],
+        "gate": gate_inputs(clip),
     }
     return source, job, record
+
+
+def gate_inputs(clip: Mapping[str, Any]) -> dict[str, list[str]]:
+    """The clip's sound names the gate judges a caption against: R2's options not in the audio, and
+    every option's label (a place word inside one names the sound, not a place)."""
+    r2 = clip["options"]["R2"]
+    return {
+        "distractors": [option["label"] for option in r2 if not option.get("mentioned")],
+        "names": sorted({option["label"] for option in (*clip["options"]["A1s"], *r2)}),
+    }
 
 
 def sound_name(label: str) -> str:
@@ -356,9 +378,3 @@ def named_in(text: str, label: str) -> bool:
 def intended_r2_key(clip: Mapping[str, Any]) -> list[str]:
     """The R2 options the prompt names (the mentioned ones): R2's key, intended, not checked."""
     return [option["value"] for option in clip["options"]["R2"] if option.get("mentioned")]
-
-
-def check_record(source: CaptionSource, job: Job, result: Mapping[str, Any]) -> dict[str, Any]:
-    """The tweak check's record for one completed call (``LiveService(tweak_check=...)``), as shown."""
-    output = displayed(output_from_record(result["output"]))
-    return check_tweak(source, output, max_chars=TWEAK_MAX_CHARS).record()

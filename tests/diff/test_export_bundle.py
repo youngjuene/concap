@@ -78,11 +78,13 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         seconds = list(csv.DictReader(handle))
     assert tuple(seconds[0]) == SECOND_CAPTION_COLUMNS and len(seconds) == 3
     row = next(row for row in seconds if row["clip"] == a1s["clip"])
+    second = f"{clip['options']['A1s'][0]['label']}가 또렷하게 들린다."
     assert (row["status"], row["second_caption"], row["first_caption"]) == (
         "ready",
-        "다시 쓴 두 번째 자막",
+        second,
         clip["caption"]["text"],
     )
+    assert (row["rung"], row["condition"]) == ("0", "trida_tau_090")
     assert row["emphasis"] in RESTORATIVE and row["emphasis_tied"] in ("True", "False")
     assert all(row[f"{name}_centred"] != "" for name in RESTORATIVE)
     assert row["attended_sound"] == clip["options"]["A1s"][0]["label"]
@@ -91,7 +93,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     assert row["on_screen"] == str(clip["scene"]["sounds"]["s1"]["visibility"]["on_screen"])
     assert 0 < float(row["tendency"]) < 1 and row["congruence_centre"] != ""
     assert row["v2_attention"] in ("hit", "miss", "source not seen")  # V2 on the noticed source
-    assert row["caption_id"] == caption_id(row["clip"], "다시 쓴 두 번째 자막")
+    assert row["caption_id"] == caption_id(row["clip"], second)
 
     # One blind row per distinct shown caption and R2 option: no participant, mode or key.
     with (out / "r2_coding.csv").open(encoding="utf-8") as handle:

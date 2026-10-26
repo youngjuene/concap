@@ -92,14 +92,8 @@ from diff.output_checks import (  # noqa: E402
     shown_text,
 )
 from diff.phase1_binding import COUNTER, FOLLOW, assignment_plan  # noqa: E402
-from diff.phase1_tweak import (  # noqa: E402
-    ELEMENTS_KO,
-    check_record,
-    named_in,
-    tweak_job_for,
-    tweak_source,
-    tweak_steer_all,
-)
+from diff.phase1_tweak import named_in, tweak_job_for, tweak_source, tweak_steer_all  # noqa: E402
+from diff.phase1_usable import BROKEN, ITEM_STEMS, NEAR_COPY, PLACE_WORDS, check_record  # noqa: E402
 from diff.study_protocol import LIVE_MAX_CHARS, SYSTEM_MESSAGE  # noqa: E402
 
 INPUTS_SCHEMA = "diff.prompt-bench-inputs/v2"  # v2: second-caption slots decided in `inputs`
@@ -107,24 +101,6 @@ REPORT_SCHEMA = "diff.prompt-bench-report/v1"
 PURPOSE = "smoke"
 KEPT_PAGES = ("P2", "P3", "P4", "P5", "P10")
 STAGE_A = ("P2", "P3", "P4", "P5")
-# Defects Trida's parallel decoding leaves that no check catches: a word cut to "소" (from "소리"),
-# and doubled commas or full stops ("..." is an ellipsis and passes).
-BROKEN = re.compile(r"(?<![가-힣])소(?![가-힣])|,,|(?<!\.)\.\.(?!\.)")
-# The mask objects of regen's c2 frames, in Korean: things a caption can name on screen.
-OBJECTS_KO = ("건물", "사람", "도로", "차량", "인도", "하늘", "땅", "나무와 풀")
-# Words for a place or an object on screen: the objects, the scene elements and common street
-# places, two syllables or more ("길" and "강" would match "길게" and "강하게"; "거리" is also the
-# distance the acousmatic prompt asks for, so it is left out).
-PLACE_WORDS = tuple(
-    sorted(
-        {
-            word
-            for phrase in (*OBJECTS_KO, *ELEMENTS_KO.values())
-            for word in re.findall(r"[가-힣]{2,}", phrase.replace("와 ", " "))
-        }
-        | {"골목", "광장", "가게", "상점", "시장", "공원", "정류장", "화면", "장면", "도시", "카페", "보도"}
-    )
-)
 # The clips whose prepared first caption contradicts their audio (plan, 2026-10-18), and
 # singapore_067, which the hypothesis team flagged (2026-10-24).
 CONTRADICTING = ("amsterdam_012", "singapore_040", "amsterdam_057", "bangkok_034", "singapore_067")
@@ -136,9 +112,6 @@ FIRST_CAPTION_ONLY = {
     "singapore_040": ("오토바이",),
     "singapore_067": ("경적", "체증"),
 }
-# Wording of the P4/P9 items a caption should not echo: E1/E3's place, E2's merging, BF's escape.
-ITEM_STEMS = ("화면 속 장소", "속해", "어우러", "벗어나")
-NEAR_COPY = 0.9
 
 
 def sha256_file(path: Path) -> str:
@@ -559,10 +532,10 @@ def bench(
             source = tweak_source(clip)
             texts: dict[str, str] = {}
             for is_planned, steer in ((True, entry["planned"]), (False, entry["other"])):
-                _, job, _ = tweak_job_for(clip, steer, PURPOSE)
+                _, job, record = tweak_job_for(clip, steer, PURPOSE)
                 result = call(job)
                 text = (result.get("output") or {}).get("text")
-                checks = check_record(source, job, result) if result.get("output") else None
+                checks = check_record(source, record, result) if result.get("output") else None
                 measured = measure(text, source.text, checks)
                 texts[steer["mode"]] = measured["shown"]
                 rows.append(

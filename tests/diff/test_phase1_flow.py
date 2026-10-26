@@ -11,11 +11,9 @@ from typing import Any
 
 import pytest
 from phase1_fixtures import DURATION_MS, approved_setup
-from test_phase1_approved import COLUMNS, sheet
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.playback as regen_playback
-from diff.phase1_approved import import_sheet
 from diff.phase1_binding import assignment_plan
 from diff.phase1_flow import (
     HANDOFF_TEXT,
@@ -29,6 +27,7 @@ from diff.phase1_flow import (
     record_playback,
 )
 from diff.phase1_setup import stripped_options
+from diff.phase1_tweak import TWEAK_LADDER
 from diff.session_store import Conflict
 from dpo.regen.study_store import Conflict as RegenConflict
 
@@ -80,8 +79,14 @@ def step(flow: Phase1, state: dict[str, Any], now: float, point: tuple[float, fl
 
 def written(flow: Phase1, state: dict[str, Any], status: str = "ready") -> None:
     """Trida's outcome for every pending second caption, as the server writes it back."""
-    for key, _, attempt in flow.pending_tweaks(state):
-        outcome = {"status": status, "attempt": attempt, "result_status": "completed", "job_id": "job-x"}
+    for key, _, attempt, rung in flow.pending_tweaks(state):
+        outcome = {
+            "status": status,
+            "attempt": attempt,
+            "rung": rung,
+            "result_status": "completed",
+            "job_id": "job-x",
+        }
         if status == "ready":
             outcome["text"] = f"두 번째 자막 {state['clip_order'].index(key)}"
         else:
@@ -173,24 +178,6 @@ def test_a_whole_phase_one_walk(flow: Phase1) -> None:
     assert ratings == [{"S1": 5, "S2": 2, "S3": 6}] * 3
 
 
-def test_an_approved_caption_is_shown_at_once_without_asking_trida(tmp_path: Path) -> None:
-    setup = approved_setup(tmp_path)
-    reviewed, _, _ = import_sheet(setup, sheet(setup), COLUMNS, reviewed_by="researcher", at="t")
-    flow = Phase1(reviewed, root=tmp_path)
-    state = flow.new_state("s-test", "P1", seed=7)
-    through_practice(flow, state)
-    now = through_stage_a(flow, state, 10.0)
-    assert flow.pending_tweaks(state) == []
-    entry = state["second_captions"][state["clip_order"][0]]
-    assert (entry["status"], entry["source"]) == ("ready", "approved") and "template" not in entry
-    assert entry["approved"] == {"approved_from": "B-words", "reviewed_by": "researcher", "reviewed_at": "t"}
-    assert entry["text"] == f"{entry['slots']['attended_sound']}가 들린다."
-    shown = flow.present(state, lambda name: name)
-    assert shown["kind"] == "view" and shown["media"]["captions"][0]["text"] == entry["text"]
-    step(flow, state, now)
-    assert state["viewings"][-1]["caption_source"] == "approved"
-
-
 def test_a_failed_second_caption_skips_that_clip_s_second_step(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=7)
     through_practice(flow, state)
@@ -215,17 +202,51 @@ def test_one_retry_is_kept_across_restarts_and_late_outcomes_are_ignored(flow: P
     state = flow.new_state("s-test", "P1", seed=7)
     through_practice(flow, state)
     through_stage_a(flow, state, 10.0)
-    (key, slots, attempt), *_ = flow.pending_tweaks(state)
-    assert attempt == 1 and slots == state["second_captions"][key]["slots"]
-    retry = {"status": "retry", "attempt": 1, "result_status": "worker_lost", "reason": "worker_lost: x"}
+    (key, slots, attempt, rung), *_ = flow.pending_tweaks(state)
+    assert (attempt, rung) == (1, 0) and slots == state["second_captions"][key]["slots"]
+    retry = {"status": "retry", "attempt": 1, "rung": 0, "result_status": "worker_lost", "reason": "x"}
     flow.record_tweak(state, key, retry, 20.0)
-    assert flow.pending_tweaks(state)[0] == (key, slots, 2)
-    ready = {"status": "ready", "attempt": 2, "result_status": "completed", "job_id": "j", "text": "새 자막"}
+    assert flow.pending_tweaks(state)[0] == (key, slots, 2, 0)
+    ready = {
+        "status": "ready",
+        "attempt": 2,
+        "rung": 0,
+        "result_status": "completed",
+        "job_id": "j",
+        "text": "새 자막",
+    }
     flow.record_tweak(state, key, ready, 21.0)
     flow.record_tweak(state, key, {**ready, "text": "늦게 온 자막"}, 22.0)
     entry = state["second_captions"][key]
     assert entry["status"] == "ready" and entry["text"] == "새 자막" and len(entry["attempts"]) == 2
-    assert key not in [pending for pending, _, _ in flow.pending_tweaks(state)]
+    assert key not in [pending for pending, *_ in flow.pending_tweaks(state)]
+
+
+def test_a_refused_caption_climbs_the_ladder_and_fails_only_on_the_last_rung(flow: Phase1) -> None:
+    state = flow.new_state("s-test", "P1", seed=7)
+    through_practice(flow, state)
+    through_stage_a(flow, state, 10.0)
+    (key, slots, _, _), *_ = flow.pending_tweaks(state)
+    entry = state["second_captions"][key]
+    assert entry["rung"] == 0 and entry["source"] == "trida"
+    for rung in range(len(TWEAK_LADDER) - 1):
+        refused = {
+            "status": "next",
+            "attempt": 1,
+            "rung": rung,
+            "result_status": "completed",
+            "job_id": f"j{rung}",
+        }
+        flow.record_tweak(state, key, {**refused, "checks": {"failures": [{"code": "near_copy"}]}}, 20.0)
+        assert flow.pending_tweaks(state)[0] == (key, slots, 1, rung + 1)
+        flow.record_tweak(state, key, refused, 20.5)  # a late outcome of a rung already left
+        assert entry["rung"] == rung + 1
+    last = len(TWEAK_LADDER) - 1
+    failed = {"status": "failed", "attempt": 1, "rung": last, "result_status": "completed", "job_id": "jz"}
+    flow.record_tweak(state, key, {**failed, "reason": "check failed: cut_off"}, 21.0)
+    assert entry["status"] == "failed" and [a["rung"] for a in entry["attempts"]] == list(range(last + 1))
+    assert entry["attempts"][0]["failures"] == ["near_copy"]
+    assert key not in [pending for pending, *_ in flow.pending_tweaks(state)]
 
 
 def test_every_page_says_where_it_sits_in_the_session(flow: Phase1) -> None:

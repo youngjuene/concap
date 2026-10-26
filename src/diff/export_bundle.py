@@ -19,8 +19,8 @@ Files written to ``--out``:
   R2, the intended key, the sounds the second-caption prompt named.
 - ``second_captions.csv``: one row per participant × clip: the status (and why
   a step was skipped), the first and second captions, where the second came
-  from (``approved``, the researcher's reviewed text for its ``variant_id``, and
-  which draft it was taken from, or ``trida`` in a smoke session), what steered it
+  from (``trida``, written live since 2026-10-26, and the τ condition of the rung
+  that delivered it; ``approved`` in sessions of 2026-10-24 to 26), what steered it
   (the attended sound; the restorative emphasis it reflects and each subscale's
   centred mean; the binding model's evidence and P(bound), the recommended mode,
   follow or counter, the mode used and the caption type), the
@@ -48,11 +48,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from diff.phase1_tweak import RESTORATIVE, named_in
+from diff.phase1_tweak import RESTORATIVE, TWEAK_LADDER, named_in
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
-EXPORT_SCHEMA: Final = "diff.export/v8"  # v8 (2026-10-26): the restorative emphasis
+EXPORT_SCHEMA: Final = "diff.export/v8"  # v8 (2026-10-26): the emphasis and the delivering rung
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -83,6 +83,8 @@ SECOND_CAPTION_COLUMNS: Final = (
     "first_caption",
     "second_caption",
     "caption_source",
+    "rung",
+    "condition",
     "variant_id",
     "approved_from",
     "attended_sound",
@@ -207,6 +209,11 @@ def second_caption_rows(
         slots = entry.get("slots", {})
         model = entry.get("model", {})
         emphasis = model.get("emphasis", {})
+        delivered = (
+            {"condition": TWEAK_LADDER[entry["rung"]]}
+            if entry.get("status") == "ready" and "rung" in entry
+            else {}
+        )
         flags = [finding["code"] for finding in (entry.get("checks") or {}).get("flags", [])]
         v2 = [
             r
@@ -225,6 +232,8 @@ def second_caption_rows(
             "first_caption": clip.get("caption", {}).get("text", ""),
             "second_caption": entry.get("text", ""),
             "caption_source": entry.get("source", "trida"),
+            "rung": entry.get("rung", "") if entry.get("source", "trida") == "trida" else "",
+            "condition": delivered.get("condition", ""),
             "variant_id": entry.get("variant_id", ""),
             "approved_from": entry.get("approved", {}).get("approved_from", ""),
             "attended_sound": slots.get("attended_sound", ""),

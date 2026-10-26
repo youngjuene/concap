@@ -338,16 +338,21 @@ def live_job(source: CaptionSource, texture: int, context: str, system_message: 
     )
 
 
-def tweak_job(source: CaptionSource, prompt: RenderedPrompt, purpose: str) -> Job:
-    """Phase 1's second caption for one participant and clip, at the live condition's τ.
+def tweak_job(
+    source: CaptionSource, prompt: RenderedPrompt, purpose: str, condition: str = LIVE_CONDITION
+) -> Job:
+    """Phase 1's second caption for one participant and clip, at ``condition``'s τ: the live
+    condition's first, another rung's after the gate refused it (``phase1_tweak.TWEAK_LADDER``).
 
     The prompt carries the participant's slots, so the job's identity is that
     participant's: the same answers give the same job.
     """
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a tweak job serves a participant session or a smoke run, not {purpose!r}"])
-    generate = trida_call_settings(TWEAK_CANVAS_TOKENS, TAU_CONDITIONS[LIVE_CONDITION])
-    return make_job(source, purpose, LIVE_CONDITION, None, TRIDA_7B, prompt, generate, phase=1)
+    if condition not in TAU_CONDITIONS:
+        raise PlanError([f"a tweak job runs at a τ condition {sorted(TAU_CONDITIONS)}, not {condition!r}"])
+    generate = trida_call_settings(TWEAK_CANVAS_TOKENS, TAU_CONDITIONS[condition])
+    return make_job(source, purpose, condition, None, TRIDA_7B, prompt, generate, phase=1)
 
 
 def prompt_guard_problems(job: Job, token_ids: Sequence[int]) -> list[str]:

@@ -42,9 +42,10 @@ label keys the masks and never words an option. Whether its source is on
 screen is measured from those masks, never judged (researcher, 2026-10-24).
 Each part is approved by the researcher (:func:`approve`) against a hash of its
 content, so any later edit voids the approval.
-:func:`setup_problems` refuses a participant setup until every part is approved,
-and until every second caption it can show is (:mod:`diff.phase1_approved`,
-2026-10-24).
+:func:`setup_problems` refuses a participant setup until every part is approved.
+From 2026-10-24 it also waited for every second caption the setup could show to be
+approved; since 2026-10-26 those captions are written live
+(:mod:`diff.phase1_tweak`), and the prompts and their gate are approved once instead.
 """
 
 from __future__ import annotations
@@ -59,7 +60,6 @@ from pathlib import Path
 from typing import Any, Final
 
 from diff.caption_sources import CATEGORIES_KO
-from diff.phase1_approved import approval_problems
 from diff.phase1_scene import scene_problems
 from diff.study_protocol import sha256_of
 
@@ -514,7 +514,6 @@ def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instru
         problems += _clip_problems(clip, root, instrument.page_spec)
     formal = {frame["still"] for clip in clips for frame in clip.get("frames", [])}
     problems += _practice_problems(setup["practice"], formal, root, instrument.page_spec)
-    sound = not problems  # every clip's scene part is there to list its second captions from
     if purpose == "participant":
         if setup.get("instrument_hash") != instrument.snapshot()["hash"]:
             problems.append("the workbook instrument changed since this setup was drafted")
@@ -523,8 +522,6 @@ def setup_problems(setup: Mapping[str, Any], purpose: str, *, root: Path, instru
         for clip in clips:
             if not approved(clip):
                 problems.append(f"{clip['key']}: not approved by the researcher (or edited since approval)")
-        if sound:
-            problems += approval_problems(setup)
     return problems
 
 

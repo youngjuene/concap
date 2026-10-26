@@ -15,9 +15,11 @@ noticed source, the attended sound, the tuner's heard families and rating means.
 prompt functions then render what those values should have produced, and every logged call is
 compared with that, so new prompt wording needs no change here. A session that ran an older
 template than the checkout is reported once, not call by call. It also checks that:
-- each clip's second caption is the researcher's approved text for its recomputed slots, shown at
-  P6 with no Trida call (2026-10-24), or, where none was approved (smoke), the one Trida wrote and
-  P6 showed, or that a failed one was skipped;
+- each clip's second caption went down the τ ladder as the server must take it (2026-10-26): every
+  logged attempt is the recomputed job at its rung, re-running the check and gate gives its logged
+  verdict, each rung was left only after a refusal (or a second transient failure), and the
+  caption shown at P6 is the one the gate passed, or a clip that never passed was skipped
+  (sessions of 2026-10-24 to 26 showed the researcher's approved text: audit them at that commit);
 - each attempt's shown text is Trida's text under the display rule (logs from 2026-10-20 on);
 - every slider change got a live call, unless no cue boundary was left to write;
 - every caption shown is one Trida wrote for that cue or an earlier one (the kept caption);
@@ -53,6 +55,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # noqa: E402
 from diff.export_bundle import caption_id  # noqa: E402
+from diff.generation_worker import TRANSIENT  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
 from diff.live_generation import STARTING_CAPTION, usable  # noqa: E402
 from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
@@ -73,11 +76,11 @@ from diff.phase1_tweak import (  # noqa: E402
     NOT_SEEN,
     OFFSCREEN_KO,
     RECORDING_ARTEFACTS,
-    check_record,
+    TWEAK_LADDER,
     tweak_job_for,
     tweak_source,
-    variant_id,
 )
+from diff.phase1_usable import check_record  # noqa: E402
 from diff.rewrite_prompts import (  # noqa: E402
     LIVE_CELL_PROMPTS,
     LIVE_RULES_VERSION,
@@ -96,6 +99,7 @@ SECOND_FIELDS = (
     "second_caption",
     "caption_source",
     "variant_id",
+    "rung",
     "emphasis",
     *SECOND_SLOTS,
     *SECOND_MODEL,
@@ -391,10 +395,9 @@ def audit_phase1(
     state: Mapping[str, Any],
     clips: Mapping[str, Any],
     tweaks: list[dict[str, Any]],
-    approved: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    """Slots, then the approved caption shown, or the tweak call, its check and outcome, per clip;
-    returns one report row per clip. ``approved`` is the setup's approved captions by variant ID."""
+    """Slots, then the tweak calls down the ladder, their checks and the outcome, per clip; returns
+    one report row per clip."""
     records = formal_records(state)
     rows: list[dict[str, Any]] = []
     ran: set[str] = set()
@@ -480,76 +483,84 @@ def audit_phase1(
         )
         attempts = [t for t in tweaks if t["clip"] == key]
         p6 = [v for v in state["viewings"] if v["clip_index"] == index and v["page"] == "P6"]
-        if entry.get("source") == "approved":
-            caption = approved.get(variant_id(expect))
-            audit.ok(
-                "approved",
-                entry.get("variant_id") == variant_id(expect) and caption is not None,
-                f"{who} {key}: no approved caption for the recomputed slots",
-            )
-            audit.ok(
-                "approved",
-                caption is not None and entry["status"] == "ready" and entry["text"] == caption["text"],
-                f"{who} {key}: the stored caption is not the approved one",
-            )
-            audit.ok("approved", not attempts, f"{who} {key}: Trida was called for an approved caption")
-            audit.ok(
-                "approved",
-                bool(p6) and p6[-1]["captions"][0]["text"] == entry["text"],
-                f"{who} {key}: the P6 viewing did not show the approved caption",
-            )
-            rows.append(
-                {
-                    "participant": who,
-                    "clip": key,
-                    "status": entry["status"],
-                    "source": "approved",
-                    "slots": entry["slots"],
-                    "second": entry["text"],
-                }
-            )
-            continue
         if not audit.ok("tweak-call", bool(attempts), f"{who} {key}: no tweak call logged"):
             continue
         last = attempts[-1]
-        audit.ok(
-            "tweak-call", last["steer"]["slots"] == entry["slots"], f"{who} {key}: logged slots != stored"
-        )
-        _, job, _ = tweak_job_for(clip, expect, str(last["job"]["purpose"]))
-        expected_job = plain(job.record())
+        for attempt in attempts:
+            audit.ok(
+                "tweak-call",
+                attempt["steer"]["slots"] == entry["slots"],
+                f"{who} {key}: logged slots != stored",
+            )
         if entry["template"]["sha256"] != TWEAK_PROMPTS[expect["mode"]].sha256:
             ran.add(str(entry["template"]["sha256"]))
         else:
-            audit.ok(
-                "tweak-call",
-                expected_job == last["job"],
-                f"{who} {key}: the logged job differs in {differing(expected_job, last['job'])}",
-            )
-        audit.ok(
-            "tweak-call",
-            last["system_message"] == job.prompt.system_message,
-            f"{who} {key}: tweak system message {last['system_message']!r}",
-        )
-        text = shown_on_screen(audit, f"{who} {key}", last)
-        if last["status"] == "completed" and last.get("output"):
-            if last.get("display_rule") == DISPLAY_RULE:
+            text = None
+            for at, attempt in enumerate(attempts):
+                rung = int(attempt["steer"].get("rung", 0))
+                where = f"{who} {key} rung {rung} attempt {attempt['attempt']}"
+                _, job, steer = tweak_job_for(clip, expect, str(attempt["job"]["purpose"]), rung)
+                expected_job = plain(job.record())
                 audit.ok(
-                    "tweak-check",
-                    plain(check_record(tweak_source(clip), job, last)) == last["checks"],
-                    f"{who} {key}: re-running the tweak check gives a different result than logged",
+                    "tweak-call",
+                    expected_job == attempt["job"],
+                    f"{where}: the logged job differs in {differing(expected_job, attempt['job'])}",
                 )
-            else:
-                audit.note("tweak-check", "before the display rule, not re-run")
-        failed = last["status"] != "completed" or bool((last.get("checks") or {}).get("failures"))
-        if entry["status"] == "ready":
-            audit.ok("tweak-outcome", not failed, f"{who} {key}: ready although the last attempt failed")
-            audit.ok("tweak-outcome", entry["text"] == text, f"{who} {key}: stored caption != Trida's output")
+                audit.ok(
+                    "tweak-call",
+                    attempt["system_message"] == job.prompt.system_message,
+                    f"{where}: tweak system message {attempt['system_message']!r}",
+                )
+                text = shown_on_screen(audit, where, attempt)
+                passed = False
+                if attempt["status"] == "completed" and attempt.get("output"):
+                    rerun = plain(check_record(tweak_source(clip), steer, attempt))
+                    audit.ok(
+                        "tweak-check",
+                        rerun == attempt["checks"],
+                        f"{where}: re-running the check and gate gives a different result than logged",
+                    )
+                    passed = not rerun["excluded"] and readable(text or "")
+                expected_next = (
+                    "ready"
+                    if passed
+                    else "retry"
+                    if attempt["status"] in TRANSIENT and attempt["attempt"] == 1
+                    else "next"
+                    if attempt["status"] == "completed" and rung + 1 < len(TWEAK_LADDER)
+                    else "failed"
+                )
+                audit.ok(
+                    "tweak-ladder",
+                    attempt["outcome"] == expected_next,
+                    f"{where}: outcome {attempt['outcome']}, the ladder says {expected_next}",
+                )
+                if at + 1 < len(attempts):
+                    following = int(attempts[at + 1]["steer"].get("rung", 0))
+                    audit.ok(
+                        "tweak-ladder",
+                        expected_next in ("retry", "next")
+                        and following == (rung if expected_next == "retry" else rung + 1),
+                        f"{where}: then rung {following} after {expected_next}",
+                    )
             audit.ok(
-                "tweak-outcome",
-                bool(p6) and p6[-1]["captions"][0]["text"] == text,
-                f"{who} {key}: the P6 viewing did not show Trida's caption",
+                "tweak-ladder",
+                int(last["steer"].get("rung", 0)) == int(entry.get("rung", 0)),
+                f"{who} {key}: the stored rung {entry.get('rung')} is not the last attempt's",
             )
-        else:
+            if entry["status"] == "ready":
+                audit.ok(
+                    "tweak-outcome",
+                    last["outcome"] == "ready" and entry["text"] == text,
+                    f"{who} {key}: stored caption != the one the gate passed",
+                )
+                audit.ok(
+                    "tweak-outcome",
+                    bool(p6) and p6[-1]["captions"][0]["text"] == text,
+                    f"{who} {key}: the P6 viewing did not show Trida's caption",
+                )
+        text = shown_on_screen(audit, f"{who} {key}", last)
+        if entry["status"] != "ready":
             audit.ok(
                 "tweak-outcome",
                 any(skip["clip"] == key for skip in state["skipped"]),
@@ -839,6 +850,7 @@ def audit_export(
                 "second_caption": entry.get("text") or "",
                 "caption_source": entry.get("source", "trida"),
                 "variant_id": entry.get("variant_id", ""),
+                "rung": str(entry.get("rung", "")) if entry.get("source", "trida") == "trida" else "",
                 "emphasis": model.get("emphasis", {}).get("chosen", ""),
                 **{name: slots.get(name, "") for name in SECOND_SLOTS},
                 **{name: str(model.get(name, "")) for name in SECOND_MODEL},
@@ -891,7 +903,6 @@ def check(args: argparse.Namespace) -> int:
     audit = Audit()
     setup = read_setup(args.phase1_setup)
     clips = {clip["key"]: clip for clip in setup["clips"]}
-    approved = (setup.get("second_captions") or {}).get("captions", {})
     with args.sources.open(encoding="utf-8") as handle:
         sources = parse_sources(json.load(handle)).sources
     cues = {(s.unit_key, s.cue_index): s for s in sources if s.phase == 2}
@@ -903,7 +914,7 @@ def check(args: argparse.Namespace) -> int:
         attempts = logs[session["session_id"]]["attempts"]
         tweaks = [a for a in attempts if a.get("kind") == "tweak"]
         lives = [a for a in attempts if a.get("kind") != "tweak"]
-        report["second_captions"] += audit_phase1(audit, who, state, clips, tweaks, approved)
+        report["second_captions"] += audit_phase1(audit, who, state, clips, tweaks)
         tuner = audit_tuner(audit, who, state, clips)
         row: dict[str, Any] = {"participant": who, "finished": session["finished_at"] is not None}
         if tuner is not None:

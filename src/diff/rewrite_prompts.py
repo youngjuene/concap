@@ -385,7 +385,9 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # acousmatic caption takes nothing from the picture.
 # Scene-aware 4 and acousmatic 5 (researcher, 2026-10-26): both end with {emphasis}, the
 # restorative quality this participant perceived most in the clip (phase1_tweak.EMPHASIS_KO),
-# the same sentence under either mode.
+# the same sentence under either mode. Captions are now written live and shown once they pass
+# the gate (diff.phase1_usable), so the wording is approved here, once, rather than caption by
+# caption, and participant sessions wait for it.
 TWEAK_PROVISIONAL: Final = True
 _TWEAK_HEAD: Final = (
     "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"

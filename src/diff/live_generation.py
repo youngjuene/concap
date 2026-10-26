@@ -51,9 +51,11 @@ The same worker also writes phase 1's second captions (researcher, 2026-10-18):
 :meth:`LiveService.submit_tweak` queues one per clip while the participant is
 still in phase 1, and the thread runs them whenever no video scheduler has a
 request, in the order submitted. Unlike a live caption, a tweak is checked
-before it counts: an output that fails its check, or a call that fails, ends
-that clip's tweak with the reason, except for one identical retry after a
-transient worker or device failure.
+before it counts. A call that fails ends that clip's tweak with the reason,
+except for one identical retry after a transient worker or device failure. Since
+2026-10-26 (captions written live, made usable by engineering) an output that
+fails its check goes to the next rung of the request's ladder (``next``; the
+session's flow queues the new job), and ends the tweak only on the last rung.
 """
 
 from __future__ import annotations
@@ -312,11 +314,14 @@ def opaque_token(secret: bytes, session_id: str, internal_id: str) -> str:
 
 Attempt = Callable[[Mapping[str, Any], float], dict[str, Any]]
 Check = Callable[[CaptionSource, Job, Mapping[str, Any]], Mapping[str, Any]]
+# A second caption's check: its source, the request's steering record and the result.
+TweakCheck = Callable[[CaptionSource, Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]]
 
 
 @dataclass(frozen=True)
 class TweakRequest:
-    """One clip's second caption for one session; ``attempt`` counts from 1."""
+    """One clip's second caption for one session at one rung of its ladder (``steer["rung"]``);
+    ``attempt`` counts from 1 within the rung."""
 
     session_id: str
     clip: str
@@ -332,15 +337,18 @@ TweakDone = Callable[[TweakRequest, dict[str, Any]], None]
 def tweak_outcome(
     request: TweakRequest, result: Mapping[str, Any], checks: Mapping[str, Any] | None
 ) -> dict[str, Any]:
-    """What one attempt means for the clip: ``ready``, ``retry`` or ``failed`` with the reason."""
+    """What one attempt means for the clip: ``ready``, ``retry`` (the same job again), ``next`` (the
+    next rung of the request's ladder, ``steer["rung"]`` of ``steer["rungs"]``) or ``failed``."""
     status = result.get("status")
-    base = {"attempt": request.attempt, "result_status": status, "job_id": request.job.job_id}
+    rung = int(request.steer.get("rung", 0))
+    base = {"attempt": request.attempt, "result_status": status, "job_id": request.job.job_id, "rung": rung}
+    refused = "failed" if rung + 1 >= int(request.steer.get("rungs", 1)) else "next"
     if status == "completed" and checks is not None and not checks.get("excluded"):
         text = shown_text(result["output"]["text"])
-        if not readable(text):  # a second caption never goes blank: the clip's second step is skipped
+        if not readable(text):  # a second caption never goes blank
             return {
                 **base,
-                "status": "failed",
+                "status": refused,
                 "reason": "nothing readable after the display rule",
                 "checks": dict(checks),
             }
@@ -348,7 +356,7 @@ def tweak_outcome(
     if status == "completed":
         codes = [finding["code"] for finding in (checks or {}).get("failures", [])]
         reason = "check failed: " + ", ".join(codes) if codes else "no check result"
-        return {**base, "status": "failed", "reason": reason, "checks": dict(checks or {})}
+        return {**base, "status": refused, "reason": reason, "checks": dict(checks or {})}
     if status in TRANSIENT and request.attempt == 1:
         return {**base, "status": "retry", "reason": f"{status}: {result.get('error')}"}
     return {**base, "status": "failed", "reason": f"{status}: {result.get('error')}"}
@@ -368,7 +376,7 @@ class LiveService:
         log_dir: Path,
         *,
         check: Check | None = None,
-        tweak_check: Check | None = None,
+        tweak_check: TweakCheck | None = None,
         deadline_s: float = LIVE_DEADLINE_S,
         clock: Callable[[], float] = time.monotonic,
         idle_wait_s: float = 0.25,
@@ -491,7 +499,7 @@ class LiveService:
         result = self._call(request.job)
         checks = None
         if result.get("status") == "completed" and result.get("output") and self.tweak_check is not None:
-            checks = dict(self.tweak_check(request.source, request.job, result))
+            checks = dict(self.tweak_check(request.source, request.steer, result))
         outcome = tweak_outcome(request, result, checks)
         self._log_tweak(request, result, checks, outcome)
         try:

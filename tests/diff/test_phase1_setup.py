@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import copy
-import csv
 import json
 from pathlib import Path
 
 import phase1_fixtures
 import pytest
 from phase1_fixtures import PREPARED, approved_setup, drafted, filled, with_scenes
-from test_phase1_approved import COLUMNS, imported, sheet
 
 import diff.workbook_instrument as workbook_instrument
 from diff.__main__ import main
@@ -22,8 +20,6 @@ from diff.phase1_setup import (
     read_ontology,
     setup_problems,
 )
-
-NO_CAPTIONS = "second captions: none approved; run `python -m diff phase1 import-second-captions`"
 
 
 def problems(setup: dict, purpose: str, root: Path) -> list[str]:
@@ -108,11 +104,9 @@ def test_unwritten_options_block_even_smoke_sessions(tmp_path: Path) -> None:
 def test_participant_sessions_need_every_part_approved(tmp_path: Path) -> None:
     setup = with_scenes(filled(drafted(tmp_path)), tmp_path)
     found = problems(setup, "participant", tmp_path)
-    assert len(found) == 5 and all("not approved" in problem for problem in found[:-1])
-    assert found[-1] == NO_CAPTIONS  # the second captions too
-    parts = approved_setup(tmp_path / "again")
-    assert problems(parts, "participant", tmp_path / "again") == [NO_CAPTIONS]
-    assert problems(imported(parts, sheet(parts))[0], "participant", tmp_path / "again") == []
+    assert len(found) == 4 and all("not approved" in problem for problem in found)
+    # Second captions are written live since 2026-10-26: none waits for approval in the setup.
+    assert problems(approved_setup(tmp_path / "again"), "participant", tmp_path / "again") == []
 
 
 def test_an_edit_after_approval_voids_it(tmp_path: Path) -> None:
@@ -121,8 +115,7 @@ def test_an_edit_after_approval_voids_it(tmp_path: Path) -> None:
     setup["clips"][0]["caption"]["text"] = "버스가 공회전하고 남자가 말한다."
     assert not approved(setup["clips"][0])
     assert problems(setup, "participant", tmp_path) == [
-        "kyoto_101: not approved by the researcher (or edited since approval)",
-        NO_CAPTIONS,
+        "kyoto_101: not approved by the researcher (or edited since approval)"
     ]
 
 
@@ -192,18 +185,9 @@ def test_the_cli_shows_and_approves(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
     assert main(["phase1", "show", "--setup", str(path)]) == 0
     shown = capsys.readouterr().out
-    assert "[kyoto_101]" in shown and "5 problems for participant sessions" in shown
+    assert "[kyoto_101]" in shown and "4 problems for participant sessions" in shown
     approval = ["--clip", "kyoto_101", "--clip", "lima_202", "--clip", "oslo_303", "--practice"]
     assert main(["phase1", "approve", "--setup", str(path), "--by", "researcher", *approval]) == 0
-    assert "1 problems left" in capsys.readouterr().out  # the second captions
-    review = tmp_path / "review.csv"
-    with review.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(sheet(json.loads(path.read_text(encoding="utf-8"))))
-    reviewed = ["--sheet", str(review), "--reviewed-by", "researcher"]
-    assert main(["phase1", "import-second-captions", "--setup", str(path), *reviewed]) == 0
-    assert "imported 36 approved second captions" in (out := capsys.readouterr().out)
-    assert "0 problems left" in out
+    assert "0 problems left" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="name what you approve"):
         main(["phase1", "approve", "--setup", str(path), "--by", "researcher"])
