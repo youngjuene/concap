@@ -4,6 +4,8 @@
         --phase1-setup SETUP --sources SOURCES [--export EXPORT_DIR] [--out REPORT.json]
     envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \\
         --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir DIR [--log-dir DIR …]
+    uv run python scripts/diff_session_audit.py tokens \\
+        --writer-dir artifacts/diff/models/qwen3.5-9b-c2022362 --log-dir DIR [--log-dir DIR …]
 
 ``check`` runs on every pilot and participant session before analysis. The answer side is
 recomputed here rather than by diff: the object under each P2 point (re-reading the masks), the
@@ -25,10 +27,12 @@ template than the checkout is reported once, not call by call. It also checks th
 - every caption shown is one Trida wrote for that cue or an earlier one (the kept caption);
 - with ``--export``, that the export matches the store and the logs.
 
-``tokens`` runs in the generator environment. It re-applies Trida's chat template to every
-logged call's system message and prompt and compares the token hash with the one the worker
-reported, which shows the logged prompt is what reached the model. Run it when the model, the
-tokenizer or the generator environment changes.
+``tokens`` re-applies one model's chat template to every logged call of that model (its system
+message and prompt) and compares the token hash with the one the worker reported, which shows the
+logged prompt is what reached the model. Run it once per model, in that model's environment: Trida's
+calls in the generator environment (``--trida-dir``), the second-caption writer's (Qwen3.5-9B since
+2026-10-26) in the repository's (``--writer-dir``). Run it when a model, its tokenizer or its
+environment changes.
 
 Both only read; the store is opened read-only. Each exits 1 on any mismatch.
 """
@@ -76,7 +80,6 @@ from diff.phase1_tweak import (  # noqa: E402
     NOT_SEEN,
     OFFSCREEN_KO,
     RECORDING_ARTEFACTS,
-    TWEAK_LADDER,
     tweak_job_for,
     tweak_source,
 )
@@ -85,6 +88,7 @@ from diff.rewrite_prompts import (  # noqa: E402
     LIVE_CELL_PROMPTS,
     LIVE_RULES_VERSION,
     TUNER_SYSTEM,
+    TWEAK_LADDER,
     TWEAK_PROMPTS,
     render_tuner_system,
 )
@@ -937,13 +941,24 @@ def tokens(args: argparse.Namespace) -> int:
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from transformers import AutoTokenizer
 
-    tokenizer: Any = AutoTokenizer.from_pretrained(str(args.trida_dir), local_files_only=True)
+    from diff.model_profile import QWEN35_9B, TRIDA_7B
+
+    # Each model's calls are checked with its own tokenizer, in its own environment: Trida's in the
+    # generator environment, the Qwen3.5 writer's (2026-10-26) in the repository's.
+    model = QWEN35_9B if args.writer_dir is not None else TRIDA_7B
+    model_dir = args.writer_dir if args.writer_dir is not None else args.trida_dir
+    if model_dir is None:
+        raise SystemExit("pass --trida-dir (generator env) or --writer-dir (repository env)")
+    tokenizer: Any = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
     counts: Counter[str] = Counter()
     mismatches: list[str] = []
     for log_dir in args.log_dir:
         for path in sorted(log_dir.rglob("live-*.jsonl")):
             for record in read_jsonl(path):
                 kind = record.get("kind", "live")
+                if record["job"]["model"]["profile_id"] != model.profile_id:
+                    counts[f"{kind} by another model, not checked here"] += 1
+                    continue
                 if not record.get("token_ids_sha256"):
                     counts[f"{kind} not tokenized (failed first)"] += 1
                     continue
@@ -951,12 +966,10 @@ def tokens(args: argparse.Namespace) -> int:
                     {"role": "system", "content": record["system_message"]},
                     {"role": "user", "content": record["job"]["prompt"]["text"]},
                 ]
-                ids = [
-                    int(t)
-                    for t in tokenizer.apply_chat_template(
-                        messages, add_generation_prompt=True, tokenize=True
-                    )
-                ]
+                encoded = tokenizer.apply_chat_template(
+                    messages, add_generation_prompt=True, tokenize=True, **dict(model.chat_options)
+                )
+                ids = [int(t) for t in (encoded["input_ids"] if isinstance(encoded, Mapping) else encoded)]
                 digest = hashlib.sha256(json.dumps(ids, separators=(",", ":")).encode("utf-8")).hexdigest()
                 same = digest == record["token_ids_sha256"]
                 counts[f"{kind} {'match' if same else 'MISMATCH'}"] += 1
@@ -979,8 +992,13 @@ def main() -> int:
     checked.add_argument("--export", type=Path, help="a python -m diff export directory to compare")
     checked.add_argument("--out", type=Path, help="write the report as JSON")
     checked.set_defaults(handler=check)
-    tokenized = commands.add_parser("tokens", help="[generator env] re-tokenize every logged call")
-    tokenized.add_argument("--trida-dir", type=Path, required=True)
+    tokenized = commands.add_parser(
+        "tokens",
+        help="re-tokenize every logged call of one model: Trida (generator env) or the writer (repo env)",
+    )
+    model = tokenized.add_mutually_exclusive_group(required=True)
+    model.add_argument("--trida-dir", type=Path, help="[generator env] Trida's live calls")
+    model.add_argument("--writer-dir", type=Path, help="[repository env] Qwen3.5-9B's second captions")
     tokenized.add_argument("--log-dir", type=Path, action="append", required=True, help="repeatable")
     tokenized.set_defaults(handler=tokens)
     args = parser.parse_args()

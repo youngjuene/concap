@@ -216,10 +216,12 @@ def apply_candidate(candidate: Mapping[str, Any]) -> None:
             texture, context = key.split("-")
             cells[(int(texture), context)] = replace(cells[(int(texture), context)], text=text)
         replacements["LIVE_CELL_PROMPTS"] = cells
-    if "tweak" in candidate:  # a mode the candidate leaves out keeps the checkout's prompt
-        modes = dict(rewrite_prompts.TWEAK_PROMPTS)
+    if "tweak" in candidate:  # it replaces the ladder's first wording; a mode left out keeps the checkout's
+        first = rewrite_prompts.TWEAK_LADDER[0]
+        modes = dict(rewrite_prompts.TWEAK_WORDINGS[first])
         for mode, text in candidate["tweak"].items():
             modes[mode] = replace(modes[mode], text=text)
+        replacements["TWEAK_WORDINGS"] = {**rewrite_prompts.TWEAK_WORDINGS, first: modes}
         replacements["TWEAK_PROMPTS"] = modes
     if "text" in candidate.get("tuner", {}):
         replacements["TUNER_SYSTEM"] = replace(rewrite_prompts.TUNER_SYSTEM, text=candidate["tuner"]["text"])

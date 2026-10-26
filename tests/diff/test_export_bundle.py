@@ -84,7 +84,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         second,
         clip["caption"]["text"],
     )
-    assert (row["rung"], row["condition"]) == ("0", "trida_tau_090")
+    assert (row["rung"], row["wording"]) == ("0", "every-sound")
     assert row["emphasis"] in RESTORATIVE and row["emphasis_tied"] in ("True", "False")
     assert all(row[f"{name}_centred"] != "" for name in RESTORATIVE)
     assert row["attended_sound"] == clip["options"]["A1s"][0]["label"]

@@ -29,6 +29,11 @@ from typing import Any
 
 GENERATOR_LOCK = Path("envs/diff-generator/uv.lock")
 GENERATOR_PYTHON = Path("envs/diff-generator/.venv/bin/python")
+# Qwen3.5 needs transformers 5, which the repository environment pins (2026-10-26); Trida's code
+# keeps the generator environment at 4.57.3.
+WRITER_PYTHON = Path(".venv/bin/python")
+WRITER_LOCK = Path("uv.lock")
+WRITER_MIN_FREE_MIB = 19456  # Qwen3.5-9B peaked at 17.7 GiB on the delivery bench
 # Trida's bf16 weights take about 15 GB; a card needs this much free to host a live worker.
 LIVE_MIN_FREE_MIB = 17408
 PARTICIPANT_STORE = Path("artifacts/diff/participants.sqlite")
@@ -325,6 +330,16 @@ def worker(args: argparse.Namespace) -> int:
             return loaded, trida_runner.warm_up(loaded)
 
         return serve(load_trida, trida_runner.run_job, protocol, sys.stdin, freeze=trida_runner.freeze_live)
+    if model.runner == "qwen35":
+        from diff import qwen35_runner
+
+        def load_writer() -> tuple[Any, dict[str, Any]]:
+            loaded = qwen35_runner.load(args.model_dir, verification, device=args.device, lock_path=args.lock)
+            return loaded, qwen35_runner.warm_up(loaded)
+
+        return serve(
+            load_writer, qwen35_runner.run_job, protocol, sys.stdin, freeze=qwen35_runner.freeze_live
+        )
     from diff import qwen_runner
 
     def load_qwen() -> tuple[Any, dict[str, Any]]:
@@ -650,8 +665,10 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     # attended sound from its prompt's line, so that it passes the gate (phase1_usable) as one must.
     prompt = str(payload["prompt"]["text"])
     cell = payload.get("cell")
-    if cell is None:
-        match = re.search(r"주의를 기울인 소리: (.*?)\.\n", prompt)
+    if cell is None:  # "그중 X에 가장 주의를 기울였습니다" since the writer's wordings (2026-10-26)
+        match = re.search(r"그중 (.*?)에 가장 주의를 기울였습니다", prompt) or re.search(
+            r"주의를 기울인 소리: (.*?)\.\n", prompt
+        )
         text = f"{match.group(1) if match else ''}가 들린다 (시험용 · 두 번째 자막)"
     else:
         match = re.search(r"원래 자막: (.*)\Z", prompt)
@@ -669,6 +686,57 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
         "new_token_count": 0,
     }
     return {"status": "completed", "output": output, "latency_ms": 1500, "seed": None}
+
+
+def _writer_service(args: argparse.Namespace, log_dir: Path, tweak_check: Any) -> Any:
+    """Phase 1's second-caption writer: Qwen3.5-9B on its own GPU, in the repository environment."""
+    import functools
+
+    from diff.generation_worker import Supervisor, WorkerCommand
+    from diff.live_generation import LiveService
+    from diff.model_profile import QWEN35_9B, verify_snapshot
+
+    gpu = args.writer_gpu
+    if gpu is None or gpu in args.gpus.split(","):
+        raise SystemExit("phase 1 needs --writer-gpu, a GPU apart from --gpus, for the second-caption writer")
+    free = _gpu_free_mib().get(gpu, 0)
+    if free < WRITER_MIN_FREE_MIB:
+        raise SystemExit(f"GPU {gpu} has {free} MiB free; the writer needs {WRITER_MIN_FREE_MIB}")
+    print("verifying the Qwen3.5-9B snapshot (hashing every weight shard) …", flush=True)
+    record_path = log_dir / "verification-writer.json"
+    _write_json(record_path, verify_snapshot(args.writer_dir, QWEN35_9B, weights=True), force=True)
+    env = {
+        **os.environ,
+        "CUDA_VISIBLE_DEVICES": gpu,
+        "PYTHONPATH": str(Path("src").resolve()),
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+    }
+    argv = (
+        str(WRITER_PYTHON.absolute()),
+        "-m",
+        "diff",
+        "worker",
+        "--profile",
+        QWEN35_9B.profile_id,
+        "--model-dir",
+        str(args.writer_dir),
+        "--verification",
+        str(record_path),
+        "--device",
+        "cuda:0",
+        "--lock",
+        str(WRITER_LOCK),
+    )
+    command = WorkerCommand(
+        argv=argv, env=env, cwd=Path.cwd(), log_path=log_dir / f"worker-writer-gpu{gpu}.log"
+    )
+    supervisor = Supervisor(command, startup_timeout=1800.0)
+    print(f"loading Qwen3.5-9B on GPU {gpu} …", flush=True)
+    supervisor.ensure_started()
+    attempt = functools.partial(supervisor.attempt, kind="live")
+    return LiveService(attempt, log_dir / "sessions", check=None, tweak_check=tweak_check)
 
 
 def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> list[str]:
@@ -930,7 +998,10 @@ def live_serve(args: argparse.Namespace) -> int:
             supervisor.ensure_started()
             attempt = functools.partial(supervisor.attempt, kind="live")
             services.append(LiveService(attempt, log_dir / "sessions", check=check, tweak_check=check_record))
-    for service in services:
+    writers = None
+    if phase1 is not None and not args.fake_worker:
+        writers = LivePool([_writer_service(args, log_dir, check_record)])
+    for service in services + (writers.services if writers else []):
         service.start()
     app = build_participant_app(
         store=SessionStore(store_path),
@@ -941,6 +1012,7 @@ def live_serve(args: argparse.Namespace) -> int:
         job_for=job_for,
         phase1=phase1,
         tweak_for=tweak_for,
+        writers=writers,
     )
     first = "phase 1, then the watch" if phase1 else "the watch (no phase 1)"
     print(f"participant app on http://{args.host}:{args.port}/: {first}", flush=True)
@@ -1158,6 +1230,16 @@ def parser() -> argparse.ArgumentParser:
     )
     serve_live.add_argument("--trida-dir", type=Path)
     serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")
+    serve_live.add_argument(
+        "--writer-dir",
+        type=Path,
+        default=Path("artifacts/diff/models/qwen3.5-9b-c2022362"),
+        help="Qwen3.5-9B, phase 1's second-caption writer (2026-10-26)",
+    )
+    serve_live.add_argument(
+        "--writer-gpu",
+        help="the GPU for the writer, apart from --gpus (Qwen3.5-9B and Trida do not share one)",
+    )
     serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     serve_live.add_argument("--log-dir", type=Path, required=True)
     serve_live.add_argument("--host", default="127.0.0.1")

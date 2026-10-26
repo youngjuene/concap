@@ -92,7 +92,7 @@ class FakeAttempt:
     def __call__(self, payload: Mapping[str, Any], timeout: float) -> dict[str, Any]:
         self.calls.append(payload["job_id"])
         if payload.get("cell") is None:  # phase 1's second caption, naming the attended sound
-            attended = re.search(r"주의를 기울인 소리: (.*?)\.\n", payload["prompt"]["text"])
+            attended = re.search(r"그중 (.*?)에 가장 주의를 기울였습니다", payload["prompt"]["text"])
             text = f"{attended.group(1) if attended else ''}가 또렷하게 들린다."
             return {"status": "completed", "output": full_output(text), "latency_ms": 400}
         cue = payload["cue_index"]

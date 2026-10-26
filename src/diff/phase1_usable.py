@@ -22,7 +22,7 @@ caption before the study. This gate adds to the server's technical check
 - **The mode:** an acousmatic caption naming a place or object on screen; a scene-aware
   one naming a place the prompt did not give.
 
-A failure sends the clip to the next rung of ``phase1_tweak.TWEAK_LADDER``; when none is
+A failure sends the clip to the next rung of ``rewrite_prompts.TWEAK_LADDER``; when none is
 left the clip's second step is skipped, as before. Flags are recorded, never acted on:
 other sounds of the prompt left unnamed (the matcher is rough, and R2's key is intended,
 not checked) and spatial relations (:data:`RELATIONS`), which the drafts invented.

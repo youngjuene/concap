@@ -15,7 +15,6 @@ from diff.output_checks import GeneratedOutput, check_tweak
 from diff.phase1_tweak import (
     EMPHASIS_KO,
     RESTORATIVE,
-    TWEAK_LADDER,
     TweakError,
     emphases,
     named_in,
@@ -27,8 +26,15 @@ from diff.phase1_tweak import (
     variant_id,
 )
 from diff.phase1_usable import ECHO_STEMS, ITEM_STEMS
-from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, TWEAK_SLOTS, render_tweak
-from diff.study_protocol import LIVE_CONDITION, TWEAK_MAX_CHARS
+from diff.rewrite_prompts import (
+    TWEAK_LADDER,
+    TWEAK_PROMPTS,
+    TWEAK_PROVISIONAL,
+    TWEAK_SLOTS,
+    TWEAK_WORDINGS,
+    render_tweak,
+)
+from diff.study_protocol import TWEAK_MAX_CHARS, WRITER_CONDITION
 
 RATINGS = ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")
 ON_THE_ROAD = (0.5, 0.9)  # the road, and kyoto's bus
@@ -152,32 +158,43 @@ def test_a_source_judged_unseen_is_placed_here_unless_it_is_the_recording_s_own(
     assert steer(oslo, first_step(sound="s1"), "follow", root)[0]["offscreen"] == ""
 
 
-def test_both_prompts_name_every_slot_in_korean_only(clip: dict[str, Any], root: Path) -> None:
+def test_every_wording_names_every_slot_in_korean_only(clip: dict[str, Any], root: Path) -> None:
     for assignment, mode in (("follow", "scene"), ("counter", "acousmatic")):
         slots, _ = steer(clip, first_step(), assignment, root)
-        prompt = render_tweak(slots)
-        assert prompt.template_sha256 == TWEAK_PROMPTS[mode].sha256
-        for text in (
-            "「버스가 공회전하는 소리」",
-            "이 영상에서 들리는 소리: 버스 소리.",
-            "주의를 기울인 소리: 버스 소리.",
-            EMPHASIS_KO["extent_coherence"],
-        ):
-            assert text in prompt.text
-        assert "{" not in prompt.text and not re.search(r"[A-Za-z]", prompt.text)
-    assert "화면 속 대상이나 장소는 말하지 마세요" in TWEAK_PROMPTS["acousmatic"].text
-    assert "그 소리를 내는 대상과만 이어 주세요." in TWEAK_PROMPTS["scene"].text
-    assert "화면에 없는 대상을 지어내지 마세요" in TWEAK_PROMPTS["scene"].text
-    assert (TWEAK_PROMPTS["scene"].version, TWEAK_PROMPTS["acousmatic"].version) == (4, 5)
-    assert all(prompt.text.count("{emphasis}") == 1 for prompt in TWEAK_PROMPTS.values())
-    assert "트인" not in TWEAK_PROMPTS["acousmatic"].text  # v4: no open or enclosed feel from the sky
-    assert all("80자 이내로" in template.text for template in TWEAK_PROMPTS.values())
-    assert "이 장면에 퍼져 있는 소리" not in TWEAK_PROMPTS["scene"].text and TWEAK_MAX_CHARS == 80
+        for wording in TWEAK_LADDER:
+            prompt = render_tweak(slots, wording)
+            assert prompt.template_sha256 == TWEAK_WORDINGS[wording][mode].sha256
+            for text in (
+                "「버스가 공회전하는 소리」",
+                "실제로 들리는 소리는 버스 소리입니다.",
+                "그중 버스 소리에 가장 주의를 기울였습니다.",
+                EMPHASIS_KO["extent_coherence"],
+            ):
+                assert text in prompt.text
+            assert "{" not in prompt.text and not re.search(r"[A-Za-z]", prompt.text)
+        assert render_tweak(slots).text == render_tweak(slots, TWEAK_LADDER[0]).text
+    assert (
+        TWEAK_LADDER == ("every-sound", "checklist", "prose")
+        and TWEAK_PROMPTS is TWEAK_WORDINGS["every-sound"]
+    )
+    for wording, modes in TWEAK_WORDINGS.items():
+        assert {template.template_id for template in modes.values()} == {f"tweak-p1-{wording}"}
+        assert all(template.text.count("{emphasis}") == 1 for template in modes.values())
+        assert "화면 속 대상이나 장소는 말하지 " in modes["acousmatic"].text
+        assert "그 소리를 내는 대상과만" in modes["scene"].text
+        assert "지어내지 마세요" in modes["scene"].text
+        assert "트인" not in modes["acousmatic"].text  # no open or enclosed feel from the sky (2026-10-26)
+        assert all("처음 자막의 문장을 그대로 옮기지 마세요" in t.text for t in modes.values())
+    assert "빠짐없이 한 번씩" in TWEAK_WORDINGS["every-sound"]["scene"].text  # the bench's R1
+    assert "지킬 것:" in TWEAK_WORDINGS["checklist"]["scene"].text  # R3
+    assert "60자 안팎으로" in TWEAK_WORDINGS["prose"]["scene"].text and TWEAK_MAX_CHARS == 80  # P2
     assert TWEAK_PROVISIONAL is True
     with pytest.raises(ValueError, match="exactly the slots"):
         render_tweak({"mode": "scene", "caption": "x"})
     with pytest.raises(ValueError, match="mode must be one of"):
         render_tweak({"caption": "x"})
+    with pytest.raises(ValueError, match="wording must be one of"):
+        render_tweak(steer(clip, first_step(), "follow", root)[0], "label-lines")
 
 
 def ratings(fascination: float, away: float, coherence: float) -> dict[str, float]:
@@ -212,28 +229,35 @@ def test_the_emphasis_reflects_the_subscale_a_clip_stands_highest_on_for_this_pa
     ]
 
 
-def test_a_refused_caption_is_written_again_at_the_next_tau_with_what_the_gate_needs(
+def test_a_refused_caption_is_written_again_in_the_next_wording_with_what_the_gate_needs(
     clip: dict[str, Any], root: Path
 ) -> None:
     source, job, steer = tweak_request(clip, first_step(), "smoke", root=root)
     rungs = [tweak_job_for(clip, steer["slots"], "smoke", rung) for rung in range(len(TWEAK_LADDER))]
-    assert [j.condition for _, j, _ in rungs] == list(TWEAK_LADDER) and rungs[0][1].job_id == job.job_id
-    assert [j.generate["threshold"] for _, j, _ in rungs] == [0.9, 1.0, 0.7]
+    assert rungs[0][1].job_id == job.job_id and {j.condition for _, j, _ in rungs} == {WRITER_CONDITION}
+    assert [j.prompt.template_id for _, j, _ in rungs] == [f"tweak-p1-{w}" for w in TWEAK_LADDER]
     assert len({j.job_id for _, j, _ in rungs}) == len(TWEAK_LADDER)  # each rung is its own call
-    assert [(r["rung"], r["rungs"], r["condition"]) for _, _, r in rungs] == [
-        (rung, len(TWEAK_LADDER), condition) for rung, condition in enumerate(TWEAK_LADDER)
+    assert [(r["rung"], r["rungs"], r["wording"], r["template"]["wording"]) for _, _, r in rungs] == [
+        (rung, len(TWEAK_LADDER), wording, wording) for rung, wording in enumerate(TWEAK_LADDER)
     ]
     assert steer["gate"] == {"distractors": ["음악"], "names": ["남자의 말소리", "버스 소리", "음악"]}
     with pytest.raises(ValueError, match="rungs 0 to 2"):
         tweak_job_for(clip, steer["slots"], "smoke", len(TWEAK_LADDER))
 
 
-def test_the_job_is_phase_one_at_the_live_condition_and_follows_the_mode(
+def test_the_job_is_phase_one_by_the_qwen_writer_greedy_and_follows_the_mode(
     clip: dict[str, Any], root: Path
 ) -> None:
     source, job, record = tweak_request(clip, first_step(), "smoke", root=root)
-    assert (job.phase, job.condition, job.cell) == (1, LIVE_CONDITION, None)
-    assert job.spec()["generate"]["max_new_tokens"] == 128 and source.text == clip["caption"]["text"]
+    assert (job.phase, job.condition, job.cell) == (1, WRITER_CONDITION, None)
+    assert (job.profile_id, job.runner) == ("qwen3.5-9b@c2022362", "qwen35")
+    assert job.spec()["generate"] == {
+        "max_new_tokens": 128,
+        "do_sample": False,
+        "repetition_penalty": 1.0,
+        "eos_token_id": [248046, 248044],
+    }
+    assert source.text == clip["caption"]["text"]
     assert record["intended_r2_key"] == ["m1"] and record["job_id"] == job.job_id
     assert record["template"]["mode"] == "scene"
     assert tweak_request(clip, first_step(), "smoke", root=root)[1].job_id == job.job_id

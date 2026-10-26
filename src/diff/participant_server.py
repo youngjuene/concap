@@ -133,13 +133,16 @@ def build_participant_app(
     job_for: JobFor,
     phase1: Phase1 | None,
     tweak_for: TweakFor | None = None,
+    writers: LivePool | None = None,
     secret: bytes | None = None,
     clock: Callable[[], float] = time.time,
 ) -> Any:
     """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
 
     ``tweak_for(clip, slots, rung)`` builds a clip's second-caption job at a rung of its ladder;
-    phase 1 needs it.
+    phase 1 needs it. ``writers`` serve those jobs on their own model (Qwen3.5-9B since
+    2026-10-26, while phase 2 stays on Trida): a session holds a writer from its entry to the
+    handoff, and without ``writers`` the session's live worker writes them.
     """
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -202,7 +205,8 @@ def build_participant_app(
         pending = phase1.pending_tweaks(session.state)
         if not pending:
             return
-        service = pool.holder(session_id) or pool.acquire(session_id)
+        tweaks = writers or pool
+        service = tweaks.holder(session_id) or tweaks.acquire(session_id)
         if service is None:
             return
         for clip_key, slots, attempt, rung in pending:
@@ -258,6 +262,13 @@ def build_participant_app(
         except ValueError:
             return error(400, BAD_ID)
         if pool.acquire(session.session_id) is None:
+            return error(503, BUSY_MESSAGE)
+        if (
+            writers is not None
+            and session.state["stage"] == "phase1"
+            and writers.acquire(session.session_id) is None
+        ):
+            pool.release(session.session_id)
             return error(503, BUSY_MESSAGE)
         submit_pending(session.session_id)
         reply = {"next_url": WATCH_URL} if session.state["stage"] == "phase2" else {"stage": "phase1"}
@@ -325,6 +336,8 @@ def build_participant_app(
             return error(409, str(exc))
         except (ValueError, KeyError, TypeError) as exc:
             return error(400, str(exc))
+        if action == "handoff" and writers is not None:
+            writers.release(session.session_id)  # phase 1 is over: no second caption is left to write
         submit_pending(session.session_id)
         return JSONResponse(reply)
 

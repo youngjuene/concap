@@ -388,40 +388,160 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # the same sentence under either mode. Captions are now written live and shown once they pass
 # the gate (diff.phase1_usable), so the wording is approved here, once, rather than caption by
 # caption, and participant sessions wait for it.
+# Since 2026-10-26 (researcher) Qwen3.5-9B writes the second caption (diff.qwen35_runner), and a caption
+# the gate refuses is written again in another wording, since a greedy call repeats itself. So the
+# prompt has three wordings, tried in TWEAK_LADDER's order, each chosen on the 2026-10-26 delivery bench
+# (artifacts/diff/bench/candidates-20261026-live, RULE.md and RESULTS.md):
+# - every-sound (the bench's R1): the task first, the facts in sentences, the attended sound first,
+#   every listed sound once and no other, no copying, one short sentence ending in 다 of about 40
+#   characters;
+# - checklist (R3): the same facts, the rules as a numbered list, one or two sentences of about 50;
+# - prose (P2): every-sound's structure with one or two sentences of about 60, and only the listed
+#   sounds.
+# Every wording ends with {emphasis}'s sentence, the same under both modes, and keeps the 80-character
+# limit's margin. The scene-aware 4 / acousmatic 5 "tweak-p1" texts they replace had the slots as
+# "label: value" lines, which Trida answered with lists of names.
 TWEAK_PROVISIONAL: Final = True
-_TWEAK_HEAD: Final = (
-    "다음은 영상에서 들리는 소리를 설명한 자막입니다: 「{caption}」\n"
-    "이 영상에서 들리는 소리: {sounds}.\n"
-    "이 시청자가 가장 주의를 기울인 소리: {attended_sound}.\n"
-)
-_TWEAK_TAIL: Final = (
-    "위에 적힌 소리 외에 새로운 소리를 더하지 마세요. 80자 이내로 쓰고, 고쳐 쓴 자막만 출력하세요. "
-    "앞에 '자막' 같은 말이나 따옴표, 번호, 설명을 붙이지 마세요."
-)
-TWEAK_PROMPTS: Final[dict[str, PromptTemplate]] = {
-    "scene": PromptTemplate(
-        template_id="tweak-p1",
-        version=4,
-        text=(
-            _TWEAK_HEAD + "화면에서 두드러지는 것: {scene_elements}. 장면의 배경: {seen}. "
-            "화면에 음원이 보이는 소리: {visible_sounds}.\n"
-            "이 자막을 소리가 화면 속 장면 안에 자리 잡도록 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
-            "중심에 두고, 장면의 배경은 소리가 들리는 곳으로 쓰세요. 음원이 화면에 보이는 소리는 그 소리를 "
-            "내는 대상과만 이어 주세요.{offscreen} 소리를 그 소리를 내지 않는 대상에 잇거나 "
-            "화면에 없는 대상을 지어내지 마세요. {emphasis}\n" + _TWEAK_TAIL
+TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
+    "every-sound": {
+        "scene": PromptTemplate(
+            template_id="tweak-p1-every-sound",
+            version=1,
+            text=(
+                "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
+                "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
+                "처음 자막은 「{caption}」입니다.\n"
+                "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
+                "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
+                "화면에서 두드러지는 것은 {scene_elements}이고, 장면의 배경은 {seen}입니다. "
+                "화면에 음원이 보이는 소리는 {visible_sounds}입니다.\n"
+                "이 시청자가 주의를 기울인 소리를 중심에 두고, 장면의 배경을 소리가 들리는 곳으로 쓰세요. "
+                "음원이 보이는 소리는 그 소리를 내는 대상과만 이어 주세요.{offscreen} 화면에 없는 대상이나 "
+                "장소는 지어내지 마세요. "
+                "{emphasis}\n"
+                "이 시청자가 주의를 기울인 소리부터 쓰세요. "
+                "위에 적힌 소리를 빠짐없이 한 번씩 쓰고 그 밖의 소리는 쓰지 말고, 처음 자막에 있더라도 "
+                "위에 없는 소리는 빼세요. "
+                "처음 자막의 문장을 그대로 옮기지 마세요. "
+                "소리 이름을 쉼표로 늘어놓지 말고, '다'로 끝나는 짧은 문장 하나로 40자 안팎으로 쓰세요. "
+                "새로 쓴 자막만 출력하고, 앞에 '자막' 같은 말이나 따옴표, 설명을 붙이지 마세요."
+            ),
         ),
-    ),
-    "acousmatic": PromptTemplate(
-        template_id="tweak-p1",
-        version=5,
-        text=(
-            _TWEAK_HEAD
-            + "이 자막을 화면을 보지 않고 귀로만 듣는 것처럼 고쳐 쓰세요. 이 시청자가 주의를 기울인 소리를 "
-            "중심에 두고, 각 소리가 무슨 소리인지는 그대로 밝히되 화면 속 대상이나 장소는 말하지 마세요. "
-            "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요. {emphasis}\n" + _TWEAK_TAIL
+        "acousmatic": PromptTemplate(
+            template_id="tweak-p1-every-sound",
+            version=1,
+            text=(
+                "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
+                "화면을 보지 않고 귀로만 듣는 것처럼, 소리가 어떻게 들리는지 쓰는 것이 목표입니다.\n"
+                "처음 자막은 「{caption}」입니다.\n"
+                "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
+                "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
+                "이 시청자가 주의를 기울인 소리를 중심에 두고, 각 소리가 무슨 소리인지는 밝히되 화면 속 "
+                "대상이나 장소는 말하지 마세요. "
+                "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요. "
+                "{emphasis}\n"
+                "이 시청자가 주의를 기울인 소리부터 쓰세요. "
+                "위에 적힌 소리를 빠짐없이 한 번씩 쓰고 그 밖의 소리는 쓰지 말고, 처음 자막에 있더라도 "
+                "위에 없는 소리는 빼세요. "
+                "처음 자막의 문장을 그대로 옮기지 마세요. "
+                "소리 이름을 쉼표로 늘어놓지 말고, '다'로 끝나는 짧은 문장 하나로 40자 안팎으로 쓰세요. "
+                "새로 쓴 자막만 출력하고, 앞에 '자막' 같은 말이나 따옴표, 설명을 붙이지 마세요."
+            ),
         ),
-    ),
+    },
+    "checklist": {
+        "scene": PromptTemplate(
+            template_id="tweak-p1-checklist",
+            version=1,
+            text=(
+                "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
+                "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
+                "처음 자막은 「{caption}」입니다.\n"
+                "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
+                "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
+                "화면에서 두드러지는 것은 {scene_elements}이고, 장면의 배경은 {seen}입니다. "
+                "화면에 음원이 보이는 소리는 {visible_sounds}입니다.{offscreen}\n"
+                "지킬 것:\n"
+                "1. 이 시청자가 주의를 기울인 소리부터 쓰세요.\n"
+                "2. 음원이 보이는 소리는 그 소리를 내는 대상과만 잇고, 화면에 없는 대상이나 장소는 "
+                "지어내지 마세요.\n"
+                "3. {emphasis}\n"
+                "4. 위에 적힌 소리를 빠짐없이 한 번씩 쓰고, 그 밖의 소리는 쓰지 마세요. "
+                "처음 자막에 있더라도 위에 없는 소리는 빼세요.\n"
+                "5. 처음 자막의 문장을 그대로 옮기지 마세요.\n"
+                "6. '다'로 끝나는 문장 한두 개로 50자 안팎으로 쓰세요.\n"
+                "새로 쓴 자막만 출력하고, 번호나 따옴표, 설명을 붙이지 마세요."
+            ),
+        ),
+        "acousmatic": PromptTemplate(
+            template_id="tweak-p1-checklist",
+            version=1,
+            text=(
+                "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
+                "화면을 보지 않고 귀로만 듣는 것처럼, 소리가 어떻게 들리는지 쓰는 것이 목표입니다.\n"
+                "처음 자막은 「{caption}」입니다.\n"
+                "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
+                "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
+                "지킬 것:\n"
+                "1. 이 시청자가 주의를 기울인 소리부터 쓰세요.\n"
+                "2. 각 소리가 무슨 소리인지는 밝히되 화면 속 대상이나 장소는 말하지 말고, 소리가 어떻게 "
+                "들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요.\n"
+                "3. {emphasis}\n"
+                "4. 위에 적힌 소리를 빠짐없이 한 번씩 쓰고, 그 밖의 소리는 쓰지 마세요. "
+                "처음 자막에 있더라도 위에 없는 소리는 빼세요.\n"
+                "5. 처음 자막의 문장을 그대로 옮기지 마세요.\n"
+                "6. '다'로 끝나는 문장 한두 개로 50자 안팎으로 쓰세요.\n"
+                "새로 쓴 자막만 출력하고, 번호나 따옴표, 설명을 붙이지 마세요."
+            ),
+        ),
+    },
+    "prose": {
+        "scene": PromptTemplate(
+            template_id="tweak-p1-prose",
+            version=1,
+            text=(
+                "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
+                "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
+                "처음 자막은 「{caption}」입니다.\n"
+                "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
+                "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
+                "화면에서 두드러지는 것은 {scene_elements}이고, 장면의 배경은 {seen}입니다. "
+                "화면에 음원이 보이는 소리는 {visible_sounds}입니다.\n"
+                "이 시청자가 주의를 기울인 소리를 중심에 두고, 장면의 배경을 소리가 들리는 곳으로 쓰세요. "
+                "음원이 보이는 소리는 그 소리를 내는 대상과만 이어 주세요.{offscreen} 화면에 없는 대상이나 "
+                "장소는 지어내지 마세요. "
+                "{emphasis}\n"
+                "이 시청자가 주의를 기울인 소리부터 쓰세요. "
+                "위에 적힌 소리만 쓰고, 처음 자막에 있더라도 위에 없는 소리는 빼세요. "
+                "처음 자막의 문장을 그대로 옮기지 마세요. "
+                "소리 이름을 쉼표로 늘어놓지 말고, '다'로 끝나는 완결된 문장 한두 개로 60자 안팎으로 쓰세요. "
+                "새로 쓴 자막만 출력하고, 앞에 '자막' 같은 말이나 따옴표, 설명을 붙이지 마세요."
+            ),
+        ),
+        "acousmatic": PromptTemplate(
+            template_id="tweak-p1-prose",
+            version=1,
+            text=(
+                "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
+                "화면을 보지 않고 귀로만 듣는 것처럼, 소리가 어떻게 들리는지 쓰는 것이 목표입니다.\n"
+                "처음 자막은 「{caption}」입니다.\n"
+                "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
+                "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
+                "이 시청자가 주의를 기울인 소리를 중심에 두고, 각 소리가 무슨 소리인지는 밝히되 화면 속 "
+                "대상이나 장소는 말하지 마세요. "
+                "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요. "
+                "{emphasis}\n"
+                "이 시청자가 주의를 기울인 소리부터 쓰세요. "
+                "위에 적힌 소리만 쓰고, 처음 자막에 있더라도 위에 없는 소리는 빼세요. "
+                "처음 자막의 문장을 그대로 옮기지 마세요. "
+                "소리 이름을 쉼표로 늘어놓지 말고, '다'로 끝나는 완결된 문장 한두 개로 60자 안팎으로 쓰세요. "
+                "새로 쓴 자막만 출력하고, 앞에 '자막' 같은 말이나 따옴표, 설명을 붙이지 마세요."
+            ),
+        ),
+    },
 }
+TWEAK_LADDER: Final = ("every-sound", "checklist", "prose")
+TWEAK_PROMPTS: Final = TWEAK_WORDINGS[TWEAK_LADDER[0]]  # the first rung's, by mode
 _TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound", "emphasis")
 TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {
     "scene": (*_TWEAK_COMMON, "scene_elements", "seen", "visible_sounds", "offscreen"),
@@ -429,14 +549,17 @@ TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {
 }
 
 
-def render_tweak(slots: Mapping[str, str]) -> RenderedPrompt:
-    """Phase 1's second-caption prompt for the slots' mode, every slot filled; the fixed system message."""
+def render_tweak(slots: Mapping[str, str], wording: str = TWEAK_LADDER[0]) -> RenderedPrompt:
+    """Phase 1's second-caption prompt in ``wording`` for the slots' mode, every slot filled; the fixed
+    system message."""
     mode = slots.get("mode")
-    if mode not in TWEAK_PROMPTS:
-        raise ValueError(f"the tweak prompt's mode must be one of {sorted(TWEAK_PROMPTS)}, not {mode!r}")
+    if mode not in TWEAK_SLOTS:
+        raise ValueError(f"the tweak prompt's mode must be one of {sorted(TWEAK_SLOTS)}, not {mode!r}")
     if set(slots) != set(TWEAK_SLOTS[mode]):
         raise ValueError(f"the {mode} tweak prompt needs exactly the slots {list(TWEAK_SLOTS[mode])}")
-    template = TWEAK_PROMPTS[mode]
+    if wording not in TWEAK_WORDINGS:
+        raise ValueError(f"the tweak prompt's wording must be one of {list(TWEAK_WORDINGS)}, not {wording!r}")
+    template = TWEAK_WORDINGS[wording][mode]
     return RenderedPrompt(
         template.template_id,
         template.version,

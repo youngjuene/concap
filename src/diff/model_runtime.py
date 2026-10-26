@@ -40,9 +40,19 @@ class LoadedModel:
         return str(self.tokenizer.decode(token_ids, skip_special_tokens=False))
 
 
-def chat_token_ids(tokenizer: Any, prompt: RenderedPrompt) -> list[int]:
-    """The prompt as the model's own chat template tokenizes it: system turn, user turn, generation cue."""
-    ids = tokenizer.apply_chat_template(prompt.messages(), add_generation_prompt=True, tokenize=True)
+def chat_token_ids(
+    tokenizer: Any, prompt: RenderedPrompt, options: Mapping[str, Any] | None = None
+) -> list[int]:
+    """The prompt as the model's own chat template tokenizes it: system turn, user turn, generation cue.
+
+    ``options`` are the profile's template keywords (``ModelProfile.chat_options``). transformers 5
+    returns an encoding where 4.57 returned the IDs.
+    """
+    ids = tokenizer.apply_chat_template(
+        prompt.messages(), add_generation_prompt=True, tokenize=True, **dict(options or {})
+    )
+    if isinstance(ids, Mapping):
+        ids = ids["input_ids"]
     return [int(token) for token in ids]
 
 

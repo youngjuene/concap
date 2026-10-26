@@ -1,9 +1,8 @@
-"""Draft every second caption phase 1 can show, down the τ ladder as the live server does.
+"""Draft every second caption phase 1 can show, down the ladder as the live server does.
 
     uv run python scripts/diff_second_captions.py variants --phase1-setup SETUP --out VARIANTS.json
-    CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_second_captions.py draft \\
-        --variants VARIANTS.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \\
-        [--candidate CANDIDATE.json …] --out DRAFTS.json --sheet SHEET.csv
+    CUDA_VISIBLE_DEVICES=1 uv run python scripts/diff_second_captions.py draft \\
+        --variants VARIANTS.json [--candidate CANDIDATE.json …] --out DRAFTS.json --sheet SHEET.csv
     uv run python scripts/diff_second_captions.py rescore --variants VARIANTS.json \\
         --drafts DRAFTS.json --sheet SHEET.csv
 
@@ -17,15 +16,17 @@ study instead, on the sheet this script wrote.
 ``variants`` lists that set from the setup with ``phase1_tweak.reachable_slots``. Each slot set is one
 variant, keyed by ``phase1_tweak.variant_id`` (a hash of its slots).
 
-``draft`` writes every variant with Trida once per wording (the checkout's, or each candidate's in the
-prompt bench's format), at the study's settings, down ``phase1_tweak.TWEAK_LADDER`` until the gate
-passes one, as the server would: the delivery rate, rung by rung, and what the gate refused. Each
+``draft`` writes every variant with the second-caption writer (Qwen3.5-9B since 2026-10-26, in the
+repository environment) once per wording (the checkout's ladder, or each candidate in the prompt
+bench's format in place of its first wording), at the study's settings, down
+``rewrite_prompts.TWEAK_LADDER`` until the gate passes one, as the server would: the delivery rate,
+rung by rung, and what the gate refused. Each
 delivered (or last) caption is also scored with the bench's rougher measures. It writes the drafts and a
 sheet for reading (UTF-8 with a byte-order mark, for spreadsheet programs): one row per variant, with
 its slots and the drafts side by side with the rung that delivered them and their issues.
 
 ``rescore`` runs the gate and the measures again from the stored outputs after a change to either,
-rewriting the drafts and the sheet in place without Trida; a variant whose ladder stopped early is
+rewriting the drafts and the sheet in place without the model; a variant whose ladder stopped early is
 marked when the new gate would have gone further. It keeps the sheet's notes.
 """
 
@@ -53,19 +54,19 @@ from diff.job_plan import PlanError  # noqa: E402
 from diff.output_checks import readable, shown_text  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     EMPHASIS_KO,
-    TWEAK_LADDER,
     TWEAK_POLICY,
     reachable_slots,
     tweak_job_for,
     variant_id,
 )
 from diff.phase1_usable import DAMAGE, check_record  # noqa: E402
+from diff.rewrite_prompts import TWEAK_LADDER  # noqa: E402
 
 VARIANTS_SCHEMA = "diff.second-caption-variants/v2"  # v2: one variant per emphasis too
 DRAFTS_SCHEMA = "diff.second-caption-drafts/v2"  # v2: each variant down the ladder, the gate's verdicts
 PURPOSE = "smoke"  # drafts for review, not participant data
 MODES = ("scene", "acousmatic")
-WORDING_NAMES = ("LIVE_CELL_PROMPTS", "TWEAK_PROMPTS", "TUNER_SYSTEM")
+WORDING_NAMES = ("LIVE_CELL_PROMPTS", "TWEAK_PROMPTS", "TWEAK_WORDINGS", "TUNER_SYSTEM")
 ODD_SOURCE = re.compile(r"(하늘|나무|풀|땅|인도)(에서|에서부터)\s*(들려|울려|울린|들린|흐른)")
 FILLED = ("note",)  # the sheet's column for the reader
 EMPHASIS_OF = {sentence: name for name, sentence in EMPHASIS_KO.items()}
@@ -134,8 +135,8 @@ def draft(args: argparse.Namespace) -> int:
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    from diff import trida_runner
-    from diff.model_profile import TRIDA_7B, verify_snapshot
+    from diff import qwen35_runner
+    from diff.model_profile import QWEN35_9B, verify_snapshot
 
     document = json.loads(args.variants.read_text(encoding="utf-8"))
     if document.get("schema") != VARIANTS_SCHEMA:
@@ -146,14 +147,14 @@ def draft(args: argparse.Namespace) -> int:
         (path.stem, json.loads(path.read_text(encoding="utf-8"))) for path in args.candidate
     ] or [("checkout", {})]
 
-    print("verifying the Trida snapshot (hashing every weight shard) …", flush=True)
-    verification = verify_snapshot(args.trida_dir, TRIDA_7B, weights=True)
+    print("verifying the Qwen3.5-9B snapshot (hashing every weight shard) …", flush=True)
+    verification = verify_snapshot(args.model_dir, QWEN35_9B, weights=True)
     drafts: list[dict[str, Any]] = []
     templates: dict[str, Any] = {}
     with tempfile.TemporaryDirectory(prefix="hf-modules-") as modules:
         os.environ["HF_MODULES_CACHE"] = modules
-        loaded = trida_runner.load(args.trida_dir, verification, device=args.device)
-        trida_runner.warm_up(loaded)
+        loaded = qwen35_runner.load(args.model_dir, verification, device=args.device)
+        qwen35_runner.warm_up(loaded)
         for name, candidate in wordings:
             for attribute, value in checkout.items():
                 setattr(rewrite_prompts, attribute, value)
@@ -168,13 +169,13 @@ def draft(args: argparse.Namespace) -> int:
                 for rung in range(len(TWEAK_LADDER)):
                     source, job, steer = tweak_job_for(clip, variant["slots"], PURPOSE, rung)
                     try:
-                        result = trida_runner.run_job(loaded, trida_runner.freeze_live(loaded, job))
+                        result = qwen35_runner.run_job(loaded, qwen35_runner.freeze_live(loaded, job))
                     except PlanError as exc:
                         result = {"status": "refused", "error": str(exc)}
                     attempts.append(
                         {
                             "rung": rung,
-                            "condition": TWEAK_LADDER[rung],
+                            "wording": TWEAK_LADDER[rung],
                             "job_id": job.job_id,
                             "status": result["status"],
                             "error": result.get("error"),
@@ -189,7 +190,7 @@ def draft(args: argparse.Namespace) -> int:
         "schema": DRAFTS_SCHEMA,
         "variants": {"path": str(args.variants), "sha256": sha256_file(args.variants)},
         "phase1_setup_sha256": document["phase1_setup_sha256"],
-        "model": {"profile": TRIDA_7B.profile_id, "device": args.device, "purpose": PURPOSE},
+        "model": {"profile": QWEN35_9B.profile_id, "device": args.device, "purpose": PURPOSE},
         "wordings": templates,
         "drafts": drafts,
     }
@@ -248,7 +249,7 @@ def delivery(drafts: Sequence[Mapping[str, Any]]) -> str:
     rungs = [sum(d["delivered_rung"] == rung for d in drafts) for rung in range(len(TWEAK_LADDER))]
     delivered = sum(rungs)
     clean = sum(d["delivered_rung"] is not None and not d["issues"] for d in drafts)
-    by_rung = ", ".join(f"{condition} {count}" for condition, count in zip(TWEAK_LADDER, rungs, strict=True))
+    by_rung = ", ".join(f"{wording} {count}" for wording, count in zip(TWEAK_LADDER, rungs, strict=True))
     return f"{len(drafts)} drafts, {delivered} delivered ({by_rung}), {clean} of them with no issue"
 
 
@@ -328,7 +329,7 @@ def write_sheet(
                 row[f"rung:{name}"] = "none" if rung is None else TWEAK_LADDER[rung]
                 row[f"draft:{name}"] = written["shown"]
                 row[f"failures:{name}"] = " | ".join(
-                    f"{a['condition']}: {', '.join(a['failures']) or a['status']}"
+                    f"{a.get('wording', a.get('condition'))}: {', '.join(a['failures']) or a['status']}"
                     for a in written["attempts"]
                     if not a["delivered"]
                 )
@@ -343,9 +344,9 @@ def main() -> int:
     listed.add_argument("--phase1-setup", type=Path, required=True)
     listed.add_argument("--out", type=Path, required=True)
     listed.set_defaults(handler=variants)
-    drafted = commands.add_parser("draft", help="[generator env, GPU] write every variant down the ladder")
+    drafted = commands.add_parser("draft", help="[repository env, GPU] write every variant down the ladder")
     drafted.add_argument("--variants", type=Path, required=True)
-    drafted.add_argument("--trida-dir", type=Path, required=True)
+    drafted.add_argument("--model-dir", type=Path, default=Path("artifacts/diff/models/qwen3.5-9b-c2022362"))
     drafted.add_argument(
         "--candidate",
         type=Path,

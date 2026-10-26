@@ -16,9 +16,11 @@ which the caption centres, and the restorative appraisal (P4), whose emphasis
 *reflects* the quality the participant perceived most in this clip
 (:func:`emphases`). Each caption is written when stage A ends and shown once it
 passes the gate (:mod:`diff.phase1_usable`); the researcher no longer approves
-every caption before the study (that design, 2026-10-24, is retired). Trida's call
-is deterministic, so a caption the gate refuses is written again at the next τ of
-:data:`TWEAK_LADDER` rather than resampled.
+every caption before the study (that design, 2026-10-24, is retired). The writer is
+Qwen3.5-9B since the same day's delivery bench, on which Trida delivered too few
+sentence rewrites (:mod:`diff.qwen35_runner`). Its call is greedy, so a caption the gate
+refuses is written again in the next wording of ``rewrite_prompts.TWEAK_LADDER``; a
+first version varied Trida's τ, which reproduced the same text in 61 of 86 retries.
 Phase 1 tests the mode (follow or counter); the emphasis is applied the same way under
 either mode, and testing it is phase 2's role, under the same rule.
 
@@ -65,13 +67,20 @@ from typing import Any, Final
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
 from diff.phase1_binding import BASELINE, FOLLOW, decide_all
-from diff.rewrite_prompts import TWEAK_PROMPTS, TWEAK_PROVISIONAL, RenderedPrompt, render_tweak
-from diff.study_protocol import LIVE_CONDITION
+from diff.rewrite_prompts import (
+    TWEAK_LADDER,
+    TWEAK_PROMPTS,
+    TWEAK_PROVISIONAL,
+    TWEAK_WORDINGS,
+    RenderedPrompt,
+    render_tweak,
+)
 
 # v5 (2026-10-24): the scene-aware setting is the clip's distinctive element, not the V1 object.
 # v6 (2026-10-26): the acousmatic prompt has no space slot, so the scene's openness reaches no caption.
 # v7 (2026-10-26): the restorative emphasis steers both modes; captions are written live, on a τ ladder.
-TWEAK_POLICY: Final = "diff.phase1-tweak/v7"
+# v8 (2026-10-26): Qwen3.5-9B writes them, and the ladder's rungs are wordings.
+TWEAK_POLICY: Final = "diff.phase1-tweak/v8"
 EMPHASIS_POLICY: Final = "diff.phase1-emphasis/reflect-v1"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
 # The scene's elements (phase1_scene.ELEMENTS) in Korean.
@@ -102,9 +111,6 @@ EMPHASIS_KO: Final[dict[str, str]] = {
     "being_away_from": "소리를 들으며 잠시 다른 곳에 와 있는 듯한 느낌이 살아나도록 쓰세요.",
     "extent_coherence": "소리들이 따로 놀지 않고 서로 이어져 들리는 느낌이 살아나도록 쓰세요.",
 }
-# The second caption's τ, rung by rung: the live condition's, then the slowest (fewest tokens
-# committed per step, so the fewest cut or doubled words), then the fastest.
-TWEAK_LADDER: Final = (LIVE_CONDITION, "trida_tau_100", "trida_tau_070")
 # For named_in: a label's words that describe its sound rather than name it, by their ending (a
 # verb before a noun, "달리는"; an adverb, "멀리서", "크게"; an object, "도로를") or as listed.
 DESCRIBING: Final = re.compile(r"(?:는|서|게|를|을)$")
@@ -276,12 +282,13 @@ def tweak_source(clip: Mapping[str, Any]) -> CaptionSource:
     )
 
 
-def template_record(mode: str) -> dict[str, Any]:
-    template = TWEAK_PROMPTS[mode]
+def template_record(mode: str, wording: str = TWEAK_LADDER[0]) -> dict[str, Any]:
+    template = TWEAK_WORDINGS[wording][mode]
     return {
         "id": template.template_id,
         "version": template.version,
         "mode": mode,
+        "wording": wording,
         "sha256": template.sha256,
         "provisional": TWEAK_PROVISIONAL,
     }
@@ -303,22 +310,24 @@ def tweak_request(
 def tweak_job_for(
     clip: Mapping[str, Any], slots: Mapping[str, str], purpose: str, rung: int = 0
 ) -> tuple[CaptionSource, Job, dict[str, Any]]:
-    """The source, the job at ``rung`` of :data:`TWEAK_LADDER` and its steering record, from slots
-    already computed (and stored). The record carries what the gate needs to judge the output."""
+    """The source, the job at ``rung`` of ``rewrite_prompts.TWEAK_LADDER`` (its wording) and its
+    steering record, from slots already computed (and stored). The record carries what the gate
+    needs to judge the output."""
     if not 0 <= rung < len(TWEAK_LADDER):
         raise ValueError(f"the ladder has rungs 0 to {len(TWEAK_LADDER) - 1}, not {rung}")
-    prompt: RenderedPrompt = render_tweak(slots)
+    wording = TWEAK_LADDER[rung]
+    prompt: RenderedPrompt = render_tweak(slots, wording)
     source = tweak_source(clip)
-    job = tweak_job(source, prompt, purpose, TWEAK_LADDER[rung])
+    job = tweak_job(source, prompt, purpose)
     record = {
         "policy": TWEAK_POLICY,
-        "template": template_record(slots["mode"]),
+        "template": template_record(slots["mode"], wording),
         "slots": dict(slots),
         "intended_r2_key": intended_r2_key(clip),
         "job_id": job.job_id,
         "rung": rung,
         "rungs": len(TWEAK_LADDER),
-        "condition": TWEAK_LADDER[rung],
+        "wording": wording,
         "gate": gate_inputs(clip),
     }
     return source, job, record

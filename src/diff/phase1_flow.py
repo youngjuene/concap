@@ -29,7 +29,7 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   outcome back (:meth:`Phase1.record_tweak`). Since 2026-10-26 every caption is
   written live (from 2026-10-24 the researcher's approved captions were shown
   instead): one the gate refuses (:mod:`diff.phase1_usable`) stays pending at
-  the next rung of ``phase1_tweak.TWEAK_LADDER``, and fails only on the last.
+  the next rung of ``rewrite_prompts.TWEAK_LADDER``, and fails only on the last.
   Reaching P6 before the caption is ready shows a waiting page; a clip whose
   second caption failed has its second step skipped (``skip-second``), with the
   reason recorded. P7's record also tests

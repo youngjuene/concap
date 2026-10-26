@@ -29,7 +29,7 @@ from typing import Any, Final
 
 from diff.analysis_decisions import gate_problems
 from diff.caption_sources import CaptionSource, bundle_problems
-from diff.model_profile import QWEN_7B, TRIDA_7B, ModelProfile, profile
+from diff.model_profile import QWEN35_9B, QWEN_7B, TRIDA_7B, ModelProfile, profile
 from diff.output_checks import CHECKS_VERSION
 from diff.rewrite_prompts import RenderedPrompt, render_live, render_phase1, render_phase2
 from diff.study_protocol import (
@@ -38,6 +38,8 @@ from diff.study_protocol import (
     LIVE_CONDITION,
     PHASE1_CONDITIONS,
     PROTOCOL_SHA256,
+    QWEN35_ENDOFTEXT_ID,
+    QWEN35_IM_END_ID,
     QWEN_BOS_IDS,
     QWEN_CONDITION,
     QWEN_ENDOFTEXT_ID,
@@ -53,6 +55,7 @@ from diff.study_protocol import (
     TRIDA_TEMPERATURE,
     TRIDA_USE_BLOCK_CACHE,
     TWEAK_CANVAS_TOKENS,
+    WRITER_CONDITION,
     canvas_tokens,
     lattice_cells,
     sha256_of,
@@ -99,6 +102,17 @@ def qwen_call_settings(phase: int) -> dict[str, Any]:
         "do_sample": False,
         "repetition_penalty": 1.0,
         "eos_token_id": [QWEN_IM_END_ID, QWEN_ENDOFTEXT_ID],
+    }
+
+
+def writer_call_settings() -> dict[str, Any]:
+    """Qwen3.5-9B's second-caption call: greedy within the tweak canvas, no repetition penalty, either
+    terminator; temperature, top_p and top_k stay unset (the revision ships no generation config)."""
+    return {
+        "max_new_tokens": TWEAK_CANVAS_TOKENS,
+        "do_sample": False,
+        "repetition_penalty": 1.0,
+        "eos_token_id": [QWEN35_IM_END_ID, QWEN35_ENDOFTEXT_ID],
     }
 
 
@@ -338,21 +352,19 @@ def live_job(source: CaptionSource, texture: int, context: str, system_message: 
     )
 
 
-def tweak_job(
-    source: CaptionSource, prompt: RenderedPrompt, purpose: str, condition: str = LIVE_CONDITION
-) -> Job:
-    """Phase 1's second caption for one participant and clip, at ``condition``'s τ: the live
-    condition's first, another rung's after the gate refused it (``phase1_tweak.TWEAK_LADDER``).
+def tweak_job(source: CaptionSource, prompt: RenderedPrompt, purpose: str) -> Job:
+    """Phase 1's second caption for one participant and clip, written by Qwen3.5-9B (researcher,
+    2026-10-26; Trida at the live condition before). A refused caption is written again in the
+    ladder's next wording (``rewrite_prompts.TWEAK_LADDER``), so the prompt tells the rungs apart.
 
     The prompt carries the participant's slots, so the job's identity is that
     participant's: the same answers give the same job.
     """
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a tweak job serves a participant session or a smoke run, not {purpose!r}"])
-    if condition not in TAU_CONDITIONS:
-        raise PlanError([f"a tweak job runs at a τ condition {sorted(TAU_CONDITIONS)}, not {condition!r}"])
-    generate = trida_call_settings(TWEAK_CANVAS_TOKENS, TAU_CONDITIONS[condition])
-    return make_job(source, purpose, condition, None, TRIDA_7B, prompt, generate, phase=1)
+    return make_job(
+        source, purpose, WRITER_CONDITION, None, QWEN35_9B, prompt, writer_call_settings(), phase=1
+    )
 
 
 def prompt_guard_problems(job: Job, token_ids: Sequence[int]) -> list[str]:
@@ -373,7 +385,8 @@ def prompt_guard_problems(job: Job, token_ids: Sequence[int]) -> list[str]:
                 problems.append(f"{job.job_id}: the prompt contains the {name} token {token}")
         if len(token_ids) == TRIDA_BLOCK_SIZE:
             problems.append(f"{job.job_id}: a prompt of exactly {TRIDA_BLOCK_SIZE} tokens is not prefilled")
-    bos_ids = TRIDA_BOS_IDS if trida else QWEN_BOS_IDS
+    # Qwen3.5's template has no BOS, and Qwen2.5's BOS ID is an ordinary token in its vocabulary.
+    bos_ids = {"trida": TRIDA_BOS_IDS, "qwen": QWEN_BOS_IDS}.get(job.runner, ())
     present = sorted({token for token in token_ids if token in bos_ids})
     if present:
         problems.append(f"{job.job_id}: the rendered prompt contains BOS token(s) {present}")
