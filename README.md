@@ -1,5 +1,220 @@
 # ConCap: Comparative Preference Alignment for Audiovisual Congruence Captioning
 
+The repository holds two packages:
+
+- **`diff`** (`src/diff`, `python -m diff`): **the study instrument in use.** It
+  is one participant app in two phases. Phase 1 shows 12 street clips twice
+  each, the second time with an audio caption rewritten from that
+  participant's own responses. Phase 2 plays long videos whose captions are
+  rewritten live as the participant moves two sliders. See
+  [the `diff` study](#the-diff-study-phase-1-and-phase-2) below, and
+  [`docs/v4-diff/`](docs/v4-diff/) for the operator runbook and the plan.
+- **`dpo`** (`src/dpo`): the preference-alignment pipeline ConCap began as,
+  with its earlier participant instruments. It is described from
+  [the `dpo` pipeline](#the-preference-alignment-pipeline-dpo) on.
+
+## 0. Install and verify
+
+Requirements: Linux, Python 3.11, `uv >= 0.11`, Git. The `diff` app needs no
+GPU, only an Anthropic API key for its caption writer
+([below](#the-diff-study-phase-1-and-phase-2)). `dpo`'s real training
+additionally requires the locked CUDA/PyTorch stack. One RTX 3090-class card
+(24 GB) is the reference setup and fits a contract declaring one caption track;
+a contract declaring two loads a base per track in one process, so it needs a
+card per track until those bases are shared.
+
+```bash
+uv sync --dev
+make check      # ruff + mypy --strict + pytest + lockfile check
+make smoke      # offline end-to-end canary
+```
+
+`make check` covers both packages, the `diff` suite (`tests/diff`) included.
+`make smoke` is `dpo`'s complete health check: a cold canary executes every
+pipeline stage on synthetic fixtures with the tiny CPU backend (all matrix
+cells train with real optimizer steps, the flipped-label retrainings
+included), and a warm rerun must reuse the same report artifact with zero
+recomputation. The live commands gate themselves: without a CUDA device or a
+wired backend, `train`, `select`, `candidates generate`, and `study export`
+refuse with exit 3 and no side effects. For a persistent, inspectable
+workspace run the underlying commands yourself:
+
+```bash
+uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
+uv run dpo artifact verify --workspace artifacts/canary --all
+```
+
+## The `diff` study: phase 1 and phase 2
+
+### Purpose
+
+The study asks how an audio caption that answers to a listener's own
+experience of a street changes that experience, toward attention restoration.
+
+- **Phase 1** shows 12 short street clips, two viewings each. The first
+  viewing shows the clip's prepared caption as it was written. The second shows
+  a caption rewritten for this participant from their answers to the first:
+  - it centres the sound they said they attended to most;
+  - it carries the restorative quality they perceived most in that clip:
+    fascination, being away, or extent and coherence (Payne, 2013), each
+    centred on their own mean over the clips;
+  - it is written in one of two modes. *Scene-aware* ties the sounds to what
+    is on screen; *acousmatic* describes them as heard, without the picture.
+    A Bayesian binding model recommends a mode for each clip from three
+    inputs: how visible the noticed sound's source is (measured from Sa2VA
+    masks), whether they pointed at it on a still, and their ratings of how
+    the sounds fit the scene. A balanced plan then follows or counters that
+    recommendation. That contrast is what phase 1 tests.
+- **Phase 2** plays three five-minute videos. Their captions are rewritten
+  live while the participant moves two sliders:
+  - texture: how the sounds are described, from none to a little to a lot;
+  - context: broad kinds, specific sources, or places and relations.
+
+  The rewriter's role text (the tuner) is built from that participant's
+  phase-1 answers. Items after the videos close the session. Testing how the
+  restorative emphasis modulates the experience is planned for phase 2, under
+  the same rule, once phase 1 is confirmed; it is not built yet.
+
+Every caption is written by Claude Sonnet 5.5 through the Claude API
+(`diff.claude_writer`), at low effort. Trida-7B wrote them until 2026-10-27, and
+Qwen3.5-9B phase 1's for a day; why they were replaced is in the plan. Nothing
+in the app runs on a GPU.
+
+### A session
+
+The experimenter types the participant ID on the start screen. Typing the
+same ID resumes an unfinished session, and a finished ID is refused. The
+pages follow the study's questionnaire sheet, in Korean:
+
+1. **Introduction, consent and a practice clip.**
+2. **Stage A, the 12 clips in a random order recorded per participant.** For
+   each clip:
+   - the first viewing, with the prepared caption;
+   - where on a still the sound seemed to come from (V1);
+   - which sound they attended to most (A1s);
+   - the restorative appraisal (P4);
+   - the remaining first-step items (P5).
+3. **Second captions.** When stage A closes, each clip's mode is decided, and
+   its second caption is written and checked. A gate (`diff.phase1_usable`)
+   refuses:
+   - broken or cut-off text;
+   - copies of the first caption, and lists of names;
+   - a missing attended sound, or a sound that is not in the audio;
+   - the questionnaire's own wording;
+   - a place in the wrong mode.
+
+   A refused caption is written again at the next rung of a retry ladder:
+   the first wording twice, then two others. A clip whose last rung is
+   refused skips its second step.
+4. **Stage B, the same clips in the same order.** For each clip:
+   - the second viewing, with the participant's caption;
+   - the point on a still again (V2);
+   - the sound attended to again (A2s);
+   - the appraisal again (P9);
+   - ratings of the caption (S1–S3);
+   - recall of the caption (R1, and R2: which sounds it named).
+5. **Phase 2.** A short briefing opens the live watch. On each slider move the
+   caption on screen is rewritten within about 2–3 s. After the videos come
+   the researcher's post-watch items.
+6. **The end screen.** The interview and debrief happen outside the app.
+
+### Running it
+
+The app runs in the repository environment. The writer reads the API key
+from the shell. Put the key in `~/.bashrc`, above its "If not running
+interactively" guard, so scripts and non-interactive shells see it too, and
+keep the file private (`chmod 600 ~/.bashrc`):
+
+```bash
+export ANTHROPIC_API_KEY=…   # never in the repository; the key's owner pays for the calls
+```
+
+Build and approve the phase-1 setup and the phase-2 cues first (runbook §6
+and §7), then list everything that would stop a participant session, and
+serve:
+
+```bash
+uv run python -m diff live preflight \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json \
+  --sources data/phase2/phase2-cues.json \
+  --video viewing-1=data/phase2/viewing-1.mp4 --video viewing-2=data/phase2/viewing-2.mp4 \
+  --video viewing-3=data/phase2/viewing-3.mp4 --items path/to/items.json
+
+uv run python -m diff live serve \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json \
+  --sources data/phase2/phase2-cues.json \
+  --video viewing-1=data/phase2/viewing-1.mp4 --video viewing-2=data/phase2/viewing-2.mp4 \
+  --video viewing-3=data/phase2/viewing-3.mp4 --items path/to/items.json \
+  --sessions 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
+```
+
+Open `http://<host>:8782/`. Notes:
+- `--sessions` sets how many participants can run at once.
+- `--purpose smoke` runs before the gates are met, on its own store.
+- Add `--fake-worker` to walk the interface with placeholder captions, without
+  the API.
+- `serve` makes one short API call at start, and stops if the key or the
+  network fails.
+
+**What leaves the machine:** every caption prompt goes to Anthropic. A
+prompt holds the clip's caption and sound words, the sound the participant
+attended to, the emphasis their ratings chose, or the phase-2 tuner text. It
+holds no participant ID and no raw answer.
+
+**After sessions:**
+
+```bash
+uv run python -m diff export --log-dir artifacts/diff/live-20261028 \
+  --phase1-setup artifacts/diff/phase1/setup-draft.json --out artifacts/diff/export-20261028
+uv run python scripts/diff_session_audit.py check --store artifacts/diff/participants.sqlite \
+  --log-dir artifacts/diff/live-20261028 --phase1-setup artifacts/diff/phase1/setup-draft.json \
+  --sources data/phase2/phase2-cues.json --export artifacts/diff/export-20261028
+```
+
+- **The export** is the only way data leave the app. It writes CSVs for the
+  phase-1 answers, the second captions, blind R2 coding and the post-watch
+  items, plus every session's full record.
+  - The second-caption file names the mode, the follow or counter plan, the
+    emphasis and the model that wrote each caption.
+- **The audit** recomputes every session from its answers. It checks:
+  - the modes, the emphases and the prompts;
+  - every logged request against the job it should have sent;
+  - the retry ladder and what each screen showed;
+  - the export.
+
+**Benches** check caption delivery before a study day. Each API call is
+billed, and Claude's output varies between runs.
+- `scripts/diff_second_captions.py` writes every second caption a participant
+  can reach down the retry ladder.
+- `scripts/diff_prompt_bench.py` scores candidate wordings of the live, second-
+  caption and tuner prompts on fixed answers.
+
+### Status
+
+Participant sessions are refused until the researcher approves:
+- the nine live prompts and the tuner's role text;
+- the second-caption wordings and the gate;
+- the binding model's parameters and plan;
+- the phase-1 setup;
+- every phase-2 starting caption.
+
+`live preflight` lists whatever is still open. The post-watch items are the
+researcher's to write. What has been measured, decided and left open is in
+[`docs/v4-diff/plan.md`](docs/v4-diff/plan.md). The operator steps are in
+[`docs/v4-diff/runbook.md`](docs/v4-diff/runbook.md).
+
+## Earlier and retired instruments
+
+- **`dpo regen` is retired** (2026-10-19). `diff` replaced it as the study
+  instrument. The code stays in `src/dpo/regen`, frozen, with
+  [`docs/v3-regen/`](docs/v3-regen/), and `make open`/`deploy/edge` still
+  describe its old public door.
+- **The `dpo session` and `dpo console` instruments**, and **the congruency-
+  slider study** (`dpo study serve`), belong to the `dpo` pipeline below.
+  [`docs/README.md`](docs/README.md) maps every instrument's documents.
+
+## The preference-alignment pipeline (`dpo`)
+
 ConCap (package: `dpo`) is a pipeline with five jobs, in order:
 
 1. **Collect** human caption preferences through a local web UI: prepared
@@ -21,52 +236,9 @@ every result-affecting knob; and the same commands run the synthetic canary on
 CPU and the real study on GPU — which backend executes is a contract field,
 not a different code path.
 
-## 0. Install and verify
+## The `dpo` study, end to end
 
-Requirements: Linux, Python 3.11, `uv >= 0.11`, Git. Real training
-additionally requires the locked CUDA/PyTorch stack. One RTX 3090-class card
-(24 GB) is the reference setup and fits a contract declaring one caption track;
-a contract declaring two loads a base per track in one process, so it needs a
-card per track until those bases are shared.
-
-```bash
-uv sync --dev
-make check      # ruff + mypy --strict + pytest + lockfile check
-make smoke      # offline end-to-end canary
-```
-
-`make smoke` is the complete health check: a cold canary executes every
-pipeline stage on synthetic fixtures with the tiny CPU backend (all matrix
-cells train with real optimizer steps, the flipped-label retrainings
-included), and a warm rerun must reuse the same report artifact with zero
-recomputation. The live commands gate themselves: without a CUDA device or a
-wired backend, `train`, `select`, `candidates generate`, and `study export`
-refuse with exit 3 and no side effects. For a persistent, inspectable
-workspace run the underlying commands yourself:
-
-```bash
-uv run dpo canary run --workspace artifacts/canary --contract configs/study/canary.toml
-uv run dpo artifact verify --workspace artifacts/canary --all
-```
-
-## Caption regeneration interfaces
-
-Two participant protocols are available and have separate entry points:
-
-- `dpo regen serve` runs the existing A/B calibration/check-up instrument.
-  `make open` and `deploy/edge` continue to publish this legacy service.
-- `python -m dpo.regen.study_api` runs the new multi-clip calibration followed
-  by three five-minute interactive videos and one final experience survey.
-  See the [two-stage run guide](src/dpo/regen/STUDY.md) for preparation and launch.
-  Its three real viewing videos still need preparation; without a model backend,
-  it uses explicitly recorded authored fallback captions for rehearsal.
-
-The default `pytest` and `make test` commands collect both protocols' tests.
-Starting the new app does not replace or repoint the existing public service.
-
-## The current study, end to end
-
-The live study is `configs/study/street-audio.toml` — Gemma 4 E4B on the
+The `dpo` pipeline's study is `configs/study/street-audio.toml` — Gemma 4 E4B on the
 **audio caption track only** (see the contract header for why), over 48 street
 clips split train 27 / validation 7 / test 7 / study 7. Its working data:
 
@@ -451,6 +623,14 @@ the record is never rewritten, and the raw files stay on disk as the
 append-only source.
 
 ## Repository structure
+
+`src/diff/` is the study app. It holds:
+- the phase-1 flow, the binding model, and the second caption's steering and
+  gate;
+- the live phase-2 scheduler and server;
+- the Claude writer, the session store and the export.
+
+Its design is in [`docs/v4-diff/`](docs/v4-diff/). `src/dpo/` is the pipeline:
 
 ```text
 src/dpo/
