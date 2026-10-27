@@ -11,8 +11,8 @@ import pytest
 
 from diff.__main__ import verification_record_path
 from diff.model_profile import (
+    CLAUDE_WRITER,
     PROFILES,
-    QWEN35_9B,
     QWEN_7B,
     TRIDA_7B,
     ModelProfile,
@@ -30,12 +30,12 @@ def test_the_pins_and_hash_shapes() -> None:
     assert all(
         len(value) == 64 for p in PROFILES.values() for value in [*p.files.values(), *p.weights.values()]
     )
-    # Dream was removed on 2026-10-12; Qwen3.5-9B writes phase 1's second captions since 2026-10-26.
-    assert set(PROFILES) == {TRIDA_7B.profile_id, QWEN_7B.profile_id, QWEN35_9B.profile_id}
-    assert QWEN35_9B.revision == "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
-    assert QWEN35_9B.token_ids == {"endoftext": 248044, "im_end": 248046}
-    assert (QWEN35_9B.runner, QWEN35_9B.remote_code, len(QWEN35_9B.weights)) == ("qwen35", (), 4)
-    assert dict(QWEN35_9B.chat_options) == {"enable_thinking": False} and QWEN35_9B.record()["chat_options"]
+    # Dream was removed on 2026-10-12, and Qwen3.5-9B (phase 1's writer on 2026-10-26) on 2026-10-27:
+    # Claude writes the second captions through the API, so its profile pins no files.
+    assert set(PROFILES) == {TRIDA_7B.profile_id, QWEN_7B.profile_id}
+    assert CLAUDE_WRITER.profile_id == "claude-sonnet-5-5@api-2026-10-21"
+    assert (CLAUDE_WRITER.runner, CLAUDE_WRITER.model) == ("claude", "claude-sonnet-5-5")
+    assert CLAUDE_WRITER.profile_id not in PROFILES and CLAUDE_WRITER.record()["api_version"] == "2026-10-21"
 
 
 def test_the_trida_pin_and_token_ids() -> None:

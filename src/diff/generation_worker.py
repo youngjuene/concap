@@ -43,7 +43,8 @@ from diff.study_protocol import sha256_of
 
 ATTEMPT_SCHEMA: Final = "diff.attempt/v1"
 DECODE_EVENT_SCHEMA: Final = "diff.decode-event/v2"
-TRANSIENT: Final = frozenset({"worker_lost", "device_error"})
+# api_unavailable: the Claude API timed out, was unreachable, or answered 429 or 5xx (diff.claude_writer).
+TRANSIENT: Final = frozenset({"worker_lost", "device_error", "api_unavailable"})
 # count_mismatch: forward calls or new positions differ from steps/canvas (§6.2);
 # rng_consumed: a greedy (Qwen) call changed an RNG state (AC-07); leftover_mask: a mask
 # token survived in the canvas. None of these is transient, so none is retried.
@@ -56,6 +57,7 @@ TECHNICAL_FAILURES: Final = frozenset(
         "count_mismatch",
         "rng_consumed",
         "leftover_mask",
+        "api_unavailable",
     }
 )
 STATUSES: Final = frozenset({"completed", "timeout", "refused"}) | TECHNICAL_FAILURES

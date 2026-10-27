@@ -19,8 +19,9 @@ Files written to ``--out``:
   R2, the intended key, the sounds the second-caption prompt named.
 - ``second_captions.csv``: one row per participant × clip: the status (and why
   a step was skipped), the first and second captions, where the second came
-  from (``trida``, written live since 2026-10-26, by Qwen3.5-9B, with the wording of the
-  rung that delivered it; ``approved`` in sessions of 2026-10-24 to 26), what steered it
+  from (``trida``, written live since 2026-10-26, by Claude through the API since 2026-10-27
+  and Qwen3.5-9B that day, with the wording of the rung that delivered it; ``approved`` in
+  sessions of 2026-10-24 to 26), what steered it
   (the attended sound; the restorative emphasis it reflects and each subscale's
   centred mean; the binding model's evidence and P(bound), the recommended mode,
   follow or counter, the mode used and the caption type), the

@@ -140,9 +140,9 @@ def build_participant_app(
     """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
 
     ``tweak_for(clip, slots, rung)`` builds a clip's second-caption job at a rung of its ladder;
-    phase 1 needs it. ``writers`` serve those jobs on their own model (Qwen3.5-9B since
-    2026-10-26, while phase 2 stays on Trida): a session holds a writer from its entry to the
-    handoff, and without ``writers`` the session's live worker writes them.
+    phase 1 needs it. ``writers`` serve those jobs on their own model (Claude through the API
+    since 2026-10-27, while phase 2 stays on Trida): a session holds a writer from its entry to
+    the handoff, and without ``writers`` the session's live worker writes them.
     """
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse

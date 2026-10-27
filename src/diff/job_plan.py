@@ -29,7 +29,7 @@ from typing import Any, Final
 
 from diff.analysis_decisions import gate_problems
 from diff.caption_sources import CaptionSource, bundle_problems
-from diff.model_profile import QWEN35_9B, QWEN_7B, TRIDA_7B, ModelProfile, profile
+from diff.model_profile import CLAUDE_WRITER, QWEN_7B, TRIDA_7B, ApiModel, ModelProfile, profile
 from diff.output_checks import CHECKS_VERSION
 from diff.rewrite_prompts import RenderedPrompt, render_live, render_phase1, render_phase2
 from diff.study_protocol import (
@@ -38,8 +38,6 @@ from diff.study_protocol import (
     LIVE_CONDITION,
     PHASE1_CONDITIONS,
     PROTOCOL_SHA256,
-    QWEN35_ENDOFTEXT_ID,
-    QWEN35_IM_END_ID,
     QWEN_BOS_IDS,
     QWEN_CONDITION,
     QWEN_ENDOFTEXT_ID,
@@ -54,8 +52,10 @@ from diff.study_protocol import (
     TRIDA_SMALL_BLOCK_SIZE,
     TRIDA_TEMPERATURE,
     TRIDA_USE_BLOCK_CACHE,
-    TWEAK_CANVAS_TOKENS,
     WRITER_CONDITION,
+    WRITER_EFFORT,
+    WRITER_FALLBACK_BETA,
+    WRITER_MAX_TOKENS,
     canvas_tokens,
     lattice_cells,
     sha256_of,
@@ -106,13 +106,14 @@ def qwen_call_settings(phase: int) -> dict[str, Any]:
 
 
 def writer_call_settings() -> dict[str, Any]:
-    """Qwen3.5-9B's second-caption call: greedy within the tweak canvas, no repetition penalty, either
-    terminator; temperature, top_p and top_k stay unset (the revision ships no generation config)."""
+    """The second-caption writer's request keywords apart from the prompt (``claude_writer.request_body``):
+    the pinned model at low effort, room for its thinking, and the server-side fallback."""
     return {
-        "max_new_tokens": TWEAK_CANVAS_TOKENS,
-        "do_sample": False,
-        "repetition_penalty": 1.0,
-        "eos_token_id": [QWEN35_IM_END_ID, QWEN35_ENDOFTEXT_ID],
+        "model": CLAUDE_WRITER.model,
+        "max_tokens": WRITER_MAX_TOKENS,
+        "output_config": {"effort": WRITER_EFFORT},
+        "fallbacks": "default",
+        "betas": [WRITER_FALLBACK_BETA],
     }
 
 
@@ -141,7 +142,8 @@ class Job:
 
     @property
     def caps(self) -> dict[str, Any]:
-        return {"canvas_tokens": self.generate["max_new_tokens"], "timeout_s": TIMEOUT_SECONDS}
+        canvas = self.generate.get("max_new_tokens", self.generate.get("max_tokens"))  # an API call's limit
+        return {"canvas_tokens": canvas, "timeout_s": TIMEOUT_SECONDS}
 
     @property
     def checks_profile(self) -> str:
@@ -304,7 +306,7 @@ def make_job(
     purpose: str,
     condition: str,
     cell: Mapping[str, Any] | None,
-    model: ModelProfile,
+    model: ModelProfile | ApiModel,
     prompt: RenderedPrompt,
     generate: Mapping[str, Any],
     *,
@@ -353,9 +355,10 @@ def live_job(source: CaptionSource, texture: int, context: str, system_message: 
 
 
 def tweak_job(source: CaptionSource, prompt: RenderedPrompt, purpose: str) -> Job:
-    """Phase 1's second caption for one participant and clip, written by Qwen3.5-9B (researcher,
-    2026-10-26; Trida at the live condition before). A refused caption is written again in the
-    ladder's next wording (``rewrite_prompts.TWEAK_LADDER``), so the prompt tells the rungs apart.
+    """Phase 1's second caption for one participant and clip, written by Claude through the API
+    (researcher, 2026-10-27; Qwen3.5-9B on 2026-10-26, Trida at the live condition before). A refused
+    caption is written again in the ladder's next wording (``rewrite_prompts.TWEAK_LADDER``), so the
+    prompt tells the rungs apart.
 
     The prompt carries the participant's slots, so the job's identity is that
     participant's: the same answers give the same job.
@@ -363,7 +366,7 @@ def tweak_job(source: CaptionSource, prompt: RenderedPrompt, purpose: str) -> Jo
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a tweak job serves a participant session or a smoke run, not {purpose!r}"])
     return make_job(
-        source, purpose, WRITER_CONDITION, None, QWEN35_9B, prompt, writer_call_settings(), phase=1
+        source, purpose, WRITER_CONDITION, None, CLAUDE_WRITER, prompt, writer_call_settings(), phase=1
     )
 
 
@@ -385,7 +388,7 @@ def prompt_guard_problems(job: Job, token_ids: Sequence[int]) -> list[str]:
                 problems.append(f"{job.job_id}: the prompt contains the {name} token {token}")
         if len(token_ids) == TRIDA_BLOCK_SIZE:
             problems.append(f"{job.job_id}: a prompt of exactly {TRIDA_BLOCK_SIZE} tokens is not prefilled")
-    # Qwen3.5's template has no BOS, and Qwen2.5's BOS ID is an ordinary token in its vocabulary.
+    # Each runner's own BOS IDs; another model's may be an ordinary token in its vocabulary.
     bos_ids = {"trida": TRIDA_BOS_IDS, "qwen": QWEN_BOS_IDS}.get(job.runner, ())
     present = sorted({token for token in token_ids if token in bos_ids})
     if present:

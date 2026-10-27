@@ -4,8 +4,6 @@
         --phase1-setup SETUP --sources SOURCES [--export EXPORT_DIR] [--out REPORT.json]
     envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \\
         --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir DIR [--log-dir DIR …]
-    uv run python scripts/diff_session_audit.py tokens \\
-        --writer-dir artifacts/diff/models/qwen3.5-9b-c2022362 --log-dir DIR [--log-dir DIR …]
 
 ``check`` runs on every pilot and participant session before analysis. The answer side is
 recomputed here rather than by diff: the object under each P2 point (re-reading the masks), the
@@ -17,8 +15,9 @@ noticed source, the attended sound, the tuner's heard families and rating means.
 prompt functions then render what those values should have produced, and every logged call is
 compared with that, so new prompt wording needs no change here. A session that ran an older
 template than the checkout is reported once, not call by call. It also checks that:
-- each clip's second caption went down the τ ladder as the server must take it (2026-10-26): every
-  logged attempt is the recomputed job at its rung, re-running the check and gate gives its logged
+- each clip's second caption went down the ladder as the server must take it (2026-10-26): every
+  logged attempt is the recomputed job at its rung, the request an API writer logged (2026-10-27) is
+  the one that job sends, re-running the check and gate gives its logged
   verdict, each rung was left only after a refusal (or a second transient failure), and the
   caption shown at P6 is the one the gate passed, or a clip that never passed was skipped
   (sessions of 2026-10-24 to 26 showed the researcher's approved text: audit them at that commit);
@@ -27,12 +26,11 @@ template than the checkout is reported once, not call by call. It also checks th
 - every caption shown is one Trida wrote for that cue or an earlier one (the kept caption);
 - with ``--export``, that the export matches the store and the logs.
 
-``tokens`` re-applies one model's chat template to every logged call of that model (its system
-message and prompt) and compares the token hash with the one the worker reported, which shows the
-logged prompt is what reached the model. Run it once per model, in that model's environment: Trida's
-calls in the generator environment (``--trida-dir``), the second-caption writer's (Qwen3.5-9B since
-2026-10-26) in the repository's (``--writer-dir``). Run it when a model, its tokenizer or its
-environment changes.
+``tokens`` re-applies Trida's chat template to every logged Trida call (its system message and
+prompt) and compares the token hash with the one the worker reported, which shows the logged prompt
+is what reached the model. Run it in the generator environment when the model, its tokenizer or its
+environment changes. The second-caption writer has no tokenizer here (Claude through the API since
+2026-10-27); ``check`` compares the request it logged with the recomputed job's instead.
 
 Both only read; the store is opened read-only. Each exits 1 on any mismatch.
 """
@@ -58,6 +56,7 @@ REPO_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff.caption_sources import CATEGORIES_KO, CaptionSource, parse_sources  # noqa: E402
+from diff.claude_writer import request_body  # noqa: E402
 from diff.export_bundle import caption_id  # noqa: E402
 from diff.generation_worker import TRANSIENT  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
@@ -515,6 +514,13 @@ def audit_phase1(
                     attempt["system_message"] == job.prompt.system_message,
                     f"{where}: tweak system message {attempt['system_message']!r}",
                 )
+                if job.runner == "claude":
+                    logged = (attempt.get("api") or {}).get("request_sha256")
+                    audit.ok(
+                        "tweak-call",
+                        logged == sha256_of(request_body(job)),
+                        f"{where}: the logged request {str(logged)[:12]} is not the job's",
+                    )
                 text = shown_on_screen(audit, where, attempt)
                 passed = False
                 if attempt["status"] == "completed" and attempt.get("output"):
@@ -941,15 +947,10 @@ def tokens(args: argparse.Namespace) -> int:
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from transformers import AutoTokenizer
 
-    from diff.model_profile import QWEN35_9B, TRIDA_7B
+    from diff.model_profile import TRIDA_7B
 
-    # Each model's calls are checked with its own tokenizer, in its own environment: Trida's in the
-    # generator environment, the Qwen3.5 writer's (2026-10-26) in the repository's.
-    model = QWEN35_9B if args.writer_dir is not None else TRIDA_7B
-    model_dir = args.writer_dir if args.writer_dir is not None else args.trida_dir
-    if model_dir is None:
-        raise SystemExit("pass --trida-dir (generator env) or --writer-dir (repository env)")
-    tokenizer: Any = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
+    model = TRIDA_7B
+    tokenizer: Any = AutoTokenizer.from_pretrained(str(args.trida_dir), local_files_only=True)
     counts: Counter[str] = Counter()
     mismatches: list[str] = []
     for log_dir in args.log_dir:
@@ -992,13 +993,8 @@ def main() -> int:
     checked.add_argument("--export", type=Path, help="a python -m diff export directory to compare")
     checked.add_argument("--out", type=Path, help="write the report as JSON")
     checked.set_defaults(handler=check)
-    tokenized = commands.add_parser(
-        "tokens",
-        help="re-tokenize every logged call of one model: Trida (generator env) or the writer (repo env)",
-    )
-    model = tokenized.add_mutually_exclusive_group(required=True)
-    model.add_argument("--trida-dir", type=Path, help="[generator env] Trida's live calls")
-    model.add_argument("--writer-dir", type=Path, help="[repository env] Qwen3.5-9B's second captions")
+    tokenized = commands.add_parser("tokens", help="[generator env] re-tokenize every logged Trida call")
+    tokenized.add_argument("--trida-dir", type=Path, required=True, help="Trida's pinned snapshot")
     tokenized.add_argument("--log-dir", type=Path, action="append", required=True, help="repeatable")
     tokenized.set_defaults(handler=tokens)
     args = parser.parse_args()

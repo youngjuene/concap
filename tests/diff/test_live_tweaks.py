@@ -119,7 +119,7 @@ def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
     flags = [finding["code"] for finding in outcomes[1]["checks"]["flags"]]
     assert "identical_to_source" in flags  # a quoted copy is still a copy
     lines = [json.loads(line) for line in (tmp_path / "logs" / "live-s1.jsonl").read_text().splitlines()]
-    assert lines[0]["schema"] == "diff.tweak-attempt/v2"
+    assert lines[0]["schema"] == "diff.tweak-attempt/v3"
     assert lines[0]["output"]["text"] == "자막: 「버스가 낮게 공회전한다.」"
     assert (
         lines[0]["shown_text"] == "버스가 낮게 공회전한다." and lines[0]["display_rule"] == "diff.display/v2"

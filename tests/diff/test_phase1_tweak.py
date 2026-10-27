@@ -245,18 +245,20 @@ def test_a_refused_caption_is_written_again_in_the_next_wording_with_what_the_ga
         tweak_job_for(clip, steer["slots"], "smoke", len(TWEAK_LADDER))
 
 
-def test_the_job_is_phase_one_by_the_qwen_writer_greedy_and_follows_the_mode(
+def test_the_job_is_phase_one_by_the_claude_writer_at_low_effort_and_follows_the_mode(
     clip: dict[str, Any], root: Path
 ) -> None:
     source, job, record = tweak_request(clip, first_step(), "smoke", root=root)
     assert (job.phase, job.condition, job.cell) == (1, WRITER_CONDITION, None)
-    assert (job.profile_id, job.runner) == ("qwen3.5-9b@c2022362", "qwen35")
+    assert (job.profile_id, job.runner) == ("claude-sonnet-5-5@api-2026-10-21", "claude")
     assert job.spec()["generate"] == {
-        "max_new_tokens": 128,
-        "do_sample": False,
-        "repetition_penalty": 1.0,
-        "eos_token_id": [248046, 248044],
+        "model": "claude-sonnet-5-5",
+        "max_tokens": 2048,
+        "output_config": {"effort": "low"},
+        "fallbacks": "default",
+        "betas": ["server-side-fallback-2026-07-01"],
     }
+    assert job.caps["canvas_tokens"] == 2048
     assert source.text == clip["caption"]["text"]
     assert record["intended_r2_key"] == ["m1"] and record["job_id"] == job.job_id
     assert record["template"]["mode"] == "scene"

@@ -56,6 +56,9 @@ except for one identical retry after a transient worker or device failure. Since
 2026-10-26 (captions written live, made usable by engineering) an output that
 fails its check goes to the next rung of the request's ladder (``next``; the
 session's flow queues the new job), and ends the tweak only on the last rung.
+Since 2026-10-27 the second captions have their own services, whose attempt is the
+Claude API writer (:mod:`diff.claude_writer`) rather than a worker; the API's record
+of each call is logged with it, and a busy or unreachable API counts as transient.
 """
 
 from __future__ import annotations
@@ -83,7 +86,7 @@ from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 # v4 (2026-10-20): ``usable`` instead; which caption each window showed is in the exposure log.
 LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v4"
 STARTING_CAPTION: Final = "starting-caption"
-TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v2"
+TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v3"  # v3 (2026-10-27): the API writer's ``api`` record
 LATENCY_WINDOW: Final = 20
 LATENCY_QUANTILE: Final = 0.9
 LATENCY_FLOOR_MS: Final = 0
@@ -363,11 +366,11 @@ def tweak_outcome(
 
 
 class LiveService:
-    """One Trida worker (one GPU) serving one session at a time, on its own thread.
+    """One Trida worker (one GPU), or one writer, serving one session at a time, on its own thread.
 
     ``attempt`` is ``Supervisor.attempt`` bound to ``kind="live"`` in production
-    and a fake in tests. ``check`` turns a result into the check record logged
-    beside it.
+    (``ClaudeWriter.attempt`` for a writer) and a fake in tests. ``check`` turns a
+    result into the check record logged beside it.
     """
 
     def __init__(
@@ -530,6 +533,7 @@ class LiveService:
             "status": result.get("status"),
             "error": result.get("error"),
             "token_ids_sha256": result.get("token_ids_sha256"),
+            "api": result.get("api"),
             "latency_ms": result.get("latency_ms"),
             "wall_ms": result.get("wall_ms"),
             "output": result.get("output"),

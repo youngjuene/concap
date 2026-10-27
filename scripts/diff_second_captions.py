@@ -1,7 +1,7 @@
 """Draft every second caption phase 1 can show, down the ladder as the live server does.
 
     uv run python scripts/diff_second_captions.py variants --phase1-setup SETUP --out VARIANTS.json
-    CUDA_VISIBLE_DEVICES=1 uv run python scripts/diff_second_captions.py draft \\
+    ANTHROPIC_API_KEY=… uv run python scripts/diff_second_captions.py draft \\
         --variants VARIANTS.json [--candidate CANDIDATE.json …] --out DRAFTS.json --sheet SHEET.csv
     uv run python scripts/diff_second_captions.py rescore --variants VARIANTS.json \\
         --drafts DRAFTS.json --sheet SHEET.csv
@@ -16,11 +16,12 @@ study instead, on the sheet this script wrote.
 ``variants`` lists that set from the setup with ``phase1_tweak.reachable_slots``. Each slot set is one
 variant, keyed by ``phase1_tweak.variant_id`` (a hash of its slots).
 
-``draft`` writes every variant with the second-caption writer (Qwen3.5-9B since 2026-10-26, in the
-repository environment) once per wording (the checkout's ladder, or each candidate in the prompt
-bench's format in place of its first wording), at the study's settings, down
-``rewrite_prompts.TWEAK_LADDER`` until the gate passes one, as the server would: the delivery rate,
-rung by rung, and what the gate refused. Each
+``draft`` writes every variant with the second-caption writer (Claude through the API since
+2026-10-27, ``diff.claude_writer``; Qwen3.5-9B on 2026-10-26) once per wording (the checkout's ladder,
+or each candidate in the prompt bench's format in place of its first wording), at the study's
+settings, down ``rewrite_prompts.TWEAK_LADDER`` until the gate passes one, as the server would: the
+delivery rate, rung by rung, what the gate refused, and each call's latency and tokens. ``--jobs``
+variants run at once (each one's ladder in order), since the API, unlike a GPU, serves several. Each
 delivered (or last) caption is also scored with the bench's rougher measures. It writes the drafts and a
 sheet for reading (UTF-8 with a byte-order mark, for spreadsheet programs): one row per variant, with
 its slots and the drafts side by side with the rung that delivered them and their issues.
@@ -36,10 +37,8 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 import re
 import sys
-import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -50,7 +49,6 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from diff_prompt_bench import apply_candidate, manipulation, measure  # noqa: E402
 
 from diff import rewrite_prompts  # noqa: E402
-from diff.job_plan import PlanError  # noqa: E402
 from diff.output_checks import readable, shown_text  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     EMPHASIS_KO,
@@ -132,11 +130,11 @@ def issues(draft: Mapping[str, Any], mode: str) -> list[str]:
 
 
 def draft(args: argparse.Namespace) -> int:
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    from diff import qwen35_runner
-    from diff.model_profile import QWEN35_9B, verify_snapshot
+    from concurrent.futures import ThreadPoolExecutor
+
+    from diff.claude_writer import ClaudeWriter
+    from diff.live_generation import LIVE_DEADLINE_S
+    from diff.model_profile import CLAUDE_WRITER
 
     document = json.loads(args.variants.read_text(encoding="utf-8"))
     if document.get("schema") != VARIANTS_SCHEMA:
@@ -147,57 +145,72 @@ def draft(args: argparse.Namespace) -> int:
         (path.stem, json.loads(path.read_text(encoding="utf-8"))) for path in args.candidate
     ] or [("checkout", {})]
 
-    print("verifying the Qwen3.5-9B snapshot (hashing every weight shard) …", flush=True)
-    verification = verify_snapshot(args.model_dir, QWEN35_9B, weights=True)
+    writer = ClaudeWriter()
+    print(f"{CLAUDE_WRITER.model}: {writer.warm_up()}", flush=True)
+
+    def ladder(variant: Mapping[str, Any], name: str) -> dict[str, Any]:
+        clip = clips[variant["clip"]]
+        attempts = []
+        for rung in range(len(TWEAK_LADDER)):
+            source, job, steer = tweak_job_for(clip, variant["slots"], PURPOSE, rung)
+            result = writer.attempt(job.record(), LIVE_DEADLINE_S)
+            if result["status"] == "api_unavailable":  # the server's one identical retry
+                result = writer.attempt(job.record(), LIVE_DEADLINE_S)
+            attempts.append(
+                {
+                    "rung": rung,
+                    "wording": TWEAK_LADDER[rung],
+                    "job_id": job.job_id,
+                    "status": result["status"],
+                    "error": result.get("error"),
+                    "output": result.get("output"),
+                    "latency_ms": result.get("latency_ms"),
+                    "api": result.get("api"),
+                }
+            )
+            if judged(source, steer, attempts[-1])["delivered"]:
+                break
+        return scored_draft(variant, clip, name, attempts)
+
     drafts: list[dict[str, Any]] = []
     templates: dict[str, Any] = {}
-    with tempfile.TemporaryDirectory(prefix="hf-modules-") as modules:
-        os.environ["HF_MODULES_CACHE"] = modules
-        loaded = qwen35_runner.load(args.model_dir, verification, device=args.device)
-        qwen35_runner.warm_up(loaded)
-        for name, candidate in wordings:
-            for attribute, value in checkout.items():
-                setattr(rewrite_prompts, attribute, value)
-            apply_candidate(candidate)
-            templates[name] = {
-                "candidate": candidate.get("name"),
-                "sha256": {mode: rewrite_prompts.TWEAK_PROMPTS[mode].sha256 for mode in MODES},
-            }
-            for variant in document["variants"]:
-                clip = clips[variant["clip"]]
-                attempts = []
-                for rung in range(len(TWEAK_LADDER)):
-                    source, job, steer = tweak_job_for(clip, variant["slots"], PURPOSE, rung)
-                    try:
-                        result = qwen35_runner.run_job(loaded, qwen35_runner.freeze_live(loaded, job))
-                    except PlanError as exc:
-                        result = {"status": "refused", "error": str(exc)}
-                    attempts.append(
-                        {
-                            "rung": rung,
-                            "wording": TWEAK_LADDER[rung],
-                            "job_id": job.job_id,
-                            "status": result["status"],
-                            "error": result.get("error"),
-                            "output": result.get("output"),
-                        }
-                    )
-                    if judged(source, steer, attempts[-1])["delivered"]:
-                        break
-                drafts.append(scored_draft(variant, clip, name, attempts))
-            print(f"{name}: {len(document['variants'])} drafts", flush=True)
+    for name, candidate in wordings:
+        for attribute, value in checkout.items():
+            setattr(rewrite_prompts, attribute, value)
+        apply_candidate(candidate)
+        templates[name] = {
+            "candidate": candidate.get("name"),
+            "sha256": {mode: rewrite_prompts.TWEAK_PROMPTS[mode].sha256 for mode in MODES},
+        }
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            drafts += pool.map(ladder, document["variants"], [name] * len(document["variants"]))
+        print(f"{name}: {len(document['variants'])} drafts", flush=True)
     report = {
         "schema": DRAFTS_SCHEMA,
         "variants": {"path": str(args.variants), "sha256": sha256_file(args.variants)},
         "phase1_setup_sha256": document["phase1_setup_sha256"],
-        "model": {"profile": QWEN35_9B.profile_id, "device": args.device, "purpose": PURPOSE},
+        "model": {"profile": CLAUDE_WRITER.profile_id, "purpose": PURPOSE},
         "wordings": templates,
         "drafts": drafts,
     }
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     write_sheet(args.sheet, document, drafts, [name for name, _ in wordings])
-    print(f"{args.out}: {delivery(drafts)}; sheet {args.sheet}")
+    print(f"{args.out}: {delivery(drafts)}; {calls(drafts)}; sheet {args.sheet}")
     return 0
+
+
+def calls(drafts: Sequence[Mapping[str, Any]]) -> str:
+    """The API calls behind the drafts: how many, their median and slowest latency, tokens, fallbacks."""
+    made = [a for d in drafts for a in d["attempts"] if a.get("api")]
+    latencies = sorted(a["latency_ms"] for a in made if a.get("latency_ms") is not None)
+    if not latencies:
+        return "no API calls"
+    tokens = {side: sum(int(a["api"].get(f"{side}_tokens", 0)) for a in made) for side in ("input", "output")}
+    fallbacks = sum(bool(a["api"].get("fallback")) for a in made)
+    return (
+        f"{len(made)} calls, median {latencies[len(latencies) // 2]} ms, slowest {latencies[-1]} ms, "
+        f"{tokens['input']} input and {tokens['output']} output tokens, {fallbacks} fallbacks"
+    )
 
 
 def judged(source: Any, steer: Mapping[str, Any], attempt: dict[str, Any]) -> dict[str, Any]:
@@ -344,9 +357,8 @@ def main() -> int:
     listed.add_argument("--phase1-setup", type=Path, required=True)
     listed.add_argument("--out", type=Path, required=True)
     listed.set_defaults(handler=variants)
-    drafted = commands.add_parser("draft", help="[repository env, GPU] write every variant down the ladder")
+    drafted = commands.add_parser("draft", help="[repository env, API key] every variant down the ladder")
     drafted.add_argument("--variants", type=Path, required=True)
-    drafted.add_argument("--model-dir", type=Path, default=Path("artifacts/diff/models/qwen3.5-9b-c2022362"))
     drafted.add_argument(
         "--candidate",
         type=Path,
@@ -354,7 +366,7 @@ def main() -> int:
         default=[],
         help="a wording in the prompt bench's format, repeatable (default: the checkout's)",
     )
-    drafted.add_argument("--device", default="cuda:0", help="within CUDA_VISIBLE_DEVICES")
+    drafted.add_argument("--jobs", type=int, default=4, help="variants written at once")
     drafted.add_argument("--out", type=Path, required=True)
     drafted.add_argument("--sheet", type=Path, required=True)
     drafted.set_defaults(handler=draft)

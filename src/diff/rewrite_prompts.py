@@ -388,8 +388,9 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # the same sentence under either mode. Captions are now written live and shown once they pass
 # the gate (diff.phase1_usable), so the wording is approved here, once, rather than caption by
 # caption, and participant sessions wait for it.
-# Since 2026-10-26 (researcher) Qwen3.5-9B writes the second caption (diff.qwen35_runner), and a caption
-# the gate refuses is written again in another wording, since a greedy call repeats itself. So the
+# Since 2026-10-26 (researcher) a caption the gate refuses is written again in another wording, since
+# a greedy call repeats itself (Qwen3.5-9B, the writer that day). Claude, the writer since 2026-10-27
+# (diff.claude_writer), keeps the same ladder. So the
 # prompt has three wordings, tried in TWEAK_LADDER's order, each chosen on the 2026-10-26 delivery bench
 # (artifacts/diff/bench/candidates-20261026-live, RULE.md and RESULTS.md):
 # - every-sound (the bench's R1): the task first, the facts in sentences, the attended sound first,

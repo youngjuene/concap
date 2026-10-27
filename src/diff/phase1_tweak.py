@@ -17,10 +17,12 @@ which the caption centres, and the restorative appraisal (P4), whose emphasis
 (:func:`emphases`). Each caption is written when stage A ends and shown once it
 passes the gate (:mod:`diff.phase1_usable`); the researcher no longer approves
 every caption before the study (that design, 2026-10-24, is retired). The writer is
-Qwen3.5-9B since the same day's delivery bench, on which Trida delivered too few
-sentence rewrites (:mod:`diff.qwen35_runner`). Its call is greedy, so a caption the gate
-refuses is written again in the next wording of ``rewrite_prompts.TWEAK_LADDER``; a
-first version varied Trida's τ, which reproduced the same text in 61 of 86 retries.
+Claude through the API since 2026-10-27 (:mod:`diff.claude_writer`), after the local
+models failed the delivery benches: Trida delivered too few sentence rewrites, and
+Qwen3.5-9B, the writer for a day, drifted into other scripts and dropped sounds. A caption
+the gate refuses is written again in the next wording of ``rewrite_prompts.TWEAK_LADDER``
+(a greedy call repeats itself; a first version varied Trida's τ, which reproduced the
+same text in 61 of 86 retries).
 Phase 1 tests the mode (follow or counter); the emphasis is applied the same way under
 either mode, and testing it is phase 2's role, under the same rule.
 
@@ -80,7 +82,8 @@ from diff.rewrite_prompts import (
 # v6 (2026-10-26): the acousmatic prompt has no space slot, so the scene's openness reaches no caption.
 # v7 (2026-10-26): the restorative emphasis steers both modes; captions are written live, on a τ ladder.
 # v8 (2026-10-26): Qwen3.5-9B writes them, and the ladder's rungs are wordings.
-TWEAK_POLICY: Final = "diff.phase1-tweak/v8"
+# v9 (2026-10-27): Claude writes them through the API, on the same ladder.
+TWEAK_POLICY: Final = "diff.phase1-tweak/v9"
 EMPHASIS_POLICY: Final = "diff.phase1-emphasis/reflect-v1"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
 # The scene's elements (phase1_scene.ELEMENTS) in Korean.

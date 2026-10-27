@@ -45,7 +45,7 @@ def sha256_tokens(token_ids: Sequence[int]) -> str:
     return sha256_of([int(token) for token in token_ids])
 
 
-PROTOCOL_SCHEMA: Final = "diff.study-protocol/v7"  # v7 (2026-10-26): phase 1's second captions by Qwen3.5-9B
+PROTOCOL_SCHEMA: Final = "diff.study-protocol/v8"  # v8 (2026-10-27): phase 1's second captions by Claude
 
 # Qwen2.5-7B-Instruct's token IDs at a09a3545 (the baseline), checked against the
 # pinned tokenizer: <|endoftext|> is EOS and PAD, <|im_end|> ends a chat turn.
@@ -58,15 +58,6 @@ QWEN_TERMINATOR_IDS: Final[dict[int, str]] = {QWEN_ENDOFTEXT_ID: "endoftext", QW
 QWEN_BOS_IDS: Final = (QWEN_CONFIG_BOS_ID,)
 # A conservative prompt-plus-output limit for the baseline, far above any prompt here.
 QWEN_CONTEXT_LIMIT: Final = 2048
-
-# Qwen3.5-9B's token IDs at c2022362, checked against the pinned tokenizer: <|im_end|> ends a turn
-# and is EOS, <|endoftext|> pads. The chat template has no BOS. Researcher, 2026-10-26: Qwen3.5-9B
-# replaces Trida for rewriting Korean captions, phase 1's second captions first (phase 2 later),
-# with thinking off (the template then writes an empty think block before the answer).
-QWEN35_ENDOFTEXT_ID: Final = 248044
-QWEN35_IM_END_ID: Final = 248046
-QWEN35_TERMINATOR_IDS: Final[dict[int, str]] = {QWEN35_ENDOFTEXT_ID: "endoftext", QWEN35_IM_END_ID: "im_end"}
-QWEN35_CONTEXT_LIMIT: Final = 4096
 
 # Trida-7B's token IDs at c37755e8 (researcher's model since 2026-10-12), checked
 # against the pinned tokenizer: <|im_end|> ends a turn and is generate's stop
@@ -112,12 +103,23 @@ LIVE_MAX_CHARS: Final = 96
 LIVE_TEXTURE_MAX: Final = 2
 # Phase 1's second caption (researcher, 2026-10-18): a clip's raw first caption
 # (up to 81 characters and three lines on the c2 clips) tweaked within 128 new
-# tokens, by Trida at the live condition until 2026-10-26 and by Qwen3.5-9B
-# since (``WRITER_CONDITION``). It is held to 80 characters (hypothesis team,
-# 2026-10-24): 160 take about 13 s to read at 12 characters per second, longer
-# than the 10 s clip.
-WRITER_CONDITION: Final = "qwen35_9b"
-TWEAK_CANVAS_TOKENS: Final = 128
+# tokens, by Trida at the live condition until 2026-10-26, by Qwen3.5-9B that
+# day, and by Claude Sonnet 5.5 through the Claude API since 2026-10-27
+# (researcher; ``WRITER_CONDITION``). It is held to 80 characters (hypothesis
+# team, 2026-10-24): 160 take about 13 s to read at 12 characters per second,
+# longer than the 10 s clip.
+# The API (version 2026-10-21) takes no temperature, top_p or top_k, so effort
+# is the call's one setting: low, at which the model's adaptive thinking skips
+# most short requests, for a rewrite between viewings. max_tokens holds any
+# thinking as well as the caption. A request the model's safeguards decline in
+# the categories Anthropic retries runs again on its fallback model
+# (server-side, "default"), recorded with the attempt.
+WRITER_CONDITION: Final = "claude_sonnet_5_5"
+WRITER_MODEL: Final = "claude-sonnet-5-5"
+WRITER_API_VERSION: Final = "2026-10-21"
+WRITER_EFFORT: Final = "low"
+WRITER_MAX_TOKENS: Final = 2048
+WRITER_FALLBACK_BETA: Final = "server-side-fallback-2026-07-01"
 TWEAK_MAX_CHARS: Final = 80
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
@@ -236,16 +238,17 @@ GENERATION: Final[dict[str, Any]] = {
         "context_limit": QWEN_CONTEXT_LIMIT,
     },
     "writer": {
-        "call": "generate",
-        "batch_size": 1,
-        "do_sample": False,
-        "repetition_penalty": 1.0,
-        "eos_token_id": [QWEN35_IM_END_ID, QWEN35_ENDOFTEXT_ID],
+        "call": "Claude API messages (beta endpoint, for the server-side fallback)",
+        "model": WRITER_MODEL,
+        "api_version": WRITER_API_VERSION,
+        "effort": WRITER_EFFORT,
+        "thinking": "adaptive (not sent); at low effort skipped on most short requests; never returned",
+        "max_tokens": WRITER_MAX_TOKENS,
         "unset": ["temperature", "top_p", "top_k"],
-        "chat_template": {"enable_thinking": False},
+        "fallbacks": "default",
         "condition": WRITER_CONDITION,
-        "canvas_tokens": TWEAK_CANVAS_TOKENS,
-        "context_limit": QWEN35_CONTEXT_LIMIT,
+        "max_chars": TWEAK_MAX_CHARS,
+        "rng": "not seedable: every request and response is logged",
     },
     "live": {
         "condition": LIVE_CONDITION,
@@ -257,8 +260,8 @@ GENERATION: Final[dict[str, Any]] = {
     "canvas_tokens": CANVAS_TOKENS,
     "tau_conditions": TAU_CONDITIONS,
     "timeout_seconds": TIMEOUT_SECONDS,
-    "caps": "a canvas of whole 32-token blocks; no call may consume randomness",
-    "retry": "one identical retry only after a transient runner or device failure",
+    "caps": "a canvas of whole 32-token blocks; no local call consumes randomness (API calls are logged)",
+    "retry": "one identical retry only after a transient runner, device or API failure",
 }
 
 PROTOCOL: Final[dict[str, Any]] = {
@@ -273,7 +276,6 @@ PROTOCOL: Final[dict[str, Any]] = {
             "bos": TRIDA_BOS_ID,
         },
         "qwen": {"endoftext": QWEN_ENDOFTEXT_ID, "im_end": QWEN_IM_END_ID, "config_bos": QWEN_CONFIG_BOS_ID},
-        "qwen35": {"endoftext": QWEN35_ENDOFTEXT_ID, "im_end": QWEN35_IM_END_ID},
     },
     "phase1": {
         "cues_per_clip": CUES_PER_CLIP,

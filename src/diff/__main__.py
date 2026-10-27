@@ -29,11 +29,6 @@ from typing import Any
 
 GENERATOR_LOCK = Path("envs/diff-generator/uv.lock")
 GENERATOR_PYTHON = Path("envs/diff-generator/.venv/bin/python")
-# Qwen3.5 needs transformers 5, which the repository environment pins (2026-10-26); Trida's code
-# keeps the generator environment at 4.57.3.
-WRITER_PYTHON = Path(".venv/bin/python")
-WRITER_LOCK = Path("uv.lock")
-WRITER_MIN_FREE_MIB = 19456  # Qwen3.5-9B peaked at 17.7 GiB on the delivery bench
 # Trida's bf16 weights take about 15 GB; a card needs this much free to host a live worker.
 LIVE_MIN_FREE_MIB = 17408
 PARTICIPANT_STORE = Path("artifacts/diff/participants.sqlite")
@@ -330,16 +325,6 @@ def worker(args: argparse.Namespace) -> int:
             return loaded, trida_runner.warm_up(loaded)
 
         return serve(load_trida, trida_runner.run_job, protocol, sys.stdin, freeze=trida_runner.freeze_live)
-    if model.runner == "qwen35":
-        from diff import qwen35_runner
-
-        def load_writer() -> tuple[Any, dict[str, Any]]:
-            loaded = qwen35_runner.load(args.model_dir, verification, device=args.device, lock_path=args.lock)
-            return loaded, qwen35_runner.warm_up(loaded)
-
-        return serve(
-            load_writer, qwen35_runner.run_job, protocol, sys.stdin, freeze=qwen35_runner.freeze_live
-        )
     from diff import qwen_runner
 
     def load_qwen() -> tuple[Any, dict[str, Any]]:
@@ -688,55 +673,27 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     return {"status": "completed", "output": output, "latency_ms": 1500, "seed": None}
 
 
-def _writer_service(args: argparse.Namespace, log_dir: Path, tweak_check: Any) -> Any:
-    """Phase 1's second-caption writer: Qwen3.5-9B on its own GPU, in the repository environment."""
-    import functools
-
-    from diff.generation_worker import Supervisor, WorkerCommand
+def _writer_services(count: int, log_dir: Path, tweak_check: Any) -> list[Any]:
+    """Phase 1's second-caption writer: Claude through the API, one service per concurrent session."""
+    from diff.claude_writer import ClaudeWriter
     from diff.live_generation import LiveService
-    from diff.model_profile import QWEN35_9B, verify_snapshot
+    from diff.model_profile import CLAUDE_WRITER
 
-    gpu = args.writer_gpu
-    if gpu is None or gpu in args.gpus.split(","):
-        raise SystemExit("phase 1 needs --writer-gpu, a GPU apart from --gpus, for the second-caption writer")
-    free = _gpu_free_mib().get(gpu, 0)
-    if free < WRITER_MIN_FREE_MIB:
-        raise SystemExit(f"GPU {gpu} has {free} MiB free; the writer needs {WRITER_MIN_FREE_MIB}")
-    print("verifying the Qwen3.5-9B snapshot (hashing every weight shard) …", flush=True)
-    record_path = log_dir / "verification-writer.json"
-    _write_json(record_path, verify_snapshot(args.writer_dir, QWEN35_9B, weights=True), force=True)
-    env = {
-        **os.environ,
-        "CUDA_VISIBLE_DEVICES": gpu,
-        "PYTHONPATH": str(Path("src").resolve()),
-        "HF_HUB_OFFLINE": "1",
-        "TRANSFORMERS_OFFLINE": "1",
-        "TOKENIZERS_PARALLELISM": "false",
-    }
-    argv = (
-        str(WRITER_PYTHON.absolute()),
-        "-m",
-        "diff",
-        "worker",
-        "--profile",
-        QWEN35_9B.profile_id,
-        "--model-dir",
-        str(args.writer_dir),
-        "--verification",
-        str(record_path),
-        "--device",
-        "cuda:0",
-        "--lock",
-        str(WRITER_LOCK),
-    )
-    command = WorkerCommand(
-        argv=argv, env=env, cwd=Path.cwd(), log_path=log_dir / f"worker-writer-gpu{gpu}.log"
-    )
-    supervisor = Supervisor(command, startup_timeout=1800.0)
-    print(f"loading Qwen3.5-9B on GPU {gpu} …", flush=True)
-    supervisor.ensure_started()
-    attempt = functools.partial(supervisor.attempt, kind="live")
-    return LiveService(attempt, log_dir / "sessions", check=None, tweak_check=tweak_check)
+    print(f"checking the Claude API for {CLAUDE_WRITER.model} …", flush=True)
+    try:
+        writer = ClaudeWriter()
+        warmup = writer.warm_up()
+    except Exception as exc:  # noqa: BLE001 — no participant enters without a writer
+        raise SystemExit(
+            f"the second-caption writer cannot reach the Claude API: {type(exc).__name__}: {exc}\n"
+            "set ANTHROPIC_API_KEY in this shell (runbook §7)"
+        ) from exc
+    _write_json(log_dir / "writer.json", {"profile": CLAUDE_WRITER.record(), "warmup": warmup}, force=True)
+    print(f"  {warmup['model']} answered in {warmup['wall_ms']} ms", flush=True)
+    return [
+        LiveService(writer.attempt, log_dir / "sessions", check=None, tweak_check=tweak_check)
+        for _ in range(count)
+    ]
 
 
 def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> list[str]:
@@ -1000,7 +957,7 @@ def live_serve(args: argparse.Namespace) -> int:
             services.append(LiveService(attempt, log_dir / "sessions", check=check, tweak_check=check_record))
     writers = None
     if phase1 is not None and not args.fake_worker:
-        writers = LivePool([_writer_service(args, log_dir, check_record)])
+        writers = LivePool(_writer_services(len(services), log_dir, check_record))
     for service in services + (writers.services if writers else []):
         service.start()
     app = build_participant_app(
@@ -1230,16 +1187,6 @@ def parser() -> argparse.ArgumentParser:
     )
     serve_live.add_argument("--trida-dir", type=Path)
     serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")
-    serve_live.add_argument(
-        "--writer-dir",
-        type=Path,
-        default=Path("artifacts/diff/models/qwen3.5-9b-c2022362"),
-        help="Qwen3.5-9B, phase 1's second-caption writer (2026-10-26)",
-    )
-    serve_live.add_argument(
-        "--writer-gpu",
-        help="the GPU for the writer, apart from --gpus (Qwen3.5-9B and Trida do not share one)",
-    )
     serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     serve_live.add_argument("--log-dir", type=Path, required=True)
     serve_live.add_argument("--host", default="127.0.0.1")
