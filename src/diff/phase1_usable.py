@@ -44,7 +44,8 @@ from diff.study_protocol import TWEAK_MAX_CHARS
 # v2 (2026-10-26): a list of names is refused.
 # v3 (2026-10-26): every item's own words, the emphasis's own words, and "차" as a vehicle.
 # v4 (2026-10-26, on Qwen3.5-9B's drafts): "채," is no cut verb; "somewhere else" in other words.
-USABLE_POLICY: Final = "diff.phase1-usable/v4"
+# v5 (2026-10-27, on Claude's drafts): named_in reads "쉴 새 없이" as no bird, and "외침" as a shout.
+USABLE_POLICY: Final = "diff.phase1-usable/v5"
 # The mask objects of regen's c2 frames, in Korean: things a caption can name on screen.
 OBJECTS_KO: Final = ("건물", "사람", "도로", "차량", "인도", "하늘", "땅", "나무와 풀")
 # Words for a place or an object on screen: the objects, the scene elements and common street

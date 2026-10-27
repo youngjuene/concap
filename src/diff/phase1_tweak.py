@@ -123,9 +123,14 @@ NOT_NAMING: Final = frozenset({"소리", "소음", "계속", "많은", "다른",
 # captions ("도로와 차량", "차량들 사이로"), so it would hide a dropped "자동차 소리".
 SOUND_WORDS: Final = (
     ("말소리", "목소리", "이야기", "대화", "웅성", "말하", "말한", "말해"),
-    ("외치", "외쳐", "고함", "소리치"),  # "외쳐" as conjugated ("크게 외쳐지며"), 2026-10-26
+    # "외쳐" as conjugated ("크게 외쳐지며"), 2026-10-26; "외친다" and the noun "외침", 2026-10-27.
+    ("외치", "외쳐", "외친", "외침", "고함", "소리치"),
 )
 PARTICLES: Final = "(?:이|가|은|는|을|를|의|도|만|와|과|로)?"
+# A one-syllable name ("새", "차") counts only as a noun: with a plural, "소리" (spaced or not) or a
+# particle after it ("새가", "새들", "새 소리"), never alone ("쉴 새 없이", "새 건물") or before
+# "로" ("새로", "차로"). Until 2026-10-27 it also counted alone, so "쉴 새 없이" named the bird.
+NOUN_PARTICLES: Final = "(?:이|가|은|는|을|를|의|도|만|와|과)"
 
 
 class TweakError(ValueError):
@@ -367,8 +372,8 @@ def sound_name(label: str) -> str:
 def named_in(text: str, label: str) -> bool:
     """Whether a caption seems to name the sound an option's label stands for: a word of the caption
     starts with the label's :func:`sound_name`, one of its :data:`SOUND_WORDS`, or the bird of
-    "새소리" ("새가"); a one-syllable name only with a particle after it. Rough: two options told
-    apart only by a describing word (bangkok_209's near and background women's voices) are named
+    "새소리" ("새가"); a one-syllable name only as a noun (:data:`NOUN_PARTICLES`). Rough: two options
+    told apart only by a describing word (bangkok_209's near and background women's voices) are named
     together, a "차량" named as a place counts for a "차량" sound, and "자동차" does not count for
     it. A hint for the researcher's blind coding of R2 against the shown caption, never the key
     itself.
@@ -380,11 +385,17 @@ def named_in(text: str, label: str) -> bool:
         return False
     group = next((g for g in SOUND_WORDS if name in g), (name,))
     stems = group + ((name[:-2],) if name.endswith("소리") and len(name) > 2 else ())
+    words = re.findall(r"[가-힣]+", text)
     return any(
-        word.startswith(stem) if len(stem) > 1 else re.fullmatch(f"{stem}(?:들)?(?:소리)?{PARTICLES}", word)
-        for word in re.findall(r"[가-힣]+", text)
+        any(word.startswith(stem) for word in words) if len(stem) > 1 else _as_noun(stem, text)
         for stem in stems
     )
+
+
+def _as_noun(stem: str, text: str) -> bool:
+    """Whether a one-syllable name stands in the caption as a noun (:data:`NOUN_PARTICLES`)."""
+    pattern = rf"(?<![가-힣]){stem}(?:들|\s?소리|들\s?소리)?{NOUN_PARTICLES}?(?![가-힣])"
+    return any(len(match.group(0)) > 1 for match in re.finditer(pattern, text))
 
 
 def intended_r2_key(clip: Mapping[str, Any]) -> list[str]:

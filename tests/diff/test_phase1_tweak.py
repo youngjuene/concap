@@ -312,4 +312,15 @@ def test_a_caption_names_a_sound_by_its_words_roughly() -> None:
     assert not named_in("자동차, 음악이 흐른다.", "자동차 경적 소리")
     assert not named_in("사람들이 크게 외치는 소리가 들린다.", "많은 사람들이 이야기하는 소리")
     assert not named_in("새로운 소리가 들린다.", "새소리")
+    # A one-syllable name only as a noun (Claude's drafts, 2026-10-27): "쉴 새 없이" is no bird.
+    assert named_in("새들이 운다.", "새소리") and named_in("새 소리가 멀리서 난다.", "새소리")
+    for text in (
+        "차들이 쉴 새 없이 오간다.",
+        "새 건물 앞을 지난다.",
+        "새로 생긴 가게 앞이다.",
+        "새벽 공기가 차다.",
+    ):
+        assert not named_in(text, "새소리"), text
+    assert named_in("날카로운 외침이 터진다.", "크게 외치는 소리")  # the noun
+    assert named_in("누군가 크게 외친다.", "크게 외치는 소리")
     assert not named_in("경적이 도로의 차량들 사이로 울린다.", "지나가는 자동차 소리")
