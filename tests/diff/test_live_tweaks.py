@@ -63,8 +63,8 @@ def written(text: str) -> dict[str, Any]:
 NAMING = ("버스가 낮게 공회전한다.", "차량이 쉼 없이 오간다.", "새가 높게 지저귄다.")
 
 
-def last_rung(request: TweakRequest, clip: dict[str, Any]) -> TweakRequest:
-    source, job, steer = tweak_job_for(clip, request.steer["slots"], "smoke", len(TWEAK_LADDER) - 1)
+def last_rung(request: TweakRequest, clip: dict[str, Any], rung: int = len(TWEAK_LADDER) - 1) -> TweakRequest:
+    source, job, steer = tweak_job_for(clip, request.steer["slots"], "smoke", rung)
     return TweakRequest(request.session_id, request.clip, source, job, steer)
 
 
@@ -103,6 +103,26 @@ def test_a_refused_caption_goes_up_the_ladder_and_fails_only_on_the_last_rung(
         (len(TWEAK_LADDER) - 1, "failed", reason),
     ]
     assert outcomes[0]["job_id"] == requests[0].job.job_id != outcomes[1]["job_id"]
+
+
+def test_the_first_wording_s_second_try_is_queued_while_its_first_is_running(
+    requests: list[TweakRequest], tmp_path: Path
+) -> None:
+    clip = approved_setup(tmp_path)["clips"][0]
+    again = last_rung(requests[0], clip, 1)
+    assert again.job.job_id == requests[0].job.job_id  # the same prompt, at the next rung
+    service = service_with(Scripted(written("bus noise"), written(NAMING[0])), tmp_path)
+    outcomes: list[dict[str, Any]] = []
+
+    def done(request: TweakRequest, outcome: dict[str, Any]) -> None:
+        outcomes.append(outcome)
+        if outcome["status"] == "next":  # as participant_server.tweak_done, before the service moves on
+            assert service.submit_tweak(again, done)
+            assert not service.submit_tweak(again, done)  # but only once
+
+    service.submit_tweak(requests[0], done)
+    run(service)
+    assert [(o["rung"], o["status"]) for o in outcomes] == [(0, "next"), (1, "ready")]
 
 
 def test_the_second_caption_is_stored_as_shown_and_logged_as_written(

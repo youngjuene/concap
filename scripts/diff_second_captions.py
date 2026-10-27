@@ -262,7 +262,10 @@ def delivery(drafts: Sequence[Mapping[str, Any]]) -> str:
     rungs = [sum(d["delivered_rung"] == rung for d in drafts) for rung in range(len(TWEAK_LADDER))]
     delivered = sum(rungs)
     clean = sum(d["delivered_rung"] is not None and not d["issues"] for d in drafts)
-    by_rung = ", ".join(f"{wording} {count}" for wording, count in zip(TWEAK_LADDER, rungs, strict=True))
+    by_rung = ", ".join(
+        f"{rung}:{wording} {count}"
+        for rung, (wording, count) in enumerate(zip(TWEAK_LADDER, rungs, strict=True))
+    )
     return f"{len(drafts)} drafts, {delivered} delivered ({by_rung}), {clean} of them with no issue"
 
 
@@ -339,10 +342,11 @@ def write_sheet(
             for name in names:
                 written = by_key[(variant["variant_id"], name)]
                 rung = written["delivered_rung"]
-                row[f"rung:{name}"] = "none" if rung is None else TWEAK_LADDER[rung]
+                row[f"rung:{name}"] = "none" if rung is None else f"{rung}:{TWEAK_LADDER[rung]}"
                 row[f"draft:{name}"] = written["shown"]
                 row[f"failures:{name}"] = " | ".join(
-                    f"{a.get('wording', a.get('condition'))}: {', '.join(a['failures']) or a['status']}"
+                    f"{a['rung']}:{a.get('wording', a.get('condition'))}: "
+                    f"{', '.join(a['failures']) or a['status']}"
                     for a in written["attempts"]
                     if not a["delivered"]
                 )

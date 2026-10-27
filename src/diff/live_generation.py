@@ -337,6 +337,12 @@ class TweakRequest:
 TweakDone = Callable[[TweakRequest, dict[str, Any]], None]
 
 
+def tweak_key(request: TweakRequest) -> tuple[str, int]:
+    """What makes a tweak request distinct: its job at its rung. A wording tried twice (2026-10-27)
+    gives the same job at two rungs, and the next is queued while the last is still running."""
+    return request.job.job_id, int(request.steer.get("rung", 0))
+
+
 def tweak_outcome(
     request: TweakRequest, result: Mapping[str, Any], checks: Mapping[str, Any] | None
 ) -> dict[str, Any]:
@@ -396,7 +402,7 @@ class LiveService:
         self.session_id: str | None = None
         self.scheduler: LiveScheduler | None = None
         self.tweaks: deque[tuple[TweakRequest, TweakDone]] = deque()
-        self.running_tweak: str | None = None
+        self.running_tweak: tuple[str, int] | None = None
         self.stopping = False
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -453,8 +459,8 @@ class LiveService:
         with self.lock:
             if request.session_id != self.session_id:
                 return False
-            if request.job.job_id == self.running_tweak or any(
-                queued.job.job_id == request.job.job_id for queued, _ in self.tweaks
+            if tweak_key(request) == self.running_tweak or any(
+                tweak_key(queued) == tweak_key(request) for queued, _ in self.tweaks
             ):
                 return False
             self.tweaks.append((request, done))
@@ -482,7 +488,7 @@ class LiveService:
             tweak = None
             if request is None and self.tweaks and self.tweaks[0][0].session_id == session_id:
                 tweak = self.tweaks.popleft()
-                self.running_tweak = tweak[0].job.job_id
+                self.running_tweak = tweak_key(tweak[0])
         if tweak is not None:
             self._tweak(*tweak)
             return True

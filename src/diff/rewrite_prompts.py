@@ -390,7 +390,8 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # caption, and participant sessions wait for it.
 # Since 2026-10-26 (researcher) a caption the gate refuses is written again in another wording, since
 # a greedy call repeats itself (Qwen3.5-9B, the writer that day). Claude, the writer since 2026-10-27
-# (diff.claude_writer), keeps the same ladder. So the
+# (diff.claude_writer), keeps the wordings; its output varies, so the first wording is tried twice
+# (researcher, 2026-10-27; on its bench the later wordings overran 80 characters in 8 of 10 calls). So the
 # prompt has three wordings, tried in TWEAK_LADDER's order, each chosen on the 2026-10-26 delivery bench
 # (artifacts/diff/bench/candidates-20261026-live, RULE.md and RESULTS.md):
 # - every-sound (the bench's R1): the task first, the facts in sentences, the attended sound first,
@@ -541,7 +542,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
         ),
     },
 }
-TWEAK_LADDER: Final = ("every-sound", "checklist", "prose")
+TWEAK_LADDER: Final = ("every-sound", "every-sound", "checklist", "prose")
 TWEAK_PROMPTS: Final = TWEAK_WORDINGS[TWEAK_LADDER[0]]  # the first rung's, by mode
 _TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound", "emphasis")
 TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {

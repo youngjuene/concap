@@ -20,7 +20,7 @@ every caption before the study (that design, 2026-10-24, is retired). The writer
 Claude through the API since 2026-10-27 (:mod:`diff.claude_writer`), after the local
 models failed the delivery benches: Trida delivered too few sentence rewrites, and
 Qwen3.5-9B, the writer for a day, drifted into other scripts and dropped sounds. A caption
-the gate refuses is written again in the next wording of ``rewrite_prompts.TWEAK_LADDER``
+the gate refuses is written again at the next rung of ``rewrite_prompts.TWEAK_LADDER``
 (a greedy call repeats itself; a first version varied Trida's τ, which reproduced the
 same text in 61 of 86 retries).
 Phase 1 tests the mode (follow or counter); the emphasis is applied the same way under
@@ -83,7 +83,8 @@ from diff.rewrite_prompts import (
 # v7 (2026-10-26): the restorative emphasis steers both modes; captions are written live, on a τ ladder.
 # v8 (2026-10-26): Qwen3.5-9B writes them, and the ladder's rungs are wordings.
 # v9 (2026-10-27): Claude writes them through the API, on the same ladder.
-TWEAK_POLICY: Final = "diff.phase1-tweak/v9"
+# v10 (2026-10-27): the first wording is tried twice, since Claude's retries vary.
+TWEAK_POLICY: Final = "diff.phase1-tweak/v10"
 EMPHASIS_POLICY: Final = "diff.phase1-emphasis/reflect-v1"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
 # The scene's elements (phase1_scene.ELEMENTS) in Korean.

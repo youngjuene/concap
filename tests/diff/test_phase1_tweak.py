@@ -173,8 +173,9 @@ def test_every_wording_names_every_slot_in_korean_only(clip: dict[str, Any], roo
                 assert text in prompt.text
             assert "{" not in prompt.text and not re.search(r"[A-Za-z]", prompt.text)
         assert render_tweak(slots).text == render_tweak(slots, TWEAK_LADDER[0]).text
+    # The first wording twice (researcher, 2026-10-27): Claude's retries vary, and its later wordings overran.
     assert (
-        TWEAK_LADDER == ("every-sound", "checklist", "prose")
+        TWEAK_LADDER == ("every-sound", "every-sound", "checklist", "prose")
         and TWEAK_PROMPTS is TWEAK_WORDINGS["every-sound"]
     )
     for wording, modes in TWEAK_WORDINGS.items():
@@ -236,12 +237,13 @@ def test_a_refused_caption_is_written_again_in_the_next_wording_with_what_the_ga
     rungs = [tweak_job_for(clip, steer["slots"], "smoke", rung) for rung in range(len(TWEAK_LADDER))]
     assert rungs[0][1].job_id == job.job_id and {j.condition for _, j, _ in rungs} == {WRITER_CONDITION}
     assert [j.prompt.template_id for _, j, _ in rungs] == [f"tweak-p1-{w}" for w in TWEAK_LADDER]
-    assert len({j.job_id for _, j, _ in rungs}) == len(TWEAK_LADDER)  # each rung is its own call
+    # Each wording is its own job; the first wording's second try is the same job at the next rung.
+    assert rungs[1][1].job_id == job.job_id and len({j.job_id for _, j, _ in rungs}) == len(TWEAK_LADDER) - 1
     assert [(r["rung"], r["rungs"], r["wording"], r["template"]["wording"]) for _, _, r in rungs] == [
         (rung, len(TWEAK_LADDER), wording, wording) for rung, wording in enumerate(TWEAK_LADDER)
     ]
     assert steer["gate"] == {"distractors": ["음악"], "names": ["남자의 말소리", "버스 소리", "음악"]}
-    with pytest.raises(ValueError, match="rungs 0 to 2"):
+    with pytest.raises(ValueError, match="rungs 0 to 3"):
         tweak_job_for(clip, steer["slots"], "smoke", len(TWEAK_LADDER))
 
 
