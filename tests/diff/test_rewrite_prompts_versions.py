@@ -66,8 +66,8 @@ def test_live_prompt_is_its_slider_cell_s_own_under_the_session_tuner(developmen
     for (texture, context), prompt in rendered.items():
         assert (prompt.template_id, prompt.template_version, prompt.context_rules_version) == (
             "live-p2",
+            6,
             5,
-            4,
         )
         assert prompt.template_sha256 == LIVE_CELL_PROMPTS[(texture, context)].sha256
         assert prompt.system_message == tuner and "{" not in prompt.text
@@ -77,6 +77,8 @@ def test_live_prompt_is_its_slider_cell_s_own_under_the_session_tuner(developmen
     assert "딱 하나만, " in rendered[(1, "specific")].text and "웅성" in rendered[(0, "relation")].text
     # version 5 (2026-10-27): broad names no source at all, which Claude otherwise kept
     assert "음원 이름은 하나도 쓰지 마세요" in rendered[(0, "broad")].text
+    # version 6 (2026-10-27): and each kind once, not "또 다른 교통 소리"
+    assert "갈래마다 이름은 한 번만" in rendered[(2, "broad")].text
     assert "수레가" not in rendered[(0, "broad")].text
     assert "손수레 바퀴가 구르는" in rendered[(0, "specific")].text
     assert "첫 소리에는 두 개" in rendered[(2, "relation")].text

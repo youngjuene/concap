@@ -128,8 +128,12 @@ EMPTY_QUALITIES: Final = "없음"
 # 경적, 종소리 or 엔진 in a third of version 4's broad captions); the market example's broad rewrites
 # drop the cart. Chosen by a rule written before the runs (artifacts/diff/cell-prompts/RULE.md, the
 # Claude round): it passed the v4 rule on 30 dev cues and on 30 held-out ones.
+# Version 6 (2026-10-27, the researcher: fix the broad captions that name one kind twice): broad names
+# each kind once and merges what the kind's sounds do ("교통 소리가 이어지다가 잠깐씩 울린다"), not
+# "또 다른 교통 소리"; version 5 did that in 12-22% of broad captions, version 6 in 0 of 90 on dev and
+# on held-out (RULE.md, Claude round 2). The other six cells are version 5's text.
 LIVE_PROMPTS_PROVISIONAL: Final = True
-LIVE_RULES_VERSION: Final = 4
+LIVE_RULES_VERSION: Final = 5
 _LIVE_HEAD: Final = (
     "영상 속 소리를 시청자가 편하게 읽을 수 있는 소리 풍경 묘사로 바꿔 쓰는 일입니다. "
     "원래 자막에는 가장 두드러진 소리가 먼저 나옵니다.\n"
@@ -157,7 +161,9 @@ _LIVE_CONTEXT: Final[dict[str, str]] = {
     "broad": (
         "- 음원 이름은 하나도 쓰지 마세요. 경적, 엔진, 타이어, 오토바이, 종소리, 목소리, 발소리처럼 "
         "무엇이 내는 소리인지 알려 주는 이름도 쓰지 말고, 교통 소리, 사람들 소리, 음악 소리, "
-        "자연의 소리, 동물 소리 같은 큰 갈래로만 부르세요. 갈래가 같은 소리는 하나로 묶고, "
+        "자연의 소리, 동물 소리 같은 큰 갈래로만 부르세요. 갈래마다 이름은 한 번만 쓰세요. "
+        "같은 갈래의 소리가 여럿이면 하나로 묶어 그 갈래가 하는 일을 이어 쓰고"
+        "(예: 교통 소리가 이어지다가 잠깐씩 울린다), '또 다른 교통 소리'처럼 같은 갈래를 다시 부르지 마세요. "
         "무엇을 하는지는 그 갈래에 맞는 쉬운 말(오간다, 이어진다, 이야기한다, 흐른다, 분다)로만 쓰세요. "
         "위치는 쓰지 마세요.\n"
     ),
@@ -238,7 +244,7 @@ def _live_cell_text(texture: int, context: str) -> str:
 
 LIVE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
     (texture, context): PromptTemplate(
-        template_id="live-p2", version=5, text=_live_cell_text(texture, context)
+        template_id="live-p2", version=6, text=_live_cell_text(texture, context)
     )
     for texture in range(LIVE_TEXTURE_MAX + 1)
     for context in CONTEXT_STEPS
