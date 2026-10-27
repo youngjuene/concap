@@ -1037,6 +1037,21 @@ the review folder).
     - **What the rule does not see:** 13% of broad captions name one kind
       twice ("traffic sounds continue and other traffic sounds pass"), since
       a cue's sounds often fall in one kind.
+  - **Broad names each kind once (`live-p2` v6).** The researcher asked to
+    fix those captions.
+    - A second rule, written before its runs, fixed the detector: a broad
+      caption names a kind twice when one kind's word appears twice, or it
+      says "another" of a kind. It asked for 3% or less on dev and on
+      held-out, with the v4 rule still passing.
+    - Only the broad instruction changed: each kind is named once, and
+      same-kind sounds merge into what that kind does.
+    - At its first run: 0 of 90 broad captions on dev (from 11) and 0 of 90
+      on held-out (from 13), with the v4 rule still passing on both. On the
+      earlier comparison's cues it is 4 of 90 (from 20), all one crowd cue
+      written as people talking and people walking.
+    - For the reader: the instruction's example phrase ("rings briefly at
+      times") appears in 14 of the 270 broad captions, mostly for a short
+      screech or brake sound.
 - **Open for the researcher:**
   - the three emphasis sentences and the gate's rules (provisional);
   - the writer's three wordings (provisional), after a native read of
@@ -1049,9 +1064,10 @@ the review folder).
   - what leaves the machine: each prompt, with the attended sound and the
     emphasis but no ID, now goes to Anthropic. Whether the consent text must
     say so;
-  - the nine cell prompts (`live-p2` v5) and the tuner: a native read of
+  - the nine cell prompts (`live-p2` v6) and the tuner: a native read of
     the cell bench (`artifacts/diff/cell-prompts/claude-20261027/`),
-    including the broad captions that name one kind twice;
+    including how often broad captions reuse the instruction's example
+    phrase;
   - whether the slower response to a slider move is acceptable;
   - what the scene-aware prompt keeps of the scene. The setting is a
     between-clip contrast that misnames some scenes, and its "here, though
