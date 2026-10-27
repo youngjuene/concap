@@ -29,6 +29,7 @@ from diff.phase1_flow import (
 from diff.phase1_setup import stripped_options
 from diff.phase1_tweak import TWEAK_LADDER
 from diff.session_store import Conflict
+from diff.study_protocol import canonical_json
 from dpo.regen.study_store import Conflict as RegenConflict
 
 RATED = ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")
@@ -196,6 +197,20 @@ def test_a_failed_second_caption_skips_that_clip_s_second_step(flow: Phase1) -> 
     with pytest.raises(Conflict, match="not skipped"):
         state.update(page="P6", clip_index=0, second_captions={})
         flow.apply(state, "skip-second", {"page": "P6"}, now)
+
+
+def test_second_captions_are_written_in_viewing_order_after_the_store_sorts_their_keys(
+    flow: Phase1,
+) -> None:
+    for seed in range(20):
+        state = flow.new_state("s-test", "P1", seed=seed)
+        if state["clip_order"] != sorted(state["clip_order"]):
+            break
+    through_practice(flow, state)
+    through_stage_a(flow, state, 10.0)
+    stored = json.loads(canonical_json(state))  # the session store's round trip sorts the keys
+    assert list(stored["second_captions"]) == sorted(state["clip_order"])
+    assert [key for key, *_ in flow.pending_tweaks(stored)] == state["clip_order"]
 
 
 def test_one_retry_is_kept_across_restarts_and_late_outcomes_are_ignored(flow: Phase1) -> None:

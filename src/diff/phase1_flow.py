@@ -592,9 +592,16 @@ class Phase1:
 
         Attempts that ended in a transient failure are recorded, so the one
         identical retry a rung allows holds across a server restart.
+
+        They come in viewing order, the order the session's writer then writes them in, so stage
+        B's first clip is written first. The stored state's keys are sorted (``canonical_json``),
+        and in key order the first clip of stage B was the ninth caption written on the
+        2026-10-27 Vercel walk: 42 s on the waiting screen.
         """
         pending = []
-        for key, entry in state.get("second_captions", {}).items():
+        captions = state.get("second_captions", {})
+        for key in sorted(captions, key=state["clip_order"].index):
+            entry = captions[key]
             if entry["status"] != "pending":
                 continue
             rung = int(entry.get("rung", 0))
