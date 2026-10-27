@@ -886,7 +886,8 @@ the review folder).
 - **The writer moves to the Claude API** (researcher, 2026-10-27). After the
   trials of 2026-10-24 to 26, phase 1's second captions are rewritten by Claude
   Sonnet 5.5 (`claude-sonnet-5-5`) through the Claude API, not by a local model.
-  Phase 2's live captions stay on Trida until phase 1 is confirmed.
+  Phase 2's live captions stay on Trida until phase 1 is confirmed (moved to
+  the same writer later that day; below).
   - **Why** (`artifacts/diff/bench/candidates-20261026-live/MODELS.md`, every
     run judged again by gate v4):
     - Trida damaged words, looped and wrote lists. Its best first call
@@ -964,6 +965,49 @@ the review folder).
       participants each. Every caption was delivered, the first wording's
       second try was queued as the same job in 14 clips, no attempt ran
       twice, and the audit found 0 mismatches.
+- **Phase 2 moves to the same writer** (researcher, 2026-10-27, the same
+  day). Phase 2's live captions are written by the same Claude Sonnet 5.5
+  call as phase 1's second captions, not by Trida. Nothing in the participant
+  app runs on a GPU any more.
+  - **What changed:**
+    - a live job takes the writer's call (`LIVE_CONDITION` is the writer's
+      condition), with the session's tuner text as the system prompt;
+    - `live serve` drops `--trida-dir` and `--gpus` and takes `--sessions N`,
+      one writer service per concurrent session, which writes that
+      session's second captions and then its live captions. The separate
+      phase-1 writer pool is gone;
+    - `live preflight` checks the API with one short call instead of
+      Trida's snapshot and the GPUs' memory;
+    - live attempts (v5) log the API record, and the audit checks each live
+      request against its recomputed job. A busy or unreachable API is
+      retried once by the scheduler, so the audit no longer counts it as a
+      mismatch;
+    - the prompt bench's `run` writes through the API.
+  - **What did not change:** the scheduler, the nine cell prompts, the tuner,
+    the checks and the display rule. The offline G0 and plan commands
+    (`generate`, `g0`) still run Trida and Qwen2.5-7B in the generator
+    environment; no participant session uses them.
+  - **The cell bench** (`artifacts/diff/cell-prompts/`): the same 30 cues
+    under all nine cells and the default tuner, scored by `cell_metrics_v4.py`.
+
+    | | Trida (v4b, 2026-10-22) | Claude Sonnet 5.5 (2026-10-27) |
+    |---|---|---|
+    | copies of the starting caption | 9% | 0% |
+    | unusable (check failure or repetition) | 7.8% | 0% |
+    | visibly broken | 6.9% | 1.5% |
+    | distinct captions per cue, of 9 | 9 | 9 |
+    | cells passing the texture rule | 2 of 9 | 6 of 9 |
+    | cells passing the context rule | 4 of 9 | 6 of 9 |
+    | time per caption, median / p90 / slowest | 0.7 / 1.1 / 3.2 s | 1.6 / 2.3 / 6.3 s |
+
+    - The v4 rule is still not met. On texture, texture 1's relation and
+      specific cells have exactly one sound word in 43% of rewrites (the
+      rule asks 60%), and texture 0's relation cell has none in 73% (80%).
+      On context, the three broad cells pass in 57–67% (70%).
+    - The 270 calls cost about $0.66, with no fallbacks.
+  - **The cost of the change:** a slider move shows about 2–3 s after it is
+    made, against about 1–1.5 s with Trida. The scheduler aims at the
+    playing window one latency ahead, the p90 of the last 20 calls.
 - **Open for the researcher:**
   - the three emphasis sentences and the gate's rules (provisional);
   - the writer's three wordings (provisional), after a native read of
@@ -976,8 +1020,10 @@ the review folder).
   - what leaves the machine: each prompt, with the attended sound and the
     emphasis but no ID, now goes to Anthropic. Whether the consent text must
     say so;
-  - phase 2's writer: Trida for now, and whether the API writer replaces it
-    once phase 1 is confirmed;
+  - the nine cell prompts and the tuner, written for Trida, on Claude's
+    output: a native read of the cell bench, and whether to tune texture 1
+    and broad context against the v4 rule;
+  - whether the slower response to a slider move is acceptable;
   - what the scene-aware prompt keeps of the scene. The setting is a
     between-clip contrast that misnames some scenes, and its "here, though
     unseen" sentence was never followed. Four clips have no sound with a

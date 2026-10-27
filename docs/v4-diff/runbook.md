@@ -264,12 +264,12 @@ so it stays on this machine.
 
 ## 7. Participant sessions: phase 1, then live phase 2
 
-The participant app runs in the repository environment. It starts one Trida
-worker per GPU in the generator environment, so `uv sync --project
-envs/diff-generator --frozen` must have run. With phase 1 it also starts the
-second-caption writer: Claude Sonnet 5.5 through the Claude API (researcher,
-2026-10-27; Qwen3.5-9B on its own GPU the day before). It runs inside the app's
-own process and needs no GPU, only an API key in the shell that starts `serve`:
+The participant app runs in the repository environment. Every caption it
+shows is written by Claude Sonnet 5.5 through the Claude API, phase 1's second
+captions and phase 2's live ones alike (researcher, 2026-10-27). Until then
+phase 2 ran on Trida, one GPU per session, and phase 1 had Qwen3.5-9B for a day.
+The writer runs inside the app's own process. It needs no GPU and no generator
+environment, only an API key in the shell that starts `serve`:
 
 ```sh
 export ANTHROPIC_API_KEY=…   # never in the repository; the key's owner pays for the calls
@@ -289,8 +289,7 @@ uv run python -m diff live serve \
   --sources path/to/phase2-sources.json \
   --video <video_id>=path/to/video.mp4 \
   --items path/to/items.json \
-  --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
-  --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
+  --sessions 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
 **Audio** (researcher, 2026-10-26). The 12 clips and the practice clip are at −23 LUFS on
@@ -335,24 +334,23 @@ nothing records it.
   `artifacts/diff/participants.sqlite`, one store for the whole study, because
   IDs are unique across it. Smoke runs get `<log-dir>/smoke-sessions.sqlite`,
   so a test `P1` never blocks a real one.
-- `--gpus` lists the cards to use, one live session per card. `serve` refuses
-  to start unless every listed card has at least 17 GB free
-  (`LIVE_MIN_FREE_MIB`). Other jobs on this machine also use GPU 0, so check
-  `nvidia-smi` and list only the free cards.
-  - A session holds its card from entry until its last video ends. With one
-    card, participants therefore come strictly one after another: a second ID
-    entered meanwhile is told to wait ("잠시 후", 503).
-- The second-caption writer needs no flag. `serve` sets up one writer per
-  card in `--gpus`, so the writer never limits how many sessions run at once.
-  A session holds its writer from entry to the handoff.
-  - **What leaves the machine:** each second-caption prompt goes to Anthropic.
-    It holds the clip's first caption, its sound and scene words, the sound
-    the participant attended to and the emphasis sentence their P4 ratings
-    chose. It holds no participant ID or raw answer.
+- `--sessions` is how many participant sessions may run at once (default 1),
+  each with its own writer service. A session holds its service from entry
+  until its last video ends. When every service is held, a new ID is told to
+  wait ("잠시 후", 503).
+  - **What leaves the machine:** every prompt goes to Anthropic, and none holds
+    a participant ID or a raw answer.
+    - A second-caption prompt holds the clip's first caption, its sound and
+      scene words, the sound the participant attended to, and the emphasis
+      sentence their P4 ratings chose.
+    - A live prompt holds the window's starting caption, the slider cell's
+      instructions, and the session's tuner text, built from the families the
+      participant heard and their rating means.
   - **If the API is busy or unreachable,** the call is tried once more (a
-    transient failure), and then the clip's second step is skipped, as for
-    any failed call. Every request and response is logged (`api` in each
-    attempt), since the API's sampling cannot be fixed.
+    transient failure). After that, a clip's second step is skipped, and a live
+    window shows its caption under earlier settings or its starting caption.
+    Every request and response is logged (`api` in each attempt), since the
+    API's sampling cannot be fixed.
 - `--purpose participant` is refused in any of these cases:
   - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
   - the nine live prompts are provisional (`rewrite_prompts.LIVE_CELL_PROMPTS`);
@@ -369,8 +367,8 @@ at once, everything that would stop a participant session:
 - the gates: the tuner text, the second-caption prompt, the setup's approvals
   and unreviewed starting captions;
 - each video's cues against the video's real length (with `ffprobe`);
-- the post-watch items, the Trida snapshot's small files, and each listed GPU's
-  free memory.
+- the post-watch items, and one short call to the API (the key works and the
+  model answers).
 
 It exits 1 while anything is listed and prints "ready for participant
 sessions" otherwise. `serve` itself now reports every unmet gate at once too.
@@ -387,8 +385,8 @@ sessions" otherwise. `serve` itself now reports every unmet gate at once too.
     participant, the first viewing (the raw prepared caption), then P2–P5;
   - the stage-B interstitial ("첫 번째 시청을 마쳤습니다"), phase 1's one natural
     break;
-  - stage B: the same clips in the same order, the second viewing (Trida's
-    caption), then P7, P8, P9, P10 (S1–S3) and P11 (R1/R2);
+  - stage B: the same clips in the same order, the second viewing (the
+    writer's caption), then P7, P8, P9, P10 (S1–S3) and P11 (R1/R2);
   - the phase-2 briefing ("이제 긴 영상 N편을 봅니다"), whose "2스테이지 시작"
     builds the tuner's calibration from the phase-1 answers and opens the
     watch at `/watch/`;
@@ -397,22 +395,21 @@ sessions" otherwise. `serve` itself now reports every unmet gate at once too.
     interview (P12) and debrief (P13), both outside the app. The session is
     already finished and saved. Hold "연구자 확인 · 다음 참가자" for one
     second to return to the entry.
-- **Second captions:** when a clip's P5 is submitted, Trida writes its second
-  caption on the session's GPU. It works from the raw caption and that
-  participant's step-1 answers (`diff.phase1_tweak`), while the participant
-  goes on with stage A.
+- **Second captions:** when stage A closes, the session's writer writes each
+  clip's second caption. It works from the raw caption and that participant's
+  answers (`diff.phase1_tweak`).
   - A participant who reaches P6 before it is ready sees "다음 영상을 준비하고
     있습니다…" until it is.
-  - A caption that fails its check, or whose call fails, skips that clip's
-    second step automatically, with the reason recorded. There are no
-    quality retries; one identical retry follows a lost worker or device
-    error.
+  - A caption the gate refuses is written again at the ladder's next rung
+    (§11). A clip whose last rung is refused, or whose call fails, skips its
+    second step automatically, with the reason recorded. One identical retry
+    follows a busy or unreachable API.
 - Phase 1 copies regen's look, and the watch shares it (UI review of
   2026-10-19), including the caption band. Every page but the watch shows the
   whole session's progress in six segments.
 - **The watch:** each slider has three stops, the steps its axis really has.
   A move shows a chip saying the caption is being rewritten. The rewrite
-  replaces the caption on screen about a second later, mid-window, and the
+  replaces the caption on screen about two seconds later, mid-window, and the
   chip says the change is applied. Late in a window, the change lands in the
   next window, and until then the chip says that window shows a caption from
   the earlier settings. Hiding the tab pauses the video behind phase 1's
@@ -423,53 +420,51 @@ sessions" otherwise. `serve` itself now reports every unmet gate at once too.
   in progress restarts its current video from the start, with its settings
   (logged as `session_resumed`, `video_restarted: true`).
 
-**GPUs:**
-- Each GPU in `--gpus` must have 17 GB free at start, or `serve` refuses.
-  Trida takes about 15 GB.
-- A session claims its GPU when the ID is typed, and holds it through phase 1
-  (which needs it for the second captions) and the videos. It releases the GPU after the last video, before the items.
-  When no GPU is free, the entry says so before anything starts.
-- The researcher's midsentence renders share these cards, so check
-  `nvidia-smi` first.
+**Writer services:**
+- A session claims a writer service when the ID is typed, and holds it through
+  phase 1 and the videos. It releases the service after the last video, before
+  the items. When none is free, the entry says so before anything starts.
+- Nothing here uses a GPU any more, so the researcher's other jobs on these
+  cards are unaffected.
 
 **Logs, under `--log-dir/sessions/`:**
 - `session-<id>.jsonl`: settings, playback, exposures (each with the job it
   showed), video ends and ratings;
-- `live-<id>.jsonl`: every Trida call, with its job, system message, token
-  hash, latency, output and checks. Live captions also carry `L` and the
+- `live-<id>.jsonl`: every writer call, with its job, system message, API
+  record (the request's hash, the served model, the request ID, the tokens),
+  latency, output and checks. Live captions also carry `L` and the
   target. Second captions are marked `kind: "tweak"`, with the clip, the
   attempt, the slots and degrees, and the outcome.
 
-`verification-trida.json` and `worker-gpu<N>.log` sit beside them. Phase-1
+`writer.json` (the writer's profile and its first call) sits in `--log-dir`. Phase-1
 answers, viewings, second captions, skipped steps and the calibration are in
 the store.
 
 **Behaviour to expect:**
-- Trida at τ 0.9 on the 96-token live canvas (protocol v6) takes about 0.4 s a
-  caption on an RTX 3090 for short starting captions, and about 0.8 s (p95
-  1.4 s, at most 2.7 s) for the M1 list captions of the long videos. A second
-  caption, on its 128-token canvas, took 0.53 s (median; 2.2 s at most) in the
-  smoke walk of 2026-10-19.
+- Claude Sonnet 5.5 at low effort took a median 1.6 s a live caption (p90 2.3
+  s, at most 6.3 s) on the cell bench of 2026-10-27, and 1.5 s a second caption
+  (p90 2.1 s). Trida took about 0.4–0.8 s a live caption on an RTX 3090.
 - The texture slider has three steps (0–2), and the context slider has three.
-- A change shows as soon as it is written: about 1–1.5 s after the move (the
-  300 ms debounce, Trida's ~0.6 s, the page's 0.5 s poll), in the window that
+- A change shows as soon as it is written: about 2–3 s after the move (the
+  300 ms debounce, the call's ~1.6 s, the page's 0.5 s poll), in the window that
   is playing. Every caption stays on screen at least 3 s (`MIN_READ_MS`):
   a rewrite that arrives sooner waits, and one that would have less than 3 s
   of its window left is not swapped in. When less than 3.5 s of the playing
   window would be left at `p + L` (`MIN_SHOWN_MS`), the change lands in the
-  next window instead. If the worker is busy, it appears one call later; a
-  model call cannot be cancelled.
-- Every window shows a caption about its own audio: Trida's under the current
-  settings; else its caption for that window under earlier settings (after a
-  late move, or while the worker is busy or restarting); else the window's
-  starting caption. A caption whose check failed or flagged a repetition
-  (about 9% on the M1 captions) is never shown.
-- A worker that overruns 30 s is restarted, which reloads the model; windows
-  meanwhile show their captions under earlier settings or their starting
-  captions.
+  next window instead. If the writer is busy, it appears one call later; a
+  call cannot be cancelled.
+- Every window shows a caption about its own audio: the writer's under the
+  current settings; else its caption for that window under earlier settings
+  (after a late move, or while the writer is busy); else the window's starting
+  caption. A caption whose check failed or flagged a repetition is never shown
+  (none of 270 on the 2026-10-27 cell bench; about 9% of Trida's on the M1
+  captions).
+- A call that has no answer in 15 s is tried once more, within the 30 s
+  deadline; windows meanwhile show their captions under earlier settings or
+  their starting captions.
 
-**Walking the interface without a GPU:** add `--fake-worker --purpose smoke`
-and leave out `--trida-dir`. The captions are placeholders marked "시험용",
+**Walking the interface without the API:** add `--fake-worker --purpose smoke`;
+no key is needed and no call is made. The captions are placeholders marked "시험용",
 never research data. Playwright's Chromium has no H.264, so a headless walk
 needs WebM copies of the clips in a walk-only copy of the setup.
 
@@ -547,16 +542,17 @@ audit compares that with every logged call. It also checks that:
 Audit with the commit the sessions ran: a session run on another template is
 reported once, as a version mismatch.
 
-When Trida, its tokenizer or its environment changes, also check that the
-logged prompts are what the worker tokenized, in the generator environment:
+For sessions from before 2026-10-27, when Trida, its tokenizer or its environment
+changed, also check that the logged prompts are what the worker tokenized, in the
+generator environment:
 
 ```sh
 envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir artifacts/diff/live-20261020
 ```
 
-The second-caption writer has no tokenizer here (Claude through the API since
-2026-10-27); `check` compares each logged request with the recomputed job's.
+Since then Claude writes both phases' captions through the API and has no
+tokenizer here; `check` compares each logged request with the recomputed job's.
 
 ## 10. Comparing prompt wordings
 
@@ -568,15 +564,17 @@ the nine cell prompts (`"cells": {"0-broad": "…{cue_text}…", …}`).
   also decides each clip's second-caption slots in both modes with the
   checkout's binding model, because that reads the click masks and the
   generator env has no Pillow (inputs schema v2).
-- `run`, in the generator env on one GPU, rebuilds every prompt from those
-  answers and slots with the checkout's code (or a candidate's wording) and
-  writes it with Trida.
+- `run`, in the repository env with `ANTHROPIC_API_KEY`, rebuilds every prompt
+  from those answers and slots with the checkout's code (or a candidate's
+  wording) and writes it with the study's writer, the server's own call. Every
+  call is billed, and Claude's output varies between runs (Trida, before
+  2026-10-27, repeated itself).
 
 It reports:
 - how often an output copies its starting caption;
 - whether texture words appear as each texture step asks;
 - check failures and flags, on the shown text;
-- how often Trida's own text has 「」 or a leading label, which the display rule removes;
+- how often the writer's own text has 「」 or a leading label, which the display rule removes;
 - a rough count of visibly broken text ("소" cut from "소리", ",,", "..");
 - how many second captions change between 0% and 100% degrees.
 
