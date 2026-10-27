@@ -360,7 +360,7 @@ def test_participant_sessions_need_phase_one(tmp_path: Path, monkeypatch: pytest
 
 
 def test_the_fake_worker_quotes_the_cue_of_a_live_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    # live-p2 v4 ends with the cue on a "원래 자막:" line; the examples before it must not be taken.
+    # live-p2 (v4 on) ends with the cue on a "원래 자막:" line; the examples before it must not be taken.
     from diff.__main__ import _fake_live_attempt
 
     monkeypatch.setattr("time.sleep", lambda seconds: None)

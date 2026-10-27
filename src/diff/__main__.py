@@ -633,7 +633,7 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     import re
 
     time.sleep(1.5)
-    # The live prompts end with the cue on a "원래 자막:" line (live-p2 v4). A second caption names the
+    # The live prompts end with the cue on a "원래 자막:" line (live-p2 v4 on). A second caption names the
     # attended sound from its prompt's line, so that it passes the gate (phase1_usable) as one must.
     prompt = str(payload["prompt"]["text"])
     cell = payload.get("cell")

@@ -66,15 +66,19 @@ def test_live_prompt_is_its_slider_cell_s_own_under_the_session_tuner(developmen
     for (texture, context), prompt in rendered.items():
         assert (prompt.template_id, prompt.template_version, prompt.context_rules_version) == (
             "live-p2",
+            5,
             4,
-            3,
         )
         assert prompt.template_sha256 == LIVE_CELL_PROMPTS[(texture, context)].sha256
         assert prompt.system_message == tuner and "{" not in prompt.text
         # the cue comes last, after the examples, so an example's answer is not the last thing read
         assert prompt.text.endswith(f"원래 자막: {source.text}") and prompt.text.count("예시\n") == 3
     assert "쓰지 말고, 무엇이 무엇을 하는지만" in rendered[(0, "broad")].text
-    assert "첫 소리에만 하나" in rendered[(1, "specific")].text
+    assert "딱 하나만, " in rendered[(1, "specific")].text and "웅성" in rendered[(0, "relation")].text
+    # version 5 (2026-10-27): broad names no source at all, which Claude otherwise kept
+    assert "음원 이름은 하나도 쓰지 마세요" in rendered[(0, "broad")].text
+    assert "수레가" not in rendered[(0, "broad")].text
+    assert "손수레 바퀴가 구르는" in rendered[(0, "specific")].text
     assert "첫 소리에는 두 개" in rendered[(2, "relation")].text
     assert "큰 갈래로" in rendered[(0, "broad")].text and "큰 갈래로" not in rendered[(0, "specific")].text
     assert "공간이 그려지는" in rendered[(1, "relation")].text

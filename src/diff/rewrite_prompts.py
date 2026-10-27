@@ -121,8 +121,15 @@ EMPTY_QUALITIES: Final = "없음"
 # Version 3's single prompt with a texture rule and a context rule changed too little (38 of 54
 # rewrites were copies). Until the researcher approves the nine texts, participant sessions are
 # refused.
+# Version 5 (2026-10-27), for Claude, which writes the live captions since that day: each stop
+# delivers its approved label ("none / a little / a lot", "broad kinds / specific sources / places
+# and relations"). Texture 0 also forbids sound-imitating words (웅웅, 웅성, 끼익) taken from the cue,
+# texture 1 allows one such word in the whole caption, and broad names no source at all (Claude kept
+# 경적, 종소리 or 엔진 in a third of version 4's broad captions); the market example's broad rewrites
+# drop the cart. Chosen by a rule written before the runs (artifacts/diff/cell-prompts/RULE.md, the
+# Claude round): it passed the v4 rule on 30 dev cues and on 30 held-out ones.
 LIVE_PROMPTS_PROVISIONAL: Final = True
-LIVE_RULES_VERSION: Final = 3
+LIVE_RULES_VERSION: Final = 4
 _LIVE_HEAD: Final = (
     "영상 속 소리를 시청자가 편하게 읽을 수 있는 소리 풍경 묘사로 바꿔 쓰는 일입니다. "
     "원래 자막에는 가장 두드러진 소리가 먼저 나옵니다.\n"
@@ -132,12 +139,14 @@ _LIVE_HEAD: Final = (
 )
 _LIVE_TEXTURE: Final[dict[int, str]] = {
     0: (
-        "- 소리가 어떻게 들리는지 나타내는 꾸밈말(크게, 낮게, 날카롭게, 웅웅거리는, 끼익거리는 같은 말)은 "
-        "쓰지 말고, 무엇이 무엇을 하는지만 담담하게 쓰세요.\n"
+        "- 소리가 어떻게 들리는지 나타내는 꾸밈말과 흉내말(크게, 낮게, 날카롭게, 웅웅, 웅성, 끼익 같은 말)은 "
+        "원래 자막에 있더라도 쓰지 말고, 무엇이 무엇을 하는지만 담담하게 쓰세요"
+        "(예: 웅성거리는 사람들 → 이야기하는 사람들).\n"
     ),
     1: (
-        "- 소리가 어떻게 들리는지 나타내는 꾸밈말은 가장 두드러진 첫 소리에만 하나 붙이세요"
-        "(예: 낮게, 날카롭게, 묵직하게, 희미하게, 일정하게). 다른 소리에는 붙이지 마세요.\n"
+        "- 소리가 어떻게 들리는지 나타내는 꾸밈말이나 흉내말은 자막 전체에서 딱 하나만, "
+        "가장 두드러진 첫 소리에만 쓰세요(예: 낮게, 날카롭게, 묵직하게, 희미하게, 일정하게). "
+        "다른 소리에는 원래 자막에 있던 꾸밈말과 흉내말(웅웅, 웅성, 끼익 같은 말)까지 모두 빼세요.\n"
     ),
     2: (
         "- 모든 소리에 어떻게 들리는지 나타내는 꾸밈말을 붙여 질감이 느껴지게 쓰세요. 첫 소리에는 두 개"
@@ -146,8 +155,10 @@ _LIVE_TEXTURE: Final[dict[int, str]] = {
 }
 _LIVE_CONTEXT: Final[dict[str, str]] = {
     "broad": (
-        "- 구체적인 음원 이름 대신 교통 소리, 사람들 소리, 음악 소리, 자연의 소리, 동물 소리 같은 큰 갈래로 "
-        "장면을 넓게 그리세요. 갈래가 같은 소리는 하나로 묶되, 그 소리들이 무엇을 하는지는 살리세요. "
+        "- 음원 이름은 하나도 쓰지 마세요. 경적, 엔진, 타이어, 오토바이, 종소리, 목소리, 발소리처럼 "
+        "무엇이 내는 소리인지 알려 주는 이름도 쓰지 말고, 교통 소리, 사람들 소리, 음악 소리, "
+        "자연의 소리, 동물 소리 같은 큰 갈래로만 부르세요. 갈래가 같은 소리는 하나로 묶고, "
+        "무엇을 하는지는 그 갈래에 맞는 쉬운 말(오간다, 이어진다, 이야기한다, 흐른다, 분다)로만 쓰세요. "
         "위치는 쓰지 마세요.\n"
     ),
     "specific": (
@@ -200,9 +211,9 @@ _LIVE_EXAMPLES: Final[tuple[tuple[str, dict[tuple[int, str], str]], ...]] = (
     (
         "시장에서 상인들이 외치는 소리, 손수레 바퀴가 덜컹거리는 소리",
         {
-            (0, "broad"): "사람들이 외치는 소리와 수레가 오가는 기계 소리",
-            (1, "broad"): "사람들이 크게 외치는 소리와 수레가 오가는 기계 소리",
-            (2, "broad"): "사람들이 크고 높게 외치는 소리와 수레가 거칠게 오가는 기계 소리",
+            (0, "broad"): "사람들이 외치는 소리와 기계가 오가는 소리",
+            (1, "broad"): "사람들이 크게 외치는 소리와 기계가 오가는 소리",
+            (2, "broad"): "사람들이 크고 높게 외치는 소리와 기계가 거칠게 오가는 소리",
             (0, "specific"): "상인들이 외치는 소리, 손수레 바퀴가 구르는 소리",
             (1, "specific"): "상인들이 크게 외치는 소리, 손수레 바퀴가 구르는 소리",
             (2, "specific"): "상인들이 크고 높게 외치는 소리, 손수레 바퀴가 거칠게 구르는 소리",
@@ -227,7 +238,7 @@ def _live_cell_text(texture: int, context: str) -> str:
 
 LIVE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
     (texture, context): PromptTemplate(
-        template_id="live-p2", version=4, text=_live_cell_text(texture, context)
+        template_id="live-p2", version=5, text=_live_cell_text(texture, context)
     )
     for texture in range(LIVE_TEXTURE_MAX + 1)
     for context in CONTEXT_STEPS
