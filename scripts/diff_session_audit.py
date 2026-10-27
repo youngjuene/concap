@@ -1,4 +1,4 @@
-"""Audit diff sessions: recompute from each participant's answers what Trida should have received.
+"""Audit diff sessions: recompute from each participant's answers what the writer should have received.
 
     uv run python scripts/diff_session_audit.py check --store STORE --log-dir DIR [--log-dir DIR …] \\
         --phase1-setup SETUP --sources SOURCES [--export EXPORT_DIR] [--out REPORT.json]
@@ -21,16 +21,17 @@ template than the checkout is reported once, not call by call. It also checks th
   verdict, each rung was left only after a refusal (or a second transient failure), and the
   caption shown at P6 is the one the gate passed, or a clip that never passed was skipped
   (sessions of 2026-10-24 to 26 showed the researcher's approved text: audit them at that commit);
-- each attempt's shown text is Trida's text under the display rule (logs from 2026-10-20 on);
-- every slider change got a live call, unless no cue boundary was left to write;
-- every caption shown is one Trida wrote for that cue or an earlier one (the kept caption);
+- each attempt's shown text is the writer's text under the display rule (logs from 2026-10-20 on);
+- every slider change got a live call, unless no cue boundary was left to write, and each live call
+  an API writer logged (2026-10-27) sent the request its recomputed job sends;
+- every caption shown is one the writer wrote for that cue or an earlier one (the kept caption);
 - with ``--export``, that the export matches the store and the logs.
 
 ``tokens`` re-applies Trida's chat template to every logged Trida call (its system message and
 prompt) and compares the token hash with the one the worker reported, which shows the logged prompt
-is what reached the model. Run it in the generator environment when the model, its tokenizer or its
-environment changes. The second-caption writer has no tokenizer here (Claude through the API since
-2026-10-27); ``check`` compares the request it logged with the recomputed job's instead.
+is what reached the model. Run it in the generator environment, for sessions from before
+2026-10-27. Since then Claude writes both phases' captions through the API and has no tokenizer
+here; ``check`` compares each request it logged with the recomputed job's instead.
 
 Both only read; the store is opened read-only. Each exits 1 on any mismatch.
 """
@@ -679,11 +680,10 @@ def audit_live(
             "live-call", call["system_message"] == tuner, f"{where}: the system message is not the tuner"
         )
         spec = call["spec"]
-        job = plain(
-            live_job(
-                source, int(spec["texture"]), str(spec["context"]), tuner, str(call["job"]["purpose"])
-            ).record()
+        recomputed = live_job(
+            source, int(spec["texture"]), str(spec["context"]), tuner, str(call["job"]["purpose"])
         )
+        job = plain(recomputed.record())
         prompt = call["job"]["prompt"]
         template = LIVE_CELL_PROMPTS.get((int(spec["texture"]), str(spec["context"])))
         if template is None or (prompt["template_sha256"], prompt["context_rules_version"]) != (
@@ -697,7 +697,19 @@ def audit_live(
                 job == call["job"],
                 f"{where}: the logged job differs in {differing(job, call['job'])}",
             )
-        audit.ok("live-call", call["status"] == "completed", f"{where}: {call['status']} {call.get('error')}")
+            if recomputed.runner == "claude":  # the API writer, since 2026-10-27
+                logged = (call.get("api") or {}).get("request_sha256")
+                audit.ok(
+                    "live-call",
+                    logged == sha256_of(request_body(recomputed)),
+                    f"{where}: the logged request {str(logged)[:12]} is not the job's",
+                )
+        # A busy or unreachable API (or a lost worker) is retried once by the scheduler, not a mismatch.
+        audit.ok(
+            "live-call",
+            call["status"] == "completed" or call["status"] in TRANSIENT,
+            f"{where}: {call['status']} {call.get('error')}",
+        )
         if call["status"] == "completed":
             shown_on_screen(audit, where, call, source.text)
             audit.ok(

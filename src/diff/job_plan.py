@@ -34,7 +34,6 @@ from diff.output_checks import CHECKS_VERSION
 from diff.rewrite_prompts import RenderedPrompt, render_live, render_phase1, render_phase2
 from diff.study_protocol import (
     CONTROL_CONDITION,
-    LIVE_CANVAS_TOKENS,
     LIVE_CONDITION,
     PHASE1_CONDITIONS,
     PROTOCOL_SHA256,
@@ -328,19 +327,15 @@ def make_job(
     )
 
 
-def live_call_settings() -> dict[str, Any]:
-    """Trida's call for a live caption: the protocol's live canvas at the live condition's τ."""
-    return trida_call_settings(LIVE_CANVAS_TOKENS, TAU_CONDITIONS[LIVE_CONDITION])
-
-
 def live_job(source: CaptionSource, texture: int, context: str, system_message: str, purpose: str) -> Job:
-    """One live phase-2 job: the cue's starting caption under the snapped steps and the session's tuner.
+    """One live phase-2 job: the cue's starting caption under the snapped steps and the session's tuner,
+    written by the second-caption writer's call (researcher, 2026-10-27; Trida at τ 0.9 before).
 
     The tuner system message is part of the prompt record, so it is part of the job's identity.
     """
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a live job serves a participant session or a smoke run, not {purpose!r}"])
-    model, generate = TRIDA_7B, live_call_settings()
+    model, generate = CLAUDE_WRITER, writer_call_settings()
     cell = {"cell_id": f"t{texture}-{context}", "quality_limit": texture, "context": context}
     return make_job(
         source,

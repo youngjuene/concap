@@ -29,8 +29,6 @@ from typing import Any
 
 GENERATOR_LOCK = Path("envs/diff-generator/uv.lock")
 GENERATOR_PYTHON = Path("envs/diff-generator/.venv/bin/python")
-# Trida's bf16 weights take about 15 GB; a card needs this much free to host a live worker.
-LIVE_MIN_FREE_MIB = 17408
 PARTICIPANT_STORE = Path("artifacts/diff/participants.sqlite")
 
 
@@ -630,17 +628,6 @@ def export_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _gpu_free_mib() -> dict[str, int]:
-    import subprocess
-
-    query = ["nvidia-smi", "--query-gpu=index,memory.used,memory.total", "--format=csv,noheader,nounits"]
-    rows = subprocess.run(query, capture_output=True, text=True, check=True).stdout.splitlines()
-    return {
-        index.strip(): int(total) - int(used)
-        for index, used, total in (row.split(",") for row in rows if row.strip())
-    }
-
-
 def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     """[--fake-worker] A stand-in for Trida, to walk the interface without a GPU; never research data."""
     import re
@@ -673,8 +660,9 @@ def _fake_live_attempt(payload: Any, timeout: float) -> dict[str, Any]:
     return {"status": "completed", "output": output, "latency_ms": 1500, "seed": None}
 
 
-def _writer_services(count: int, log_dir: Path, tweak_check: Any) -> list[Any]:
-    """Phase 1's second-caption writer: Claude through the API, one service per concurrent session."""
+def _writer_services(count: int, log_dir: Path, check: Any, tweak_check: Any) -> list[Any]:
+    """The writer of both phases' captions: Claude through the API (2026-10-27), one service per
+    concurrent session, each writing its session's second captions and then its live captions."""
     from diff.claude_writer import ClaudeWriter
     from diff.live_generation import LiveService
     from diff.model_profile import CLAUDE_WRITER
@@ -685,13 +673,13 @@ def _writer_services(count: int, log_dir: Path, tweak_check: Any) -> list[Any]:
         warmup = writer.warm_up()
     except Exception as exc:  # noqa: BLE001 — no participant enters without a writer
         raise SystemExit(
-            f"the second-caption writer cannot reach the Claude API: {type(exc).__name__}: {exc}\n"
+            f"the writer cannot reach the Claude API: {type(exc).__name__}: {exc}\n"
             "set ANTHROPIC_API_KEY in this shell (runbook §7)"
         ) from exc
     _write_json(log_dir / "writer.json", {"profile": CLAUDE_WRITER.record(), "warmup": warmup}, force=True)
     print(f"  {warmup['model']} answered in {warmup['wall_ms']} ms", flush=True)
     return [
-        LiveService(writer.attempt, log_dir / "sessions", check=None, tweak_check=tweak_check)
+        LiveService(writer.attempt, log_dir / "sessions", check=check, tweak_check=tweak_check)
         for _ in range(count)
     ]
 
@@ -747,9 +735,9 @@ def live_preflight(args: argparse.Namespace) -> int:
     import subprocess
 
     import diff.workbook_instrument as workbook_instrument
+    from diff.claude_writer import ClaudeWriter
     from diff.live_generation import LiveStream, starting_caption_problems
     from diff.live_server import LiveVideo, rating_items
-    from diff.model_profile import TRIDA_7B, ProfileMismatch, verify_snapshot
     from diff.phase1_setup import SetupError, read_setup, setup_problems
     from diff.study_protocol import LIVE_MAX_CHARS
 
@@ -802,20 +790,12 @@ def live_preflight(args: argparse.Namespace) -> int:
             problems = setup_problems(setup, "participant", root=Path.cwd(), instrument=workbook_instrument)
             blockers += [f"phase-1 setup: {problem}" for problem in problems]
     blockers += _participant_blockers(args, videos)
-    try:
-        verify_snapshot(args.trida_dir, TRIDA_7B, weights=False)
-    except (OSError, ProfileMismatch) as exc:
-        blockers.append(f"Trida snapshot {args.trida_dir}: {exc}")
-    try:
-        free = _gpu_free_mib()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        free = {}
-        blockers.append(f"cannot read the GPUs: {exc}")
-    for gpu in args.gpus.split(","):
-        if free and free.get(gpu, 0) < LIVE_MIN_FREE_MIB:
-            blockers.append(
-                f"GPU {gpu}: {free.get(gpu, 0)} MiB free, a live worker needs {LIVE_MIN_FREE_MIB}"
-            )
+    try:  # one short call: the key works and the model answers
+        warmup = ClaudeWriter().warm_up()
+    except Exception as exc:  # noqa: BLE001 — reported, like every other blocker
+        blockers.append(f"the writer cannot reach the Claude API: {type(exc).__name__}: {exc}")
+    else:
+        notes.append(f"writer: {warmup['model']} answered in {warmup['wall_ms']} ms")
     store = args.store or PARTICIPANT_STORE
     if store.exists():
         db = sqlite3.connect(store.resolve().as_uri() + "?mode=ro", uri=True)
@@ -835,17 +815,14 @@ def live_preflight(args: argparse.Namespace) -> int:
 
 
 def live_serve(args: argparse.Namespace) -> int:
-    """[repository env + GPU] The participant app: entry, phase 1, then live phase 2 on Trida."""
-    import functools
-
+    """[repository env + API key] The participant app: entry, phase 1, then live phase 2, every caption
+    written by Claude through the API (Trida wrote phase 2's until 2026-10-27)."""
     import uvicorn
 
     import diff.workbook_instrument as workbook_instrument
-    from diff.generation_worker import Supervisor, WorkerCommand
     from diff.job_plan import live_job
     from diff.live_generation import LiveService, LiveStream, starting_caption_problems
     from diff.live_server import LivePool, LiveVideo, rating_items
-    from diff.model_profile import TRIDA_7B, verify_snapshot
     from diff.output_checks import check_output, displayed, output_from_record
     from diff.participant_server import build_participant_app
     from diff.phase1_flow import Phase1
@@ -909,56 +886,8 @@ def live_serve(args: argparse.Namespace) -> int:
             LiveService(_fake_live_attempt, log_dir / "fake-worker", check=None, tweak_check=check_record)
         )
     else:
-        if args.trida_dir is None:
-            raise SystemExit("pass --trida-dir (or --fake-worker to walk the interface)")
-        free = _gpu_free_mib()
-        print("verifying the Trida snapshot (hashing every weight shard) …", flush=True)
-        record_path = log_dir / "verification-trida.json"
-        _write_json(record_path, verify_snapshot(args.trida_dir, TRIDA_7B, weights=True), force=True)
-        for gpu in args.gpus.split(","):
-            if free.get(gpu, 0) < LIVE_MIN_FREE_MIB:
-                raise SystemExit(
-                    f"GPU {gpu} has {free.get(gpu, 0)} MiB free; a live worker needs {LIVE_MIN_FREE_MIB}"
-                )
-            env = {
-                **os.environ,
-                "CUDA_VISIBLE_DEVICES": gpu,
-                "PYTHONPATH": str(Path("src").resolve()),
-                "HF_HUB_OFFLINE": "1",
-                "TRANSFORMERS_OFFLINE": "1",
-                "HF_MODULES_CACHE": str((log_dir / "hf-modules" / uuid.uuid4().hex).resolve()),
-                "TOKENIZERS_PARALLELISM": "false",
-            }
-            command = WorkerCommand(
-                argv=(
-                    str(GENERATOR_PYTHON.absolute()),  # not resolve(): the venv's python is a symlink
-                    "-m",
-                    "diff",
-                    "worker",
-                    "--profile",
-                    TRIDA_7B.profile_id,
-                    "--model-dir",
-                    str(args.trida_dir),
-                    "--verification",
-                    str(record_path),
-                    "--device",
-                    "cuda:0",
-                    "--lock",
-                    str(GENERATOR_LOCK),
-                ),
-                env=env,
-                cwd=Path.cwd(),
-                log_path=log_dir / f"worker-gpu{gpu}.log",
-            )
-            supervisor = Supervisor(command, startup_timeout=1800.0)
-            print(f"loading Trida on GPU {gpu} …", flush=True)
-            supervisor.ensure_started()
-            attempt = functools.partial(supervisor.attempt, kind="live")
-            services.append(LiveService(attempt, log_dir / "sessions", check=check, tweak_check=check_record))
-    writers = None
-    if phase1 is not None and not args.fake_worker:
-        writers = LivePool(_writer_services(len(services), log_dir, check_record))
-    for service in services + (writers.services if writers else []):
+        services = _writer_services(args.sessions, log_dir, check, check_record)
+    for service in services:
         service.start()
     app = build_participant_app(
         store=SessionStore(store_path),
@@ -969,11 +898,10 @@ def live_serve(args: argparse.Namespace) -> int:
         job_for=job_for,
         phase1=phase1,
         tweak_for=tweak_for,
-        writers=writers,
     )
     first = "phase 1, then the watch" if phase1 else "the watch (no phase 1)"
     print(f"participant app on http://{args.host}:{args.port}/: {first}", flush=True)
-    print(f"  store {store_path}; {len(services)} worker(s)", flush=True)
+    print(f"  store {store_path}; {len(services)} session(s) at once", flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
@@ -1168,11 +1096,11 @@ def parser() -> argparse.ArgumentParser:
     exported.add_argument("--out", type=Path, required=True, help="a new, empty directory")
     exported.set_defaults(handler=export_run)
     live = commands.add_parser(
-        "live", help="live phase 2: Trida rewrites captions while a participant watches"
+        "live", help="live phase 2: Claude rewrites captions while a participant watches"
     )
     live_commands = live.add_subparsers(dest="action", required=True)
     serve_live = live_commands.add_parser(
-        "serve", help="[repository env + GPU] run the participant app: entry, phase 1, live phase 2"
+        "serve", help="[repository env + API key] run the participant app: entry, phase 1, live phase 2"
     )
     serve_live.add_argument("--sources", type=Path, required=True, help="phase-2 cues with starting captions")
     serve_live.add_argument("--video", action="append", required=True, help="ID=PATH, in watch order")
@@ -1185,14 +1113,15 @@ def parser() -> argparse.ArgumentParser:
     serve_live.add_argument(
         "--store", type=Path, help=f"session store (default {PARTICIPANT_STORE} for participants)"
     )
-    serve_live.add_argument("--trida-dir", type=Path)
-    serve_live.add_argument("--gpus", default="0", help="comma-separated GPU indices, one live session each")
+    serve_live.add_argument(
+        "--sessions", type=int, default=1, help="participant sessions at once, each with its own writer"
+    )
     serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     serve_live.add_argument("--log-dir", type=Path, required=True)
     serve_live.add_argument("--host", default="127.0.0.1")
     serve_live.add_argument("--port", type=int, default=8782)
     serve_live.add_argument(
-        "--fake-worker", action="store_true", help="placeholder captions, no GPU (interface walk)"
+        "--fake-worker", action="store_true", help="placeholder captions, no API calls (interface walk)"
     )
     serve_live.set_defaults(handler=live_serve)
     preflight = live_commands.add_parser(
@@ -1203,8 +1132,6 @@ def parser() -> argparse.ArgumentParser:
     preflight.add_argument("--items", type=Path, required=True)
     preflight.add_argument("--phase1-setup", type=Path)
     preflight.add_argument("--store", type=Path, help=f"session store (default {PARTICIPANT_STORE})")
-    preflight.add_argument("--trida-dir", type=Path, required=True)
-    preflight.add_argument("--gpus", default="0", help="the GPUs live serve will use")
     preflight.set_defaults(handler=live_preflight)
     return root
 

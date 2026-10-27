@@ -1,10 +1,9 @@
-"""Score wordings of the live prompt, the second-caption prompt and the tuner with Trida, on fixed answers.
+"""Score wordings of the live, second-caption and tuner prompts with the writer, on fixed answers.
 
     uv run python scripts/diff_prompt_bench.py inputs --store STORE --log-dir DIR [--log-dir DIR …] \\
         --phase1-setup SETUP --sources SOURCES --note TEXT --out INPUTS.json
-    CUDA_VISIBLE_DEVICES=1 envs/diff-generator/.venv/bin/python scripts/diff_prompt_bench.py run \\
-        --inputs INPUTS.json --trida-dir artifacts/diff/models/trida-7b-c37755e8 \\
-        [--candidate CANDIDATE.json] --out REPORT.json
+    ANTHROPIC_API_KEY=… uv run python scripts/diff_prompt_bench.py run \\
+        --inputs INPUTS.json [--candidate CANDIDATE.json] --out REPORT.json
 
 rewrite_prompts records how its wordings were chosen: draft candidates, run them on the same
 material at the study's settings, and pick by a rule written down before the run. This runs that
@@ -19,19 +18,21 @@ comparison for live-p2, tweak-p1 and the tuner.
 ``run`` rebuilds every prompt from those answers and slots with the checkout's own code. A
 candidate that changes the wording therefore runs on the same participants.
 
-``run`` loads Trida on one GPU and writes, for each session:
+``run`` writes with the study's writer (Claude through the API since 2026-10-27, ``diff.claude_writer``;
+Trida on a GPU before), for each session:
 - every live (cue, texture, context) under the session's tuner, and the same prompts under the
   plain system message, which separates the prompt's effect from the tuner's;
 - each clip's second caption in the mode the binding model and the plan chose, and the same
   answers in the other mode.
-Calls take the worker's own path (freeze_live, run_job) at the study's settings. Trida is
-deterministic at temperature 0, so a rerun gives the same outputs.
+Calls take the server's own path (``ClaudeWriter.attempt``) at the study's settings, with the
+server's one retry after a busy or unreachable API. Each distinct prompt is called once. Claude's
+output varies, so a rerun gives other outputs (Trida, at temperature 0, gave the same).
 
 It reports:
 - how often an output copies its starting caption;
 - whether a live output has as many texture words as its step asks (0, 1 or 2);
 - check failures and flags, from the server's own checks on the shown text (the display rule);
-- how often Trida's own text has 「」 or a leading prompt label, which the display rule removes;
+- how often the writer's own text has 「」 or a leading prompt label, which the display rule removes;
 - visibly broken text in what is shown: "소" cut from "소리", doubled commas or full stops. The
   count is rough (it misses typos such as "웅거림" and would count the animal 소), so a fluent
   reader still rates the chosen wording;
@@ -63,11 +64,9 @@ import argparse
 import difflib
 import hashlib
 import json
-import os
 import re
 import sqlite3
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -79,7 +78,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from diff import rewrite_prompts  # noqa: E402
 from diff.caption_sources import CaptionSource, parse_sources  # noqa: E402
-from diff.job_plan import Job, PlanError, live_job  # noqa: E402
+from diff.job_plan import Job, live_job  # noqa: E402
 from diff.live_calibration import calibrate  # noqa: E402
 from diff.live_generation import usable  # noqa: E402
 from diff.output_checks import (  # noqa: E402
@@ -249,7 +248,7 @@ def profile_inputs(
 def measure(
     text: str | None, source: str, checks: Mapping[str, Any] | None, *, falls_back: bool = False
 ) -> dict[str, Any]:
-    """Copies and texture words in what is shown; quotes and labels in what Trida wrote.
+    """Copies and texture words in what is shown; quotes and labels in what the writer wrote.
 
     ``falls_back``: a live caption, which shows its starting caption when it is not usable (nothing
     readable left, a check failure or a repetition; ``live_generation.usable``). The bench has no
@@ -379,7 +378,7 @@ def print_summary(summary: Mapping[str, Any]) -> None:
         live = summary[f"live_{system}"]
         print(
             f"live under {system}: {live['copies']}/{live['calls']} copies, "
-            f"{live['not_completed']} not completed; Trida wrote 「」 in {live['quotes']}, "
+            f"{live['not_completed']} not completed; the writer wrote 「」 in {live['quotes']}, "
             f"a label in {live['labels']}; {live['broken']} visibly broken; "
             f"{live['unusable']} unusable ({live['blank']} blank), shown as the starting caption"
         )
@@ -394,7 +393,7 @@ def print_summary(summary: Mapping[str, Any]) -> None:
     tweak = summary["tweak"]
     print(
         f"second caption: {tweak['copies']}/{tweak['calls']} copies, {tweak['failed']} failed, "
-        f"Trida wrote 「」 in {tweak['quotes']}, a label in {tweak['labels']}; "
+        f"the writer wrote 「」 in {tweak['quotes']}, a label in {tweak['labels']}; "
         f"{tweak['broken']} visibly broken; {tweak['blank']} blank, failed"
         f"\n  failures {tweak['failures']}  flags {tweak['flags']}"
     )
@@ -424,11 +423,9 @@ def print_summary(summary: Mapping[str, Any]) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    from diff import trida_runner
-    from diff.model_profile import TRIDA_7B, verify_snapshot
+    from diff.claude_writer import UNAVAILABLE, ClaudeWriter
+    from diff.live_generation import LIVE_DEADLINE_S
+    from diff.model_profile import CLAUDE_WRITER
 
     document = json.loads(args.inputs.read_text(encoding="utf-8"))
     if document.get("schema") != INPUTS_SCHEMA:
@@ -438,23 +435,19 @@ def run(args: argparse.Namespace) -> int:
     clips = document["clips"]
     cues = {(s.unit_key, s.cue_index): s for s in parse_sources(document["sources"]).sources}
 
-    print("verifying the Trida snapshot (hashing every weight shard) …", flush=True)
-    verification = verify_snapshot(args.trida_dir, TRIDA_7B, weights=True)
-    with tempfile.TemporaryDirectory(prefix="hf-modules-") as modules:
-        os.environ["HF_MODULES_CACHE"] = modules
-        loaded = trida_runner.load(args.trida_dir, verification, device=args.device)
-        trida_runner.warm_up(loaded)
-        results: dict[str, dict[str, Any]] = {}
+    writer = ClaudeWriter()
+    print(f"{CLAUDE_WRITER.model}: {writer.warm_up()}", flush=True)
+    results: dict[str, dict[str, Any]] = {}
 
-        def call(job: Job) -> dict[str, Any]:
-            if job.job_id not in results:
-                try:
-                    results[job.job_id] = trida_runner.run_job(loaded, trida_runner.freeze_live(loaded, job))
-                except PlanError as exc:  # a prompt the guards refuse is a result of the wording
-                    results[job.job_id] = {"status": "refused", "error": str(exc)}
-            return results[job.job_id]
+    def call(job: Job) -> dict[str, Any]:
+        if job.job_id not in results:
+            result = writer.attempt(job.record(), LIVE_DEADLINE_S)
+            if result["status"] == UNAVAILABLE:  # the server's one identical retry
+                result = writer.attempt(job.record(), LIVE_DEADLINE_S)
+            results[job.job_id] = result
+        return results[job.job_id]
 
-        rows = bench(document["sessions"], clips, cues, call)
+    rows = bench(document["sessions"], clips, cues, call)
     summary = summarise(rows)
     print_summary(summary)
     report = {
@@ -476,7 +469,7 @@ def run(args: argparse.Namespace) -> int:
             "sha256": sha256_file(args.inputs),
             "note": document.get("note"),
         },
-        "model": {"profile": TRIDA_7B.profile_id, "device": args.device},
+        "model": {"profile": CLAUDE_WRITER.profile_id},
         "distinct_calls": len(results),
         "summary": summary,
         "rows": rows,
@@ -580,13 +573,11 @@ def main() -> int:
     kept.add_argument("--note", required=True, help="what the run was, for whoever reads the report")
     kept.add_argument("--out", type=Path, required=True)
     kept.set_defaults(handler=inputs)
-    ran = commands.add_parser("run", help="[generator env, GPU] write every prompt with Trida and score it")
+    ran = commands.add_parser("run", help="[repository env, API key] write every prompt and score it")
     ran.add_argument("--inputs", type=Path, required=True)
-    ran.add_argument("--trida-dir", type=Path, required=True)
     ran.add_argument(
         "--candidate", type=Path, help="a JSON file of replacement wordings (default: the checkout's)"
     )
-    ran.add_argument("--device", default="cuda:0", help="within CUDA_VISIBLE_DEVICES")
     ran.add_argument("--out", type=Path, required=True)
     ran.set_defaults(handler=run)
     args = parser.parse_args()

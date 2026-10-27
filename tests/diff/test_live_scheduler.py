@@ -10,7 +10,8 @@ from typing import Any
 import pytest
 
 from diff.caption_sources import CaptionSource, parse_sources
-from diff.job_plan import Job, live_job, make_job, trida_call_settings
+from diff.claude_writer import request_body
+from diff.job_plan import Job, live_job, make_job, trida_call_settings, writer_call_settings
 from diff.live_generation import (
     LatencyEstimator,
     LiveScheduler,
@@ -21,8 +22,9 @@ from diff.live_generation import (
     slider_steps,
     starting_caption_problems,
 )
-from diff.model_profile import TRIDA_7B
+from diff.model_profile import CLAUDE_WRITER, TRIDA_7B
 from diff.rewrite_prompts import RenderedPrompt
+from diff.study_protocol import WRITER_CONDITION
 
 VIDEO = "live_test_video"
 
@@ -287,7 +289,7 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
         json.loads(line)
         for line in (tmp_path / "live-session-a.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v4"
+    assert len(lines) == 3 and lines[0]["schema"] == "diff.live-attempt/v5"
     assert lines[0]["output"]["text"] == "자막: 「첫 자막」" and lines[0]["shown_text"] == "첫 자막"
     assert lines[0]["usable"] is True
     assert lines[0]["display_rule"] == "diff.display/v2"
@@ -301,12 +303,13 @@ def test_the_service_runs_requests_and_logs_every_attempt(tmp_path: Path) -> Non
     assert service.free
 
 
-def test_live_jobs_run_trida_at_tau_09_on_three_blocks() -> None:
-    # Researcher, 2026-10-12: Trida at its README setting; 96 tokens fit the 96-character limit.
+def test_live_jobs_take_the_writer_s_call_under_the_tuner() -> None:
+    # Researcher, 2026-10-27: phase 2's live captions take phase 1's writer call (Trida at τ 0.9 before).
     job = live_job(stream().cues[0], 2, "specific", "당신은 오디오 자막 조정기입니다.", "smoke")
-    assert job.profile_id == TRIDA_7B.profile_id and job.condition == "trida_tau_090"
-    assert job.generate["max_new_tokens"] == 96 and job.generate["threshold"] == 0.9
-    assert job.generate["temperature"] == 0 and job.caps == {"canvas_tokens": 96, "timeout_s": 60.0}
+    assert (job.profile_id, job.runner) == (CLAUDE_WRITER.profile_id, "claude")
+    assert job.condition == WRITER_CONDITION and job.generate == writer_call_settings()
+    assert job.cell == {"cell_id": "t2-specific", "quality_limit": 2, "context": "specific"}
+    assert request_body(job)["system"] == "당신은 오디오 자막 조정기입니다."  # the tuner is the system prompt
 
 
 def test_starting_captions_longer_than_the_live_limit_are_named() -> None:

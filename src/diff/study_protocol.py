@@ -45,7 +45,8 @@ def sha256_tokens(token_ids: Sequence[int]) -> str:
     return sha256_of([int(token) for token in token_ids])
 
 
-PROTOCOL_SCHEMA: Final = "diff.study-protocol/v8"  # v8 (2026-10-27): phase 1's second captions by Claude
+# v8 (2026-10-27): phase 1's second captions by Claude. v9 (the same day): phase 2's live captions too.
+PROTOCOL_SCHEMA: Final = "diff.study-protocol/v9"
 
 # Qwen2.5-7B-Instruct's token IDs at a09a3545 (the baseline), checked against the
 # pinned tokenizer: <|endoftext|> is EOS and PAD, <|im_end|> ends a chat turn.
@@ -92,10 +93,8 @@ CANVAS_TOKENS: Final[dict[int, int]] = {1: 96, 2: 128}
 TIMEOUT_SECONDS: Final = 60.0
 MAX_CHARS: Final[dict[int, int]] = {1: 96, 2: 160}
 # Live phase 2: a starting caption and its rewrite fit phase 1's 96 characters
-# (researcher, 2026-10-12), so live captions use phase 1's three-block canvas.
-# Trida writes one in about 0.4 s at τ 0.9, its README setting.
-LIVE_CONDITION: Final = "trida_tau_090"
-LIVE_CANVAS_TOKENS: Final = 96
+# (researcher, 2026-10-12). Trida wrote them at τ 0.9 in about 0.4 s until
+# 2026-10-27; since, the second-caption writer's call does (LIVE_CONDITION, below).
 LIVE_MAX_CHARS: Final = 96
 # The texture slider spans steps 0-2 (researcher, 2026-10-12). On held-out
 # captions with Dream, the 0-4 range gave 25-30 broken, looping or copied
@@ -120,6 +119,8 @@ WRITER_API_VERSION: Final = "2026-10-21"
 WRITER_EFFORT: Final = "low"
 WRITER_MAX_TOKENS: Final = 2048
 WRITER_FALLBACK_BETA: Final = "server-side-fallback-2026-07-01"
+# Researcher, 2026-10-27: phase 2's live captions take the same call (Trida's τ 0.9 until then).
+LIVE_CONDITION: Final = WRITER_CONDITION
 TWEAK_MAX_CHARS: Final = 80
 MAX_LINES: Final[dict[int, int]] = {1: 2}
 CUES_PER_CLIP: Final = 4
@@ -252,7 +253,6 @@ GENERATION: Final[dict[str, Any]] = {
     },
     "live": {
         "condition": LIVE_CONDITION,
-        "canvas_tokens": LIVE_CANVAS_TOKENS,
         "max_chars": LIVE_MAX_CHARS,
         "texture_max_step": LIVE_TEXTURE_MAX,
     },

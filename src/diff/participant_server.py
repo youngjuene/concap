@@ -3,11 +3,12 @@
 Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
 - **Entry:** the experimenter types the participant ID on the start screen.
   The same ID resumes an unfinished session; a finished one is refused.
-- **GPU:** each session claims a GPU when the ID is entered, so a full machine
-  shows before the participant starts, not at the handoff.
+- **Writer:** each session claims a writer service when the ID is entered, so a
+  full machine shows before the participant starts, not at the handoff (a GPU
+  with Trida until 2026-10-27; ``live serve --sessions`` of them since).
 - **Phases:** phase 1 (:class:`diff.phase1_flow.Phase1`) runs the
   questionnaire spreadsheet's pages, two viewings per clip. Each clip's second
-  caption is written by Trida on the GPU the session claimed, queued when the
+  caption is written by the session's writer service, queued when the
   clip's first step closes (P5) and written back into the session when it
   finishes. At the handoff, the tuner's calibration is built from the phase-1
   answers and the live watch (``/watch/``) opens with it, with no researcher
@@ -133,16 +134,15 @@ def build_participant_app(
     job_for: JobFor,
     phase1: Phase1 | None,
     tweak_for: TweakFor | None = None,
-    writers: LivePool | None = None,
     secret: bytes | None = None,
     clock: Callable[[], float] = time.time,
 ) -> Any:
     """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
 
     ``tweak_for(clip, slots, rung)`` builds a clip's second-caption job at a rung of its ladder;
-    phase 1 needs it. ``writers`` serve those jobs on their own model (Claude through the API
-    since 2026-10-27, while phase 2 stays on Trida): a session holds a writer from its entry to
-    the handoff, and without ``writers`` the session's live worker writes them.
+    phase 1 needs it. The session's live service writes them: Claude through the API since
+    2026-10-27, which also writes phase 2's live captions (on 2026-10-26 to 27 phase 1 had its own
+    writer pool, while phase 2 stayed on Trida).
     """
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -196,7 +196,7 @@ def build_participant_app(
             submit_pending(request.session_id)
 
     def submit_pending(session_id: str) -> None:
-        """Queue every pending second caption on the session's GPU (already queued ones are skipped)."""
+        """Queue every pending second caption on the session's writer (already queued ones are skipped)."""
         if phase1 is None or tweak_for is None:
             return
         session = store.get(session_id)
@@ -205,8 +205,7 @@ def build_participant_app(
         pending = phase1.pending_tweaks(session.state)
         if not pending:
             return
-        tweaks = writers or pool
-        service = tweaks.holder(session_id) or tweaks.acquire(session_id)
+        service = pool.holder(session_id) or pool.acquire(session_id)
         if service is None:
             return
         for clip_key, slots, attempt, rung in pending:
@@ -262,13 +261,6 @@ def build_participant_app(
         except ValueError:
             return error(400, BAD_ID)
         if pool.acquire(session.session_id) is None:
-            return error(503, BUSY_MESSAGE)
-        if (
-            writers is not None
-            and session.state["stage"] == "phase1"
-            and writers.acquire(session.session_id) is None
-        ):
-            pool.release(session.session_id)
             return error(503, BUSY_MESSAGE)
         submit_pending(session.session_id)
         reply = {"next_url": WATCH_URL} if session.state["stage"] == "phase2" else {"stage": "phase1"}
@@ -336,8 +328,6 @@ def build_participant_app(
             return error(409, str(exc))
         except (ValueError, KeyError, TypeError) as exc:
             return error(400, str(exc))
-        if action == "handoff" and writers is not None:
-            writers.release(session.session_id)  # phase 1 is over: no second caption is left to write
         submit_pending(session.session_id)
         return JSONResponse(reply)
 
@@ -354,7 +344,7 @@ def build_participant_app(
                 return live
             progress = session.state["live"]
             if progress["stage"] == "ratings":
-                # The last video already released the GPU; the items need none.
+                # The last video already released the writer; the items need none.
                 service = pool.holder(session.session_id) or pool.services[0]
             else:
                 acquired = pool.acquire(session.session_id)

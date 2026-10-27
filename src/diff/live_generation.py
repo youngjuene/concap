@@ -1,4 +1,8 @@
-"""Live phase-2 captions: Trida rewrites the cue captions while a participant watches.
+"""Live phase-2 captions: the writer rewrites the cue captions while a participant watches.
+
+The writer was Trida until 2026-10-27 and is Claude through the API since (researcher;
+:mod:`diff.claude_writer`), the same call as phase 1's second captions. "Trida" below is the
+writer of the time.
 
 Researcher's design of 2026-10-11 (plan "Live phase 2"):
 
@@ -56,9 +60,9 @@ except for one identical retry after a transient worker or device failure. Since
 2026-10-26 (captions written live, made usable by engineering) an output that
 fails its check goes to the next rung of the request's ladder (``next``; the
 session's flow queues the new job), and ends the tweak only on the last rung.
-Since 2026-10-27 the second captions have their own services, whose attempt is the
-Claude API writer (:mod:`diff.claude_writer`) rather than a worker; the API's record
-of each call is logged with it, and a busy or unreachable API counts as transient.
+Since 2026-10-27 the attempt is the Claude API writer (:mod:`diff.claude_writer`)
+rather than a worker, for both phases; the API's record of each call is logged with
+it, and a busy or unreachable API counts as transient.
 """
 
 from __future__ import annotations
@@ -84,7 +88,8 @@ from diff.study_protocol import CONTEXT_STEPS, LIVE_TEXTURE_MAX
 # v2 (2026-10-20): each attempt also records the shown text and the display rule.
 # v3 (2026-10-20): and where the shown text came from, Trida or the cue's starting caption.
 # v4 (2026-10-20): ``usable`` instead; which caption each window showed is in the exposure log.
-LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v4"
+# v5 (2026-10-27): the API writer's ``api`` record.
+LIVE_ATTEMPT_SCHEMA: Final = "diff.live-attempt/v5"
 STARTING_CAPTION: Final = "starting-caption"
 TWEAK_ATTEMPT_SCHEMA: Final = "diff.tweak-attempt/v3"  # v3 (2026-10-27): the API writer's ``api`` record
 LATENCY_WINDOW: Final = 20
@@ -596,6 +601,7 @@ class LiveService:
             "error": result.get("error"),
             "seed": result.get("seed"),
             "token_ids_sha256": result.get("token_ids_sha256"),
+            "api": result.get("api"),
             "latency_ms": result.get("latency_ms"),
             "wall_ms": result.get("wall_ms"),
             "output": result.get("output"),

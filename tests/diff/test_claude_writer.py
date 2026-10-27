@@ -176,3 +176,27 @@ def test_the_server_retries_a_busy_api_once_and_logs_what_it_said(
     lines = [json.loads(line) for line in (tmp_path / "logs" / "live-s1.jsonl").read_text().splitlines()]
     assert lines[1]["api"]["request_sha256"] == sha256_of(request_body(requests[0].job))
     assert lines[1]["token_ids_sha256"] is None  # no tokenizer here: the request's hash stands in
+
+
+def test_a_live_watch_shows_the_writer_s_captions_and_logs_each_request(tmp_path: Path) -> None:
+    from test_live_scheduler import stream
+
+    from diff.job_plan import live_job
+    from diff.live_generation import LiveScheduler, LiveService, Spec
+
+    client = FakeClient(*(message(f"차들이 낮게 지나간다 {cue}.") for cue in range(3)))
+    service = LiveService(ClaudeWriter(client).attempt, tmp_path, check=lambda s, j, r: {}, clock=lambda: 0.0)
+
+    def job_for(source: Any, spec: Spec) -> Any:
+        return live_job(source, spec.texture, spec.context, spec.system_message, "smoke")
+
+    service.attach("s1", LiveScheduler(stream(), job_for))
+    service.settings(Spec(1, "broad", "당신은 오디오 자막 조정기입니다."), 0)
+    while service.step():
+        pass
+    ready = service.ready()
+    assert [ready[cue]["text"] for cue in range(3)] == [f"차들이 낮게 지나간다 {cue}." for cue in range(3)]
+    assert all(body["system"] == "당신은 오디오 자막 조정기입니다." for body in client.bodies)  # the tuner
+    lines = [json.loads(line) for line in (tmp_path / "live-s1.jsonl").read_text().splitlines()]
+    assert [line["schema"] for line in lines] == ["diff.live-attempt/v5"] * 3
+    assert [line["api"]["request_sha256"] for line in lines] == [sha256_of(body) for body in client.bodies]
