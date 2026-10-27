@@ -344,7 +344,13 @@ def tweak_outcome(
     next rung of the request's ladder, ``steer["rung"]`` of ``steer["rungs"]``) or ``failed``."""
     status = result.get("status")
     rung = int(request.steer.get("rung", 0))
-    base = {"attempt": request.attempt, "result_status": status, "job_id": request.job.job_id, "rung": rung}
+    base = {
+        "attempt": request.attempt,
+        "result_status": status,
+        "job_id": request.job.job_id,
+        "rung": rung,
+        "served_by": (result.get("api") or {}).get("model"),  # an API writer's model, fallback included
+    }
     refused = "failed" if rung + 1 >= int(request.steer.get("rungs", 1)) else "next"
     if status == "completed" and checks is not None and not checks.get("excluded"):
         text = shown_text(result["output"]["text"])

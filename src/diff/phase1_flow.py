@@ -618,7 +618,7 @@ class Phase1:
         entry["attempts"].append(
             {
                 key: outcome.get(key)
-                for key in ("attempt", "rung", "status", "result_status", "reason", "job_id")
+                for key in ("attempt", "rung", "status", "result_status", "reason", "job_id", "served_by")
             }
             | {"failures": [f["code"] for f in (outcome.get("checks") or {}).get("failures", [])], "at": now}
         )

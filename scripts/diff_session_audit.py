@@ -103,6 +103,7 @@ SECOND_FIELDS = (
     "caption_source",
     "variant_id",
     "rung",
+    "writer_model",
     "emphasis",
     *SECOND_SLOTS,
     *SECOND_MODEL,
@@ -564,6 +565,12 @@ def audit_phase1(
                     last["outcome"] == "ready" and entry["text"] == text,
                     f"{who} {key}: stored caption != the one the gate passed",
                 )
+                served = (last.get("api") or {}).get("model")
+                audit.ok(
+                    "tweak-outcome",
+                    (entry.get("attempts") or [{}])[-1].get("served_by") == served,
+                    f"{who} {key}: the stored writer model is not {served}, the logged one",
+                )
                 audit.ok(
                     "tweak-outcome",
                     bool(p6) and p6[-1]["captions"][0]["text"] == text,
@@ -853,6 +860,11 @@ def audit_export(
             for item in record["presented_order"]:
                 key = (sid, str(record["clip_index"]), viewing, str(record["page"]), str(item))
                 phase1[key] = cell(record["answers"].get(item))
+        served = {  # the model that wrote each clip's delivered caption, from the logs
+            record["clip"]: (record.get("api") or {}).get("model") or ""
+            for record in logs[sid]["attempts"]
+            if record.get("kind") == "tweak" and record.get("outcome") == "ready"
+        }
         for clip, entry in state.get("second_captions", {}).items():
             slots, model = entry.get("slots", {}), entry.get("model", {})
             seconds[(sid, clip)] = {
@@ -861,6 +873,7 @@ def audit_export(
                 "caption_source": entry.get("source", "trida"),
                 "variant_id": entry.get("variant_id", ""),
                 "rung": str(entry.get("rung", "")) if entry.get("source", "trida") == "trida" else "",
+                "writer_model": served.get(clip, "") if entry["status"] == "ready" else "",
                 "emphasis": model.get("emphasis", {}).get("chosen", ""),
                 **{name: slots.get(name, "") for name in SECOND_SLOTS},
                 **{name: str(model.get(name, "")) for name in SECOND_MODEL},

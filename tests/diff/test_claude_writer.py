@@ -171,6 +171,7 @@ def test_the_server_retries_a_busy_api_once_and_logs_what_it_said(
     service.submit_tweak(requests[0], lambda r, o: outcomes.append(o))
     run(service)
     assert [o["status"] for o in outcomes] == ["retry", "ready"]
+    assert outcomes[1]["served_by"] == "claude-sonnet-5-5" and outcomes[0]["served_by"] is None
     assert client.bodies[0] == client.bodies[1] == request_body(requests[0].job)
     lines = [json.loads(line) for line in (tmp_path / "logs" / "live-s1.jsonl").read_text().splitlines()]
     assert lines[1]["api"]["request_sha256"] == sha256_of(request_body(requests[0].job))
