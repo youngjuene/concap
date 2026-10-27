@@ -403,6 +403,8 @@ class LiveService:
         self.scheduler: LiveScheduler | None = None
         self.tweaks: deque[tuple[TweakRequest, TweakDone]] = deque()
         self.running_tweak: tuple[str, int] | None = None
+        # Every attempt that ran for the session, so a page poll's stale read never queues one again.
+        self.finished_tweaks: set[tuple[str, int, int]] = set()
         self.stopping = False
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -433,6 +435,7 @@ class LiveService:
             if self.session_id == session_id:
                 self.session_id, self.scheduler = None, None
                 self.tweaks = deque(item for item in self.tweaks if item[0].session_id != session_id)
+                self.finished_tweaks = set()
 
     @property
     def free(self) -> bool:
@@ -455,12 +458,15 @@ class LiveService:
             return {} if self.scheduler is None else self.scheduler.ready()
 
     def submit_tweak(self, request: TweakRequest, done: TweakDone) -> bool:
-        """Queue a clip's second caption for the claimed session; ``False`` if not claimed or queued."""
+        """Queue a clip's second caption for the claimed session; ``False`` if not claimed, queued,
+        running, or already run (a stale read of the session's pending attempts)."""
         with self.lock:
             if request.session_id != self.session_id:
                 return False
-            if tweak_key(request) == self.running_tweak or any(
-                tweak_key(queued) == tweak_key(request) for queued, _ in self.tweaks
+            if (
+                tweak_key(request) == self.running_tweak
+                or (*tweak_key(request), request.attempt) in self.finished_tweaks
+                or any(tweak_key(queued) == tweak_key(request) for queued, _ in self.tweaks)
             ):
                 return False
             self.tweaks.append((request, done))
@@ -521,6 +527,7 @@ class LiveService:
             done(request, outcome)
         finally:
             with self.lock:
+                self.finished_tweaks.add((*tweak_key(request), request.attempt))
                 self.running_tweak = None
                 if outcome["status"] == "retry" and self.session_id == request.session_id:
                     self.tweaks.appendleft((replace(request, attempt=request.attempt + 1), done))

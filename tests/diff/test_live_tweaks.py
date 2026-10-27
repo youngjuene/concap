@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,23 @@ def test_the_first_wording_s_second_try_is_queued_while_its_first_is_running(
     service.submit_tweak(requests[0], done)
     run(service)
     assert [(o["rung"], o["status"]) for o in outcomes] == [(0, "next"), (1, "ready")]
+
+
+def test_an_attempt_that_already_ran_is_never_queued_again(
+    requests: list[TweakRequest], tmp_path: Path
+) -> None:
+    """A page poll reads the pending attempt, and the attempt may finish before the poll submits it
+    (the 2026-10-27 walk ran a delivered caption's retry twice); the stale submission is refused."""
+    lost = {"status": "worker_lost", "error": "gone"}
+    service = service_with(Scripted(lost, written(NAMING[0])), tmp_path)
+    outcomes: list[dict[str, Any]] = []
+    service.submit_tweak(requests[0], lambda r, o: outcomes.append(o))
+    run(service)
+    assert [o["status"] for o in outcomes] == ["retry", "ready"]
+    retried = replace(requests[0], attempt=2)
+    for stale in (requests[0], retried):  # what the poll read before each finished
+        assert not service.submit_tweak(stale, lambda r, o: outcomes.append(o))
+    assert not service.step() and len(outcomes) == 2
 
 
 def test_the_second_caption_is_stored_as_shown_and_logged_as_written(
