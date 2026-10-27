@@ -8,9 +8,10 @@ per Hobby CLI upload):
   ``git show``, so uncommitted edits in the tree never reach a deploy);
 - the setup, the phase-2 cues and the items, and every still and mask the setup names, at their
   repository paths (the server reads masks and stills itself);
-- the phase-1 videos go to the project's Vercel Blob store with ``--upload``, named by their
-  content's SHA-256 so no URL carries a clip key. ``blob-manifest.json`` beside the site
-  remembers what is uploaded.
+- the videos go to the project's Vercel Blob store with ``--upload``, named by their content's
+  SHA-256 so no URL carries a clip key. ``blob-manifest.json`` beside the site remembers what is
+  uploaded. Phase 2's viewing videos go as a web copy (``web/`` beside the site, made once per
+  source; see ``WEB_COPY``); phase 1's clips go as they are.
 
 The study link's access code is kept in ``access-code`` beside the site (made on the first stage,
 replaced with ``--new-code``); it goes into ``deploy.json``, never into a served file.
@@ -61,6 +62,14 @@ VERCEL_JSON = {
 # The project link and the CLI's pulled env survive a re-stage; neither is ever uploaded.
 LINK_STATE = (".vercel", ".env.local", ".gitignore")
 VERCELIGNORE = (".env*", "__pycache__", "*.pyc", ".agents", ".claude", "skills-lock.json")
+# Phase 2's viewing videos are 1080p60 at 5.8 Mbps, 665 MB a participant, and Hobby's Blob
+# allows 10 GB of downloads a month (over it, Blob is shut for 30 days). 720p capped at 2 Mbps
+# is about 225 MB; frame rate and timing are kept, and the sound is copied, not re-encoded.
+WEB_COPY = (
+    "-vf", "scale=-2:720", "-c:v", "libx264", "-preset", "slow", "-crf", "23",
+    "-maxrate", "2000k", "-bufsize", "4000k", "-pix_fmt", "yuv420p",
+    "-c:a", "copy", "-movflags", "+faststart",
+)  # fmt: skip
 CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 MEDIA_SUFFIXES = (".png", ".mp4", ".webm")
 
@@ -132,18 +141,39 @@ def blob_token(out: Path) -> str:
     raise SystemExit(f"no BLOB_READ_WRITE_TOKEN in {out / '.env.local'}: run `vercel env pull` there")
 
 
-def upload(path: str, manifest: dict[str, str], token: str, cwd: Path) -> str:
-    digest = hashlib.sha256((REPO / path).read_bytes()).hexdigest()
-    if digest not in manifest:
-        pathname = f"m/{digest[:32]}{Path(path).suffix}"
-        print(f"uploading {path} → {pathname}", flush=True)
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def web_copy(path: str, web: Path) -> Path:
+    """Where a phase-2 video's web copy is (``WEB_COPY``), named after its source's digest."""
+    return web / f"{digest(REPO / path)[:32]}.mp4"
+
+
+def make_web_copy(path: str, web: Path) -> Path:
+    target = web_copy(path, web)
+    if not target.exists():
+        print(f"encoding a web copy of {path}", flush=True)
+        web.mkdir(parents=True, exist_ok=True)
+        partial = target.with_suffix(".partial.mp4")
+        command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(REPO / path)]
+        subprocess.run([*command, *WEB_COPY, str(partial)], check=True)
+        partial.rename(target)
+    return target
+
+
+def upload(source: Path, manifest: dict[str, str], token: str, cwd: Path) -> str:
+    sha = digest(source)
+    if sha not in manifest:
+        pathname = f"m/{sha[:32]}{source.suffix}"
+        print(f"uploading {source.relative_to(REPO)} → {pathname}", flush=True)
         # Run outside the site, whose .env.local also holds an OIDC token the CLI would prefer.
         reply = subprocess.run(
             [
                 "vercel",
                 "blob",
                 "put",
-                str(REPO / path),
+                str(source),
                 "--pathname",
                 pathname,
                 "--access",
@@ -160,8 +190,8 @@ def upload(path: str, manifest: dict[str, str], token: str, cwd: Path) -> str:
         urls = [word for word in (reply.stdout + reply.stderr).split() if word.startswith("https://")]
         if not urls:
             raise SystemExit(f"no URL in vercel blob put's reply:\n{reply.stdout}{reply.stderr}")
-        manifest[digest] = urls[0]
-    return manifest[digest]
+        manifest[sha] = urls[0]
+    return manifest[sha]
 
 
 def main() -> int:
@@ -169,7 +199,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--purpose", choices=("smoke", "participant"), default="smoke")
     parser.add_argument("--sessions", type=int, default=4, help="concurrent sessions per instance")
-    parser.add_argument("--upload", action="store_true", help="upload missing phase-1 videos to Blob")
+    parser.add_argument("--upload", action="store_true", help="upload missing videos to Blob")
     parser.add_argument("--closed", action="store_true", help="every request gets the closed page")
     parser.add_argument("--new-code", action="store_true", help="replace the access code (closes old links)")
     parser.add_argument("--dirty", action="store_true", help="stage uncommitted deploy/vercel files")
@@ -214,26 +244,29 @@ def main() -> int:
     (out / "src").rmdir()
 
     media = sorted(setup_files(setup))
-    videos = [path for path in media if path.endswith((".mp4", ".webm"))]
+    clips = [path for path in media if path.endswith((".mp4", ".webm"))]
     for path in media:
-        if path not in videos:
+        if path not in clips:
             copy(path, out)
     for path in (SETUP, SOURCES, ITEMS):
         copy(path, out)
 
+    web = out.with_name("web")
+    blobbed = {path: REPO / path for path in clips}
+    for _, path in VIDEOS:
+        blobbed[path] = make_web_copy(path, web) if args.upload else web_copy(path, web)
     manifest_path = out.with_name("blob-manifest.json")
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     if args.upload:
         token = blob_token(out)
-        for path in videos:
-            upload(path, manifest, token, out.parent)
+        for source in blobbed.values():
+            upload(source, manifest, token, out.parent)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     urls = {}
-    for path in videos:
-        digest = hashlib.sha256((REPO / path).read_bytes()).hexdigest()
-        if digest in manifest:
-            urls[path] = manifest[digest]
-    missing = [path for path in videos if path not in urls]
+    for path, source in blobbed.items():
+        if source.exists() and (sha := digest(source)) in manifest:
+            urls[path] = manifest[sha]
+    missing = [path for path in blobbed if path not in urls]
 
     code_path = out.with_name("access-code")
     if args.new_code or not code_path.exists():
@@ -262,7 +295,7 @@ def main() -> int:
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file() and ".vercel" not in p.parts)
     print(f"staged {commit} ({args.purpose}) in {out}: {size / 1e6:.1f} MB")
     if missing:
-        print(f"{len(missing)} of {len(videos)} phase-1 videos are not on Blob yet (pass --upload)")
+        print(f"{len(missing)} of {len(blobbed)} videos are not on Blob yet (pass --upload):", *missing)
     return 0
 
 

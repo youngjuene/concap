@@ -1,4 +1,4 @@
-"""Vercel's entrypoint for the diff participant app: phase 1, written by Claude through the API.
+"""Vercel's entrypoint for the diff participant app: both phases, written by Claude through the API.
 
 ``deploy/vercel/stage.py`` copies this file to the root of a staged site, beside the ``diff``
 and ``dpo`` packages, the setup's stills and masks, and ``deploy.json``, which says what to serve.

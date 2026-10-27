@@ -5,8 +5,16 @@ written by Claude through the API. No GPU and no lab machine sits between the pa
 the study: the app runs in Singapore (`sin1`) beside its database, the clips come from Vercel
 Blob.
 
-**Phase 1 only, smoke only (2026-10-27).** Phase 2's videos are not uploaded yet, and the app
-serves `purpose: smoke` until the researcher's participant gates are lifted.
+**Both phases, smoke only (2026-10-27).** The app serves `purpose: smoke` until the
+researcher's participant gates are lifted.
+
+**One caveat for phase 2.** The live watch keeps its session in the instance's memory (its
+writer, its schedule, its caption tokens); only its progress is in the store. A watch request
+that reaches another instance rebuilds the session at the start of the video it was in, so the
+participant's video restarts, and a `video-ended` from the old video is refused there. Vercel
+offers no session affinity. On the 2026-10-27 walk (P909, three 5-minute videos at real speed)
+every request stayed on one instance: one `session_started`, no `session_resumed`. A
+`session_resumed` with `video_restarted: true` in the logs is how it would show.
 
 ## What is where
 
@@ -16,7 +24,7 @@ serves `purpose: smoke` until the researcher's participant gates are lifted.
 | Project | `youngjuenes-projects/concap-diff` (Hobby), not connected to GitHub |
 | Staged site | `artifacts/diff/vercel/site/` (built by `stage.py`, linked by its `.vercel/`) |
 | Sessions | Neon Postgres `concap-sessions` (`sin1`), `DATABASE_URL` |
-| Videos | Blob store `concap-diff-media` (`icn1`, public), named by content hash |
+| Videos | Blob store `concap-diff-media` (`icn1`, public), named by content hash; phase 2's as 720p web copies (`artifacts/diff/vercel/web/`) |
 | Secrets | `ANTHROPIC_API_KEY`, `DIFF_SECRET` (keys the media tokens), production and preview |
 
 ## Deploy
@@ -32,6 +40,12 @@ cd artifacts/diff/vercel/site && vercel deploy --prod
   setup against the full repository, copies the stills and masks the server reads, and with
   `--upload` puts any video not yet on Blob there. It refuses an uncommitted `deploy/vercel/`
   unless `--dirty` is passed.
+- Phase 2's viewing videos go up as web copies: 720p, video capped at 2 Mbps, frame rate and
+  timing kept, sound copied untouched (`WEB_COPY` in `stage.py`). The originals are 1080p60 at
+  5.8 Mbps, 665 MB a participant. Hobby's Blob allows 10 GB of downloads a month, and over it
+  every clip stops for 30 days. With the copies a participant costs about 355 MB
+  (phase 1's clips 115 MB, phase 2's 240 MB), roughly 28 a month. Blob's usage is in the
+  project's Observability tab.
 - `--new-code` makes a new six-character code (letters and digits, case ignored); after the
   deploy, every old link shows the closed page.
 - `--closed` stages a site that shows the closed page to everyone, code or not: deploy it to
