@@ -489,9 +489,14 @@ It reads the store (`--store`, default the participant store) and every
 - `second_captions.csv`: one row per participant × clip:
   - the status, and the reason for a skipped step;
   - the first and second captions, and where the second came from
-    (`caption_source`: `trida`, written live since 2026-10-26, with the
-    delivering `rung` and its τ `condition`; `approved` in sessions of
-    2026-10-24 to 26), with its `variant_id`;
+    (`caption_source`: `trida`, the label for a caption written live since
+    2026-10-26, whatever model wrote it), with:
+    - the delivering `rung` and its `wording`;
+    - `writer_model`, the model that wrote it (Claude Sonnet 5.5 since
+      2026-10-27, or Anthropic's fallback when its safeguards declined);
+    - its `variant_id`.
+
+    (`approved` marks a caption from the sessions of 2026-10-24 to 26.)
   - the attended sound, the restorative `emphasis` with the three centred
     subscale means, and the binding model's inputs, P(bound),
     recommendation, follow or counter, mode and caption type;
