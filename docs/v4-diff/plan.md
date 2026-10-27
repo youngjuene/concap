@@ -883,11 +883,63 @@ the review folder).
     the first rung). The median time per caption was 1.2 s (p90 1.5 s). The
     audit found 0 mismatches, and all 37 logged prompts re-tokenize to the
     worker's hash.
+- **The writer moves to the Claude API** (researcher, 2026-10-27). After the
+  trials of 2026-10-24 to 26, phase 1's second captions are rewritten by Claude
+  Sonnet 5.5 (`claude-sonnet-5-5`) through the Claude API, not by a local model.
+  Phase 2's live captions stay on Trida until phase 1 is confirmed.
+  - **Why** (`artifacts/diff/bench/candidates-20261026-live/MODELS.md`, every
+    run judged again by gate v4):
+    - Trida damaged words, looped and wrote lists. Its best first call
+      reached 16 of 87 in the weaker mode.
+    - Every Qwen drifted into another script: Chinese paragraphs and English
+      or Vietnamese words from Qwen2.5-7B, and Cyrillic or Chinese sound words
+      from Qwen3.5-9B in 4–9 of 174 first calls per wording.
+    - Qwen3.5-2B echoed the prompt's instructions.
+    - To stay short, the Qwen models dropped listed sounds: 74 of 9B's 159
+      delivered first calls under its best wording. The gate only flags this.
+    - 9B needed its own GPU and a second Python environment.
+  - **The call** (`diff.claude_writer`) runs inside the app's process, with no
+    GPU.
+    - Its settings are part of each job's identity: low effort, adaptive
+      thinking, up to 2,048 output tokens, and Anthropic's server-side
+      fallback (`fallbacks: "default"`).
+    - API version 2026-10-21 takes no sampling parameters, so the output is
+      not reproducible. Every request and response is logged instead, with
+      the request's SHA-256, the served model, the request ID and the tokens.
+    - A busy or unreachable API (timeout, 429, 5xx) counts as transient and is
+      tried once more.
+    - The prompts, the three-wording ladder and the gate are unchanged.
+  - **Built:**
+    - protocol v8, tweak policy v9;
+    - tweak attempts v3, which log the API record;
+    - export v10, whose `writer_model` column names the model that wrote each
+      caption;
+    - one writer per live card, so the writer never limits concurrent
+      sessions;
+    - the audit checks each logged request against the recomputed job and
+      the stored writer model against the log;
+    - the delivery bench drafts through the API (`--jobs` at once);
+    - `diff.qwen35_runner`, the Qwen3.5 profile and `--writer-gpu` are removed.
+  - **Verified:**
+    - `make check` passed.
+    - Three stand-in participants walked phase 1 through the app with the
+      writer's real SDK client against a local stand-in for the Messages API.
+      The stand-in scripted 429s and copied captions, and all 36 captions
+      were delivered (24 at the first rung, 12 at the second).
+    - Every one of the 61 requests carried the pinned model, API version and
+      fallback header, and the audit found 0 mismatches.
+    - This checks the integration, not the captions.
+  - **Not yet measured:** the delivery bench on the API, which needs an API
+    key, and is billed.
 - **Open for the researcher:**
   - the three emphasis sentences and the gate's rules (provisional);
-  - the writer's three wordings (provisional; a native read of 9B's Korean
-    before approval). One small fix is to add "Korean only": 9B sometimes
-    writes a sound in Cyrillic or Chinese, which the gate refuses;
+  - the writer's three wordings (provisional; a native read of Claude's
+    drafts once the API bench has run);
+  - what leaves the machine: each prompt, with the attended sound and the
+    emphasis but no ID, now goes to Anthropic. Whether the consent text must
+    say so;
+  - phase 2's writer: Trida for now, and whether the API writer replaces it
+    once phase 1 is confirmed;
   - what the scene-aware prompt keeps of the scene. The setting is a
     between-clip contrast that misnames some scenes, and its "here, though
     unseen" sentence was never followed. Four clips have no sound with a

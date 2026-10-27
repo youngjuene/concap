@@ -267,9 +267,21 @@ so it stays on this machine.
 The participant app runs in the repository environment. It starts one Trida
 worker per GPU in the generator environment, so `uv sync --project
 envs/diff-generator --frozen` must have run. With phase 1 it also starts the
-second-caption writer, Qwen3.5-9B (researcher, 2026-10-26), on its own GPU. It runs
-in the repository environment, because Qwen3.5 needs transformers 5 and Trida's
-code pins the generator environment at 4.57.3.
+second-caption writer: Claude Sonnet 5.5 through the Claude API (researcher,
+2026-10-27; Qwen3.5-9B on its own GPU the day before). It runs inside the app's
+own process and needs no GPU, only an API key in the shell that starts `serve`:
+
+```sh
+export ANTHROPIC_API_KEY=…   # never in the repository; the key's owner pays for the calls
+```
+
+To keep it across shells, put that line in `~/.bashrc` above its "If not running interactively"
+guard (`case $- in … return;; esac`), which ends non-interactive shells before anything below it,
+and make the file private (`chmod 600 ~/.bashrc`).
+
+`serve` makes one short call before anyone can enter and stops if the API does
+not answer (no key, a wrong key, no network). It writes the writer's profile and
+that call's time to `<log-dir>/writer.json`.
 
 ```sh
 uv run python -m diff live serve \
@@ -278,7 +290,7 @@ uv run python -m diff live serve \
   --video <video_id>=path/to/video.mp4 \
   --items path/to/items.json \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 \
-  --gpus 0 --writer-gpu 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
+  --gpus 0 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
 **Audio** (researcher, 2026-10-26). The 12 clips and the practice clip are at −23 LUFS on
@@ -330,15 +342,17 @@ nothing records it.
   - A session holds its card from entry until its last video ends. With one
     card, participants therefore come strictly one after another: a second ID
     entered meanwhile is told to wait ("잠시 후", 503).
-- `--writer-gpu` is the card for the second-caption writer. It must not be one
-  of `--gpus`: Qwen3.5-9B (about 18 GB) and Trida (about 15 GB) do not fit one
-  24 GB card together. `serve` refuses unless it has 19 GB free
-  (`WRITER_MIN_FREE_MIB`). `--writer-dir` defaults to
-  `artifacts/diff/models/qwen3.5-9b-c2022362`, whose every file `serve` hashes
-  against the pinned profile (`model_profile.QWEN35_9B`) at start.
-  - A session holds the writer from entry to the handoff, so with one writer
-    participants also come one at a time. This holds until phase 2 moves to
-    Qwen3.5 too, after phase 1 is confirmed.
+- The second-caption writer needs no flag. `serve` sets up one writer per
+  card in `--gpus`, so the writer never limits how many sessions run at once.
+  A session holds its writer from entry to the handoff.
+  - **What leaves the machine:** each second-caption prompt goes to Anthropic.
+    It holds the clip's first caption, its sound and scene words, the sound
+    the participant attended to and the emphasis sentence their P4 ratings
+    chose. It holds no participant ID or raw answer.
+  - **If the API is busy or unreachable,** the call is tried once more (a
+    transient failure), and then the clip's second step is skipped, as for
+    any failed call. Every request and response is logged (`api` in each
+    attempt), since the API's sampling cannot be fixed.
 - `--purpose participant` is refused in any of these cases:
   - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
   - the nine live prompts are provisional (`rewrite_prompts.LIVE_CELL_PROMPTS`);
@@ -522,7 +536,8 @@ participant's answers it recomputes:
 
 diff's own prompt functions render what those values should produce, and the
 audit compares that with every logged call. It also checks that:
-- each second caption went down the τ ladder as the server must take it,
+- each second caption went down the ladder as the server must take it,
+  sent the request its recomputed job sends (the logged request's hash),
   and is the caption the gate passed and P6 showed, or that a clip that
   never passed was skipped;
 - every slider change got a live call;
@@ -532,16 +547,16 @@ audit compares that with every logged call. It also checks that:
 Audit with the commit the sessions ran: a session run on another template is
 reported once, as a version mismatch.
 
-When a model, its tokenizer or its environment changes, also check that the
-logged prompts are what each worker tokenized. Run it once per model, in that
-model's environment:
+When Trida, its tokenizer or its environment changes, also check that the
+logged prompts are what the worker tokenized, in the generator environment:
 
 ```sh
 envs/diff-generator/.venv/bin/python scripts/diff_session_audit.py tokens \
   --trida-dir artifacts/diff/models/trida-7b-c37755e8 --log-dir artifacts/diff/live-20261020
-uv run python scripts/diff_session_audit.py tokens \
-  --writer-dir artifacts/diff/models/qwen3.5-9b-c2022362 --log-dir artifacts/diff/live-20261020
 ```
+
+The second-caption writer has no tokenizer here (Claude through the API since
+2026-10-27); `check` compares each logged request with the recomputed job's.
 
 ## 10. Comparing prompt wordings
 
@@ -586,11 +601,13 @@ The prompt depends on the participant through three things:
   this clip stands highest on, centred on their own means
   (`phase1_tweak.emphases`).
 
-The writer is Qwen3.5-9B, greedy, with thinking off. Each refused caption is
-written again in the next wording of `rewrite_prompts.TWEAK_LADDER`
-(every-sound, then checklist, then prose), because a greedy call repeats
-itself. A first version varied Trida's τ, which reproduced the same text in 61
-of 86 retries. The clip's second step is skipped only when the last rung is
+The writer is Claude Sonnet 5.5 through the Claude API at low effort
+(`diff.claude_writer`; researcher, 2026-10-27). The local models' failures that
+led to it are in `artifacts/diff/bench/candidates-20261026-live/MODELS.md`.
+Each refused caption is written again in the next wording of
+`rewrite_prompts.TWEAK_LADDER` (every-sound, then checklist, then prose). The
+ladder was built for greedy Qwen3.5-9B, whose retries repeat themselves; a first
+version varied Trida's τ, which reproduced the same text in 61 of 86 retries. The clip's second step is skipped only when the last rung is
 refused too. The gate (`diff.phase1_usable`, v4) refuses:
 - decoding damage: loops, cut or doubled words, a caption cut off mid-clause;
 - near-copies of the first caption, and lists of names (no predicate);
@@ -610,9 +627,12 @@ ladder, as the server would:
 ```sh
 uv run python scripts/diff_second_captions.py variants \
   --phase1-setup artifacts/diff/phase1/setup-draft.json --out DIR/variants.json
-CUDA_VISIBLE_DEVICES=1 uv run python scripts/diff_second_captions.py draft \
-  --variants DIR/variants.json --out DIR/drafts.json --sheet DIR/sheet.csv
+uv run python scripts/diff_second_captions.py draft \
+  --variants DIR/variants.json --out DIR/drafts.json --sheet DIR/sheet.csv [--jobs 4]
 ```
+
+`draft` needs `ANTHROPIC_API_KEY`, and every call is billed. It runs `--jobs`
+variants at once and reports the calls' latency, tokens and fallbacks.
 
 `variants` lists every slot set with `phase1_tweak.reachable_slots`, one per
 mode, sound and emphasis: 174 on the setup, against 58 before the emphasis.
@@ -623,7 +643,7 @@ variant, with the delivering rung, the caption, what each refused rung failed
 on, and the issues.
 
 `rescore --variants DIR/variants.json --drafts DIR/drafts.json --sheet DIR/sheet.csv`
-runs the gate and the measures again from the stored outputs, without Trida.
+runs the gate and the measures again from the stored outputs, without the writer.
 It says when a changed gate would have left a ladder at an earlier rung, so
 that the bench should be drafted again.
 
