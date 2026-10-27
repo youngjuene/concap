@@ -604,11 +604,14 @@ The prompt depends on the participant through three things:
 The writer is Claude Sonnet 5.5 through the Claude API at low effort
 (`diff.claude_writer`; researcher, 2026-10-27). The local models' failures that
 led to it are in `artifacts/diff/bench/candidates-20261026-live/MODELS.md`.
-Each refused caption is written again in the next wording of
-`rewrite_prompts.TWEAK_LADDER` (every-sound, then checklist, then prose). The
-ladder was built for greedy Qwen3.5-9B, whose retries repeat themselves; a first
-version varied Trida's τ, which reproduced the same text in 61 of 86 retries. The clip's second step is skipped only when the last rung is
-refused too. The gate (`diff.phase1_usable`, v4) refuses:
+Each refused caption is written again at the next rung of
+`rewrite_prompts.TWEAK_LADDER`: every-sound twice, then checklist, then prose
+(researcher, 2026-10-27). Claude's output varies, so a second call in the first
+wording is a real retry; on its bench the later wordings ran over 80 characters
+in 8 of 10 calls. The wordings were built for greedy Qwen3.5-9B, whose retries
+repeat themselves; a first version varied Trida's τ, which reproduced the same
+text in 61 of 86 retries. The clip's second step is skipped only when the last
+rung is refused too. The gate (`diff.phase1_usable`, v5) refuses:
 - decoding damage: loops, cut or doubled words, a caption cut off mid-clause;
 - near-copies of the first caption, and lists of names (no predicate);
 - an unnamed attended sound;

@@ -929,12 +929,50 @@ the review folder).
     - Every one of the 61 requests carried the pinned model, API version and
       fallback header, and the audit found 0 mismatches.
     - This checks the integration, not the captions.
-  - **Not yet measured:** the delivery bench on the API, which needs an API
-    key, and is billed.
+  - **Measured on the API** (delivery bench, the 174 reachable captions,
+    `artifacts/diff/phase1/second-captions-api-20261027/`):
+    - 169 delivered, 168 of them at the first wording, with no output in
+      another script.
+    - 32 delivered captions were flagged for a dropped sound, against 78 for
+      Qwen3.5-9B. 48 were flagged for a spatial relation, against 21.
+    - The median call took 1.5 s, the slowest 2.9 s. The run cost about $0.40,
+      with no fallbacks.
+    - Two of the five misses were the matcher's errors, not Claude's:
+      - the idiom for "without pause" contains the one-syllable word for bird,
+        so it read as naming the bird distractor;
+      - the noun and the plain form of "shout" were not counted as naming the
+        attended shout.
+    - The two later wordings ran over 80 characters in 8 of their 10 calls.
+  - **Then, the same day** (researcher: fix the matcher, and retry the first
+    wording):
+    - **Gate v5:** a one-syllable sound name counts only as a noun, followed
+      by a plural, the word for "sound", or a particle; the shout stems gain
+      the noun and the plain form.
+    - **Tweak policy v10:** the ladder is every-sound twice, then checklist,
+      then prose. The second try is the same job at the next rung, so the
+      writer services tell queued tweaks apart by job and rung.
+    - **A race fixed.** A page poll reads the pending attempts and then queues
+      them; an attempt that finished in between was queued and run again. The
+      walk caught it: a delivered caption's retry ran twice. A service now
+      refuses any attempt that has already run for the session.
+    - **The bench again:** 174 of 174 delivered, 171 at the first try and 3 at
+      the second; checklist and prose were never reached. No output in
+      another script. 24 delivered captions were flagged for a dropped sound,
+      45 for a spatial relation. The median call took 1.5 s and the p90
+      2.1 s; 6 of 177 calls took over 3 s, the slowest 9.1 s.
+    - **Through the server,** with the stand-in API: two walks of three
+      participants each. Every caption was delivered, the first wording's
+      second try was queued as the same job in 14 clips, no attempt ran
+      twice, and the audit found 0 mismatches.
 - **Open for the researcher:**
   - the three emphasis sentences and the gate's rules (provisional);
-  - the writer's three wordings (provisional; a native read of Claude's
-    drafts once the API bench has run);
+  - the writer's three wordings (provisional), after a native read of
+    Claude's drafts (the sheet in
+    `artifacts/diff/phase1/second-captions-api-20261027/ladder-v10/`). Two
+    things to look at: Claude adds spatial words such as "beyond" more often,
+    and one delivered caption (amsterdam_057, scene-aware, fascination)
+    paraphrases the emphasis sentence, which the echo check, built on its
+    exact stem, lets through;
   - what leaves the machine: each prompt, with the attended sound and the
     emphasis but no ID, now goes to Anthropic. Whether the consent text must
     say so;
