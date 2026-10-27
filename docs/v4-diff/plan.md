@@ -1007,7 +1007,36 @@ the review folder).
     - The 270 calls cost about $0.66, with no fallbacks.
   - **The cost of the change:** a slider move shows about 2–3 s after it is
     made, against about 1–1.5 s with Trida. The scheduler aims at the
-    playing window one latency ahead, the p90 of the last 20 calls.
+    playing window one latency ahead, the p90 of the last 20 calls. The
+    researcher accepted the delay and the running cost.
+  - **The cell prompts tuned for Claude (`live-p2` v5).** The researcher asked
+    whether meeting the v4 rule serves the experiment, and if so to meet it.
+    - **It does where a stop fails its label.** Participants see the approved
+      labels: none, a little and a lot for texture; broad kinds, specific
+      sources, and places and relations for context. The choices they make
+      are read against those labels.
+      - Texture was already monotonic: on average 0.2, 1.7 and 3.6 texture
+        words at steps 0, 1 and 2.
+      - But a third of broad captions named a specific source, so broad
+        overlapped specific.
+      - Texture 0 kept sound-imitating words in up to 27% of a cell's
+        captions, against the label "none".
+      - Texture 1 often had two or three words.
+    - **The rule was written before any run** (`artifacts/diff/cell-prompts/
+      RULE.md`, the Claude round): tune on 30 dev cues, confirm on 30
+      held-out cues, with the scorer and thresholds unchanged.
+    - **Version 5:**
+      - texture 0 also forbids sound-imitating words taken from the cue;
+      - texture 1 allows one such word in the whole caption;
+      - broad names no source at all;
+      - the market example's broad rewrites drop the cart's name.
+    - It passed on dev and on held-out at its first run (9 of 9 texture
+      cells and 9 of 9 context cells each), with copies, unusable and broken
+      captions at or under 1%. On the cues of the earlier comparison it
+      passes too.
+    - **What the rule does not see:** 13% of broad captions name one kind
+      twice ("traffic sounds continue and other traffic sounds pass"), since
+      a cue's sounds often fall in one kind.
 - **Open for the researcher:**
   - the three emphasis sentences and the gate's rules (provisional);
   - the writer's three wordings (provisional), after a native read of
@@ -1020,9 +1049,9 @@ the review folder).
   - what leaves the machine: each prompt, with the attended sound and the
     emphasis but no ID, now goes to Anthropic. Whether the consent text must
     say so;
-  - the nine cell prompts and the tuner, written for Trida, on Claude's
-    output: a native read of the cell bench, and whether to tune texture 1
-    and broad context against the v4 rule;
+  - the nine cell prompts (`live-p2` v5) and the tuner: a native read of
+    the cell bench (`artifacts/diff/cell-prompts/claude-20261027/`),
+    including the broad captions that name one kind twice;
   - whether the slower response to a slider move is acceptable;
   - what the scene-aware prompt keeps of the scene. The setting is a
     between-clip contrast that misnames some scenes, and its "here, though
