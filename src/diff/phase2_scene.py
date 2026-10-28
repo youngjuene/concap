@@ -208,6 +208,10 @@ def scene_problems(scenes: Mapping[str, Any] | None, sources: Sequence[Any]) -> 
             problems.append(f"{where}: the scene part's sounds are not the starting caption's")
         if scene.get("distinctive") not in ELEMENTS_KO:
             problems.append(f"{where}: no distinctive element")
+        if scene["sounds"] and scene["sounds"][0]["audioset_label"] in RECORDING_ARTEFACTS:
+            # The cue's mode is read off its first sound (cue_steer), and a sound of the recording is
+            # never placed, so it would set the mode for a sound the prompt leaves out.
+            problems.append(f"{where}: the first sound is a sound of the recording itself")
     return problems
 
 

@@ -63,6 +63,17 @@ def _phase2_scenes(path: Path | None) -> Any:
         raise SystemExit(str(exc)) from exc
 
 
+def _scene_file_or_exit(scenes: Any, videos: Sequence[Any]) -> None:
+    """Stop a server whose scene file cannot steer its cues, for any purpose: a smoke run would
+    otherwise fail on the first cue that has no usable scene part."""
+    from diff.phase2_scene import scene_problems
+
+    problems = scene_problems(scenes, [cue for video in videos for cue in video.stream.cues])
+    if problems:
+        more = f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""
+        raise SystemExit(f"the phase-2 scene file cannot steer these videos' cues: {problems[0]}{more}")
+
+
 def _sources(path: Path) -> Any:
     from diff.caption_sources import SourceError, parse_sources
 
@@ -925,6 +936,8 @@ def live_serve(args: argparse.Namespace) -> int:
     scenes = _phase2_scenes(args.phase2_scene)
     if scenes is None:
         print(f"no phase-2 scene parts at {args.phase2_scene}: every cue is written acousmatic", flush=True)
+    else:
+        _scene_file_or_exit(scenes, videos)
 
     def job_for(source: Any, spec: Any) -> Any:
         scene = scenes["cues"].get(source.source_id) if scenes is not None else None

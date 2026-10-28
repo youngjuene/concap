@@ -151,6 +151,35 @@ def test_scene_problems(run: dict[str, Any]) -> None:
     ]
 
 
+def test_a_scene_file_the_cues_cannot_use_is_a_problem(run: dict[str, Any]) -> None:
+    key = next(iter(run["scenes"]["cues"]))
+    lost = {**run["scenes"]["cues"][key], "distinctive": None}
+    assert scene_problems({**run["scenes"], "cues": {**run["scenes"]["cues"], key: lost}}, run["cues"]) == [
+        f"{VIDEO} cue 0: no distinctive element"
+    ]
+    sounds = run["scenes"]["cues"][key]["sounds"]
+    windy = {
+        **run["scenes"]["cues"][key],
+        "sounds": [{**sounds[0], "audioset_label": "Wind noise (microphone)"}, *sounds[1:]],
+    }
+    problems = scene_problems({**run["scenes"], "cues": {**run["scenes"]["cues"], key: windy}}, run["cues"])
+    assert problems == [f"{VIDEO} cue 0: the first sound is a sound of the recording itself"]
+
+
+def test_serve_refuses_a_scene_file_that_does_not_fit_its_cues_for_any_purpose(run: dict[str, Any]) -> None:
+    from types import SimpleNamespace
+
+    from diff.__main__ import _scene_file_or_exit
+
+    videos = [SimpleNamespace(stream=SimpleNamespace(cues=run["cues"]))]
+    _scene_file_or_exit(run["scenes"], videos)  # fits: no exit
+    edited = [
+        SimpleNamespace(stream=SimpleNamespace(cues=sources(["버스 공회전 소리", "남자 목소리, 새소리"])))
+    ]
+    with pytest.raises(SystemExit, match=r"cannot steer these videos' cues: viewing-9 cue 0: no scene part"):
+        _scene_file_or_exit(run["scenes"], edited)
+
+
 def test_the_slots_leave_out_the_recording_itself(run: dict[str, Any]) -> None:
     first, second = by_cue(run)
     assert scene_slots(first) == {
