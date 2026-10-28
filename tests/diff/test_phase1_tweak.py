@@ -27,6 +27,7 @@ from diff.phase1_tweak import (
 )
 from diff.phase1_usable import ECHO_STEMS, ITEM_STEMS
 from diff.rewrite_prompts import (
+    NOT_SEEN,
     TWEAK_LADDER,
     TWEAK_PROMPTS,
     TWEAK_PROVISIONAL,
@@ -196,6 +197,20 @@ def test_every_wording_names_every_slot_in_korean_only(clip: dict[str, Any], roo
         render_tweak({"caption": "x"})
     with pytest.raises(ValueError, match="wording must be one of"):
         render_tweak(steer(clip, first_step(), "follow", root)[0], "label-lines")
+
+
+def test_a_scene_prompt_with_no_sound_on_screen_says_so_in_its_own_sentence(
+    clip: dict[str, Any], root: Path
+) -> None:
+    slots, _ = steer(clip, first_step(), "follow", root)
+    assert slots["mode"] == "scene"
+    for wording in TWEAK_LADDER:
+        shown = render_tweak(slots, wording).text
+        assert f"화면에 음원이 보이는 소리는 {slots['visible_sounds']}입니다." in shown
+        none = render_tweak({**slots, "visible_sounds": NOT_SEEN}, wording).text
+        assert "화면에 음원이 보이는 소리는 없습니다." in none and "없음" not in none
+    # The sentence is the prompt's, not a slot: the slots (and every variant id) stay as they were.
+    assert "visible_sentence" not in slots
 
 
 def ratings(fascination: float, away: float, coherence: float) -> dict[str, float]:

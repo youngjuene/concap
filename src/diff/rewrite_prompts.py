@@ -106,6 +106,8 @@ CONTEXT_RULES: Final[dict[str, str]] = {
     "relation": "근거에 있는 음원 이름과 함께 근거에 있는 위치나 관계를 쓰세요.",
 }
 EMPTY_QUALITIES: Final = "없음"
+# A slot's value when the clip has nothing to put there (``phase1_tweak.scene_slots``).
+NOT_SEEN: Final = "없음"
 
 # Live phase 2 (researcher, 2026-10-11): the model rewrites a cue's starting caption
 # while the participant watches, under the session's tuner system message.
@@ -582,9 +584,9 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # its own text, and its slots vary with the clip's scene (diff.phase1_tweak):
 # {caption}; {sounds}, the clip's sounds from orig_text, which the prompt names and
 # which are therefore R2's key (both modes keep every sound's name, so the key holds);
-# {attended_sound} (A1s); {emphasis}; scene-aware: {scene_elements}, {seen}, {visible_sounds},
-# {offscreen}; acousmatic: none of its own. The researcher approves the wording; until then it is
-# provisional and participant sessions are refused. Version 2 (design review,
+# {attended_sound} (A1s); {emphasis}; scene-aware: {scene_elements}, {seen}, {visible_sentence} (from the
+# {visible_sounds} slot), {offscreen}; acousmatic: none of its own. The researcher approves the wording;
+# until then it is provisional and participant sessions are refused. Version 2 (design review,
 # 2026-10-24): the scene-aware prompt no longer asks for two centres (the attended
 # sound and the V1 object) and ties each sound only to its own source, since an
 # unrelated V1 object invited a made-up link; the acousmatic prompt makes the space
@@ -621,7 +623,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
     "every-sound": {
         "scene": PromptTemplate(
             template_id="tweak-p1-every-sound",
-            version=1,
+            version=2,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
                 "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
@@ -629,7 +631,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
                 "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
                 "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
                 "화면에서 두드러지는 것은 {scene_elements}이고, 장면의 배경은 {seen}입니다. "
-                "화면에 음원이 보이는 소리는 {visible_sounds}입니다.\n"
+                "{visible_sentence}\n"
                 "이 시청자가 주의를 기울인 소리를 중심에 두고, 장면의 배경을 소리가 들리는 곳으로 쓰세요. "
                 "음원이 보이는 소리는 그 소리를 내는 대상과만 이어 주세요.{offscreen} 화면에 없는 대상이나 "
                 "장소는 지어내지 마세요. "
@@ -667,7 +669,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
     "checklist": {
         "scene": PromptTemplate(
             template_id="tweak-p1-checklist",
-            version=1,
+            version=2,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
                 "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
@@ -675,7 +677,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
                 "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
                 "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
                 "화면에서 두드러지는 것은 {scene_elements}이고, 장면의 배경은 {seen}입니다. "
-                "화면에 음원이 보이는 소리는 {visible_sounds}입니다.{offscreen}\n"
+                "{visible_sentence}{offscreen}\n"
                 "지킬 것:\n"
                 "1. 이 시청자가 주의를 기울인 소리부터 쓰세요.\n"
                 "2. 음원이 보이는 소리는 그 소리를 내는 대상과만 잇고, 화면에 없는 대상이나 장소는 "
@@ -713,7 +715,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
     "prose": {
         "scene": PromptTemplate(
             template_id="tweak-p1-prose",
-            version=1,
+            version=2,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
                 "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
@@ -721,7 +723,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
                 "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
                 "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
                 "화면에서 두드러지는 것은 {scene_elements}이고, 장면의 배경은 {seen}입니다. "
-                "화면에 음원이 보이는 소리는 {visible_sounds}입니다.\n"
+                "{visible_sentence}\n"
                 "이 시청자가 주의를 기울인 소리를 중심에 두고, 장면의 배경을 소리가 들리는 곳으로 쓰세요. "
                 "음원이 보이는 소리는 그 소리를 내는 대상과만 이어 주세요.{offscreen} 화면에 없는 대상이나 "
                 "장소는 지어내지 마세요. "
@@ -775,14 +777,25 @@ def render_tweak(slots: Mapping[str, str], wording: str = TWEAK_LADDER[0]) -> Re
     if wording not in TWEAK_WORDINGS:
         raise ValueError(f"the tweak prompt's wording must be one of {list(TWEAK_WORDINGS)}, not {wording!r}")
     template = TWEAK_WORDINGS[wording][mode]
+    fields = dict(slots)
+    if mode == "scene":
+        fields["visible_sentence"] = visible_sentence(slots["visible_sounds"])
     return RenderedPrompt(
         template.template_id,
         template.version,
         template.sha256,
         0,  # no evidence is rendered into a tweak prompt
         None,
-        template.text.format(**slots),
+        template.text.format(**fields),
     )
+
+
+def visible_sentence(visible_sounds: str) -> str:
+    """The scene-aware prompt's sentence on the sounds whose source is on screen; "없음입니다" is no Korean,
+    so a clip with none says so in its own sentence (scene templates v2, 2026-10-28)."""
+    if visible_sounds == NOT_SEEN:
+        return "화면에 음원이 보이는 소리는 없습니다."
+    return f"화면에 음원이 보이는 소리는 {visible_sounds}입니다."
 
 
 def render_tuner_system(slots: Mapping[str, str]) -> str:

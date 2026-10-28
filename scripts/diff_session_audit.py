@@ -78,7 +78,6 @@ from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     ELEMENTS_KO,
     EMPHASIS_KO,
-    NOT_SEEN,
     OFFSCREEN_KO,
     RECORDING_ARTEFACTS,
     tweak_job_for,
@@ -89,6 +88,7 @@ from diff.rewrite_prompts import (  # noqa: E402
     LIVE_CELL_PROMPTS,
     LIVE_MODE_PROMPTS,
     LIVE_RULES_VERSION,
+    NOT_SEEN,
     TUNER_SYSTEM,
     TWEAK_LADDER,
     TWEAK_PROMPTS,

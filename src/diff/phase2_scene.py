@@ -52,7 +52,8 @@ from diff.phase1_scene import (
     visibility,
     winners,
 )
-from diff.phase1_tweak import ELEMENTS_KO, NOT_SEEN, RECORDING_ARTEFACTS
+from diff.phase1_tweak import ELEMENTS_KO, RECORDING_ARTEFACTS
+from diff.rewrite_prompts import NOT_SEEN
 
 SCENE_SCHEMA: Final = "diff.phase2-scene/v1"
 PROFILE_POLICY: Final = "diff.phase2-profile/v1"

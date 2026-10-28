@@ -70,6 +70,7 @@ from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
 from diff.phase1_binding import BASELINE, FOLLOW, assignment_plan, decide_all
 from diff.rewrite_prompts import (
+    NOT_SEEN,
     TWEAK_LADDER,
     TWEAK_PROMPTS,
     TWEAK_PROVISIONAL,
@@ -103,7 +104,6 @@ OFFSCREEN_KO: Final = (
 )
 # AudioSet labels for sounds of the recording, not of the place: never placed in the scene.
 RECORDING_ARTEFACTS: Final = frozenset({"Wind noise (microphone)"})
-NOT_SEEN: Final = "없음"
 # The restorative appraisal that steers the emphasis: the soundscape subscales of P4 (Payne, 2013),
 # in the questionnaire's order, which breaks a tie left after the raw means. The place's being away
 # (P1–P2, Hartig et al., 1997) rates the picture, not the sounds the caption describes.
