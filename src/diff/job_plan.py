@@ -327,23 +327,36 @@ def make_job(
     )
 
 
-def live_job(source: CaptionSource, texture: int, context: str, system_message: str, purpose: str) -> Job:
+def live_job(
+    source: CaptionSource,
+    texture: int,
+    context: str,
+    system_message: str,
+    purpose: str,
+    steer: Mapping[str, Any] | None = None,
+) -> Job:
     """One live phase-2 job: the cue's starting caption under the snapped steps and the session's tuner,
     written by the second-caption writer's call (researcher, 2026-10-27; Trida at τ 0.9 before).
 
-    The tuner system message is part of the prompt record, so it is part of the job's identity.
+    ``steer`` is the cue's mode for this participant (``phase2_scene.cue_steer``); without one the cue
+    is written acousmatic, as before 2026-10-28. The tuner system message is part of the prompt record
+    and the steer part of the cell, so both are part of the job's identity.
     """
     if purpose not in ("participant", "smoke"):
         raise PlanError([f"a live job serves a participant session or a smoke run, not {purpose!r}"])
     model, generate = CLAUDE_WRITER, writer_call_settings()
-    cell = {"cell_id": f"t{texture}-{context}", "quality_limit": texture, "context": context}
+    mode = str(steer["mode"]) if steer is not None else "acousmatic"
+    slots = dict(steer.get("slots", {})) if steer is not None else {}
+    cell: dict[str, Any] = {"cell_id": f"t{texture}-{context}", "quality_limit": texture, "context": context}
+    if steer is not None:
+        cell.update(cell_id=f"t{texture}-{context}-{mode}", mode=mode, steer=dict(steer))
     return make_job(
         source,
         purpose,
         LIVE_CONDITION,
         cell,
         model,
-        render_live(source, texture, context, system_message),
+        render_live(source, texture, context, system_message, mode, slots),
         generate,
         phase=2,
     )

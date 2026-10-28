@@ -250,6 +250,202 @@ LIVE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
     for context in CONTEXT_STEPS
 }
 
+# Phase 2's scene-aware cells (researcher, 2026-10-28, gate 5: the participant's phase-1 scene
+# perception carried into the live captions, ``diff.phase2_scene``). A cue the model recommends
+# scene-aware for this participant is written by these nine; an acousmatic one by the nine above,
+# unchanged, which take nothing from the picture. Each scene cell is its acousmatic cell with the
+# context rule placing the sounds in the scene on screen: the setting is the cue window's distinctive
+# element, a sound whose source the masks put in view is tied to it, and the others are heard from
+# "보이지 않는 곳" (not "화면 밖", as in phase 1's off-screen sentence); no unseen sound is set beside a
+# seen thing. The examples' scenes are invented too. Provisional until the researcher approves them
+# with the scene parts (``phase2_scene.PHASE2_SCENE_PROVISIONAL``).
+_LIVE_SCENE_RULE: Final = (
+    "- 이 영상은 화면과 함께 봅니다. 아래에 적힌 장면에 "
+    "맞춰, 소리가 화면 속 장면에서 나는 것으로 들리게 쓰세요. "
+    "화면에 음원이 보이지 않는 소리는 '보이지 않는 곳에서' "
+    "들리는 것으로 쓰고, 화면 속 대상 옆이나 사이에 두지 "
+    "마세요. 장면에 적히지 않은 대상이나 장소는 지어내지 마세요.\n"
+)
+_LIVE_SCENE_CONTEXT: Final[dict[str, str]] = {
+    "broad": _LIVE_CONTEXT["broad"].replace(
+        "위치는 쓰지 마세요.", "소리가 들리는 곳은 장면의 배경으로 한 번만 쓰세요."
+    ),
+    "specific": (
+        "- 음원은 원래 자막의 구체적인 이름으로 부르고, 각 소리가 무엇을 하는지 살려 쉼표로 이으세요. "
+        "소리가 들리는 곳은 장면의 배경으로 한 번만 쓰고, 다른 소리와의 관계는 쓰지 마세요.\n"
+    ),
+    "relation": (
+        "- 음원은 원래 자막의 구체적인 이름으로 부르고, 첫 "
+        "소리를 앞에 두고 나머지 소리를 그 곁이나 사이에 놓아 "
+        "공간이 그려지는 한 문장으로 쓰세요. 공간은 장면의 배경과 화면에 음원이 보이는 소리로만 그리세요. "
+        "원래 자막의 위치(멀리서, 근처에서)는 살리세요.\n"
+    ),
+}
+_SCENE_LINES: Final = (
+    "장면의 배경: {seen}\n화면에 음원이 보이는 소리: {visible_sounds}\n"
+    "화면에 음원이 보이지 않는 소리: {unseen_sounds}\n"
+)
+# Each example: an invented caption, its invented scene, and its scene-aware rewrite in every cell.
+_LIVE_SCENE_EXAMPLES: Final[tuple[tuple[str, dict[str, str], dict[tuple[int, str], str]], ...]] = (
+    (
+        _LIVE_EXAMPLES[0][0],
+        {
+            "seen": "나무와 풀",
+            "visible_sounds": "크게 웃는 아이들 소리, 어른들의 대화 소리",
+            "unseen_sounds": "멀리서 개가 짖는 소리",
+        },
+        {
+            (
+                0,
+                "broad",
+            ): "나무와 풀 사이에서 사람들이 웃고 이야기하는 소리, 보이지 않는 곳에서 동물이 우는 소리",
+            (
+                1,
+                "broad",
+            ): "나무와 풀 사이에서 사람들이 크게 웃고 이야기하는 소리, 보이지 않는 곳에서 동물이 우는 소리",
+            (2, "broad"): (
+                "나무와 풀 사이에서 사람들이 높고 크게 웃으며 이야기하는 "
+                "소리, 보이지 않는 곳에서 동물이 날카롭게 우는 소리"
+            ),
+            (
+                0,
+                "specific",
+            ): (
+                "나무와 풀 사이에서 아이들이 웃는 소리, 어른들이 "
+                "이야기하는 소리, 보이지 않는 곳에서 개가 짖는 소리"
+            ),
+            (1, "specific"): (
+                "나무와 풀 사이에서 아이들이 크게 웃는 소리, 어른들이 "
+                "이야기하는 소리, 보이지 않는 곳에서 개가 짖는 소리"
+            ),
+            (2, "specific"): (
+                "나무와 풀 사이에서 아이들이 높고 크게 웃는 소리, 어른들이 낮게 이야기하는 소리, "
+                "보이지 않는 곳에서 개가 날카롭게 짖는 소리"
+            ),
+            (
+                0,
+                "relation",
+            ): (
+                "나무와 풀 사이에서 웃는 아이들 곁으로 어른들의 "
+                "이야기가 들리고, 멀리 보이지 않는 곳에서 개가 짖는다"
+            ),
+            (1, "relation"): (
+                "나무와 풀 사이에 아이들 웃음소리가 크게 퍼지는 곁으로 어른들의 이야기가 들리고, "
+                "멀리 보이지 않는 곳에서 개가 짖는다"
+            ),
+            (2, "relation"): (
+                "나무와 풀 사이에 높고 크게 퍼지는 아이들 웃음소리 곁으로 어른들의 낮은 이야기가 들리고, "
+                "멀리 보이지 않는 곳에서 개가 날카롭게 짖는다"
+            ),
+        },
+    ),
+    (
+        _LIVE_EXAMPLES[1][0],
+        {
+            "seen": "나무와 풀",
+            "visible_sounds": "바람에 흔들리는 나뭇잎 소리",
+            "unseen_sounds": "계속 지저귀는 새소리",
+        },
+        {
+            (
+                0,
+                "broad",
+            ): "보이지 않는 곳에서 동물들이 우는 소리와 나무와 풀 사이로 바람이 스치는 자연의 소리",
+            (
+                1,
+                "broad",
+            ): "보이지 않는 곳에서 동물들이 일정하게 우는 소리와 나무와 풀 사이로 바람이 스치는 자연의 소리",
+            (2, "broad"): (
+                "보이지 않는 곳에서 동물들이 높고 일정하게 우는 소리와 "
+                "나무와 풀 사이로 바람이 부드럽게 스치는 자연의 소리"
+            ),
+            (
+                0,
+                "specific",
+            ): "보이지 않는 곳에서 새들이 지저귀는 소리, 나무와 풀 사이 나뭇잎이 바람에 흔들리는 소리",
+            (
+                1,
+                "specific",
+            ): (
+                "보이지 않는 곳에서 새들이 일정하게 지저귀는 "
+                "소리, 나무와 풀 사이 나뭇잎이 바람에 흔들리는 소리"
+            ),
+            (2, "specific"): (
+                "보이지 않는 곳에서 새들이 높고 일정하게 지저귀는 "
+                "소리, 나무와 풀 사이 나뭇잎이 부드럽게 흔들리는 소리"
+            ),
+            (
+                0,
+                "relation",
+            ): "보이지 않는 곳에서 새들이 지저귀고, 눈앞의 나무와 풀 사이로 나뭇잎이 바람에 흔들린다",
+            (
+                1,
+                "relation",
+            ): (
+                "보이지 않는 곳에서 새들이 일정하게 지저귀고, "
+                "눈앞의 나무와 풀 사이로 나뭇잎이 바람에 흔들린다"
+            ),
+            (2, "relation"): (
+                "보이지 않는 곳에서 새들이 높고 일정하게 지저귀고, "
+                "눈앞의 나무와 풀 사이로 나뭇잎이 부드럽게 흔들린다"
+            ),
+        },
+    ),
+    (
+        _LIVE_EXAMPLES[2][0],
+        {
+            "seen": "건물",
+            "visible_sounds": "상인들이 외치는 소리, 손수레 바퀴가 덜컹거리는 소리",
+            "unseen_sounds": "없음",
+        },
+        {
+            (0, "broad"): "건물 앞에서 사람들이 외치는 소리와 기계가 오가는 소리",
+            (1, "broad"): "건물 앞에서 사람들이 크게 외치는 소리와 기계가 오가는 소리",
+            (2, "broad"): "건물 앞에서 사람들이 크고 높게 외치는 소리와 기계가 거칠게 오가는 소리",
+            (0, "specific"): "건물 앞에서 상인들이 외치는 소리, 손수레 바퀴가 구르는 소리",
+            (1, "specific"): "건물 앞에서 상인들이 크게 외치는 소리, 손수레 바퀴가 구르는 소리",
+            (2, "specific"): "건물 앞에서 상인들이 크고 높게 외치는 소리, 손수레 바퀴가 거칠게 구르는 소리",
+            (0, "relation"): "건물 앞 상인들의 외침 사이로 손수레 바퀴가 지나간다",
+            (1, "relation"): "건물 앞에 상인들 외침이 크게 퍼지는 사이로 손수레 바퀴가 지나간다",
+            (2, "relation"): "건물 앞에 크고 높게 퍼지는 외침 사이로 손수레 바퀴가 거칠게 지나간다",
+        },
+    ),
+)
+_LIVE_SCENE_TAIL: Final = (
+    "이제 아래 자막을 바꿔 쓰세요. 바꿔 쓴 자막만 한 줄로, 70자 이내로 출력하세요.\n"
+    + _SCENE_LINES
+    + "원래 자막: {cue_text}"
+)
+
+
+def _live_scene_cell_text(texture: int, context: str) -> str:
+    examples = "".join(
+        f"예시\n{_SCENE_LINES.format(**scene)}"
+        f"원래 자막: {caption}\n바꿔 쓴 자막: {rewrites[(texture, context)]}\n"
+        for caption, scene, rewrites in _LIVE_SCENE_EXAMPLES
+    )
+    return (
+        _LIVE_HEAD
+        + _LIVE_TEXTURE[texture]
+        + _LIVE_SCENE_CONTEXT[context]
+        + _LIVE_SCENE_RULE
+        + examples
+        + _LIVE_SCENE_TAIL
+    )
+
+
+LIVE_SCENE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
+    (texture, context): PromptTemplate(
+        template_id="live-p2-scene", version=1, text=_live_scene_cell_text(texture, context)
+    )
+    for texture in range(LIVE_TEXTURE_MAX + 1)
+    for context in CONTEXT_STEPS
+}
+LIVE_MODE_PROMPTS: Final[dict[str, dict[tuple[int, str], PromptTemplate]]] = {
+    "acousmatic": LIVE_CELL_PROMPTS,
+    "scene": LIVE_SCENE_CELL_PROMPTS,
+}
+
 
 # The live session's system message: our own "audio caption tuner" role, built
 # once per session from the participant's phase-1 ratings and answers (researcher,
@@ -596,10 +792,18 @@ def render_tuner_system(slots: Mapping[str, str]) -> str:
     return TUNER_SYSTEM.text.format(**slots)
 
 
-def render_live(source: CaptionSource, texture: int, context: str, system_message: str) -> RenderedPrompt:
+def render_live(
+    source: CaptionSource,
+    texture: int,
+    context: str,
+    system_message: str,
+    mode: str = "acousmatic",
+    slots: Mapping[str, str] | None = None,
+) -> RenderedPrompt:
     """The live phase-2 prompt: the slider cell's own prompt over a cue's starting caption, under the tuner.
 
-    The nine prompts are ``LIVE_CELL_PROMPTS``; the job's cell names which one a call used.
+    The prompts are ``LIVE_MODE_PROMPTS[mode]``, nine per mode; the scene-aware ones take the cue's
+    scene slots (``phase2_scene.cue_steer``). The job's cell names which one a call used.
     """
     if context not in CONTEXT_STEPS:
         raise ValueError(f"Unknown context step: {context}")
@@ -607,13 +811,20 @@ def render_live(source: CaptionSource, texture: int, context: str, system_messag
         raise ValueError("texture must be an integer step from 0 to 2")
     if not system_message:
         raise ValueError("a live prompt needs the session's tuner system message")
-    template = LIVE_CELL_PROMPTS[(texture, context)]
+    if mode not in LIVE_MODE_PROMPTS:
+        raise ValueError(f"Unknown live mode: {mode}")
+    needed = {"seen", "visible_sounds", "unseen_sounds"} if mode == "scene" else set()
+    if set(slots or {}) != needed:
+        raise ValueError(
+            f"the {mode} live prompt takes the slots {sorted(needed)}, got {sorted(slots or {})}"
+        )
+    template = LIVE_MODE_PROMPTS[mode][(texture, context)]
     return RenderedPrompt(
         template.template_id,
         template.version,
         template.sha256,
         0,  # no evidence is rendered into a live prompt
         LIVE_RULES_VERSION,
-        template.text.format(cue_text=source.text),
+        template.text.format(cue_text=source.text, **dict(slots or {})),
         system_message=system_message,
     )
