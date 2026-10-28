@@ -40,6 +40,8 @@ cd artifacts/diff/vercel/site && vercel deploy --prod
   setup against the full repository, copies the stills and masks the server reads, and with
   `--upload` puts any video not yet on Blob there. It refuses an uncommitted `deploy/vercel/`
   unless `--dirty` is passed.
+- It also copies `data/phase2/phase2-scene.json` when it exists (gate 5: each cue's scene part, numbers
+  and labels only, no masks), and `deploy.json` names it; without it every phase-2 cue is acousmatic.
 - Phase 2's viewing videos go up as web copies: 720p, video capped at 2 Mbps, frame rate and
   timing kept, sound copied untouched (`WEB_COPY` in `stage.py`). The originals are 1080p60 at
   5.8 Mbps, 665 MB a participant. Hobby's Blob allows 10 GB of downloads a month, and over it

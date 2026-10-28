@@ -292,6 +292,20 @@ uv run python -m diff live serve \
   --sessions 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
+**Phase-2 scene parts** (gate 5, 2026-10-28). Each cue's mode follows the participant's phase-1
+binding tendency and the masks (plan.md, "Phase 2's scene profile"). Build the file once the long
+videos' visual masks exist, after drafting or editing the keys:
+
+```sh
+.venv/bin/python scripts/diff_phase2_keys.py --out data/phase2/scene-keys.csv \
+  --raw artifacts/diff/phase2-scene/keys-draft          # billed; cached per window
+uv run python -m diff phase2 scene                      # writes data/phase2/phase2-scene.json
+```
+
+`serve` reads `--phase2-scene` (default `data/phase2/phase2-scene.json`). Without the file every
+cue is written acousmatic, as before, and participant sessions are refused. Audit with
+`--phase2-scene` too.
+
 **Audio** (researcher, 2026-10-26). The 12 clips and the practice clip are at −23 LUFS on
 loudnorm's meter. They are stereo as recorded: in 9 of the 12 the right channel is 1.3–7.5 dB
 louder. The app has no volume control. Participants set the system volume themselves, and

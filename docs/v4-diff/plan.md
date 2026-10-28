@@ -1104,6 +1104,42 @@ one-at-a-time sensitivity run on the real setup:**
 `BINDING_PROVISIONAL` is False since then. The two prompt texts and the Korean element and off-screen
 phrases belong to `TWEAK_PROVISIONAL`, which still refuses participant sessions.
 
+## Phase 2's scene profile — gate 5 (researcher, 2026-10-28)
+
+Until this gate nothing from a mask reached a phase-2 prompt: the nine live cells saw only the cue,
+the slider cell and the tuner, and the relation stop invented a layout ("사이로, 너머로, 뒤로").
+The researcher asked for the masks in phase 2 as a new gate and decided:
+- **D1 (c): the participant's phase-1 scene perception is retained into phase 2's caption
+  adjustments.** At the handoff the binding model's tendency π is learnt from all twelve stage-A clips'
+  attention evidence (`phase2_scene.scene_profile`, kept in the calibration record, policy
+  `diff.live-calibration/v3`) and fixed through the watch. Each cue is written in the mode the phase-1
+  model recommends for it, `logit P(b) = logit π + logit q`, with `q` the measured visibility of the
+  cue's first (most prominent) sound and no evidence of the cue's own (`phase2_scene.cue_steer`,
+  `diff.phase2-mode/follow-v1`). Phase 2 tests no mode, so it always follows.
+  - Acousmatic cues use the nine v6 cells unchanged; scene-aware cues use nine new cells
+    (`LIVE_SCENE_CELL_PROMPTS`, `live-p2-scene` v1), each the acousmatic cell with its context rule
+    placing the sounds in the scene: the setting is the window's distinctive element, an on-screen
+    sound is tied to it, and the others are "보이지 않는 곳에서", never beside a seen thing.
+- **D2: a sound uses the audio mask of a phrase in its own window with the same AudioSet label;
+  otherwise it has none** and is never on screen. The labels are drafted by Claude from the classes
+  `phase1_scene.PLAUSIBLE` covers (`scripts/diff_phase2_keys.py`): 189 of the 198 sounds have a mask,
+  9 do not (sounds re-heard by the researcher: bells, footsteps, music, children's voices). A
+  shared-group fallback paired a horn with a tyre screech and was dropped.
+- **D3: phase 1's `ON_SCREEN`, `PLAUSIBLE`, `MIN_LIFT` and stride, unchanged.**
+
+**Material.** The audio masks of 2026-10-22 (`Sa2VA/avmask/runs/phase2/masks/audio`) and a visual run
+over the same 90 windows, every frame, the 8 fixed categories (`sa2va_captions.py --branch visual`,
+started 2026-10-28). Whole 600-frame windows, where phase 1 used the 96-frame windowed run.
+
+**Built:** `diff.phase2_scene` (keys, per-window scene parts, profile, steer), `python -m diff phase2
+scene`, `render_live(..., mode, slots)`, `live_job(..., steer)` (the steer is in the cell, so in the
+attempt log and the job's identity), `Spec.scene`, `serve --phase2-scene`, the session audit's own
+re-derivation of each cue's mode, and the Vercel staging of the scene file.
+
+`PHASE2_SCENE_PROVISIONAL` refuses participant sessions until the researcher approves the keys, the
+scene parts and the nine scene cells on the gate-5 review page; a missing or stale scene file does
+too. Gate 3 (the live prompts) is reviewed after this one, on both sets.
+
 ## Readiness fixes (2026-10-20)
 
 The 2026-10-19 smoke run with three agent pseudo participants on real Trida
