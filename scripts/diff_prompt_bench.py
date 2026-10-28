@@ -90,8 +90,14 @@ from diff.output_checks import (  # noqa: E402
     readable,
     shown_text,
 )
-from diff.phase1_binding import COUNTER, FOLLOW, assignment_plan  # noqa: E402
-from diff.phase1_tweak import named_in, tweak_job_for, tweak_source, tweak_steer_all  # noqa: E402
+from diff.phase1_binding import COUNTER, FOLLOW  # noqa: E402
+from diff.phase1_tweak import (  # noqa: E402
+    named_in,
+    stratified_plan,
+    tweak_job_for,
+    tweak_source,
+    tweak_steer_all,
+)
 from diff.phase1_usable import BROKEN, ITEM_STEMS, NEAR_COPY, PLACE_WORDS, check_record  # noqa: E402
 from diff.study_protocol import LIVE_MAX_CHARS, SYSTEM_MESSAGE  # noqa: E402
 
@@ -155,15 +161,20 @@ def inputs(args: argparse.Namespace) -> int:
                     if call.get("kind") != "tweak":
                         spec = call["spec"]
                         live[(call["video_id"], call["cue"], spec["texture"], spec["context"])] = None
-        plan = state.get("assignment", {}).get("plan") or assignment_plan(
-            int(state["order_seed"]), len(state["clip_order"])
-        )
+        stored = state.get("assignment", {}).get("plan")
+        plan = stored
         complete = [entry for entry in kept if all(page in entry["records"] for page in STAGE_A)]
         tweaks = []
         if complete:
             chosen = [clips[entry["key"]] for entry in complete]
             answered = [entry["records"] for entry in complete]
-            planned = [plan[entry["index"]] for entry in complete]
+            # A session still in stage A has no plan yet: draw it as the flow will.
+            planned = (
+                [stored[entry["index"]] for entry in complete]
+                if stored
+                else stratified_plan(chosen, answered, int(state["order_seed"]), root=REPO_ROOT)
+            )
+            plan = plan or planned
             flipped = [COUNTER if assignment == FOLLOW else FOLLOW for assignment in planned]
             ways = (
                 tweak_steer_all(chosen, answered, planned, root=REPO_ROOT),

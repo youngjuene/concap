@@ -61,11 +61,14 @@ sound with no plausible source in view is rarely bound to what is seen.
 **Decision.** P(b) sums over the grid. Its recommendation is scene-aware when
 P(b) ≥ 0.5 and acousmatic otherwise, so that the caption matches how the sound
 is heard (compatibility, in attention restoration theory). Each participant
-follows a balanced plan, drawn from the order seed at entry: half the clips
-take the recommended mode and half the other one. Following or countering is
-then randomised within participant and independent of every rating, so each
-mode is shown with probability 1/2 whatever P(b) is. The model's inputs enter
-only through the recommendation.
+follows a stratified plan (``stratified-v2``, researcher, 2026-10-28, the design
+review's C14), drawn from the order seed once the recommendations are in: within
+the scene-recommended clips and within the acousmatic-recommended clips, half
+take the recommended mode and half the other one. Each mode is shown with
+probability 1/2 whatever P(b) is, and every participant sees both modes in both
+strata (5–7 scene-aware captions of 12, where the balanced plan drawn at entry
+gave 3 or fewer, or 9 or more, to 13.7% of participants). The model's inputs
+enter only through the recommendation.
 
 **Moderators** (researcher, 2026-10-25, to pre-register). P(b) is fixed before
 the outcome, but on the 12 c2 clips it mostly follows ``q``, so the analysis
@@ -97,7 +100,8 @@ from typing import Any, Final
 
 BINDING_POLICY: Final = "diff.phase1-binding/v3"
 BINDING_PROVISIONAL: Final = True
-ASSIGNMENT_POLICY: Final = "diff.phase1-assignment/balanced-v1"
+ASSIGNMENT_POLICY: Final = "diff.phase1-assignment/stratified-v2"
+BALANCED_POLICY: Final = "diff.phase1-assignment/balanced-v1"  # sessions begun before 2026-10-28
 GRID_SIZE: Final = 100
 GRID: Final = tuple((index + 0.5) / GRID_SIZE for index in range(GRID_SIZE))
 DRAWN: Final = 0.2
@@ -120,10 +124,32 @@ BASELINE: Final[dict[str, tuple[str, ...]]] = {
 }
 
 
-def assignment_plan(seed: int, count: int) -> list[str]:
-    """Follow or counter per clip, in stage-A order: half each, the odd one out countering."""
+def assignment_plan(seed: int, recommended: Sequence[str]) -> list[str]:
+    """Follow or counter per clip, in stage-A order, given each clip's recommended mode.
+
+    Within each recommendation, half the clips follow. When both strata are odd, one seeded coin
+    gives the remaining follow to one of them, so follows are exactly half overall (an odd count's
+    odd one out counters, as the balanced plan did) and each clip follows with probability 1/2.
+    """
+    if any(mode not in MODES for mode in recommended):
+        raise ValueError(f"recommendations must be in {MODES}")
+    rng = random.Random(f"{ASSIGNMENT_POLICY}:{seed}")
+    strata = [[index for index, mode in enumerate(recommended) if mode == stratum] for stratum in MODES]
+    follows = [len(stratum) // 2 for stratum in strata]
+    odd = [k for k, stratum in enumerate(strata) if len(stratum) % 2]
+    for k in rng.sample(odd, len(recommended) // 2 - sum(follows)):
+        follows[k] += 1
+    plan = [COUNTER] * len(recommended)
+    for stratum, count in zip(strata, follows, strict=True):
+        for index in rng.sample(stratum, count):
+            plan[index] = FOLLOW
+    return plan
+
+
+def balanced_plan(seed: int, count: int) -> list[str]:
+    """``balanced-v1``, drawn at entry until 2026-10-28: half follow, shuffled; kept for audits."""
     plan = [FOLLOW] * (count // 2) + [COUNTER] * (count - count // 2)
-    random.Random(f"{ASSIGNMENT_POLICY}:{seed}").shuffle(plan)
+    random.Random(f"{BALANCED_POLICY}:{seed}").shuffle(plan)
     return plan
 
 

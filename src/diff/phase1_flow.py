@@ -15,9 +15,11 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   ``step`` and ``progress`` (a segment of the whole session and how far
   into it), and the handoff briefs phase 2.
 - **Clip order:** random per participant, from a seed recorded in the state.
-  The same seed draws the participant's balanced plan of which clips follow the
-  binding model's recommended mode and which counter it
-  (:func:`diff.phase1_binding.assignment_plan`, 2026-10-23).
+  The same seed draws, when stage A closes, the participant's stratified plan
+  of which clips follow the binding model's recommended mode and which counter
+  it (:func:`diff.phase1_binding.assignment_plan`; balanced at entry from
+  2026-10-23, stratified by recommendation since 2026-10-28). A session begun
+  under the balanced plan keeps it.
 - **Captions:** P1 shows the clip's prepared caption raw. P6 shows the caption
   Trida wrote from it and the participant's first-step answers
   (:mod:`diff.phase1_tweak`). The last P5's submit closes stage A: it runs the
@@ -66,9 +68,9 @@ from typing import Any, Final
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
-from diff.phase1_binding import ASSIGNMENT_POLICY, assignment_plan, attention
+from diff.phase1_binding import ASSIGNMENT_POLICY, attention
 from diff.phase1_setup import stripped_options
-from diff.phase1_tweak import template_record, tweak_steer_all, variant_id
+from diff.phase1_tweak import stratified_plan, template_record, tweak_steer_all, variant_id
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
@@ -197,7 +199,7 @@ class Phase1:
             "clip_index": 0,
             "order_seed": seed,
             "clip_order": clip_order(sorted(self.clips), seed),
-            "assignment": {"policy": ASSIGNMENT_POLICY, "plan": assignment_plan(seed, len(self.clips))},
+            "assignment": {"policy": ASSIGNMENT_POLICY, "plan": None},  # drawn when stage A closes
             "instrument_hash": self.instrument.snapshot()["hash"],
             "setup_sha256": sha256_of(self.setup),
             "consent": None,
@@ -555,6 +557,9 @@ class Phase1:
             return
         clips = [self.clips[key] for key in state["clip_order"]]
         records = [self.step_records(state, index, STEP_A[1:]) for index in range(count)]
+        if state["assignment"]["plan"] is None:
+            seed = int(state["order_seed"])
+            state["assignment"]["plan"] = stratified_plan(clips, records, seed, root=self.root)
         steered = tweak_steer_all(clips, records, state["assignment"]["plan"], root=self.root)
         for index, (clip, (slots, model)) in enumerate(zip(clips, steered, strict=True)):
             state["second_captions"][clip["key"]] = {

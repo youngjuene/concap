@@ -68,7 +68,7 @@ from typing import Any, Final
 
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job, tweak_job
-from diff.phase1_binding import BASELINE, FOLLOW, decide_all
+from diff.phase1_binding import BASELINE, FOLLOW, assignment_plan, decide_all
 from diff.rewrite_prompts import (
     TWEAK_LADDER,
     TWEAK_PROMPTS,
@@ -212,6 +212,20 @@ def caption_variant(clip: Mapping[str, Any], mode: str) -> dict[str, Any]:
     if mode == "acousmatic":
         return {"type": "acousmatic"}
     return {"type": f"scene/{clip['scene']['distinctive']}"}
+
+
+def stratified_plan(
+    clips: Sequence[Mapping[str, Any]],
+    records: Sequence[Mapping[str, Mapping[str, Any]]],
+    seed: int,
+    *,
+    root: Path,
+) -> list[str]:
+    """The participant's follow/counter plan, drawn from their recommendations once stage A is in."""
+    answers = [step_answers(step, str(clip["key"])) for clip, step in zip(clips, records, strict=True)]
+    matches = [(step["P2"].get("matches") or [None])[0] for step in records]
+    models = decide_all(clips, answers, matches, [FOLLOW] * len(clips), root=root)
+    return assignment_plan(seed, [model["recommended"] for model in models])
 
 
 def tweak_steer_all(

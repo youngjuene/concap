@@ -18,6 +18,7 @@ from diff.phase1_binding import (
     GRID_SIZE,
     assignment_plan,
     attention,
+    balanced_plan,
     congruence,
     decide_all,
     p_bound,
@@ -28,12 +29,42 @@ from diff.phase1_binding import (
 UNIFORM = [1 / GRID_SIZE] * GRID_SIZE
 
 
-def test_the_plan_is_balanced_and_fixed_by_the_seed() -> None:
-    plan = assignment_plan(7, 12)
+# Five clips recommended scene-aware and seven acousmatic, in stage-A order.
+RECOMMENDED = ["scene", "acousmatic", "acousmatic", "scene", "acousmatic", "scene"] + [
+    "acousmatic",
+    "scene",
+    "acousmatic",
+    "acousmatic",
+    "scene",
+    "acousmatic",
+]
+
+
+def shown_scene(plan: list[str], recommended: list[str]) -> int:
+    return sum((rec == "scene") == (step == FOLLOW) for step, rec in zip(plan, recommended, strict=True))
+
+
+def test_the_stratified_plan_halves_each_recommendation_and_is_fixed_by_the_seed() -> None:
+    plan = assignment_plan(7, RECOMMENDED)
     assert plan.count(FOLLOW) == plan.count(COUNTER) == 6
-    assert plan == assignment_plan(7, 12) and plan != assignment_plan(8, 12)
-    odd = assignment_plan(7, 3)
+    assert plan == assignment_plan(7, RECOMMENDED) and plan != assignment_plan(8, RECOMMENDED)
+    scene = [step for step, rec in zip(plan, RECOMMENDED, strict=True) if rec == "scene"]
+    assert scene.count(FOLLOW) in (2, 3)  # the odd strata share one extra follow by a coin
+    odd = assignment_plan(7, ["scene", "acousmatic", "acousmatic"])
     assert odd.count(FOLLOW) == 1 and odd.count(COUNTER) == 2
+    with pytest.raises(ValueError):
+        assignment_plan(7, ["scene", "maybe"])
+
+
+def test_every_participant_sees_both_modes_and_each_clip_follows_half_the_time() -> None:
+    plans = [assignment_plan(seed, RECOMMENDED) for seed in range(2000)]
+    # 5–7 scene-aware captions of 12 for everyone; the balanced plan let this reach 3 or 9.
+    assert {shown_scene(plan, RECOMMENDED) for plan in plans} <= {5, 6, 7}
+    for index in range(len(RECOMMENDED)):
+        share = sum(plan[index] == FOLLOW for plan in plans) / len(plans)
+        assert abs(share - 0.5) < 0.04, (index, share)
+    spread = {shown_scene(balanced_plan(seed, 12), RECOMMENDED) for seed in range(2000)}
+    assert min(spread) <= 4 and max(spread) >= 8
 
 
 def test_closed_forms_at_an_even_visibility() -> None:

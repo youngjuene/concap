@@ -66,6 +66,7 @@ from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
 from diff.phase1_binding import (  # noqa: E402
     AREA_FLOOR,
     ASSIGNMENT_POLICY,
+    BALANCED_POLICY,
     CONGRUENCE_ITEMS,
     CONGRUENCE_K,
     CONGRUENCE_SPAN,
@@ -224,10 +225,25 @@ def object_at(frame: Mapping[str, Any], x: float, y: float) -> str | None:
     return best[0] if best else None
 
 
-def expected_plan(seed: int, count: int) -> list[str]:
-    """The balanced follow/counter plan drawn from the order seed."""
+def expected_balanced(seed: int, count: int) -> list[str]:
+    """``balanced-v1`` (sessions begun before 2026-10-28): half follow, shuffled at entry."""
     plan = ["follow"] * (count // 2) + ["counter"] * (count - count // 2)
-    random.Random(f"{ASSIGNMENT_POLICY}:{seed}").shuffle(plan)
+    random.Random(f"{BALANCED_POLICY}:{seed}").shuffle(plan)
+    return plan
+
+
+def expected_stratified(seed: int, recommended: list[str]) -> list[str]:
+    """``stratified-v2``: half follow within each recommendation; a seeded coin for odd strata."""
+    rng = random.Random(f"{ASSIGNMENT_POLICY}:{seed}")
+    strata = [[i for i, mode in enumerate(recommended) if mode == m] for m in ("scene", "acousmatic")]
+    follows = [len(stratum) // 2 for stratum in strata]
+    odd = [k for k, stratum in enumerate(strata) if len(stratum) % 2]
+    for k in rng.sample(odd, len(recommended) // 2 - sum(follows)):
+        follows[k] += 1
+    plan = ["counter"] * len(recommended)
+    for stratum, count in zip(strata, follows, strict=True):
+        for i in rng.sample(stratum, count):
+            plan[i] = "follow"
     return plan
 
 
@@ -406,8 +422,14 @@ def audit_phase1(
     records = formal_records(state)
     rows: list[dict[str, Any]] = []
     ran: set[str] = set()
-    plan = expected_plan(int(state["order_seed"]), len(state["clip_order"]))
-    audit.ok("tweak-model", state["assignment"]["plan"] == plan, f"{who}: the stored plan is not the seed's")
+    seed = int(state["order_seed"])
+    policy, stored = state["assignment"]["policy"], state["assignment"]["plan"]
+    known = policy in (BALANCED_POLICY, ASSIGNMENT_POLICY)
+    if not audit.ok("tweak-model", known, f"{who}: unknown plan {policy}"):
+        return rows
+    if policy == BALANCED_POLICY:
+        plan = expected_balanced(seed, len(state["clip_order"]))
+        audit.ok("tweak-model", stored == plan, f"{who}: the stored plan is not the seed's")
     order = list(state["clip_order"])
     steps = [
         {page: records[(index, page)] for page in STEP1_PAGES if (index, page) in records}
@@ -415,12 +437,21 @@ def audit_phase1(
     ]
     if any(len(step1) < len(STEP1_PAGES) for step1 in steps):  # the modes are decided as stage A closes
         audit.ok("tweak-slots", not state["second_captions"], f"{who}: second captions before stage A closed")
+        if policy == ASSIGNMENT_POLICY:
+            audit.ok("tweak-model", stored is None, f"{who}: a plan drawn before stage A closed")
         return rows
     answers_of = [
         {k: v for page in STEP1_PAGES for k, v in step1[page]["answers"].items()} for step1 in steps
     ]
     points = [step1["P2"]["answers"]["V1"][0] for step1 in steps]
     bindings = expected_bindings([clips[key] for key in order], answers_of, points)
+    if policy == ASSIGNMENT_POLICY:
+        plan = expected_stratified(seed, [binding["recommended"] for binding in bindings])
+        audit.ok(
+            "tweak-model",
+            stored == plan,
+            f"{who}: the stored plan is not the seed's for these recommendations",
+        )
     emphases = expected_emphases(answers_of)
     for index, key in enumerate(order):
         clip, step1 = clips[key], steps[index]

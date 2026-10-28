@@ -114,19 +114,19 @@ def through_practice(flow: Phase1, state: dict[str, Any]) -> None:
     flow.apply(state, "practice-complete", {"page": "practice", "answers": answers}, 2.0)
 
 
-def test_each_clip_s_mode_comes_from_the_model_and_the_balanced_plan(flow: Phase1) -> None:
+def test_each_clip_s_mode_comes_from_the_model_and_the_stratified_plan(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=7)
-    assert state["assignment"] == {
-        "policy": "diff.phase1-assignment/balanced-v1",
-        "plan": assignment_plan(7, 3),
-    }
+    assert state["assignment"] == {"policy": "diff.phase1-assignment/stratified-v2", "plan": None}
     through_practice(flow, state)
     now = 10.0
     for _ in range(2):
         now = step(flow, state, now)
     assert state["second_captions"] == {}  # nothing is decided before stage A closes
+    assert state["assignment"]["plan"] is None
     step(flow, state, now)
     entries = list(state["second_captions"].values())
+    recommended = [entry["model"]["recommended"] for entry in entries]
+    assert state["assignment"]["plan"] == assignment_plan(7, recommended)
     assert [entry["clip_index"] for entry in entries] == [0, 1, 2]  # queued in stage-B order
     for index, entry in enumerate(entries):
         model = entry["model"]
