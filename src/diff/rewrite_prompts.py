@@ -261,12 +261,18 @@ LIVE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
 # "보이지 않는 곳" (not "화면 밖", as in phase 1's off-screen sentence); no unseen sound is set beside a
 # seen thing. The examples' scenes are invented too. Provisional until the researcher approves them
 # with the scene parts (``phase2_scene.PHASE2_SCENE_PROVISIONAL``).
+# Version 2 (2026-10-29, the scene round's first revision, RULE.md): the setting opens every caption,
+# even when nothing heard is on screen, and "보이지 않는 곳에서" is written once with the other unseen
+# sounds after it. Version 1 repeated it before each unseen sound, which the output check's repetition
+# test refuses (42 of 810 bench captions fell back to the starting caption), and left the setting out
+# of 23% of captions, mostly cues with no sound on screen. The forest example (birds, a street sound)
+# became an all-unseen harbour.
 _LIVE_SCENE_RULE: Final = (
-    "- 이 영상은 화면과 함께 봅니다. 아래에 적힌 장면에 "
-    "맞춰, 소리가 화면 속 장면에서 나는 것으로 들리게 쓰세요. "
-    "화면에 음원이 보이지 않는 소리는 '보이지 않는 곳에서' "
-    "들리는 것으로 쓰고, 화면 속 대상 옆이나 사이에 두지 "
-    "마세요. 장면에 적히지 않은 대상이나 장소는 지어내지 마세요.\n"
+    "- 이 영상은 화면과 함께 봅니다. 아래에 적힌 장면에 맞춰, 소리가 화면 속 장면에서 나는 것으로 "
+    "들리게 쓰세요. 장면의 배경은 화면에 음원이 보이는 소리가 없어도 자막 첫머리에 한 번 쓰세요"
+    "(예: 건물 앞에서, 하늘 아래, 도로 위로). 화면에 음원이 보이지 않는 소리는 '보이지 않는 곳에서'를 "
+    "한 번만 쓰고 그 뒤에 이어 쓰며, 화면 속 대상 옆이나 사이에 두지 마세요. 장면에 적히지 않은 "
+    "대상이나 장소는 지어내지 마세요.\n"
 )
 _LIVE_SCENE_CONTEXT: Final[dict[str, str]] = {
     "broad": _LIVE_CONTEXT["broad"].replace(
@@ -342,54 +348,32 @@ _LIVE_SCENE_EXAMPLES: Final[tuple[tuple[str, dict[str, str], dict[tuple[int, str
         },
     ),
     (
-        _LIVE_EXAMPLES[1][0],
+        "멀리서 낮게 울리는 뱃고동 소리, 끼룩거리는 갈매기 소리",
         {
-            "seen": "나무와 풀",
-            "visible_sounds": "바람에 흔들리는 나뭇잎 소리",
-            "unseen_sounds": "계속 지저귀는 새소리",
+            "seen": "하늘",
+            "visible_sounds": "없음",
+            "unseen_sounds": "멀리서 낮게 울리는 뱃고동 소리, 끼룩거리는 갈매기 소리",
         },
         {
-            (
-                0,
-                "broad",
-            ): "보이지 않는 곳에서 동물들이 우는 소리와 나무와 풀 사이로 바람이 스치는 자연의 소리",
-            (
-                1,
-                "broad",
-            ): "보이지 않는 곳에서 동물들이 일정하게 우는 소리와 나무와 풀 사이로 바람이 스치는 자연의 소리",
+            (0, "broad"): "하늘 아래, 보이지 않는 곳에서 교통 소리가 울리고 동물들이 우는 소리",
+            (1, "broad"): "하늘 아래, 보이지 않는 곳에서 교통 소리가 낮게 울리고 동물들이 우는 소리",
             (2, "broad"): (
-                "보이지 않는 곳에서 동물들이 높고 일정하게 우는 소리와 "
-                "나무와 풀 사이로 바람이 부드럽게 스치는 자연의 소리"
+                "하늘 아래, 보이지 않는 곳에서 교통 소리가 낮고 묵직하게 울리고 동물들이 날카롭게 우는 소리"
             ),
-            (
-                0,
-                "specific",
-            ): "보이지 않는 곳에서 새들이 지저귀는 소리, 나무와 풀 사이 나뭇잎이 바람에 흔들리는 소리",
-            (
-                1,
-                "specific",
-            ): (
-                "보이지 않는 곳에서 새들이 일정하게 지저귀는 "
-                "소리, 나무와 풀 사이 나뭇잎이 바람에 흔들리는 소리"
-            ),
+            (0, "specific"): "하늘 아래, 보이지 않는 곳에서 뱃고동이 울리는 소리, 갈매기가 우는 소리",
+            (1, "specific"): "하늘 아래, 보이지 않는 곳에서 뱃고동이 낮게 울리는 소리, 갈매기가 우는 소리",
             (2, "specific"): (
-                "보이지 않는 곳에서 새들이 높고 일정하게 지저귀는 "
-                "소리, 나무와 풀 사이 나뭇잎이 부드럽게 흔들리는 소리"
+                "하늘 아래, 보이지 않는 곳에서 뱃고동이 낮고 "
+                "묵직하게 울리는 소리, 갈매기가 날카롭게 우는 소리"
             ),
-            (
-                0,
-                "relation",
-            ): "보이지 않는 곳에서 새들이 지저귀고, 눈앞의 나무와 풀 사이로 나뭇잎이 바람에 흔들린다",
+            (0, "relation"): "하늘 아래 보이지 않는 곳에서 멀리 뱃고동이 울리고, 그 사이로 갈매기가 운다",
             (
                 1,
                 "relation",
-            ): (
-                "보이지 않는 곳에서 새들이 일정하게 지저귀고, "
-                "눈앞의 나무와 풀 사이로 나뭇잎이 바람에 흔들린다"
-            ),
+            ): "하늘 아래 보이지 않는 곳에서 멀리 뱃고동이 낮게 울리고, 그 사이로 갈매기가 운다",
             (2, "relation"): (
-                "보이지 않는 곳에서 새들이 높고 일정하게 지저귀고, "
-                "눈앞의 나무와 풀 사이로 나뭇잎이 부드럽게 흔들린다"
+                "하늘 아래 보이지 않는 곳에서 멀리 뱃고동이 낮고 "
+                "묵직하게 울리고, 그 사이로 갈매기가 날카롭게 운다"
             ),
         },
     ),
@@ -438,7 +422,7 @@ def _live_scene_cell_text(texture: int, context: str) -> str:
 
 LIVE_SCENE_CELL_PROMPTS: Final[dict[tuple[int, str], PromptTemplate]] = {
     (texture, context): PromptTemplate(
-        template_id="live-p2-scene", version=1, text=_live_scene_cell_text(texture, context)
+        template_id="live-p2-scene", version=2, text=_live_scene_cell_text(texture, context)
     )
     for texture in range(LIVE_TEXTURE_MAX + 1)
     for context in CONTEXT_STEPS
