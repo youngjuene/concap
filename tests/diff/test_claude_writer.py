@@ -17,12 +17,12 @@ from phase1_fixtures import approved_setup
 from test_live_tweaks import requests, run, service_with  # noqa: F401 — the fixture
 from test_phase1_tweak import first_step
 
-from diff.claude_writer import ClaudeWriter, request_body
+from diff.claude_writer import ClaudeWriter, check_api_version, request_body
 from diff.live_generation import TweakRequest
 from diff.model_profile import TRIDA_7B
 from diff.phase1_tweak import tweak_request
 from diff.phase1_usable import check_record
-from diff.study_protocol import sha256_of
+from diff.study_protocol import WRITER_API_VERSION, sha256_of
 
 REQUEST = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
 
@@ -149,6 +149,18 @@ def test_a_busy_or_unreachable_api_is_transient_and_any_other_failure_is_refused
     result = ClaudeWriter(FakeClient(error)).attempt(job.record(), 30.0)
     assert result["status"] == status and type(error).__name__ in result["error"]
     assert result["api"] == {"request_sha256": sha256_of(request_body(job))} and "output" not in result
+
+
+def test_the_installed_sdk_must_send_the_api_version_the_writer_is_pinned_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-key")
+    assert ClaudeWriter().client.default_headers["anthropic-version"] == WRITER_API_VERSION
+    older = SimpleNamespace(default_headers={"anthropic-version": "2026-01-01"})
+    with pytest.raises(RuntimeError, match=f"'2026-01-01'.*pinned to '{WRITER_API_VERSION}'"):
+        check_api_version(older)
+    with pytest.raises(RuntimeError, match="None"):
+        check_api_version(SimpleNamespace(default_headers={}))
 
 
 def test_only_the_writer_s_own_intact_jobs_are_sent(tmp_path: Path) -> None:

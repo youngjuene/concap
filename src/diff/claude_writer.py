@@ -30,7 +30,7 @@ from typing import Any, Final
 from diff.job_plan import Job, PlanError, job_from_record
 from diff.model_profile import CLAUDE_WRITER
 from diff.output_checks import GeneratedOutput
-from diff.study_protocol import sha256_of
+from diff.study_protocol import WRITER_API_VERSION, sha256_of
 
 # One SDK retry inside the call's deadline (each try gets half of it); the server adds one more.
 SDK_RETRIES: Final = 1
@@ -91,6 +91,7 @@ class ClaudeWriter:
             import anthropic
 
             client = anthropic.Anthropic(max_retries=SDK_RETRIES)
+            check_api_version(client)
         self.client = client
 
     def attempt(self, payload: Mapping[str, Any], timeout: float) -> dict[str, Any]:
@@ -142,6 +143,22 @@ class ClaudeWriter:
             {**writer_call_settings(), "messages": [{"role": "user", "content": "안녕하세요."}]}, 60.0
         )
         return {"wall_ms": round((time.monotonic() - started) * 1000), "model": message.model}
+
+
+def check_api_version(client: Any) -> None:
+    """Refuse a client whose SDK sends another API version than the one the job identity names.
+
+    The version is the SDK's default header, not a setting of ours: a bumped ``anthropic`` package
+    would change what every request means (sampling parameters, thinking, safeguards) while the
+    profile and the exports still said ``WRITER_API_VERSION``.
+    """
+    sent = client.default_headers.get("anthropic-version")
+    if sent != WRITER_API_VERSION:
+        raise RuntimeError(
+            f"the installed anthropic SDK sends API version {sent!r}, but the writer is pinned to "
+            f"{WRITER_API_VERSION!r} (study_protocol.WRITER_API_VERSION); pin the SDK that sends it, "
+            "or re-run the benches and move the pin"
+        )
 
 
 def failure_status(exc: BaseException) -> str:
