@@ -231,6 +231,8 @@ def main() -> int:
     modules = [module for module in server_modules() if f"src/{module.as_posix()}" in committed]
 
     sys.path.insert(0, str(REPO / "src"))
+    from pg_store import DATABASES
+
     import diff.workbook_instrument as workbook_instrument
     from diff.phase1_setup import read_setup, setup_problems
 
@@ -300,6 +302,7 @@ def main() -> int:
         "access_code": code_path.read_text().strip(),
         "open": not args.closed,
         "purpose": args.purpose,
+        "database": DATABASES[args.purpose],
         "sessions": args.sessions,
         "phase1_setup": str(SETUP),
         "sources": str(SOURCES),

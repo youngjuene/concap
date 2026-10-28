@@ -23,7 +23,7 @@ every request stayed on one instance: one `session_started`, no `session_resumed
 | Study link | `https://concap-exp.vercel.app/?code=<code>`, code in `artifacts/diff/vercel/access-code` |
 | Project | `youngjuenes-projects/concap-diff` (Hobby), not connected to GitHub |
 | Staged site | `artifacts/diff/vercel/site/` (built by `stage.py`, linked by its `.vercel/`) |
-| Sessions | Neon Postgres `concap-sessions` (`sin1`), `DATABASE_URL` |
+| Sessions | Neon Postgres `concap-sessions` (`sin1`), `DATABASE_URL`: database `neondb` for smoke, `participant` for participants |
 | Videos | Blob store `concap-diff-media` (`icn1`, public), named by content hash, as web copies (`artifacts/diff/vercel/web/`): phase 1's remuxed for fast start, phase 2's at 720p |
 | Secrets | `ANTHROPIC_API_KEY`, `DIFF_SECRET` (keys the media tokens), production and preview |
 
@@ -55,18 +55,39 @@ cd artifacts/diff/vercel/site && vercel deploy --prod
 - `vercel deploy` without `--prod` makes a preview, behind Vercel's login
   (`vercel curl <path> --deployment <url>`).
 
+## Smoke and participant sessions
+
+They go to two databases of the one Neon project, as the lab keeps two stores:
+- `--purpose smoke` (the default) → `neondb`;
+- `--purpose participant` → `participant` (created 2026-10-28).
+
+So a test P1 never blocks a real P1, and a participant pull holds no test session. `deploy.json`
+names the database, and `app.py` swaps it into `DATABASE_URL`. `stage.py --purpose participant`
+refuses while the lab's participant gates stand (`_participant_blockers`: the provisional prompts,
+the tuner text, the binding model, unreviewed starting captions), as `live serve` does.
+
+Once production serves participants, test on a preview, which sits behind Vercel's login:
+
+```sh
+uv run python deploy/vercel/stage.py --out artifacts/diff/vercel/site   # smoke
+cd artifacts/diff/vercel/site && vercel deploy                        # a preview, not --prod
+```
+
+Then re-stage `--purpose participant`, so the site directory again matches production.
+
 ## Bring the data to the lab
 
 ```sh
-uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/pull.py
+uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/pull.py   # --purpose smoke for tests
 uv run python -m diff export --store artifacts/diff/vercel/pulls/<time>/sessions.sqlite \
   --log-dir artifacts/diff/vercel/pulls/<time>/logs \
   --phase1-setup artifacts/diff/phase1/setup-draft.json --out artifacts/diff/export-<date>
 ```
 
 `pull.py` reads Neon (one consistent snapshot; the study keeps running) into a new directory: a
-lab-format `sessions.sqlite` and the live logs as the files the lab server writes. It prints the
-export command to run next. It finds the database through `artifacts/diff/vercel/.env.production`
+lab-format `sessions.sqlite` and the live logs as the files the lab server writes. It prints a health line
+(sessions finished, and any live watch that restarted its video) and the export command to run
+next. It finds the database through `artifacts/diff/vercel/.env.production`
 (`vercel env pull ../.env.production --environment production` in the site; secrets come back
 as placeholders, the database URL does not).
 

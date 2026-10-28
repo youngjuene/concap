@@ -7,15 +7,22 @@ here every transaction takes one advisory lock instead, so writes are serialised
 
 The SQL the base class sends is written for sqlite3 (``?`` placeholders); :class:`_Db` passes it
 on with psycopg's ``%s``. None of that SQL holds a literal ``?``.
+
+Smoke and participant sessions live in two databases of the one Neon project (:data:`DATABASES`),
+as the lab keeps them in two stores: a test P1 never blocks a participant P1, and a pull of the
+participants holds no test session. Only the URL's database name differs (:func:`on_database`).
 """
 
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, Final
+from urllib.parse import urlsplit, urlunsplit
 
 from diff.session_store import STORE_SCHEMA, SessionStore
 
+# neondb is the one the Neon integration made; participant was created on 2026-10-28.
+DATABASES: Final = {"smoke": "neondb", "participant": "participant"}
 WRITE_LOCK: Final = 0x646966660001  # any constant; every writer takes the same one
 TABLES: Final = (
     "CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -35,6 +42,11 @@ LOGS: Final = (
     "CREATE TABLE IF NOT EXISTS logs ("
     " id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, line TEXT NOT NULL, at DOUBLE PRECISION NOT NULL)"
 )
+
+
+def on_database(url: str, name: str) -> str:
+    """``url`` (Neon's ``DATABASE_URL``, pooled or not) pointed at the database ``name``."""
+    return urlunsplit(urlsplit(url)._replace(path=f"/{name}"))
 
 
 class _Db:

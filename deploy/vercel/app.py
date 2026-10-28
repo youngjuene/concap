@@ -99,7 +99,7 @@ CLOSED = (
 
 
 def _build() -> Any:
-    from pg_store import PgSessionStore
+    from pg_store import PgSessionStore, on_database
 
     import diff.workbook_instrument as workbook_instrument
     from diff.caption_sources import parse_sources
@@ -137,7 +137,7 @@ def _build() -> Any:
             source, output, template_phase=2, cell=job.cell, max_chars=LIVE_MAX_CHARS
         ).record()
 
-    store = PgSessionStore(os.environ["DATABASE_URL"])
+    store = PgSessionStore(on_database(os.environ["DATABASE_URL"], DEPLOY["database"]))
     logs = store.log_dir() / "sessions"
     writer = ClaudeWriter()
     services = [
