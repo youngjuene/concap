@@ -354,7 +354,9 @@ nothing records it.
 - `--purpose participant` is refused in any of these cases:
   - the tuner role text is provisional (`rewrite_prompts.TUNER_SYSTEM`);
   - the nine live prompts are provisional (`rewrite_prompts.LIVE_CELL_PROMPTS`);
-  - the second-caption prompt is provisional (`rewrite_prompts.TWEAK_P1`);
+  - the second-caption wordings and their gate are provisional
+    (`rewrite_prompts.TWEAK_WORDINGS`, `phase1_usable`);
+  - the binding model is provisional (`phase1_binding.BINDING_PROVISIONAL`, approved 2026-10-28);
   - the setup has unapproved parts;
   - a phase-2 starting caption is not reviewed: every cue needs status
     `reviewed` and text provenance that is human or reviewed.

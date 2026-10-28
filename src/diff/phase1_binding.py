@@ -70,6 +70,12 @@ strata (5–7 scene-aware captions of 12, where the balanced plan drawn at entry
 gave 3 or fewer, or 9 or more, to 13.7% of participants). The model's inputs
 enter only through the recommendation.
 
+**Approved 2026-10-28** (researcher): every parameter as it stands, after a
+one-at-a-time sensitivity run on the real setup; the 29 ``audioset_label``s as
+drafted; the stratified plan. The primary outcome is the F + BF composite at P9;
+H1 (follow beats counter) is the primary confirmatory test and H4 (one mode
+better for everyone) the secondary (``docs/v4-diff/plan.md``).
+
 **Moderators** (researcher, 2026-10-25, to pre-register). P(b) is fixed before
 the outcome, but on the 12 c2 clips it mostly follows ``q``, so the analysis
 takes it as two moderators of the mode's effect on P4→P9, both recorded:
@@ -99,7 +105,7 @@ from statistics import mean
 from typing import Any, Final
 
 BINDING_POLICY: Final = "diff.phase1-binding/v3"
-BINDING_PROVISIONAL: Final = True
+BINDING_PROVISIONAL: Final = False
 ASSIGNMENT_POLICY: Final = "diff.phase1-assignment/stratified-v2"
 BALANCED_POLICY: Final = "diff.phase1-assignment/balanced-v1"  # sessions begun before 2026-10-28
 GRID_SIZE: Final = 100

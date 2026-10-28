@@ -268,9 +268,10 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
 ) -> None:
     from diff.__main__ import main
 
-    if approved:  # one of them approved, the others still provisional
-        module = "phase1_binding" if approved == "BINDING_PROVISIONAL" else "rewrite_prompts"
-        monkeypatch.setattr(f"diff.{module}.{approved}", False)
+    # All provisional, then one approved, whatever the code's current approvals are.
+    for flag in ("TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL", "BINDING_PROVISIONAL"):
+        module = "phase1_binding" if flag == "BINDING_PROVISIONAL" else "rewrite_prompts"
+        monkeypatch.setattr(f"diff.{module}.{flag}", flag != approved)
 
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
@@ -320,6 +321,7 @@ def test_preflight_lists_every_blocker_at_once(
         raise TypeError("Could not resolve authentication method")
 
     monkeypatch.setattr("diff.claude_writer.ClaudeWriter.warm_up", no_key)
+    monkeypatch.setattr("diff.phase1_binding.BINDING_PROVISIONAL", True)  # every gate closed
     sources = tmp_path / "sources.json"  # the test stream's cues are drafts
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
     sources.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")

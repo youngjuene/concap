@@ -1077,24 +1077,32 @@ the review folder).
   - a gate for sounds the first caption names but the audio lacks. It needs
     those words per clip in the setup; the bench lists them for four clips.
 
-**Open for the researcher:**
-- the on-screen line (0.5) and the `PLAUSIBLE` table, which now decide
-  visibility on their own;
-- the parameters: 0.2 drawn, the 0.05 floor, the 1.5% click tolerance, ln 3,
-  the uniform tendency prior, the 0.5 threshold, the sky cut-offs (which
-  reach no caption since 2026-10-26), the 1.5
-  lift, and the `PLAUSIBLE` table;
-- the 29 drafted `audioset_label`s;
-- the two prompt texts and the Korean element and off-screen phrases;
-- the balanced plan, and the primary outcome subscale. The hypothesis team
-  suggested the sign of scene × centred E1/E3 on BF1_2, with the built
-  model's positive sign as the rival. That was before the moderator split,
-  under which centred E1/E3 is part of `u`. The sheet also notes that BF1's
-  loading shifted with environment type in Payne (2013) and may be unstable
-  for urban video.
+**Decided 2026-10-28 (researcher), after the gate-1 review page and a
+one-at-a-time sensitivity run on the real setup:**
+- **Parameters approved as they stand:**
+  - the on-screen line (0.5), the `PLAUSIBLE` table, 0.2 drawn, the 0.05 floor, the 1.5% click tolerance,
+    ln 3, the uniform tendency prior, the 0.5 threshold, the sky cut-offs and the 1.5 lift;
+  - in the simulation (400 participants × 12 clips, the panel's world), the rule matched true binding
+    on 75.0% of clips, against 72.5% for "scene-aware when q ≥ 0.5";
+  - no single change did better by more than 0.4 points; without E1/E3 (K = 0) the rule fell to 72.3%.
+- **The 29 `audioset_label`s are approved as drafted.**
+- **The plan is `stratified-v2`** (the panel's C14). Within each recommendation, half the clips
+  follow, drawn from the order seed when stage A closes.
+  - Each clip still follows with probability 1/2, and every participant sees 5–7 scene-aware captions
+    (balanced-v1 gave 3 or fewer, or 9 or more, to 13.7%).
+  - Sessions begun under balanced-v1 keep their plan; the session audit re-derives both.
+- **Primary outcome: the F + BF composite at P9** (F1_2–F3_2, BF1_2–BF3_2), as the panel powered it,
+  with F and BF reported as secondary. E1_2/E3_2 are the manipulation check, since E1/E3 feed the rule.
+- **Confirmatory set:**
+  - H1, follow beats counter (β_follow > 0), is primary at 95%;
+  - H4, one mode better for everyone (β_mode, attentional focus < 0 against coherence > 0), is
+    secondary at 97.5%;
+  - visibility (mode × v), the participant's binding (mode × u) and the policy values are
+    pre-registered estimates with stated directions;
+  - the notation sketch is the "Second-Caption Hypotheses" page.
 
-Until then `BINDING_PROVISIONAL` and `TWEAK_PROVISIONAL` refuse participant
-sessions, and the setup's clips need approving again.
+`BINDING_PROVISIONAL` is False since then. The two prompt texts and the Korean element and off-screen
+phrases belong to `TWEAK_PROVISIONAL`, which still refuses participant sessions.
 
 ## Readiness fixes (2026-10-20)
 
