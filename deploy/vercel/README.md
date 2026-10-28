@@ -91,6 +91,20 @@ next. It finds the database through `artifacts/diff/vercel/.env.production`
 (`vercel env pull ../.env.production --environment production` in the site; secrets come back
 as placeholders, the database URL does not).
 
+## A participant withdraws
+
+The consent sheet's data-flow page (`docs/v4-diff/consent-data-flow.md`) promises to delete a
+withdrawn participant's records everywhere:
+
+```sh
+uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/forget.py P12         # counts only
+uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/forget.py P12 --yes   # deletes
+```
+
+It deletes the sessions, receipts, events and live logs from Neon in one transaction. It then lists
+every pull and export on this machine that still holds the participant. Delete those, then pull
+and export again.
+
 ## How it differs from the lab server
 
 `app.py` builds the same app as `live serve`, with:
