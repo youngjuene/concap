@@ -33,7 +33,7 @@ from diff.caption_sources import CATEGORIES_KO
 from diff.rewrite_prompts import TUNER_PROVISIONAL, TUNER_SYSTEM, render_tuner_system
 from diff.study_protocol import sha256_of
 
-CALIBRATION_POLICY: Final = "diff.live-calibration/v2"
+CALIBRATION_POLICY: Final = "diff.live-calibration/v3"  # v3 (2026-10-28): the scene profile
 CALIBRATION_SOURCE: Final = "regen sheet handoff for the sliders; phase-1 ratings and answers for the tuner"
 START_TEXTURE: Final = 0.5
 START_CONTEXT: Final = 0.5
@@ -85,9 +85,13 @@ def profile_slots(heard: Mapping[str, int], means: Mapping[str, float | None]) -
 
 
 def calibrate(
-    observations: Sequence[Mapping[str, Any]], ratings: Sequence[Mapping[str, Any]] = ()
+    observations: Sequence[Mapping[str, Any]],
+    ratings: Sequence[Mapping[str, Any]] = (),
+    scene_profile: Mapping[str, Any] | None = None,
 ) -> Calibration:
-    """Midpoint sliders and the session's tuner system message from phase-1 answers and ratings."""
+    """Midpoint sliders and the session's tuner system message from phase-1 answers and ratings, with
+    the participant's scene profile (``phase2_scene.scene_profile``; ``None`` without phase 1), which
+    sets each cue's mode through the watch."""
     heard: Counter[str] = Counter()
     labels: Counter[str] = Counter()
     for observation in observations:
@@ -114,6 +118,7 @@ def calibrate(
         },
         "slots": slots,
         "system_message": system_message,
+        "scene_profile": dict(scene_profile) if scene_profile is not None else None,
     }
     return Calibration(
         START_TEXTURE,

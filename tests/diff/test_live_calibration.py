@@ -24,7 +24,8 @@ def test_the_tuner_carries_heard_families_and_rating_means() -> None:
     assert "소리 표현 4.5" in calibration.system_message and "장면과의 일치 2.5" in calibration.system_message
     assert calibration.record["caption_rating_means"] == {"S1": 4.5, "S2": 2.5, "S3": 5.5}
     assert calibration.record["tuner"]["template"] == TUNER_SYSTEM.template_id
-    assert calibration.record["policy"] == "diff.live-calibration/v2"
+    assert calibration.record["policy"] == "diff.live-calibration/v3"
+    assert calibration.record["scene_profile"] is None  # no phase 1: every cue has a flat tendency
 
 
 def test_visual_labels_never_reach_the_prompt() -> None:

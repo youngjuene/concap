@@ -125,11 +125,13 @@ def slider_steps(texture: float, context: float) -> tuple[int, str]:
 
 @dataclass(frozen=True)
 class Spec:
-    """What a caption is written under: the snapped steps and the session's tuner system message."""
+    """What a caption is written under: the snapped steps, the session's tuner system message, and
+    its scene profile's history (``phase2_scene.scene_profile``), which sets each cue's mode."""
 
     texture: int
     context: str
     system_message: str = ""
+    scene: tuple[tuple[float, float], ...] = ()
 
 
 class LatencyEstimator:

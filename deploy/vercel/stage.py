@@ -39,6 +39,7 @@ REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 SETUP = Path("artifacts/diff/phase1/setup-draft.json")
 SOURCES = Path("data/phase2/phase2-cues.json")
+SCENES = Path("data/phase2/phase2-scene.json")  # absent until `python -m diff phase2 scene`
 ITEMS = Path("artifacts/diff/robustness-20261020/items.json")
 VIDEOS = (
     ("viewing-1", "data/phase2/viewing-1.mp4"),
@@ -113,7 +114,9 @@ def participant_blockers() -> list[str]:
 
     sources = parse_sources(json.loads((REPO / SOURCES).read_text(encoding="utf-8"))).sources
     videos = [LiveVideo(key, REPO / path, LiveStream.from_sources(sources, key)) for key, path in VIDEOS]
-    return _participant_blockers(argparse.Namespace(phase1_setup=REPO / SETUP), videos)
+    return _participant_blockers(
+        argparse.Namespace(phase1_setup=REPO / SETUP, phase2_scene=REPO / SCENES), videos
+    )
 
 
 def setup_files(setup: Any) -> set[str]:
@@ -273,6 +276,8 @@ def main() -> int:
             copy(path, out)
     for path in (SETUP, SOURCES, ITEMS):
         copy(path, out)
+    if (REPO / SCENES).is_file():
+        copy(SCENES, out)
 
     web = out.with_name("web")
     copies = {path: FAST_START for path in clips} | {path: WEB_COPY for _, path in VIDEOS}
@@ -306,6 +311,7 @@ def main() -> int:
         "sessions": args.sessions,
         "phase1_setup": str(SETUP),
         "sources": str(SOURCES),
+        "scenes": str(SCENES) if (REPO / SCENES).is_file() else None,
         "items": str(ITEMS),
         "videos": [list(video) for video in VIDEOS],
         "media": urls,

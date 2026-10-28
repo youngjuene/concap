@@ -87,6 +87,7 @@ from diff.phase1_tweak import (  # noqa: E402
 from diff.phase1_usable import check_record  # noqa: E402
 from diff.rewrite_prompts import (  # noqa: E402
     LIVE_CELL_PROMPTS,
+    LIVE_MODE_PROMPTS,
     LIVE_RULES_VERSION,
     TUNER_SYSTEM,
     TWEAK_LADDER,
@@ -691,6 +692,45 @@ def audit_tuner(audit: Audit, who: str, state: Mapping[str, Any], clips: Mapping
     return str(calibration["system_message"])
 
 
+def expected_history(state: Mapping[str, Any]) -> list[list[float]]:
+    """phase2_scene.scene_profile's history, re-derived: each stage-A clip's (visibility, attention
+    log ratio) as its binding record holds them, in stage-A order."""
+    records = sorted(state.get("second_captions", {}).values(), key=lambda r: int(r["clip_index"]))
+    return [[float(r["model"]["visibility"]), float(r["model"]["attention"]["log_ratio"])] for r in records]
+
+
+def expected_steer(scene: Mapping[str, Any], history: Sequence[Sequence[float]]) -> dict[str, Any]:
+    """phase2_scene.cue_steer's mode and P(b), re-derived on its own grid: the tendency learnt from the
+    history, then the first sound's visibility as the prior, with no evidence of the cue's own."""
+    grid = [(i + 0.5) / GRID_SIZE for i in range(GRID_SIZE)]
+
+    def bound(pi: float, q: float) -> float:
+        odds = (pi / (1 - pi)) * (q / (1 - q))
+        return odds / (1 + odds)
+
+    weights = [1.0] * GRID_SIZE
+    for visibility, log_ratio in history:
+        weights = [
+            w * ((1 - bound(pi, visibility)) + bound(pi, visibility) * math.exp(log_ratio))
+            for w, pi in zip(weights, grid, strict=True)
+        ]
+        total = sum(weights)
+        weights = [w / total for w in weights]
+    total = sum(weights)
+    q = float(scene["sounds"][0]["visibility"]["mean"])
+    probability = sum(w / total * bound(pi, q) for w, pi in zip(weights, grid, strict=True))
+    placed = [s for s in scene["sounds"] if s["audioset_label"] not in RECORDING_ARTEFACTS]
+    visible = [s["sound"] for s in placed if s["visibility"]["on_screen"]]
+    unseen = [s["sound"] for s in placed if not s["visibility"]["on_screen"]]
+    mode = "scene" if probability >= THRESHOLD else "acousmatic"
+    slots = {
+        "seen": ELEMENTS_KO[scene["distinctive"]],
+        "visible_sounds": ", ".join(dict.fromkeys(visible)) or NOT_SEEN,
+        "unseen_sounds": ", ".join(dict.fromkeys(unseen)) or NOT_SEEN,
+    }
+    return {"mode": mode, "p_bound": round(probability, 4), "slots": slots if mode == "scene" else {}}
+
+
 def audit_live(
     audit: Audit,
     who: str,
@@ -698,9 +738,20 @@ def audit_live(
     lives: list[dict[str, Any]],
     events: list[dict[str, Any]],
     cues: Mapping[tuple[str, int], CaptionSource],
+    scenes: Mapping[str, Any] | None = None,
+    state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Every live call against the slider steps and the tuner; settings and exposures against the calls."""
+    """Every live call against the slider steps, the tuner and (since 2026-10-28) the cue's mode for this
+    participant; settings and exposures against the calls."""
     stale = False
+    profile = ((state or {}).get("calibration", {}).get("record", {}) or {}).get("scene_profile")
+    history = expected_history(state or {}) if profile is not None else []
+    if profile is not None:
+        audit.ok(
+            "live-mode",
+            profile["history"] == history,
+            f"{who}: the scene profile's history is not the stage-A binding records'",
+        )
     for call in lives:
         where = f"{who} {call['video_id']}#{call['cue']}"
         source = cues.get((call["video_id"], call["cue"]))
@@ -711,12 +762,32 @@ def audit_live(
             "live-call", call["system_message"] == tuner, f"{where}: the system message is not the tuner"
         )
         spec = call["spec"]
+        logged_steer = (call["job"].get("cell") or {}).get("steer")
+        mode = "acousmatic"
+        if logged_steer is not None:
+            scene = (scenes or {}).get("cues", {}).get(source.source_id)
+            if not audit.ok(
+                "live-mode", scene is not None, f"{where}: a steered call, no scene part (--phase2-scene)"
+            ):
+                continue
+            assert scene is not None
+            expected = expected_steer(scene, history)
+            got = {key: logged_steer.get(key) for key in expected}
+            audit.ok(
+                "live-mode", got == expected, f"{where}: the cue's mode differs in {differing(expected, got)}"
+            )
+            mode = str(logged_steer["mode"])
         recomputed = live_job(
-            source, int(spec["texture"]), str(spec["context"]), tuner, str(call["job"]["purpose"])
+            source,
+            int(spec["texture"]),
+            str(spec["context"]),
+            tuner,
+            str(call["job"]["purpose"]),
+            logged_steer,
         )
         job = plain(recomputed.record())
         prompt = call["job"]["prompt"]
-        template = LIVE_CELL_PROMPTS.get((int(spec["texture"]), str(spec["context"])))
+        template = LIVE_MODE_PROMPTS[mode].get((int(spec["texture"]), str(spec["context"])))
         if template is None or (prompt["template_sha256"], prompt["context_rules_version"]) != (
             template.sha256,
             LIVE_RULES_VERSION,
@@ -972,6 +1043,7 @@ def check(args: argparse.Namespace) -> int:
     with args.sources.open(encoding="utf-8") as handle:
         sources = parse_sources(json.load(handle)).sources
     cues = {(s.unit_key, s.cue_index): s for s in sources if s.phase == 2}
+    scenes = json.loads(args.phase2_scene.read_text(encoding="utf-8")) if args.phase2_scene else None
     sessions, store_events = read_store(args.store)
     logs = {s["session_id"]: session_logs(args.log_dir, s["session_id"]) for s in sessions}
     report: dict[str, Any] = {"sessions": [], "second_captions": []}
@@ -985,7 +1057,8 @@ def check(args: argparse.Namespace) -> int:
         row: dict[str, Any] = {"participant": who, "finished": session["finished_at"] is not None}
         if tuner is not None:
             row |= {"tuner": tuner, "post_watch": state.get("live", {}).get("answers")}
-            row |= audit_live(audit, who, tuner, lives, logs[session["session_id"]]["events"], cues)
+            events = logs[session["session_id"]]["events"]
+            row |= audit_live(audit, who, tuner, lives, events, cues, scenes, state)
         report["sessions"].append(row)
     if args.export is not None:
         audit_export(audit, args.export, setup, sessions, store_events, logs)
@@ -1046,6 +1119,7 @@ def main() -> int:
     checked.add_argument("--log-dir", type=Path, action="append", required=True, help="repeatable")
     checked.add_argument("--phase1-setup", type=Path, required=True, help="the setup the sessions ran with")
     checked.add_argument("--sources", type=Path, required=True, help="the phase-2 cues the sessions ran with")
+    checked.add_argument("--phase2-scene", type=Path, help="the cues' scene parts the sessions ran with")
     checked.add_argument("--export", type=Path, help="a python -m diff export directory to compare")
     checked.add_argument("--out", type=Path, help="write the report as JSON")
     checked.set_defaults(handler=check)

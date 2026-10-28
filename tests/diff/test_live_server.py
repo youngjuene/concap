@@ -261,7 +261,8 @@ def test_rating_items_are_validated() -> None:
 
 
 @pytest.mark.parametrize(
-    "approved", ["", "TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL", "BINDING_PROVISIONAL"]
+    "approved",
+    ["", "TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL", "BINDING_PROVISIONAL", "PHASE2_SCENE_PROVISIONAL"],
 )
 def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: str
@@ -269,9 +270,14 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
     from diff.__main__ import main
 
     # All provisional, then one approved, whatever the code's current approvals are.
-    for flag in ("TUNER_PROVISIONAL", "LIVE_PROMPTS_PROVISIONAL", "BINDING_PROVISIONAL"):
-        module = "phase1_binding" if flag == "BINDING_PROVISIONAL" else "rewrite_prompts"
-        monkeypatch.setattr(f"diff.{module}.{flag}", flag != approved)
+    modules = {"BINDING_PROVISIONAL": "phase1_binding", "PHASE2_SCENE_PROVISIONAL": "phase2_scene"}
+    for flag in (
+        "TUNER_PROVISIONAL",
+        "LIVE_PROMPTS_PROVISIONAL",
+        "BINDING_PROVISIONAL",
+        "PHASE2_SCENE_PROVISIONAL",
+    ):
+        monkeypatch.setattr(f"diff.{modules.get(flag, 'rewrite_prompts')}.{flag}", flag != approved)
 
     sources = tmp_path / "sources.json"
     document = {"schema": "diff.caption-sources/v1", "sources": [cue.record() for cue in stream().cues]}
@@ -288,6 +294,7 @@ def test_participant_sessions_wait_for_the_researcher_s_tuner_text_and_prompts(
         ("tuner system message", "TUNER_PROVISIONAL"),
         ("nine live prompts are still provisional", "LIVE_PROMPTS_PROVISIONAL"),
         ("binding model's parameters and plan are still provisional", "BINDING_PROVISIONAL"),
+        ("scene parts and scene-aware live prompts are still provisional", "PHASE2_SCENE_PROVISIONAL"),
     ):
         assert (blocker in str(stopped.value)) is (flag != approved), blocker
 

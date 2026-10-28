@@ -50,6 +50,19 @@ def _write_text(path: Path, text: str, *, force: bool = False) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _phase2_scenes(path: Path | None) -> Any:
+    """The phase-2 scene parts (``diff.phase2_scene``), or ``None`` when there is no file."""
+    from diff.phase1_scene import SceneError
+    from diff.phase2_scene import read_scenes
+
+    if path is None or not path.is_file():
+        return None
+    try:
+        return read_scenes(path)
+    except SceneError as exc:
+        raise SystemExit(str(exc)) from exc
+
+
 def _sources(path: Path) -> Any:
     from diff.caption_sources import SourceError, parse_sources
 
@@ -514,6 +527,35 @@ def phase1_scene(args: argparse.Namespace) -> int:
     return 0
 
 
+def phase2_scene(args: argparse.Namespace) -> int:
+    """Build each phase-2 cue's scene part from the long videos' Sa2VA run and the sound keys."""
+    from diff.phase1_scene import SceneError
+    from diff.phase2_scene import build_scenes
+
+    sources = _sources(args.sources).sources
+    try:
+        scenes = build_scenes(
+            sources, keys=args.keys, run=args.sa2va, ontology=args.ontology, stride=args.stride
+        )
+    except SceneError as exc:
+        raise SystemExit(f"cannot build the phase-2 scene parts: {exc}") from exc
+    _write_json(args.out, scenes, force=True)
+    by_source = {source.source_id: source for source in sources}
+    for source_id, scene in scenes["cues"].items():
+        source = by_source[source_id]
+        sounds = ", ".join(
+            f"{s['sound']} {s['visibility']['share']:.2f}{' on' if s['visibility']['on_screen'] else ''}"
+            f" [{s['mask_match']}]"
+            for s in scene["sounds"]
+        )
+        print(
+            f"{source.unit_key} {source.cue_index:02d}: "
+            f"{scene['distinctive']} ({scene['distinctive_by']}); {sounds}"
+        )
+    print(f"wrote {len(scenes['cues'])} cues' scene parts to {args.out}")
+    return 0
+
+
 def _print_scene(clip: Any) -> None:
     scene = clip.get("scene")
     if not scene:
@@ -688,6 +730,7 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
     """Every gate a participant session waits on, given serve's arguments (empty when none)."""
     from diff.caption_sources import starting_caption_review_problems
     from diff.phase1_binding import BINDING_PROVISIONAL
+    from diff.phase2_scene import PHASE2_SCENE_PROVISIONAL, scene_problems
     from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL, TWEAK_PROVISIONAL
 
     blockers = []
@@ -712,6 +755,17 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
             "(rewrite_prompts.TWEAK_PROMPTS, phase1_usable); participant sessions wait for the "
             "researcher's approval"
         )
+    if PHASE2_SCENE_PROVISIONAL:
+        blockers.append(
+            "phase 2's scene parts and scene-aware live prompts are still provisional "
+            "(phase2_scene, rewrite_prompts.LIVE_SCENE_CELL_PROMPTS); participant sessions wait for the "
+            "researcher's approval"
+        )
+    cues = [cue for video in videos for cue in video.stream.cues]
+    unscened = scene_problems(_phase2_scenes(getattr(args, "phase2_scene", None)), cues)
+    if unscened:
+        more = f" (and {len(unscened) - 1} more)" if len(unscened) > 1 else ""
+        blockers.append(f"phase 2's scene parts cannot steer the watch: {unscened[0]}{more}")
     if args.phase1_setup is None:
         blockers.append("participant sessions need phase 1: pass --phase1-setup")
     unreviewed = [
@@ -829,6 +883,7 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.phase1_setup import read_setup, setup_problems
     from diff.phase1_tweak import tweak_job_for
     from diff.phase1_usable import check_record
+    from diff.phase2_scene import cue_steer
     from diff.session_store import SessionStore
     from diff.study_protocol import LIVE_MAX_CHARS
 
@@ -867,8 +922,14 @@ def live_serve(args: argparse.Namespace) -> int:
         PARTICIPANT_STORE if args.purpose == "participant" else log_dir / "smoke-sessions.sqlite"
     )
 
+    scenes = _phase2_scenes(args.phase2_scene)
+    if scenes is None:
+        print(f"no phase-2 scene parts at {args.phase2_scene}: every cue is written acousmatic", flush=True)
+
     def job_for(source: Any, spec: Any) -> Any:
-        return live_job(source, spec.texture, spec.context, spec.system_message, args.purpose)
+        scene = scenes["cues"].get(source.source_id) if scenes is not None else None
+        steer = cue_steer(scene, spec.scene) if scenes is not None else None
+        return live_job(source, spec.texture, spec.context, spec.system_message, args.purpose, steer)
 
     def tweak_for(clip: Any, slots: Any, rung: int) -> Any:
         return tweak_job_for(clip, slots, args.purpose, rung)
@@ -1087,6 +1148,24 @@ def parser() -> argparse.ArgumentParser:
     sign.add_argument("--clip", action="append", help="a clip key; repeatable")
     sign.add_argument("--practice", action="store_true")
     sign.set_defaults(handler=phase1_approve)
+    phase2 = commands.add_parser("phase2", help="phase 2's scene parts").add_subparsers(
+        dest="action", required=True
+    )
+    scene2 = phase2.add_parser("scene", help="build each cue's scene part from the long videos' Sa2VA run")
+    scene2.add_argument("--sources", type=Path, default=Path("data/phase2/phase2-cues.json"))
+    scene2.add_argument("--keys", type=Path, default=Path("data/phase2/scene-keys.csv"))
+    scene2.add_argument(
+        "--sa2va",
+        type=Path,
+        default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/runs/phase2/masks"),
+        help="the run's masks folder, holding visual/<video>/<Category> and audio/<video>/<phrase>",
+    )
+    scene2.add_argument(
+        "--ontology", type=Path, default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json")
+    )
+    scene2.add_argument("--stride", type=int, default=10, help="read every n-th frame")
+    scene2.add_argument("--out", type=Path, default=Path("data/phase2/phase2-scene.json"))
+    scene2.set_defaults(handler=phase2_scene)
     exported = commands.add_parser("export", help="research export from the session store and live logs")
     exported.add_argument("--store", type=Path, default=PARTICIPANT_STORE)
     exported.add_argument(
@@ -1116,6 +1195,12 @@ def parser() -> argparse.ArgumentParser:
     serve_live.add_argument(
         "--sessions", type=int, default=1, help="participant sessions at once, each with its own writer"
     )
+    serve_live.add_argument(
+        "--phase2-scene",
+        type=Path,
+        default=Path("data/phase2/phase2-scene.json"),
+        help="the cues' scene parts (python -m diff phase2 scene); without it every cue is acousmatic",
+    )
     serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
     serve_live.add_argument("--log-dir", type=Path, required=True)
     serve_live.add_argument("--host", default="127.0.0.1")
@@ -1131,6 +1216,7 @@ def parser() -> argparse.ArgumentParser:
     preflight.add_argument("--video", action="append", required=True, help="ID=PATH, in watch order")
     preflight.add_argument("--items", type=Path, required=True)
     preflight.add_argument("--phase1-setup", type=Path)
+    preflight.add_argument("--phase2-scene", type=Path, default=Path("data/phase2/phase2-scene.json"))
     preflight.add_argument("--store", type=Path, help=f"session store (default {PARTICIPANT_STORE})")
     preflight.set_defaults(handler=live_preflight)
     return root

@@ -113,6 +113,7 @@ def _build() -> Any:
     from diff.phase1_setup import read_setup
     from diff.phase1_tweak import tweak_job_for
     from diff.phase1_usable import check_record
+    from diff.phase2_scene import cue_steer
     from diff.study_protocol import LIVE_MAX_CHARS
 
     purpose = DEPLOY["purpose"]
@@ -125,8 +126,14 @@ def _build() -> Any:
     # stage.py ran setup_problems against the full media before staging; the videos are not here.
     phase1 = Phase1(read_setup(ROOT / DEPLOY["phase1_setup"]), root=ROOT, instrument=workbook_instrument)
 
+    scenes = (
+        json.loads((ROOT / DEPLOY["scenes"]).read_text(encoding="utf-8")) if DEPLOY.get("scenes") else None
+    )
+
     def job_for(source: Any, spec: Any) -> Any:
-        return live_job(source, spec.texture, spec.context, spec.system_message, purpose)
+        scene = scenes["cues"].get(source.source_id) if scenes is not None else None
+        steer = cue_steer(scene, spec.scene) if scenes is not None else None
+        return live_job(source, spec.texture, spec.context, spec.system_message, purpose, steer)
 
     def tweak_for(clip: Any, slots: Any, rung: int) -> Any:
         return tweak_job_for(clip, slots, purpose, rung)
