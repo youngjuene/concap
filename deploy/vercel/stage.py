@@ -103,6 +103,19 @@ def server_modules() -> list[Path]:
     return [Path(line).relative_to(REPO / "src") for line in out.stdout.split()]
 
 
+def participant_blockers() -> list[str]:
+    """The gates ``live serve --purpose participant`` waits on (provisional prompts, the binding
+    model, unreviewed starting captions), as the lab checks them: the app does not repeat them."""
+    from diff.__main__ import _participant_blockers
+    from diff.caption_sources import parse_sources
+    from diff.live_generation import LiveStream
+    from diff.live_server import LiveVideo
+
+    sources = parse_sources(json.loads((REPO / SOURCES).read_text(encoding="utf-8"))).sources
+    videos = [LiveVideo(key, REPO / path, LiveStream.from_sources(sources, key)) for key, path in VIDEOS]
+    return _participant_blockers(argparse.Namespace(phase1_setup=REPO / SETUP), videos)
+
+
 def setup_files(setup: Any) -> set[str]:
     """Every repository-relative media file the setup names."""
     found: set[str] = set()
@@ -225,6 +238,10 @@ def main() -> int:
     problems = setup_problems(setup, args.purpose, root=REPO, instrument=workbook_instrument)
     if problems:
         raise SystemExit(f"the setup cannot serve {args.purpose} sessions:\n  " + "\n  ".join(problems))
+    if args.purpose == "participant":
+        blockers = participant_blockers()
+        if blockers:
+            raise SystemExit("participant sessions cannot start:\n  " + "\n  ".join(blockers))
 
     out: Path = args.out.resolve()
     kept = out.with_name(out.name + ".kept")
