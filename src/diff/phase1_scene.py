@@ -372,8 +372,23 @@ def add_scenes(
     scenes = [
         build_scene(clip, run=run, groups_of=groups_of, root=root, stride=stride) for clip in updated["clips"]
     ]
-    means = {name: mean(scene["elements"][name] for scene in scenes) for name in ELEMENTS}
+    means = distinguish(scenes)
     for clip, scene in zip(updated["clips"], scenes, strict=True):
+        scene["openness"] = openness(scene["elements"][OPEN_ELEMENT])
+        scene["setup_reference"] = {
+            "element_means": {k: round(v, 4) for k, v in means.items()},
+            "min_lift": MIN_LIFT,
+            "sky": {"open": OPEN_SKY, "enclosed": ENCLOSED_SKY},
+        }
+        clip["scene"] = scene
+    return updated
+
+
+def distinguish(scenes: Sequence[dict[str, Any]]) -> dict[str, float]:
+    """Give each scene its elements' lift over the set's mean and its distinctive element: the one
+    lifted most, or the largest when no lift reaches :data:`MIN_LIFT`. Returns the means."""
+    means = {name: mean(scene["elements"][name] for scene in scenes) for name in ELEMENTS}
+    for scene in scenes:
         lift = {
             name: round(scene["elements"][name] / means[name], 3) if means[name] else 0.0 for name in ELEMENTS
         }
@@ -384,14 +399,7 @@ def add_scenes(
         else:
             scene["distinctive"] = max(ELEMENTS, key=lambda name: scene["elements"][name])
             scene["distinctive_by"] = "largest"
-        scene["openness"] = openness(scene["elements"][OPEN_ELEMENT])
-        scene["setup_reference"] = {
-            "element_means": {k: round(v, 4) for k, v in means.items()},
-            "min_lift": MIN_LIFT,
-            "sky": {"open": OPEN_SKY, "enclosed": ENCLOSED_SKY},
-        }
-        clip["scene"] = scene
-    return updated
+    return means
 
 
 def scene_problems(clip: Mapping[str, Any], root: Path) -> list[str]:
