@@ -10,8 +10,9 @@ per Hobby CLI upload):
   repository paths (the server reads masks and stills itself);
 - the videos go to the project's Vercel Blob store with ``--upload``, named by their content's
   SHA-256 so no URL carries a clip key. ``blob-manifest.json`` beside the site remembers what is
-  uploaded. Phase 2's viewing videos go as a web copy (``web/`` beside the site, made once per
-  source; see ``WEB_COPY``); phase 1's clips go as they are.
+  uploaded. Every video goes as a web copy (``web/`` beside the site, made once per source):
+  phase 2's re-encoded (``WEB_COPY``), phase 1's remuxed with their streams untouched
+  (``FAST_START``).
 
 The study link's access code is kept in ``access-code`` beside the site (made on the first stage,
 replaced with ``--new-code``); it goes into ``deploy.json``, never into a served file.
@@ -70,6 +71,9 @@ WEB_COPY = (
     "-maxrate", "2000k", "-bufsize", "4000k", "-pix_fmt", "yuv420p",
     "-c:a", "copy", "-movflags", "+faststart",
 )  # fmt: skip
+# Phase 1's clips have their index (moov) after the media, so a browser fetches the file's end
+# before it can show a frame. A remux moves it to the front; the streams are copied unchanged.
+FAST_START = ("-map", "0", "-c", "copy", "-movflags", "+faststart")
 CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 MEDIA_SUFFIXES = (".png", ".mp4", ".webm")
 
@@ -146,18 +150,18 @@ def digest(path: Path) -> str:
 
 
 def web_copy(path: str, web: Path) -> Path:
-    """Where a phase-2 video's web copy is (``WEB_COPY``), named after its source's digest."""
+    """Where a video's web copy is, named after its source's digest."""
     return web / f"{digest(REPO / path)[:32]}.mp4"
 
 
-def make_web_copy(path: str, web: Path) -> Path:
+def make_web_copy(path: str, web: Path, options: tuple[str, ...]) -> Path:
     target = web_copy(path, web)
     if not target.exists():
-        print(f"encoding a web copy of {path}", flush=True)
+        print(f"making a web copy of {path}", flush=True)
         web.mkdir(parents=True, exist_ok=True)
         partial = target.with_suffix(".partial.mp4")
         command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(REPO / path)]
-        subprocess.run([*command, *WEB_COPY, str(partial)], check=True)
+        subprocess.run([*command, *options, str(partial)], check=True)
         partial.rename(target)
     return target
 
@@ -252,9 +256,11 @@ def main() -> int:
         copy(path, out)
 
     web = out.with_name("web")
-    blobbed = {path: REPO / path for path in clips}
-    for _, path in VIDEOS:
-        blobbed[path] = make_web_copy(path, web) if args.upload else web_copy(path, web)
+    copies = {path: FAST_START for path in clips} | {path: WEB_COPY for _, path in VIDEOS}
+    blobbed = {
+        path: make_web_copy(path, web, options) if args.upload else web_copy(path, web)
+        for path, options in copies.items()
+    }
     manifest_path = out.with_name("blob-manifest.json")
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     if args.upload:

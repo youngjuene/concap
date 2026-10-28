@@ -24,7 +24,7 @@ every request stayed on one instance: one `session_started`, no `session_resumed
 | Project | `youngjuenes-projects/concap-diff` (Hobby), not connected to GitHub |
 | Staged site | `artifacts/diff/vercel/site/` (built by `stage.py`, linked by its `.vercel/`) |
 | Sessions | Neon Postgres `concap-sessions` (`sin1`), `DATABASE_URL` |
-| Videos | Blob store `concap-diff-media` (`icn1`, public), named by content hash; phase 2's as 720p web copies (`artifacts/diff/vercel/web/`) |
+| Videos | Blob store `concap-diff-media` (`icn1`, public), named by content hash, as web copies (`artifacts/diff/vercel/web/`): phase 1's remuxed for fast start, phase 2's at 720p |
 | Secrets | `ANTHROPIC_API_KEY`, `DIFF_SECRET` (keys the media tokens), production and preview |
 
 ## Deploy
@@ -46,6 +46,8 @@ cd artifacts/diff/vercel/site && vercel deploy --prod
   every clip stops for 30 days. With the copies a participant costs about 355 MB
   (phase 1's clips 115 MB, phase 2's 240 MB), roughly 28 a month. Blob's usage is in the
   project's Observability tab.
+- Phase 1's clips go up remuxed with their index (`moov`) first (`FAST_START`): the same packets,
+  so a browser can start them without fetching the file's end first.
 - `--new-code` makes a new six-character code (letters and digits, case ignored); after the
   deploy, every old link shows the closed page.
 - `--closed` stages a site that shows the closed page to everyone, code or not: deploy it to
