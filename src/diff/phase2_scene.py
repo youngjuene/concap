@@ -62,7 +62,7 @@ PHASE2_SCENE_PROVISIONAL: Final = True
 SCENE_FILE: Final = Path("data/phase2/phase2-scene.json")
 KEYS_FILE: Final = Path("data/phase2/scene-keys.csv")
 MATCHES: Final = ("label", "none")
-FPS: Final = 60
+WINDOWS: Final = "visual_jobs.csv"  # the run's manifest, beside its masks folder
 
 
 def read_keys(path: Path) -> dict[tuple[str, int], list[dict[str, str]]]:
@@ -82,6 +82,21 @@ def read_keys(path: Path) -> dict[tuple[str, int], list[dict[str, str]]]:
     return keys
 
 
+def read_windows(path: Path) -> dict[tuple[str, int], tuple[int, int]]:
+    """Each (video, window)'s frames as the Sa2VA run decoded them, ``[start, end)``.
+
+    The videos' frame rates vary a little (59.94 to 60), and the run numbered frames by decoding at
+    each video's own rate, so a cue's milliseconds do not give its frames.
+    """
+    if not path.is_file():
+        raise SceneError(f"no window manifest at {path} (sa2va_captions.py --branch visual writes it)")
+    with path.open(encoding="utf-8", newline="") as handle:
+        return {
+            (row["video"], int(row["window"])): (int(row["frame_start"]), int(row["frame_end_exclusive"]))
+            for row in csv.DictReader(handle)
+        }
+
+
 def cue_sounds(text: str) -> list[str]:
     """A starting caption's sounds, as the keys table splits them."""
     return [part.strip().rstrip(".").strip() for part in text.replace("\n", ",").split(",") if part.strip()]
@@ -99,13 +114,14 @@ def build_cue(
     source: Any,
     keys: Sequence[Mapping[str, str]],
     *,
+    frames: tuple[int, int],
     run: Path,
     groups_of: Callable[[str], tuple[str, ...]],
     stride: int = STRIDE,
 ) -> dict[str, Any]:
     """One cue's scene part, without the set-relative fields (:func:`build_scenes` adds them)."""
     video = str(source.unit_key)
-    lo, hi = round(source.start_ms * FPS / 1000), round(source.end_ms * FPS / 1000)
+    lo, hi = frames
     folder = run / "visual" / video
     if not folder.is_dir():
         raise SceneError(f"{video}: no visual masks at {folder}")
@@ -161,6 +177,7 @@ def build_scenes(
 ) -> dict[str, Any]:
     """Every phase-2 cue's scene part, keyed by its source ID, with the distinctive element by lift."""
     table = read_keys(keys)
+    windows = read_windows(run.parent / WINDOWS)
     groups_of = ontology_groups(ontology)
     cues = [source for source in sources if source.phase == 2]
     scenes = []
@@ -168,7 +185,10 @@ def build_scenes(
         rows = table.get((str(source.unit_key), source.cue_index))
         if rows is None:
             raise SceneError(f"{source.unit_key} cue {source.cue_index}: no keys in {keys}")
-        scenes.append(build_cue(source, rows, run=run, groups_of=groups_of, stride=stride))
+        frames = windows.get((str(source.unit_key), source.cue_index))
+        if frames is None:
+            raise SceneError(f"{source.unit_key} cue {source.cue_index}: not in {run.parent / WINDOWS}")
+        scenes.append(build_cue(source, rows, frames=frames, run=run, groups_of=groups_of, stride=stride))
     means = distinguish(scenes)
     return {
         "schema": SCENE_SCHEMA,

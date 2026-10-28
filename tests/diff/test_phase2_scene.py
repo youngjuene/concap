@@ -91,6 +91,9 @@ def run(tmp_path: Path) -> dict[str, Any]:
             _png(masks / "audio" / VIDEO / "a bus idling" / name, (0, HEIGHT - 2, WIDTH, HEIGHT))
         else:
             _png(masks / "audio" / VIDEO / "a man speaking" / name, (0, 0, WIDTH, 2))
+    with (tmp_path / "visual_jobs.csv").open("w", encoding="utf-8", newline="") as handle:
+        handle.write("video,window,frame_start,frame_end_exclusive\n")
+        handle.write(f"{VIDEO},0,0,60\n{VIDEO},1,61,120\n")  # as decoded, not from the milliseconds
     ontology = tmp_path / "ontology.json"
     ontology.write_text(json.dumps(ONTOLOGY), encoding="utf-8")
     keys = tmp_path / "keys.csv"
@@ -115,7 +118,7 @@ def by_cue(run: dict[str, Any]) -> list[dict[str, Any]]:
 
 def test_each_window_reads_only_its_own_frames(run: dict[str, Any]) -> None:
     first, second = by_cue(run)
-    assert first["frames"] == [0, 60] and second["frames"] == [60, 120]
+    assert first["frames"] == [0, 60] and second["frames"] == [61, 120]  # the run's manifest
     assert first["composition"] == {"road": 0.5, "sky": 0.5, "vegetation": 0.0, "none": 0.0}
     assert second["elements"]["nature"] == 0.75
     assert (first["distinctive"], second["distinctive"]) == ("traffic", "nature")
