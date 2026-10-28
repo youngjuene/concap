@@ -21,6 +21,7 @@ from diff.phase1_tweak import (
     reachable_slots,
     tweak_job_for,
     tweak_request,
+    tweak_slots,
     tweak_source,
     tweak_steer_all,
     variant_id,
@@ -131,6 +132,18 @@ def test_the_setting_is_the_clip_s_whatever_the_point_and_a_missing_page_stops(
     del records["P4"]
     with pytest.raises(TweakError, match=r"no \['P4'\]"):
         steer(clip, records, "follow", root)
+
+
+def test_an_attended_sound_outside_the_clip_s_options_stops_instead_of_naming_no_sound(
+    clip: dict[str, Any], root: Path
+) -> None:
+    for attended in (None, "", "no-such-sound"):
+        with pytest.raises(TweakError, match="attended sound .* not one of the clip's A1s options"):
+            tweak_slots(clip, "scene", attended, "fascination")
+    chosen = clip["options"]["A1s"][0]
+    assert (
+        tweak_slots(clip, "acousmatic", chosen["value"], "fascination")["attended_sound"] == chosen["label"]
+    )
 
 
 def test_every_caption_a_participant_can_reach_is_listed_once_per_mode_sound_and_emphasis(

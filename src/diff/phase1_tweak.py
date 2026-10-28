@@ -255,12 +255,18 @@ def tweak_steer_all(
 def tweak_slots(clip: Mapping[str, Any], mode: str, attended: str | None, emphasis: str) -> dict[str, str]:
     """One clip's prompt slots in ``mode``, from the attended sound (A1s) and the reflected subscale."""
     sounds = {option["value"]: option["label"] for option in clip["options"]["A1s"]}
+    if str(attended) not in sounds:
+        # A1s is a required choice among the clip's options; the prompt must never name "no sound" as the
+        # one the participant attended to.
+        raise TweakError(
+            f"{clip['key']}: the attended sound {attended!r} is not one of the clip's A1s options"
+        )
     mentioned = [option["label"] for option in clip["options"]["R2"] if option.get("mentioned")]
     return {
         "mode": mode,
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(mentioned),
-        "attended_sound": sounds.get(str(attended), NOT_SEEN),
+        "attended_sound": sounds[str(attended)],
         "emphasis": EMPHASIS_KO[emphasis],
         **scene_slots(clip, mode),
     }
