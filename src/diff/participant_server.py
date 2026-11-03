@@ -60,7 +60,6 @@ from diff.live_server import (
     open_video,
 )
 from diff.phase1_flow import Phase1
-from diff.phase2_scene import scene_profile
 from diff.session_store import Conflict, Session, SessionFinished, SessionStore
 
 COOKIE: Final = "diff_session"
@@ -312,7 +311,7 @@ def build_participant_app(
                 return page(state), event
             if data.get("page") != "handoff":
                 raise Conflict("This answer belongs to another page")
-            calibration = calibrate(*flow.profile_inputs(state), scene_profile(state["second_captions"]))
+            calibration = calibrate(*flow.profile_inputs(state))
             event = flow.hand_off(state, calibration_record(calibration), now)
             state["live"] = live_progress(calibration)
             return {"next_url": WATCH_URL}, event

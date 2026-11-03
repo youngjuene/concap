@@ -132,7 +132,7 @@ def _build() -> Any:
 
     def job_for(source: Any, spec: Any) -> Any:
         scene = scenes["cues"].get(source.source_id) if scenes is not None else None
-        steer = cue_steer(scene, spec.scene) if scenes is not None else None
+        steer = cue_steer(scene) if scenes is not None else None
         return live_job(source, spec.texture, spec.context, spec.system_message, purpose, steer)
 
     def tweak_for(clip: Any, slots: Any, rung: int) -> Any:

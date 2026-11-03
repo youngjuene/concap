@@ -692,33 +692,17 @@ def audit_tuner(audit: Audit, who: str, state: Mapping[str, Any], clips: Mapping
     return str(calibration["system_message"])
 
 
-def expected_history(state: Mapping[str, Any]) -> list[list[float]]:
-    """phase2_scene.scene_profile's history, re-derived: each stage-A clip's (visibility, attention
-    log ratio) as its binding record holds them, in stage-A order."""
-    records = sorted(state.get("second_captions", {}).values(), key=lambda r: int(r["clip_index"]))
-    return [[float(r["model"]["visibility"]), float(r["model"]["attention"]["log_ratio"])] for r in records]
-
-
-def expected_steer(scene: Mapping[str, Any], history: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """phase2_scene.cue_steer's mode and P(b), re-derived on its own grid: the tendency learnt from the
-    history, then the first sound's visibility as the prior, with no evidence of the cue's own."""
+def expected_steer(scene: Mapping[str, Any]) -> dict[str, Any]:
+    """phase2_scene.cue_steer's mode and P(b), re-derived on its own grid: a flat tendency, then the
+    first sound's visibility as the prior, with no evidence of the cue's own."""
     grid = [(i + 0.5) / GRID_SIZE for i in range(GRID_SIZE)]
 
     def bound(pi: float, q: float) -> float:
         odds = (pi / (1 - pi)) * (q / (1 - q))
         return odds / (1 + odds)
 
-    weights = [1.0] * GRID_SIZE
-    for visibility, log_ratio in history:
-        weights = [
-            w * ((1 - bound(pi, visibility)) + bound(pi, visibility) * math.exp(log_ratio))
-            for w, pi in zip(weights, grid, strict=True)
-        ]
-        total = sum(weights)
-        weights = [w / total for w in weights]
-    total = sum(weights)
     q = float(scene["sounds"][0]["visibility"]["mean"])
-    probability = sum(w / total * bound(pi, q) for w, pi in zip(weights, grid, strict=True))
+    probability = sum(bound(pi, q) for pi in grid) / GRID_SIZE
     placed = [s for s in scene["sounds"] if s["audioset_label"] not in RECORDING_ARTEFACTS]
     visible = [s["sound"] for s in placed if s["visibility"]["on_screen"]]
     unseen = [s["sound"] for s in placed if not s["visibility"]["on_screen"]]
@@ -744,14 +728,6 @@ def audit_live(
     """Every live call against the slider steps, the tuner and (since 2026-10-28) the cue's mode for this
     participant; settings and exposures against the calls."""
     stale = False
-    profile = ((state or {}).get("calibration", {}).get("record", {}) or {}).get("scene_profile")
-    history = expected_history(state or {}) if profile is not None else []
-    if profile is not None:
-        audit.ok(
-            "live-mode",
-            profile["history"] == history,
-            f"{who}: the scene profile's history is not the stage-A binding records'",
-        )
     for call in lives:
         where = f"{who} {call['video_id']}#{call['cue']}"
         source = cues.get((call["video_id"], call["cue"]))
@@ -771,7 +747,7 @@ def audit_live(
             ):
                 continue
             assert scene is not None
-            expected = expected_steer(scene, history)
+            expected = expected_steer(scene)
             got = {key: logged_steer.get(key) for key in expected}
             audit.ok(
                 "live-mode", got == expected, f"{where}: the cue's mode differs in {differing(expected, got)}"

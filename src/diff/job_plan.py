@@ -338,7 +338,7 @@ def live_job(
     """One live phase-2 job: the cue's starting caption under the snapped steps and the session's tuner,
     written by the second-caption writer's call (researcher, 2026-10-27; Trida at τ 0.9 before).
 
-    ``steer`` is the cue's mode for this participant (``phase2_scene.cue_steer``); without one the cue
+    ``steer`` is the cue's mode (``phase2_scene.cue_steer``); without one the cue
     is written acousmatic, as before 2026-10-28. The tuner system message is part of the prompt record
     and the steer part of the cell, so both are part of the job's identity.
     """

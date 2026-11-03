@@ -1106,6 +1106,15 @@ phrases belong to `TWEAK_PROVISIONAL`, which still refuses participant sessions.
 
 ## Phase 2's scene profile — gate 5 (researcher, 2026-10-28)
 
+**Changed on 2026-11-03: the profile is gone (D1 (c) below is superseded).** On the design simulations
+(`artifacts/diff/phase2-scene/d1-sim`, `design-sim`) the attention profile recovered the simulated
+tendency at r = 0.17 and gained nothing over the masks, and a mode toggle could not detect a modest
+effect. The researcher rejected an "automatic" stop, and chose to measure perceived source directly.
+- **The watch:** each cue's mode comes from its masks alone (`logit P(b) = logit q`,
+  `phase2_scene.cue_steer`, `diff.phase2-mode/masks-v2`). No mode control; the two sliders stay.
+
+The rest of this section records the 2026-10-28 design.
+
 Until this gate nothing from a mask reached a phase-2 prompt: the nine live cells saw only the cue,
 the slider cell and the tuner, and the relation stop invented a layout ("사이로, 너머로, 뒤로").
 The researcher asked for the masks in phase 2 as a new gate and decided:

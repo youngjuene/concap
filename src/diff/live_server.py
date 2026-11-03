@@ -161,9 +161,7 @@ def live_event(log_dir: Path, at: float, session_id: str, event: str, **data: An
 
 def spec_of(session: LiveSession) -> Spec:
     texture, context = slider_steps(session.texture, session.context)
-    profile = session.calibration.record.get("scene_profile") or {}
-    history = tuple((float(v), float(r)) for v, r in profile.get("history", ()))
-    return Spec(texture, context, session.calibration.system_message, history)
+    return Spec(texture, context, session.calibration.system_message)
 
 
 def open_video(session: LiveSession, videos: Sequence[LiveVideo], job_for: JobFor) -> None:

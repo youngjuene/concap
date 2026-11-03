@@ -20,7 +20,6 @@ from diff.phase2_scene import (
     cue_steer,
     read_keys,
     scene_problems,
-    scene_profile,
     scene_slots,
 )
 from diff.rewrite_prompts import (
@@ -197,27 +196,14 @@ def test_the_slots_leave_out_the_recording_itself(run: dict[str, Any]) -> None:
     }
 
 
-def test_the_profile_is_the_tendency_from_every_stage_a_clip() -> None:
-    records = {
-        "b": {"clip_index": 1, "model": {"visibility": 0.8, "attention": {"log_ratio": 1.2}}},
-        "a": {"clip_index": 0, "model": {"visibility": 0.3, "attention": {"log_ratio": 0.0}}},
-    }
-    profile = scene_profile(records)
-    assert profile["history"] == [[0.3, 0.0], [0.8, 1.2]] and profile["clips"] == 2
-    assert scene_profile({})["tendency"]["mean"] == pytest.approx(0.5)
-
-
-def test_each_cue_follows_the_phase1_models_recommendation(run: dict[str, Any]) -> None:
+def test_each_cue_s_mode_comes_from_the_masks_alone(run: dict[str, Any]) -> None:
     first, second = by_cue(run)
-    flat = cue_steer(first, [])
+    flat = cue_steer(first)
     q = first["sounds"][0]["visibility"]["mean"]
     assert flat["p_bound"] == round(p_bound(tendency([]), q, 0.0), 4)
     assert flat["mode"] == "scene" and flat["slots"]["seen"] == "도로와 차량"
-    assert cue_steer(second, [])["mode"] == "acousmatic" and cue_steer(second, [])["slots"] == {}
-    # A participant who bound little in phase 1 hears even a visible bus detached.
-    detached = [[0.9, -0.25]] * 12
-    assert cue_steer(first, detached)["p_bound"] < flat["p_bound"]
-    assert cue_steer(None, [])["mode"] == "acousmatic"
+    assert cue_steer(second)["mode"] == "acousmatic" and cue_steer(second)["slots"] == {}
+    assert cue_steer(None)["mode"] == "acousmatic"
 
 
 def test_the_scene_cells_keep_the_acousmatic_nine_and_need_the_slots(run: dict[str, Any]) -> None:
@@ -230,7 +216,7 @@ def test_the_scene_cells_keep_the_acousmatic_nine_and_need_the_slots(run: dict[s
             assert "보이지 않는 곳에서" in scene.text and "위치는 쓰지 마세요" not in scene.text
     with pytest.raises(ValueError, match="takes the slots"):
         render_live(cue, 1, "relation", TUNER, "scene")
-    steer = cue_steer(by_cue(run)[0], [])
+    steer = cue_steer(by_cue(run)[0])
     job = live_job(cue, 1, "relation", TUNER, "smoke", steer)
     assert job.cell["cell_id"] == "t1-relation-scene" and job.cell["steer"]["mode"] == "scene"
     assert job.prompt.template_id == "live-p2-scene"

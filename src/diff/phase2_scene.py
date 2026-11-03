@@ -1,17 +1,15 @@
-"""Phase 2's scene parts and caption mode: the long videos' Sa2VA masks per cue window, and each
-participant's phase-1 scene perception carried into the live captions.
+"""Phase 2's scene parts and caption mode: the long videos' Sa2VA masks per cue window, which set each
+cue's live caption mode.
 
-Researcher's decisions of 2026-10-28 (gate 5, ``docs/v4-diff/plan.md``):
+Researcher's decisions of 2026-10-28 (gate 5, ``docs/v4-diff/plan.md``), as changed on 2026-11-03:
 
-- **D1 (c), the profile carried into phase 2.** Phase 1's binding model learns each participant's
-  tendency ``π`` to bind sounds to the scene on screen (:func:`diff.phase1_binding.tendency`). At the
-  handoff the tendency is learnt once more, from the attention evidence of *all* their stage-A clips
-  (:func:`scene_profile`), and fixed through the watch. Each cue's mode is then the phase-1 model's
-  recommendation for that cue: ``logit P(b) = logit π + logit q``, where ``q`` is the measured
-  visibility of the cue's first sound (the starting captions name the most prominent sound first,
-  as phase 1's noticed sound is the one the participant attended), with no evidence of the cue's
-  own. Scene-aware when ``P(b) ≥ phase1_binding.THRESHOLD``, acousmatic otherwise
-  (:func:`cue_steer`). Phase 2 tests no mode, so it always follows the recommendation.
+- **The mode comes from the masks alone.** Each cue's mode is the phase-1 model's recommendation with a
+  flat tendency: ``logit P(b) = logit q``, where ``q`` is the measured visibility of the cue's first
+  sound (the starting captions name the most prominent sound first). Scene-aware when
+  ``P(b) ≥ phase1_binding.THRESHOLD``, acousmatic otherwise (:func:`cue_steer`). Until 2026-11-03 the
+  tendency was learnt from each participant's stage-A attention evidence (D1 (c)); it recovered the
+  simulated tendency at r = 0.17 and gained nothing over the masks
+  (``artifacts/diff/phase2-scene/d1-sim``). The watch has no mode control.
 - **D2, which mask a sound uses.** The audio masks of 2026-10-22 were prompted with the English
   phrases (``en_afnext``); the participant reads ``ko_final``, edited and partly re-heard. Each sound
   and phrase gets an AudioSet label (``scripts/diff_phase2_keys.py``, Claude, from the classes
@@ -38,7 +36,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from diff.phase1_binding import MODES, THRESHOLD, p_bound, summary, tendency
+from diff.phase1_binding import MODES, THRESHOLD, p_bound, tendency
 from diff.phase1_scene import (
     ON_SCREEN,
     STRIDE,
@@ -56,8 +54,7 @@ from diff.phase1_tweak import ELEMENTS_KO, RECORDING_ARTEFACTS
 from diff.rewrite_prompts import NOT_SEEN
 
 SCENE_SCHEMA: Final = "diff.phase2-scene/v1"
-PROFILE_POLICY: Final = "diff.phase2-profile/v1"
-STEER_POLICY: Final = "diff.phase2-mode/follow-v1"
+STEER_POLICY: Final = "diff.phase2-mode/masks-v2"  # v2 (2026-11-03): masks alone, no participant profile
 PHASE2_SCENE_PROVISIONAL: Final = True
 SCENE_FILE: Final = Path("data/phase2/phase2-scene.json")
 KEYS_FILE: Final = Path("data/phase2/scene-keys.csv")
@@ -235,25 +232,6 @@ def scene_problems(scenes: Mapping[str, Any] | None, sources: Sequence[Any]) -> 
     return problems
 
 
-def scene_profile(second_captions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """The participant's binding tendency from every stage-A clip, for the watch.
-
-    Each clip gives its noticed sound's visibility and its attention evidence, as the binding model
-    recorded them when stage A closed; a session with no phase 1 has none, and a flat tendency.
-    """
-    records = sorted(second_captions.values(), key=lambda record: int(record["clip_index"]))
-    history = [
-        [float(record["model"]["visibility"]), float(record["model"]["attention"]["log_ratio"])]
-        for record in records
-    ]
-    return {
-        "policy": PROFILE_POLICY,
-        "clips": len(history),
-        "history": history,
-        "tendency": summary(tendency([(visibility, log_ratio) for visibility, log_ratio in history])),
-    }
-
-
 def scene_slots(scene: Mapping[str, Any]) -> dict[str, str]:
     """The scene-aware prompt's slots: the setting, and the sounds whose source is or is not in view.
 
@@ -269,14 +247,14 @@ def scene_slots(scene: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
-def cue_steer(scene: Mapping[str, Any] | None, history: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """The cue's mode, from the participant's tendency and the first sound's visibility, with the
-    scene-aware slots; acousmatic with no scene part (a smoke run without masks)."""
+def cue_steer(scene: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The cue's mode, from the first sound's visibility, with the scene-aware slots; acousmatic with
+    no scene part (a smoke run without masks)."""
     if scene is None:
         return {"policy": STEER_POLICY, "mode": MODES[1], "reason": "no scene part", "slots": {}}
     lead = scene["sounds"][0]
     q = float(lead["visibility"]["mean"])
-    probability = p_bound(tendency([(float(v), float(r)) for v, r in history]), q, 0.0)
+    probability = p_bound(tendency([]), q, 0.0)
     mode = MODES[0] if probability >= THRESHOLD else MODES[1]
     return {
         "policy": STEER_POLICY,
@@ -284,6 +262,5 @@ def cue_steer(scene: Mapping[str, Any] | None, history: Sequence[Sequence[float]
         "lead": lead["sound"],
         "visibility": q,
         "p_bound": round(probability, 4),
-        "clips": len(history),
         "slots": scene_slots(scene) if mode == MODES[0] else {},
     }

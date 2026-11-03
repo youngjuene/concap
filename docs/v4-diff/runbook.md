@@ -292,9 +292,9 @@ uv run python -m diff live serve \
   --sessions 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
-**Phase-2 scene parts** (gate 5, 2026-10-28). Each cue's mode follows the participant's phase-1
-binding tendency and the masks (plan.md, "Phase 2's scene profile"). Build the file once the long
-videos' visual masks exist, after drafting or editing the keys:
+**Phase-2 scene parts** (gate 5, 2026-10-28; 2026-11-03). Each cue's mode comes from the masks alone
+(plan.md, "Phase 2's scene profile"). Build the file once the long videos' visual masks exist, after
+drafting or editing the keys:
 
 ```sh
 .venv/bin/python scripts/diff_phase2_keys.py --out data/phase2/scene-keys.csv \
