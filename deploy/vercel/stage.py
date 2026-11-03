@@ -25,6 +25,7 @@ does not re-check, because the videos are not in its bundle. ``.vercel/`` (the p
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -92,16 +93,41 @@ def git(*args: str) -> str:
     return subprocess.run(["git", "-C", str(REPO), *args], check=True, capture_output=True, text=True).stdout
 
 
+def app_imports() -> list[str]:
+    """The ``diff`` modules ``app.py`` imports, read from its source: a module only ``app.py`` needs
+    must be staged too, so this cannot be a list kept by hand."""
+    tree = ast.parse((HERE / "app.py").read_text(encoding="utf-8"))
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "diff":
+            found.add(str(node.module))
+        elif isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names if alias.name.split(".")[0] == "diff")
+    return sorted(found)
+
+
 def server_modules() -> list[Path]:
     """Every ``diff`` and ``dpo`` source file the server imports, relative to ``src``."""
     code = (
-        "import sys, diff.participant_server, diff.phase1_flow, diff.phase1_tweak, diff.phase1_usable,"
-        " diff.claude_writer, diff.live_server, diff.phase1_setup, diff.workbook_instrument;"
+        f"import sys, {', '.join(app_imports())};"
         "print('\\n'.join(sorted(m.__file__ for n, m in sys.modules.items()"
         " if n.split('.')[0] in ('diff', 'dpo') and getattr(m, '__file__', None))))"
     )
     out = subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True, cwd=REPO)
     return [Path(line).relative_to(REPO / "src") for line in out.stdout.split()]
+
+
+def staged_import_problem(out: Path) -> str | None:
+    """Import what ``app.py`` imports from the staged copies alone; a failure here is a site that
+    would answer every request with a 500."""
+    modules = app_imports()
+    code = (
+        f"import sys; sys.path.insert(0, {str(out)!r}); import importlib;"
+        f"mods = [importlib.import_module(m) for m in {modules!r}];"
+        f"assert all(m.__file__.startswith({str(out)!r}) for m in mods), 'imported from outside the site'"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=out)
+    return None if done.returncode == 0 else done.stderr.strip().splitlines()[-1]
 
 
 def participant_blockers() -> list[str]:
@@ -324,6 +350,9 @@ def main() -> int:
     (out / ".vercelignore").write_text("\n".join(VERCELIGNORE) + "\n")
     (out / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n")
 
+    problem = staged_import_problem(out)
+    if problem:
+        raise SystemExit(f"the staged site cannot import what app.py needs: {problem}")
     size = sum(p.stat().st_size for p in out.rglob("*") if p.is_file() and ".vercel" not in p.parts)
     print(f"staged {commit} ({args.purpose}) in {out}: {size / 1e6:.1f} MB")
     if missing:
