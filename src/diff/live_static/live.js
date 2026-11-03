@@ -11,6 +11,7 @@
 //   or "waiting" while a cue still shows a caption from earlier settings;
 // - a hidden tab pauses the video behind phase 1's overlay, so no caption counts as seen unseen;
 // - the ratings use phase 1's scale cards and sticky bar;
+// - the perceived-source block (researcher, 2026-11-03) replays cues without captions after the ratings;
 // - the last screen keeps the participant for the oral interview, and a held
 //   button takes the experimenter back to the entry.
 "use strict";
@@ -367,10 +368,135 @@ async function renderItems() {
       submit.disabled = false;
       return;
     }
-    state.stage = "done";
+    state.stage = saved.data.stage;
     render();
   };
   update();
+}
+
+// -- the perceived-source block --------------------------------------------------
+// Each answer's click plays the next clip, so the browser allows its sound; a refused play falls back to
+// the button. A hidden tab stops the clip, and it starts over on return.
+const SOURCE_POLL_MS = 50;
+const source = { page: null, index: 0, measures: null, clock: null, playing: false };
+
+function sourceStatus(text) { $("source-status").textContent = text; }
+
+function stopClipClock() { clearInterval(source.clock); source.clock = null; source.playing = false; }
+
+function sourceButton(label) {
+  stopClipClock();
+  const button = $("source-start");
+  button.textContent = label;
+  button.hidden = false;
+  button.disabled = false;
+  button.parentElement.hidden = false;
+}
+
+async function seekTo(player, ms) {
+  if (player.readyState < 1) {
+    await new Promise((resolve, reject) => {
+      player.addEventListener("loadedmetadata", resolve, { once: true });
+      player.addEventListener("error", reject, { once: true });
+    });
+  }
+  await new Promise((resolve, reject) => {
+    player.addEventListener("seeked", resolve, { once: true });
+    player.addEventListener("error", reject, { once: true });
+    player.currentTime = ms / 1000;
+  });
+}
+
+async function playClip() {
+  const trial = source.page.trials[source.index];
+  const player = $("source-video");
+  const measures = source.measures;
+  $("source-start").parentElement.hidden = true;
+  $("source-answers").disabled = true;
+  sourceStatus("장면을 불러오고 있습니다…");
+  const asked = performance.now();
+  try {
+    const url = new URL(trial.media, window.location.href).href;
+    if (player.src !== url) { player.src = url; player.load(); }
+    // Started inside the click, muted and out of sight, so the browser allows this element's sound
+    // later and nothing of the wrong moment is seen or heard while it seeks.
+    player.muted = true;
+    player.style.visibility = "hidden";
+    const allowed = player.play().catch(() => null);
+    await seekTo(player, trial.start_ms);
+    await allowed;
+    player.pause();
+    await seekTo(player, trial.start_ms);
+    player.muted = false;
+    player.style.visibility = "";
+    await player.play();
+  } catch (error) {
+    player.style.visibility = "";
+    sourceStatus("장면을 재생하지 못했습니다. 아래 단추를 눌러 주세요.");
+    sourceButton("장면 재생");
+    return;
+  }
+  measures.waited_ms += Math.round(performance.now() - asked);
+  sourceStatus("");
+  source.playing = true;
+  source.clock = setInterval(() => {
+    if (player.currentTime * 1000 < trial.end_ms && !player.ended) return;
+    stopClipClock();
+    player.pause();
+    measures.played_ms = Math.round(player.currentTime * 1000) - trial.start_ms;
+    $("source-answers").disabled = false;
+    $("source-question").scrollIntoView({ block: "nearest" });
+  }, SOURCE_POLL_MS);
+}
+
+function showTrial() {
+  const trial = source.page.trials[source.index];
+  source.measures = { played_ms: 0, waited_ms: 0, stalls: 0, restarts: 0 };
+  $("source-eyebrow").textContent = `2스테이지 · 소리가 나는 곳 ${source.index + 1} / ${source.page.trials.length}`;
+  $("source-sound").textContent = trial.sound;
+  $("source-trial").hidden = false;
+  $("source-lede").hidden = source.index > 0;
+  $("source-answers").disabled = true;
+}
+
+async function answerSource(answer, button) {
+  $("source-answers").disabled = true;
+  sourceStatus("");
+  const measures = source.measures;
+  const saved = await call("api/source-answer", { index: source.index, answer, ...measures });
+  if (!saved.ok) {
+    $("source-answers").disabled = false;
+    sourceStatus(saved.data.detail || "응답을 저장하지 못했습니다. 다시 눌러 주세요.");
+    return;
+  }
+  if (saved.data.stage === "done") {
+    $("source-video").removeAttribute("src");
+    state.stage = "done";
+    render();
+    return;
+  }
+  source.index = saved.data.next;
+  showTrial();
+  button.blur();
+  playClip();
+}
+
+async function renderSource() {
+  const result = await call("api/source");
+  if (!result.ok) return;
+  source.page = result.data;
+  source.index = result.data.next;
+  $("source-question").textContent = result.data.question;
+  const choices = $("source-choices");
+  choices.textContent = "";
+  for (const answer of result.data.answers) {
+    const button = element("button", answer.text);
+    button.type = "button";
+    button.addEventListener("click", () => answerSource(answer.id, button));
+    choices.appendChild(button);
+  }
+  showTrial();
+  sourceButton(source.index > 0 ? "이어서 재생" : "장면 재생");
 }
 
 // -- pages ---------------------------------------------------------------------
@@ -409,6 +535,10 @@ function render() {
     clearInterval(poller);
     renderItems();
     show("ratings");
+  } else if (state.stage === "source") {
+    clearInterval(poller);
+    show("source");
+    renderSource();
   } else if (state.stage === "done") {
     clearInterval(poller);
     show("done");
@@ -510,7 +640,16 @@ function wire() {
       render();
     }
   });
+  $("source-start").addEventListener("click", playClip);
+  $("source-video").addEventListener("waiting", () => { if (source.playing) source.measures.stalls += 1; });
   document.addEventListener("visibilitychange", () => {
+    if (document.hidden && source.playing) {
+      $("source-video").pause();
+      source.measures.restarts += 1;
+      sourceButton("다시 재생");
+      sourceStatus("화면을 벗어나 장면이 멈췄습니다. 처음부터 다시 봐 주세요.");
+      return;
+    }
     if (document.hidden && state && state.stage === "watch" && !video().paused && !video().ended) pauseHidden();
     else if (!document.hidden && !$("paused").hidden) $("resume").focus();
   });

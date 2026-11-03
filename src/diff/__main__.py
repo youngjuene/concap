@@ -743,6 +743,7 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
     from diff.phase1_binding import BINDING_PROVISIONAL
     from diff.phase2_scene import PHASE2_SCENE_PROVISIONAL, scene_problems
     from diff.rewrite_prompts import LIVE_PROMPTS_PROVISIONAL, TUNER_PROVISIONAL, TWEAK_PROVISIONAL
+    from diff.source_check import SOURCE_CHECK_PROVISIONAL, pool_problems
 
     blockers = []
     if LIVE_PROMPTS_PROVISIONAL:
@@ -772,8 +773,14 @@ def _participant_blockers(args: argparse.Namespace, videos: Sequence[Any]) -> li
             "(phase2_scene, rewrite_prompts.LIVE_SCENE_CELL_PROMPTS); participant sessions wait for the "
             "researcher's approval"
         )
+    if SOURCE_CHECK_PROVISIONAL:
+        blockers.append(
+            "the perceived-source block's wording is still provisional (source_check); participant "
+            "sessions wait for the researcher's approval"
+        )
     cues = [cue for video in videos for cue in video.stream.cues]
     unscened = scene_problems(_phase2_scenes(getattr(args, "phase2_scene", None)), cues)
+    unscened += pool_problems(_phase2_scenes(getattr(args, "phase2_scene", None)), videos)
     if unscened:
         more = f" (and {len(unscened) - 1} more)" if len(unscened) > 1 else ""
         blockers.append(f"phase 2's scene parts cannot steer the watch: {unscened[0]}{more}")
@@ -896,6 +903,7 @@ def live_serve(args: argparse.Namespace) -> int:
     from diff.phase1_usable import check_record
     from diff.phase2_scene import cue_steer
     from diff.session_store import SessionStore
+    from diff.source_check import draw, pool_problems
     from diff.study_protocol import LIVE_MAX_CHARS
 
     sources = _sources(args.sources).sources
@@ -938,6 +946,9 @@ def live_serve(args: argparse.Namespace) -> int:
         print(f"no phase-2 scene parts at {args.phase2_scene}: every cue is written acousmatic", flush=True)
     else:
         _scene_file_or_exit(scenes, videos)
+        short = pool_problems(scenes, videos)
+        if short:
+            raise SystemExit(f"these cues cannot fill the perceived-source block: {short[0]}")
 
     def job_for(source: Any, spec: Any) -> Any:
         scene = scenes["cues"].get(source.source_id) if scenes is not None else None
@@ -972,6 +983,7 @@ def live_serve(args: argparse.Namespace) -> int:
         job_for=job_for,
         phase1=phase1,
         tweak_for=tweak_for,
+        source_draw=(lambda session_id: draw(session_id, scenes, videos)) if scenes is not None else None,
     )
     first = "phase 1, then the watch" if phase1 else "the watch (no phase 1)"
     print(f"participant app on http://{args.host}:{args.port}/: {first}", flush=True)

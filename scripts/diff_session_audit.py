@@ -715,6 +715,56 @@ def expected_steer(scene: Mapping[str, Any]) -> dict[str, Any]:
     return {"mode": mode, "p_bound": round(probability, 4), "slots": slots if mode == "scene" else {}}
 
 
+def audit_source(audit: Audit, who: str, live: Mapping[str, Any], scenes: Mapping[str, Any] | None) -> None:
+    """The perceived-source block against the scene file: the draw's size, strata and lead sounds, and
+    each answer against its trial and a clip that played."""
+    draw = live.get("source")
+    if draw is None:
+        return
+    trials, answers = draw["trials"], live.get("source_answers", [])
+    audit.ok("source-draw", len(trials) == 21, f"{who}: {len(trials)} trials, not 21")
+    audit.ok(
+        "source-draw",
+        len({t["source_id"] for t in trials}) == len(trials),
+        f"{who}: a cue was drawn twice",
+    )
+    audit.ok(
+        "source-draw",
+        sum(t["on_screen"] for t in trials) == 10,
+        f"{who}: {sum(t['on_screen'] for t in trials)} on-screen trials, not 10",
+    )
+    for trial in trials:
+        where = f"{who} {trial['video_id']}#{trial['cue']}"
+        scene = (scenes or {}).get("cues", {}).get(trial["source_id"])
+        if not audit.ok("source-draw", scene is not None, f"{where}: no scene part (--phase2-scene)"):
+            continue
+        assert scene is not None
+        lead = scene["sounds"][0]
+        audit.ok(
+            "source-draw",
+            lead.get("mask_match") == "label"
+            and (trial["sound"], trial["visibility"], trial["on_screen"])
+            == (lead["sound"], float(lead["visibility"]["mean"]), bool(lead["visibility"]["on_screen"])),
+            f"{where}: the trial is not the cue's lead sound",
+        )
+    for position, answer in enumerate(answers):
+        where = f"{who} source trial {position}"
+        audit.ok(
+            "source-answer",
+            answer["index"] == position
+            and answer["source_id"] == trials[position]["source_id"]
+            and answer["answer"] in draw["answer_order"],
+            f"{where}: the answer does not match its trial",
+        )
+        length = trials[position]["end_ms"] - trials[position]["start_ms"]
+        # A flag on the data, not on the code: the participant's network may have cut a clip short.
+        audit.ok(
+            "source-answer",
+            answer["played_ms"] >= length - 1000,
+            f"{where}: played {answer['played_ms']} ms of {length}",
+        )
+
+
 def audit_live(
     audit: Audit,
     who: str,
@@ -728,6 +778,7 @@ def audit_live(
     """Every live call against the slider steps, the tuner and (since 2026-10-28) the cue's mode for this
     participant; settings and exposures against the calls."""
     stale = False
+    audit_source(audit, who, (state or {}).get("live", {}), scenes)
     for call in lives:
         where = f"{who} {call['video_id']}#{call['cue']}"
         source = cues.get((call["video_id"], call["cue"]))

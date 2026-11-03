@@ -9,7 +9,8 @@ Researcher's decisions of 2026-10-28 (gate 5, ``docs/v4-diff/plan.md``), as chan
   ``P(b) ≥ phase1_binding.THRESHOLD``, acousmatic otherwise (:func:`cue_steer`). Until 2026-11-03 the
   tendency was learnt from each participant's stage-A attention evidence (D1 (c)); it recovered the
   simulated tendency at r = 0.17 and gained nothing over the masks
-  (``artifacts/diff/phase2-scene/d1-sim``). The watch has no mode control.
+  (``artifacts/diff/phase2-scene/d1-sim``). What each participant perceives is now asked outright
+  after the watch (:mod:`diff.source_check`), and the watch has no mode control.
 - **D2, which mask a sound uses.** The audio masks of 2026-10-22 were prompted with the English
   phrases (``en_afnext``); the participant reads ``ko_final``, edited and partly re-heard. Each sound
   and phrase gets an AudioSet label (``scripts/diff_phase2_keys.py``, Claude, from the classes

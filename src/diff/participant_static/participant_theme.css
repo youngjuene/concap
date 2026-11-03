@@ -332,3 +332,11 @@ button.hold.holding::after { transform: scaleX(1); transition: transform 1s line
   .steppers { grid-template-columns: 1fr; gap: 24px; padding: 4px 0 0; }
   .watch { padding: 16px 12px 24px; }
 }
+
+/* The perceived-source block: the sound's name above a captionless replay, then two fixed answers. */
+.source-trial { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
+.source-sound { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.5; color: var(--ink, inherit); }
+.source-trial .watch-stage video { height: clamp(200px, calc(100vh - 480px), 480px); }
+.source-answers { margin: 0; padding: 0; border: 0; }
+.source-answers legend { padding: 0; margin-bottom: 10px; font-weight: 600; }
+.source-answers:disabled { opacity: .55; }

@@ -1112,6 +1112,18 @@ tendency at r = 0.17 and gained nothing over the masks, and a mode toggle could 
 effect. The researcher rejected an "automatic" stop, and chose to measure perceived source directly.
 - **The watch:** each cue's mode comes from its masks alone (`logit P(b) = logit q`,
   `phase2_scene.cue_steer`, `diff.phase2-mode/masks-v2`). No mode control; the two sliders stay.
+- **The perceived-source block** (`diff.source_check`; wording approved 2026-11-03), after the post-watch
+  items, so the question cannot colour the ratings of the captions just watched. 21 cues replayed without a
+  caption (10 on screen, 11 off by the masks, a per-session draw grouped by video). Each names the cue's
+  lead sound as listened; the participant answers "화면에 보이는 것에서" or "화면에 보이지 않는 곳에서".
+  Nothing is written for it, so it needs no writer: written pairs failed the rule on Qwen3.5-9B (`design-sim`,
+  round 3) and would have needed a matched, reviewed caption bank.
+- **Analysis:** the answer's slope on the lead sound's logit q, min F' by person and by item, from
+  `source_check.csv`. It measures where people say a sound comes from, not which caption they prefer.
+- **Simulated, not tested on people:** false positives 0.010, power 0.88, 0.76 with 20% inattentive, 0.82
+  with noisy q, 4.9 minutes (assumes 4 s to answer). A person's score reaches r = 0.5 with their true tendency
+  only from about 75% report accuracy (assumed). The pilot measures this, and whether the bare question
+  yields a percept or only a report of what is visible.
 
 The rest of this section records the 2026-10-28 design.
 

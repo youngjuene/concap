@@ -56,7 +56,8 @@ from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
 
 # v9 (2026-10-26): the delivering rung's wording, not its τ. v10 (2026-10-27): the model that wrote it.
-EXPORT_SCHEMA: Final = "diff.export/v10"
+# v11 (2026-11-03): the perceived-source block, source_check.csv.
+EXPORT_SCHEMA: Final = "diff.export/v11"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -127,6 +128,24 @@ R2_CODING_COLUMNS: Final = ("caption_id", "clip", "caption", "option", "label", 
 SOUND_ITEMS: Final = frozenset({"A1s", "A2s"})
 POINT_ITEMS: Final = frozenset({"V1", "V2"})
 POST_WATCH_COLUMNS: Final = ("participant", "session_id", "finished", "item", "answer")
+SOURCE_CHECK_COLUMNS: Final = (
+    "participant",
+    "session_id",
+    "finished",
+    "index",
+    "source_id",
+    "video_id",
+    "cue",
+    "sound",
+    "visibility",
+    "on_screen",
+    "answer",
+    "played_ms",
+    "waited_ms",
+    "stalls",
+    "restarts",
+    "answered_at",
+)
 
 
 def _jsonl(path: Path) -> list[dict[str, Any]]:
@@ -149,6 +168,38 @@ def live_logs(log_dirs: Sequence[Path], session_id: str) -> dict[str, list[dict[
 
 def _cell(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
+def source_check_rows(
+    participant: str, session_id: str, finished: bool, live: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """One row per perceived-source answer, beside its cue's q and stratum from the session's draw."""
+    trials = (live.get("source") or {}).get("trials", [])
+    return [
+        {
+            "participant": participant,
+            "session_id": session_id,
+            "finished": finished,
+            **{
+                key: trials[answer["index"]][key]
+                for key in ("video_id", "cue", "sound", "visibility", "on_screen")
+            },
+            **{
+                key: answer[key]
+                for key in (
+                    "index",
+                    "source_id",
+                    "answer",
+                    "played_ms",
+                    "waited_ms",
+                    "stalls",
+                    "restarts",
+                    "answered_at",
+                )
+            },
+        }
+        for answer in live.get("source_answers", [])
+    ]
 
 
 def phase1_rows(
@@ -327,6 +378,7 @@ def export(
     phase1: list[dict[str, Any]] = []
     seconds: list[dict[str, Any]] = []
     post_watch: list[dict[str, Any]] = []
+    source_check: list[dict[str, Any]] = []
     with (out / "participants.jsonl").open("w", encoding="utf-8") as handle:
         for session in sessions:
             finished = session.finished_at is not None
@@ -346,6 +398,9 @@ def export(
             seconds += second_caption_rows(
                 session.participant, session.session_id, finished, session.state, clips
             )
+            source_check += source_check_rows(
+                session.participant, session.session_id, finished, session.state.get("live", {})
+            )
             for item, answer in sorted(session.state.get("live", {}).get("answers", {}).items()):
                 post_watch.append(
                     {
@@ -362,6 +417,7 @@ def export(
         "phase1_rows": _write_csv(out / "phase1.csv", PHASE1_COLUMNS, phase1),
         "second_caption_rows": _write_csv(out / "second_captions.csv", SECOND_CAPTION_COLUMNS, seconds),
         "post_watch_rows": _write_csv(out / "post_watch.csv", POST_WATCH_COLUMNS, post_watch),
+        "source_check_rows": _write_csv(out / "source_check.csv", SOURCE_CHECK_COLUMNS, source_check),
         "r2_coding_rows": _write_csv(
             out / "r2_coding.csv", R2_CODING_COLUMNS, r2_coding_rows(seconds, clips)
         ),

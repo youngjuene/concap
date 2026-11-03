@@ -8,7 +8,8 @@ Pages, in order:
    nothing new is ready);
 3. the next video (settings carry over), or the researcher's rating items once
    the last video ends;
-4. done: the screens are over, but the oral interview (P12) and debrief (P13)
+4. the perceived-source block, when the serve has one (:mod:`diff.source_check`);
+5. done: the screens are over, but the oral interview (P12) and debrief (P13)
    follow outside the app, so the page asks the participant to stay and call
    the experimenter (UI review of 2026-10-19).
 
@@ -53,6 +54,7 @@ from diff.caption_sources import CaptionSource
 from diff.job_plan import Job
 from diff.live_calibration import Calibration
 from diff.live_generation import LiveScheduler, LiveService, LiveStream, Spec, opaque_token, slider_steps
+from diff.source_check import ANSWERS, QUESTION
 from diff.study_protocol import CONTEXT_STEPS
 
 EVENT_SCHEMA: Final = "diff.live-event/v1"
@@ -146,9 +148,12 @@ class LiveSession:
     context: float = 0.5
     answers: dict[str, int] = field(default_factory=dict)
     tokens: dict[str, str] = field(default_factory=dict)  # every token served, to its job ID
+    source: dict[str, Any] | None = None  # the session's perceived-source draw (``source_check.draw``)
+    source_answers: list[dict[str, Any]] = field(default_factory=list)
 
 
 JobFor = Callable[[CaptionSource, Spec], Job]
+SourceDraw = Callable[[str], dict[str, Any]]
 
 
 def live_event(log_dir: Path, at: float, session_id: str, event: str, **data: Any) -> None:
@@ -183,11 +188,15 @@ def add_live_routes(
     changed: Callable[[LiveSession, str], None],
     clock: Callable[[], float] = time.time,
     after_phase1: bool = False,
+    source_draw: SourceDraw | None = None,
 ) -> None:
     """The watch's routes under ``/watch/``; ``current(request)`` raises HTTPException without a session.
 
     ``after_phase1``: the watch follows phase 1, so each view says where it sits
     in the whole session (segment 4 of 0–5, the long videos).
+
+    ``source_draw``: the session's perceived-source draw, asked after the items; without one (a smoke
+    run with no scene parts) the items end the session.
     """
     from fastapi import APIRouter, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -221,7 +230,9 @@ def add_live_routes(
             },
         }
         if after_phase1:
-            done = 1.0 if session.stage in ("ratings", "done") else session.video_index / len(videos)
+            done = (
+                1.0 if session.stage in ("ratings", "source", "done") else session.video_index / len(videos)
+            )
             result["progress"] = {"segment": 4, "fraction": round(done, 3)}
         return result
 
@@ -249,12 +260,14 @@ def add_live_routes(
     @router.get("/media/{token}")
     def media(token: str, request: Request) -> FileResponse:
         session = current(request)
-        video = videos[session.video_index]
-        if not secrets.compare_digest(token, opaque_token(key, session.session_id, video.video_id)):
-            raise HTTPException(status_code=404)
-        return FileResponse(
-            video.media, media_type="video/webm" if video.media.suffix == ".webm" else "video/mp4"
-        )
+        # The block replays cues of every video; otherwise only the video being watched is served.
+        offered = videos if session.stage == "source" else [videos[session.video_index]]
+        for video in offered:
+            if secrets.compare_digest(token, opaque_token(key, session.session_id, video.video_id)):
+                return FileResponse(
+                    video.media, media_type="video/webm" if video.media.suffix == ".webm" else "video/mp4"
+                )
+        raise HTTPException(status_code=404)
 
     @router.post("/api/start")
     def start_watch(request: Request) -> dict[str, Any]:
@@ -392,9 +405,73 @@ def add_live_routes(
             ):
                 raise HTTPException(status_code=422, detail="응답 범위를 확인해 주세요.")
         session.answers = {item.item_id: int(answers[item.item_id]) for item in items}
-        session.stage = "done"
-        log(session, "ratings", answers=session.answers)
+        if source_draw is not None:
+            session.source = source_draw(session.session_id)
+            session.stage = "source"
+            log(session, "ratings", answers=session.answers)
+            log(session, "source_drawn", draw=session.source)
+        else:
+            session.stage = "done"
+            log(session, "ratings", answers=session.answers)
         changed(session, "ratings")
-        return {"stage": "done"}
+        return {"stage": session.stage}
+
+    @router.get("/api/source")
+    def source_page(request: Request) -> dict[str, Any]:
+        session = current(request)
+        if session.stage != "source" or session.source is None:
+            raise HTTPException(status_code=409, detail="지금은 이 단계가 아닙니다.")
+        return {
+            "question": QUESTION,
+            "answers": [{"id": answer, "text": ANSWERS[answer]} for answer in session.source["answer_order"]],
+            "next": len(session.source_answers),
+            # What the page needs to play and name a cue: never its masks, its q or its stratum.
+            "trials": [
+                {
+                    "media": f"media/{opaque_token(key, session.session_id, trial['video_id'])}",
+                    "start_ms": trial["start_ms"],
+                    "end_ms": trial["end_ms"],
+                    "sound": trial["sound"],
+                }
+                for trial in session.source["trials"]
+            ],
+        }
+
+    @router.post("/api/source-answer")
+    async def source_answer(request: Request) -> dict[str, Any]:
+        session = current(request)
+        if session.stage != "source" or session.source is None:
+            raise HTTPException(status_code=409, detail="지금은 응답할 수 없습니다.")
+        body = await request.json()
+        try:
+            index, answer = int(body["index"]), str(body["answer"])
+            played, waited = int(body["played_ms"]), int(body["waited_ms"])
+            stalls, restarts = int(body["stalls"]), int(body["restarts"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="응답을 읽을 수 없습니다.") from exc
+        if answer not in ANSWERS:
+            raise HTTPException(status_code=422, detail="응답을 읽을 수 없습니다.")
+        done = len(session.source_answers)
+        if index == done - 1 and session.source_answers[index]["answer"] == answer:
+            return {"stage": session.stage, "next": done}  # a retried request, already kept
+        if index != done:
+            raise HTTPException(status_code=409, detail="이미 다른 장면의 차례입니다.")
+        trial = session.source["trials"][index]
+        record = {
+            "index": index,
+            "source_id": trial["source_id"],
+            "answer": answer,
+            "played_ms": played,
+            "waited_ms": waited,
+            "stalls": stalls,
+            "restarts": restarts,
+            "answered_at": clock(),
+        }
+        session.source_answers.append(record)
+        if len(session.source_answers) == len(session.source["trials"]):
+            session.stage = "done"
+        log(session, "source_answer", **record)
+        changed(session, "source_answer")
+        return {"stage": session.stage, "next": len(session.source_answers)}
 
     app.include_router(router)

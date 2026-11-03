@@ -38,6 +38,24 @@
     <form id="items" novalidate></form>
   </section>
 
+  <section id="source" hidden>
+    <div class="head">
+      <span class="eyebrow" id="source-eyebrow">2스테이지 · 소리가 나는 곳</span>
+      <h1 tabindex="-1">소리가 나는 곳</h1>
+      <p class="lede" id="source-lede">앞서 본 영상의 장면을 짧게 다시 보여 드립니다. 자막 없이 보고 들은 뒤, 적힌 소리가 어디에서 나는 것처럼 들렸는지 골라 주세요. 정답은 없습니다.</p>
+    </div>
+    <div class="source-trial" id="source-trial" hidden>
+      <p class="source-sound" id="source-sound"></p>
+      <div class="watch-stage"><video id="source-video" playsinline preload="auto" disablepictureinpicture></video></div>
+      <p class="sheet-hint" id="source-status" role="status"></p>
+      <fieldset class="source-answers" id="source-answers" disabled>
+        <legend id="source-question"></legend>
+        <div class="sheet-choices" id="source-choices"></div>
+      </fieldset>
+    </div>
+    <div class="actions"><button class="primary" id="source-start" type="button">장면 재생</button></div>
+  </section>
+
   <section id="done" hidden>
     <div class="head">
       <span class="eyebrow">2스테이지 완료</span>

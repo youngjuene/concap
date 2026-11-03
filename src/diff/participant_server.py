@@ -55,6 +55,7 @@ from diff.live_server import (
     LiveSession,
     LiveVideo,
     RatingItem,
+    SourceDraw,
     add_live_routes,
     live_event,
     open_video,
@@ -79,6 +80,7 @@ ACTIONS: Final = frozenset(
 )
 TweakFor = Callable[[Mapping[str, Any], Mapping[str, str], int], tuple[CaptionSource, Job, dict[str, Any]]]
 WATCH_URL: Final = "watch/"
+AFTER_WATCH: Final = ("ratings", "source")
 PHASE2_ONLY: Final = "diff.phase2-only/v1"
 MEDIA_TYPES: Final = {".png": "image/png", ".mp4": "video/mp4", ".webm": "video/webm"}
 HEADERS: Final = {
@@ -121,6 +123,8 @@ def live_progress(calibration: Calibration) -> dict[str, Any]:
         "context": calibration.context,
         "answers": {},
         "started": False,
+        "source": None,
+        "source_answers": [],
     }
 
 
@@ -136,13 +140,14 @@ def build_participant_app(
     tweak_for: TweakFor | None = None,
     secret: bytes | None = None,
     clock: Callable[[], float] = time.time,
+    source_draw: SourceDraw | None = None,
 ) -> Any:
     """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
 
     ``tweak_for(clip, slots, rung)`` builds a clip's second-caption job at a rung of its ladder;
     phase 1 needs it. The session's live service writes them: Claude through the API since
     2026-10-27, which also writes phase 2's live captions (on 2026-10-26 to 27 phase 1 had its own
-    writer pool, while phase 2 stayed on Trida).
+    writer pool, while phase 2 stayed on Trida). ``source_draw`` is the perceived-source block's draw.
     """
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -340,11 +345,17 @@ def build_participant_app(
             raise HTTPException(status_code=409, detail=NOT_YET)
         with lock:
             live = live_sessions.get(session.session_id)
-            if live is not None:
-                return live
             progress = session.state["live"]
-            if progress["stage"] == "ratings":
-                # The last video already released the writer; the items need none.
+            if live is not None:
+                if progress["stage"] in AFTER_WATCH:
+                    # Another instance may have taken the last answer (Vercel); the store has it.
+                    live.stage = progress["stage"]
+                    live.answers = dict(progress["answers"])
+                    live.source = progress.get("source")
+                    live.source_answers = list(progress.get("source_answers", []))
+                return live
+            if progress["stage"] in AFTER_WATCH:
+                # The last video already released the writer; these pages need none.
                 service = pool.holder(session.session_id) or pool.services[0]
             else:
                 acquired = pool.acquire(session.session_id)
@@ -361,6 +372,8 @@ def build_participant_app(
                 texture=progress["texture"],
                 context=progress["context"],
                 answers=dict(progress["answers"]),
+                source=progress.get("source"),
+                source_answers=list(progress.get("source_answers", [])),
             )
             live_sessions[session.session_id] = live
         if not progress["started"]:
@@ -382,6 +395,8 @@ def build_participant_app(
             "context": live.context,
             "answers": dict(live.answers),
             "started": True,
+            "source": live.source,
+            "source_answers": list(live.source_answers),
         }
         note = None if event == "settings" else {"event": f"live_{event}", "video_index": live.video_index}
         store.update(live.session_id, lambda state: state.update(live=progress), note)
@@ -402,5 +417,6 @@ def build_participant_app(
         changed=changed,
         clock=clock,
         after_phase1=phase1 is not None,
+        source_draw=source_draw,
     )
     return app

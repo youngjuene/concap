@@ -44,6 +44,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         "phase1_rows": 102,
         "second_caption_rows": 3,
         "post_watch_rows": 1,
+        "source_check_rows": 0,  # this serve has no scene parts, so no block
         "r2_coding_rows": 6,  # three shown captions, two R2 options each
     }
 

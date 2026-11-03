@@ -114,6 +114,7 @@ def _build() -> Any:
     from diff.phase1_tweak import tweak_job_for
     from diff.phase1_usable import check_record
     from diff.phase2_scene import cue_steer
+    from diff.source_check import draw
     from diff.study_protocol import LIVE_MAX_CHARS
 
     purpose = DEPLOY["purpose"]
@@ -164,6 +165,7 @@ def _build() -> Any:
         phase1=phase1,
         tweak_for=tweak_for,
         secret=os.environ["DIFF_SECRET"].encode(),
+        source_draw=(lambda session_id: draw(session_id, scenes, videos)) if scenes is not None else None,
     )
     _gate(app, DEPLOY["access_code"], open=DEPLOY.get("open", True))
     return app
