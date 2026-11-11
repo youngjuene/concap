@@ -555,7 +555,8 @@ def phase2_scene(args: argparse.Namespace) -> int:
     for source_id, scene in scenes["cues"].items():
         source = by_source[source_id]
         sounds = ", ".join(
-            f"{s['sound']} {s['visibility']['share']:.2f}{' on' if s['visibility']['on_screen'] else ''}"
+            f"{s['sound']} {s['visibility']['share']:.2f}/{s['visibility']['scan']:.2f}"
+            f"{' on' if s['visibility']['on_screen'] else ''}"
             f" [{s['mask_match']}]"
             for s in scene["sounds"]
         )
@@ -1182,8 +1183,9 @@ def parser() -> argparse.ArgumentParser:
     scene2.add_argument(
         "--sa2va",
         type=Path,
-        default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/runs/phase2/masks"),
-        help="the run's masks folder, holding visual/<video>/<Category> and audio/<video>/<phrase>",
+        default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/runs/phase2-windowed/masks"),
+        help="the run's masks folder, holding visual/<video>/<Category> and audio/<video>/<phrase> "
+        "(the fully windowed run since 2026-11-03)",
     )
     scene2.add_argument(
         "--ontology", type=Path, default=Path("/mnt/hdd/research/2026/Sa2VA/avmask/data/ontology.json")

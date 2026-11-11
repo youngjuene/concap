@@ -13,11 +13,13 @@ from PIL import Image
 
 from diff.caption_sources import parse_sources
 from diff.job_plan import live_job
-from diff.phase1_binding import p_bound, tendency
 from diff.phase1_scene import SceneError
 from diff.phase2_scene import (
+    AREA_FLOOR,
+    best_window,
     build_scenes,
     cue_steer,
+    placeable,
     read_keys,
     scene_problems,
     scene_slots,
@@ -198,12 +200,45 @@ def test_the_slots_leave_out_the_recording_itself(run: dict[str, Any]) -> None:
 
 def test_each_cue_s_mode_comes_from_the_masks_alone(run: dict[str, Any]) -> None:
     first, second = by_cue(run)
-    flat = cue_steer(first)
-    q = first["sounds"][0]["visibility"]["mean"]
-    assert flat["p_bound"] == round(p_bound(tendency([]), q, 0.0), 4)
-    assert flat["mode"] == "scene" and flat["slots"]["seen"] == "도로와 차량"
+    steer = cue_steer(first)
+    lead = first["sounds"][0]["visibility"]
+    assert lead["on_screen"] and steer["scan"] == lead["scan"] and steer["visibility"] == lead["mean"]
+    assert steer["mode"] == "scene" and steer["slots"]["seen"] == "도로와 차량"
     assert cue_steer(second)["mode"] == "acousmatic" and cue_steer(second)["slots"] == {}
     assert cue_steer(None)["mode"] == "acousmatic"
+
+
+def test_the_mode_follows_on_screen_not_the_window_mean() -> None:
+    """A source in view for the last 2 s only: its 10 s mean is 0.2, yet it is on screen."""
+    scene = {
+        "distinctive": "traffic",
+        "sounds": [
+            {
+                "sound": "버스 소리",
+                "audioset_label": "Bus",
+                "visibility": {"share": 0.2, "scan": 1.0, "on_screen": True, "mean": 0.25},
+            }
+        ],
+    }
+    assert cue_steer(scene)["mode"] == "scene"
+
+
+def test_a_source_counts_where_it_is_in_view_for_two_seconds_anywhere() -> None:
+    width = 12  # 2 s of frames sampled at 6 per second
+    late = [0.0] * 48 + [1.0] * 12
+    assert best_window(late, [0.01] * 60, width) == 1.0  # the mean over the window is 0.2
+    brief = [0.0] * 54 + [1.0] * 6
+    assert best_window(brief, [0.01] * 60, width) == 0.5  # 1 s of a source: the edge of the line
+    tiny = [1.0] * 60
+    assert best_window(tiny, [AREA_FLOOR / 2] * 60, width) == 0.0  # a mask too small to count
+    assert best_window([1.0, 0.0], [0.01, 0.01], width) == 0.5  # fewer frames than the window: their mean
+    assert best_window([], [], width) == 0.0
+
+
+def test_a_bell_has_no_visible_source_in_phase_2() -> None:
+    assert placeable(("Bell", "Musical instrument")) == ()
+    assert placeable(("Musical instrument",)) == ("person",)
+    assert placeable(("Vehicle",)) == ("road", "road_transport")
 
 
 def test_the_scene_cells_keep_the_acousmatic_nine_and_need_the_slots(run: dict[str, Any]) -> None:

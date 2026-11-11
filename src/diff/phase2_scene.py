@@ -3,14 +3,25 @@ cue's live caption mode.
 
 Researcher's decisions of 2026-10-28 (gate 5, ``docs/v4-diff/plan.md``), as changed on 2026-11-03:
 
-- **The mode comes from the masks alone.** Each cue's mode is the phase-1 model's recommendation with a
-  flat tendency: ``logit P(b) = logit q``, where ``q`` is the measured visibility of the cue's first
-  sound (the starting captions name the most prominent sound first). Scene-aware when
-  ``P(b) ≥ phase1_binding.THRESHOLD``, acousmatic otherwise (:func:`cue_steer`). Until 2026-11-03 the
-  tendency was learnt from each participant's stage-A attention evidence (D1 (c)); it recovered the
-  simulated tendency at r = 0.17 and gained nothing over the masks
-  (``artifacts/diff/phase2-scene/d1-sim``). What each participant perceives is now asked outright
-  after the watch (:mod:`diff.source_check`), and the watch has no mode control.
+- **The mode comes from the masks alone.** A cue is scene-aware when its first sound's source is on
+  screen and acousmatic otherwise (:func:`cue_steer`); the starting captions name the most prominent
+  sound first. Until 2026-11-03 a participant's tendency, learnt from their stage-A attention
+  evidence (D1 (c)), entered too; it recovered the simulated tendency at r = 0.17 and gained nothing
+  over the masks (``artifacts/diff/phase2-scene/d1-sim``). What each participant perceives is now
+  asked outright after the watch (:mod:`diff.source_check`), and the watch has no mode control.
+- **What "on screen" is in phase 2** (researcher, 2026-11-11, after a blind rating of the 90 first
+  sounds, ``artifacts/diff/phase2-scene/blind-rating``): the source appears for a sustained moment,
+  anywhere in the window. A sound is on screen when its best 2 s window (:data:`SCAN_FRAMES`) has a
+  mean share of at least :data:`~diff.phase1_scene.ON_SCREEN` on its source's categories, a frame
+  counting 0 where that part of the mask covers less than :data:`AREA_FLOOR` of the frame
+  (:func:`best_window`, rule ``s2a``). Against the rating it scored balanced accuracy 0.74 and kappa
+  0.49, where the 10 s mean phase 1 uses scored 0.68 and 0.37: the mean counts a frame without a
+  mask as off screen, so a source in view for part of the window was called unseen, and it ignores
+  size. Phase 1 keeps its rule (gate 1, approved 2026-10-28). ``share`` and ``q`` are computed as in
+  phase 1 and stay the block's predictor; only ``on_screen`` follows the new rule.
+- **Bells are never placed** (:data:`UNPLACED_GROUPS`, researcher, 2026-11-11): all nine cues led by
+  a bell were rated unseen, while ``Bell → building`` takes any building for the bell. A label in
+  that group has no visible category in phase 2, like the wind's.
 - **D2, which mask a sound uses.** The audio masks of 2026-10-22 were prompted with the English
   phrases (``en_afnext``); the participant reads ``ko_final``, edited and partly re-heard. Each sound
   and phrase gets an AudioSet label (``scripts/diff_phase2_keys.py``, Claude, from the classes
@@ -35,27 +46,33 @@ import csv
 import json
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from statistics import mean
 from typing import Any, Final
 
-from diff.phase1_binding import MODES, THRESHOLD, p_bound, tendency
+from diff.phase1_binding import MODES
 from diff.phase1_scene import (
     ON_SCREEN,
     STRIDE,
     SceneError,
+    _mask,
     category_id,
     composition,
     distinguish,
     elements_of,
     ontology_groups,
     plausible_categories,
-    visibility,
     winners,
 )
 from diff.phase1_tweak import ELEMENTS_KO, RECORDING_ARTEFACTS
 from diff.rewrite_prompts import NOT_SEEN
 
-SCENE_SCHEMA: Final = "diff.phase2-scene/v1"
-STEER_POLICY: Final = "diff.phase2-mode/masks-v2"  # v2 (2026-11-03): masks alone, no participant profile
+SCENE_SCHEMA: Final = "diff.phase2-scene/v2"  # v2 (2026-11-11): on_screen by the s2a rule, bells unplaced
+# v2 (2026-11-03): masks alone, no participant profile. v3 (2026-11-11): the lead's on_screen, not P(b).
+STEER_POLICY: Final = "diff.phase2-mode/masks-v3"
+ON_SCREEN_RULE: Final = "s2a"
+SCAN_FRAMES: Final = 120  # 2 s at 60 fps: the window whose mean share must reach ON_SCREEN
+AREA_FLOOR: Final = 0.002  # a frame whose on-target mask covers less of the frame than this counts 0
+UNPLACED_GROUPS: Final = ("Bell",)
 PHASE2_SCENE_PROVISIONAL: Final = True
 SCENE_FILE: Final = Path("data/phase2/phase2-scene.json")
 KEYS_FILE: Final = Path("data/phase2/scene-keys.csv")
@@ -108,6 +125,67 @@ def _window_frames(visual: Mapping[str, Path], lo: int, hi: int, stride: int) ->
     return common[::stride]
 
 
+def best_window(shares: Sequence[float], areas: Sequence[float], width: int) -> float:
+    """The highest mean share over ``width`` consecutive sampled frames, a frame counting 0 where its
+    on-target mask covers less than :data:`AREA_FLOOR` of the frame; the mean of them all when there
+    are fewer frames than ``width``."""
+    kept = [share if area >= AREA_FLOOR else 0.0 for share, area in zip(shares, areas, strict=True)]
+    if not kept:
+        return 0.0
+    if len(kept) <= width:
+        return sum(kept) / len(kept)
+    return max(sum(kept[start : start + width]) / width for start in range(len(kept) - width + 1))
+
+
+def appearance(
+    audio: Path,
+    frames: Mapping[str, Any],
+    names: Sequence[str],
+    categories: Sequence[str],
+    seconds: int,
+    stride: int,
+) -> dict[str, Any]:
+    """Phase 1's share and its Beta posterior (``phase1_scene.visibility``, unchanged), and whether the
+    source is on screen by the phase-2 rule (:func:`best_window`)."""
+    import numpy as np
+
+    inside = [index for index, name in enumerate(names) if name in categories]
+    shares: list[float] = []
+    areas: list[float] = []
+    for frame, winner in frames.items():
+        path = audio / frame
+        if not path.is_file():
+            continue
+        mask = _mask(path)
+        size = int(mask.sum())
+        hit = int(np.isin(winner[mask], inside).sum()) if size and inside else 0
+        shares.append(hit / size if size else 0.0)
+        areas.append(hit / mask.size)
+    if not shares:
+        raise SceneError(f"no audio mask among the sampled frames in {audio}")
+    share = mean(shares)
+    alpha, beta = 1 + seconds * share, 1 + seconds * (1 - share)
+    scan = best_window(shares, areas, max(1, SCAN_FRAMES // stride))
+    return {
+        "frames": len(shares),
+        "share": round(share, 4),
+        "scan": round(scan, 4),
+        "rule": ON_SCREEN_RULE,
+        "on_screen": scan >= ON_SCREEN,
+        "alpha": round(alpha, 4),
+        "beta": round(beta, 4),
+        "mean": round(alpha / (alpha + beta), 4),
+    }
+
+
+def placeable(groups: Sequence[str]) -> tuple[str, ...]:
+    """The visual categories a sound's source can be seen in, in phase 2: phase 1's, except none for a
+    label in :data:`UNPLACED_GROUPS`."""
+    if set(groups) & set(UNPLACED_GROUPS):
+        return ()
+    return plausible_categories(groups)
+
+
 def build_cue(
     source: Any,
     keys: Sequence[Mapping[str, str]],
@@ -134,16 +212,18 @@ def build_cue(
     for row in keys:
         label = row["audioset_label"]
         groups = groups_of(label)
-        categories = plausible_categories(groups)
+        categories = placeable(groups)
         if row["mask_dir"]:
             audio = run / "audio" / video / row["mask_dir"]
             if not audio.is_dir():
                 raise SceneError(f"{video}: no audio masks at {audio}")
-            seen = visibility(audio, sampled, names, categories, seconds)
+            seen = appearance(audio, sampled, names, categories, seconds, stride)
         else:  # no mask: no source in view, the prior's mean at a share of 0
             seen = {
                 "frames": 0,
                 "share": 0.0,
+                "scan": 0.0,
+                "rule": ON_SCREEN_RULE,
                 "on_screen": False,
                 "alpha": 1.0,
                 "beta": float(1 + seconds),
@@ -195,6 +275,12 @@ def build_scenes(
             "keys": str(keys),
             "stride": stride,
             "on_screen": ON_SCREEN,
+            "on_screen_rule": {
+                "rule": ON_SCREEN_RULE,
+                "scan_frames": SCAN_FRAMES,
+                "area_floor": AREA_FLOOR,
+                "unplaced_groups": list(UNPLACED_GROUPS),
+            },
             "element_means": {name: round(value, 4) for name, value in means.items()},
         },
         "cues": {source.source_id: scene for source, scene in zip(cues, scenes, strict=True)},
@@ -249,19 +335,18 @@ def scene_slots(scene: Mapping[str, Any]) -> dict[str, str]:
 
 
 def cue_steer(scene: Mapping[str, Any] | None) -> dict[str, Any]:
-    """The cue's mode, from the first sound's visibility, with the scene-aware slots; acousmatic with
-    no scene part (a smoke run without masks)."""
+    """The cue's mode, scene-aware when its first sound's source is on screen, with the scene-aware
+    slots; acousmatic with no scene part (a smoke run without masks)."""
     if scene is None:
         return {"policy": STEER_POLICY, "mode": MODES[1], "reason": "no scene part", "slots": {}}
     lead = scene["sounds"][0]
-    q = float(lead["visibility"]["mean"])
-    probability = p_bound(tendency([]), q, 0.0)
-    mode = MODES[0] if probability >= THRESHOLD else MODES[1]
+    seen = lead["visibility"]
+    mode = MODES[0] if seen["on_screen"] else MODES[1]
     return {
         "policy": STEER_POLICY,
         "mode": mode,
         "lead": lead["sound"],
-        "visibility": q,
-        "p_bound": round(probability, 4),
+        "visibility": float(seen["mean"]),
+        "scan": float(seen["scan"]),
         "slots": scene_slots(scene) if mode == MODES[0] else {},
     }
