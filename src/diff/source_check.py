@@ -4,13 +4,15 @@ without a caption, and for each the participant says where its named sound seems
 Researcher's decision of 2026-11-03 (``artifacts/diff/phase2-scene/design-sim/PLAN.md``, D6c). No text
 is written for the block: the sound is the cue's lead sound as listened, the answers are fixed, so no
 writer, length gap or wording can stand between the percept and the answer. The analysis is the slope
-of the answer on the lead sound's logit q, tested by person and by item (min F').
+of the answer on the lead sound's logit q, with the video as a fixed effect (researcher, 2026-11-11: a
+blind rating found the share of sources in view at .17, .50 and .93 across the three videos), tested
+by person and by item (min F').
 
 Each participant gets their own stratified draw, 10 cues whose lead sound's source is on screen by the
-masks and 11 whose is not, as the design simulation ran it. Cues are grouped by video so that the page
-changes its video file at most twice; the order inside each video is random. A cue whose lead sound has
-no mask (``mask_match`` is ``none``) has no measured q, so it is never drawn. The draw is seeded by the
-session ID, so the audit can re-derive it.
+masks (``phase2_scene``'s rule) and 11 whose is not, as the design simulation ran it. Cues are grouped
+by video so that the page changes its video file at most twice; the order inside each video is random.
+A cue whose lead sound has no mask (``mask_match`` is ``none``) has no measured q, so it is never
+drawn. The draw is seeded by the session ID, so the audit can re-derive it.
 
 The items come first (``diff.live_server``): this question would otherwise colour the ratings of the
 captions just watched. The researcher approved the Korean wording on 2026-11-03.

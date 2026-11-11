@@ -1110,20 +1110,54 @@ phrases belong to `TWEAK_PROVISIONAL`, which still refuses participant sessions.
 (`artifacts/diff/phase2-scene/d1-sim`, `design-sim`) the attention profile recovered the simulated
 tendency at r = 0.17 and gained nothing over the masks, and a mode toggle could not detect a modest
 effect. The researcher rejected an "automatic" stop, and chose to measure perceived source directly.
-- **The watch:** each cue's mode comes from its masks alone (`logit P(b) = logit q`,
-  `phase2_scene.cue_steer`, `diff.phase2-mode/masks-v2`). No mode control; the two sliders stay.
+- **The watch:** each cue's mode comes from its masks alone: scene-aware when its first sound's source
+  is on screen (`phase2_scene.cue_steer`, `diff.phase2-mode/masks-v3` since 2026-11-11). No mode
+  control; the two sliders stay. (Until 2026-11-11 this section said `logit P(b) = logit q`. That was
+  wrong: with a flat tendency, `P(b)` averages `σ(logit π + logit q)` over π's grid, so q = 0.917
+  gives 0.836; the decision was nonetheless exactly `share ≥ 0.5`.)
 - **The perceived-source block** (`diff.source_check`; wording approved 2026-11-03), after the post-watch
   items, so the question cannot colour the ratings of the captions just watched. 21 cues replayed without a
   caption (10 on screen, 11 off by the masks, a per-session draw grouped by video). Each names the cue's
   lead sound as listened; the participant answers "화면에 보이는 것에서" or "화면에 보이지 않는 곳에서".
   Nothing is written for it, so it needs no writer: written pairs failed the rule on Qwen3.5-9B (`design-sim`,
   round 3) and would have needed a matched, reviewed caption bank.
-- **Analysis:** the answer's slope on the lead sound's logit q, min F' by person and by item, from
-  `source_check.csv`. It measures where people say a sound comes from, not which caption they prefer.
+- **Analysis:** the answer's slope on the lead sound's logit q, with the video as a fixed effect
+  (researcher, 2026-11-11), min F' by person and by item, from `source_check.csv`. It measures where
+  people say a sound comes from, not which caption they prefer.
 - **Simulated, not tested on people:** false positives 0.010, power 0.88, 0.76 with 20% inattentive, 0.82
   with noisy q, 4.9 minutes (assumes 4 s to answer). A person's score reaches r = 0.5 with their true tendency
   only from about 75% report accuracy (assumed). The pilot measures this, and whether the bare question
   yields a percept or only a report of what is visible.
+
+**On screen in phase 2: the s2a rule (researcher, 2026-11-11).** Phase 2 no longer uses phase 1's
+10 s mean for its on/off decision (the mode, the scene prompt's visible and unseen slots, the block's
+strata). A sound is on screen when its best 2 s window has a mean share of at least 0.5 on its
+source's categories, a frame counting 0 where that part of the mask covers under 0.2% of the frame
+(`phase2_scene.best_window`). Bells have no visible category in phase 2. `share` and `q` are
+unchanged and stay the block's predictor; phase 1 keeps its rule and its approvals.
+- **Why.** On the gate-5 cue cards the researcher marked 13 calls wrong (2026-11-05), mostly sources
+  in view for part of the window. The 10 s mean counts a frame without a mask as off screen, so time
+  and placement mix, and it ignores size (`artifacts/diff/phase2-scene/mask-label-review`). Sa2VA
+  draws the masks from frames and text only, so a mask is a candidate source, not the heard one.
+- **How it was chosen.** Five rules were fixed before a rating of the 90 first sounds without masks
+  or calls (`artifacts/diff/phase2-scene/blind-rating`: PLAN.md, score.py). Balanced accuracy and
+  kappa against it: the 10 s mean 0.683 and 0.367 (under the 0.40 gate); s2a 0.747 and 0.510 as
+  scored, 0.735 and 0.486 in exact arithmetic (the scoring's floating-point window mean put one cue
+  at exactly 0.5 below the line; the code counts it on, as the rule says); the best, a two-segment
+  rule, 0.777 and 0.563 as first scored, 0.748 and 0.499 once a seam bug in it was fixed. The fixed
+  procedure picked s2a and returned "unresolved" (its difference from the mean has interval −0.05 to
+  0.15), so the researcher decided. All nine bell-led cues were rated unseen; scores with bells off
+  are not reported as validation, since that change was made on this rating.
+- **Limits, to state.** One rater, the researcher, who had seen the cue cards; 39 of the 41 "not
+  seen" answers came after skipping to the clip's end. The bell change is post hoc, from that rater.
+  The rule is fitted to these 90 windows of one Sa2VA run and is not claimed beyond them.
+- **Effect.** First sounds on screen: 59 of 90 (48 under the mean); 27 first sounds change mode.
+  The block's drawable pools: 59 on and 30 off, the off ones 16, 12 and 2 across the three videos,
+  so the analysis adds video as a fixed effect. Simulated on these strata (round 5): false positives
+  0.007, and 0.012 where a video's look alone moves answers (0.396 without the fixed effect); power
+  0.87 at the effect rounds 2–4 used, 0.96 at a 10-point gap; 0.73 with 20% inattentive; 0.78 with
+  noisy q. The block's simulation was re-run on these strata
+  (`artifacts/diff/phase2-scene/design-sim`, round 5).
 
 The rest of this section records the 2026-10-28 design.
 
