@@ -163,6 +163,7 @@ class LivePool:
             self.seen[session_id] = now
             held = self.holder(session_id)
             if held is not None:
+                held.heard(session_id)
                 return held
             if self.spawn is not None:
                 for service in self.services:
@@ -175,6 +176,8 @@ class LivePool:
                 free = self.spawn()
                 free.claim(session_id)
                 self.services.append(free)
+            if free is not None:
+                free.heard(session_id)
             return free
 
     def release(self, session_id: str) -> None:

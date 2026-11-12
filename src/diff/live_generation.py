@@ -72,6 +72,14 @@ claims a caption before writing it, so the same captions are served everywhere a
 twice. A playback report older than :data:`STALE_PLAY_S` means the browser is gone, and the
 scheduler stops writing ahead. Without a shared record the service works from its own memory, as
 before.
+
+**A server that is not being asked does not write** (``fresh_s``, 2026-11-12). Vercel suspends an
+instance between requests, and a writer thread suspended in the middle of a call held its claim
+while the cue went by: on the first four-session run over several instances a quarter of the live
+calls took over 6 s by the instance's clock, the longest 557 s, against a median of 2 s. With
+``fresh_s`` a service starts a call only if its server heard from the session that recently, and
+``claim_ttl_s`` lets another server take over a caption whose writer has gone quiet well before
+the call's own deadline. A caption then written twice costs one call; the first result stands.
 """
 
 from __future__ import annotations
@@ -436,9 +444,13 @@ class LiveService:
         deadline_s: float = LIVE_DEADLINE_S,
         clock: Callable[[], float] = time.monotonic,
         idle_wait_s: float = 0.25,
+        claim_ttl_s: float = CLAIM_TTL_S,
+        fresh_s: float | None = None,
     ) -> None:
         self.attempt, self.log_dir, self.check, self.tweak_check = attempt, log_dir, check, tweak_check
         self.deadline_s, self.clock, self.idle_wait_s = deadline_s, clock, idle_wait_s
+        self.claim_ttl_s, self.fresh_s = claim_ttl_s, fresh_s
+        self.heard_at = float("-inf")  # when this server last had a request of the claimed session
         self.lock = threading.Condition()
         self.session_id: str | None = None
         self.scheduler: LiveScheduler | None = None
@@ -482,6 +494,17 @@ class LiveService:
                 return False
             self.session_id = session_id
             return True
+
+    def heard(self, session_id: str) -> None:
+        """A request of the claimed session reached this server just now."""
+        with self.lock:
+            if self.session_id == session_id:
+                self.heard_at = self.clock()
+                self.lock.notify_all()
+
+    def asked(self) -> bool:
+        """Whether this server is being asked: always without ``fresh_s`` (the lab's one server)."""
+        return self.fresh_s is None or self.clock() - self.heard_at <= self.fresh_s
 
     def stop(self, session_id: str) -> None:
         """End the current video's scheduler but keep the session's claim (between videos)."""
@@ -556,7 +579,7 @@ class LiveService:
             scheduler.absorb(int(row["cue"]), str(row["job_id"]), row["result"])
             self.foreign.pop(str(row["job_id"]), None)
         for job_id, since in list(self.foreign.items()):
-            if local - since > CLAIM_TTL_S:  # its writer never reported back: ours to try
+            if local - since > self.claim_ttl_s:  # its writer never reported back: ours to try
                 del self.foreign[job_id]
                 scheduler.in_flight.discard(job_id)
         now = shared.now(video_id)
@@ -611,6 +634,8 @@ class LiveService:
         A video's requests come first; a queued tweak runs when the video has none.
         """
         with self.lock:
+            if not self.asked():
+                return False  # nobody is asking this server: it may be suspended before a call returns
             self._sync()
             scheduler, session_id, shared = self.scheduler, self.session_id, self.shared
             request = scheduler.next_request(self.clock()) if scheduler is not None else None
@@ -628,7 +653,7 @@ class LiveService:
             # One claim per attempt: a transient failure's retry is a new one.
             tried = len(scheduler.failures.get(job_id, []))
             try:
-                claimed = shared.claim(f"live:{job_id}:{tried}", CLAIM_TTL_S)
+                claimed = shared.claim(f"live:{job_id}:{tried}", self.claim_ttl_s)
             except Exception:
                 with self.lock:
                     scheduler.in_flight.discard(job_id)
@@ -665,7 +690,8 @@ class LiveService:
         shared = self.shared
         claim = "tweak:{}:{}:{}".format(*tweak_key(request), request.attempt)
         try:
-            claimed = shared is None or shared.claim(claim, CLAIM_TTL_S)
+            # A second caption is a longer call than a live one, so its claim holds twice as long.
+            claimed = shared is None or shared.claim(claim, 2 * self.claim_ttl_s)
         except Exception:
             with self.lock:
                 self.running_tweak = None

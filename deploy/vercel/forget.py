@@ -4,7 +4,8 @@
 
 Without ``--yes`` it only counts what would go. With it, the participant's sessions, receipts,
 events, live logs (``logs/sessions/session-<id>.jsonl`` and ``live-<id>.jsonl``), shared watch
-record (playback, written captions, claims) and personal link are deleted in one transaction. The lab's copies are not touched: it lists every pull and export that still holds
+record (playback, written captions, claims) and personal link are deleted in one transaction. The
+lab's copies are not touched: it lists every pull and export that still holds
 the participant, to delete by hand (then pull and export again).
 """
 

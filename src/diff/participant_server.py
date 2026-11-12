@@ -265,7 +265,7 @@ def build_participant_app(
         pending = phase1.pending_tweaks(session.state)
         if not pending:
             return
-        service = pool.holder(session_id) or pool.acquire(session_id)
+        service = pool.acquire(session_id)  # also tells the writer this server is being asked
         if service is None:
             return
         service.share(session_id, SessionShare(store, session_id))

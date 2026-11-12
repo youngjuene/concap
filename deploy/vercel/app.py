@@ -162,7 +162,11 @@ def _build() -> Any:
     writer = ClaudeWriter()
 
     def spawn() -> Any:
-        service = LiveService(writer.attempt, logs, check=check, tweak_check=check_record)
+        # An instance is suspended between requests: write only while asked, and let another
+        # instance take over a caption whose writer went quiet (diff.live_generation).
+        service = LiveService(
+            writer.attempt, logs, check=check, tweak_check=check_record, claim_ttl_s=6.0, fresh_s=3.0
+        )
         service.start()
         return service
 

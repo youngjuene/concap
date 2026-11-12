@@ -258,3 +258,36 @@ def test_a_grown_pool_never_refuses_a_session_in_the_middle_of_a_video(tmp_path:
     assert len(server.pool.services) == 2
     assert second.post("/watch/api/session", json={}).json()["stage"] == "ready"  # and so does P2
     assert len(server.pool.services) == 3
+
+
+def test_a_server_nobody_asks_does_not_write_and_a_quiet_writer_s_caption_is_taken_over(
+    tmp_path: Path,
+) -> None:
+    for video in VIDEOS:
+        (tmp_path / f"{video}.webm").write_bytes(video.encode())
+    wall = [1000.0]
+    a, b = Server("가", tmp_path, wall), Server("나", tmp_path, wall)
+    local = [0.0]
+    for server in (a, b):  # as on Vercel: write only while asked, short claims
+        server.service.clock = lambda: local[0]
+        server.service.fresh_s, server.service.claim_ttl_s = 3.0, 6.0
+    enter(a.client)
+    b.client.cookies.update(dict(a.client.cookies))
+    a.client.post("/watch/api/session", json={})
+    local[0] += 10  # a hears nothing for ten seconds: it would be suspended, so it starts no call
+    a.drain()
+    assert a.writer.calls == []
+    store = SessionStore(tmp_path / "sessions.sqlite", clock=lambda: wall[0])
+    session_id = store.sessions()[0].session_id
+    # a had claimed the first caption and went quiet in the middle of the call.
+    b.client.get("/watch/api/state")
+    job = b.service.scheduler.job(0).job_id
+    assert store.watch_claim(session_id, f"live:{job}:0", 6.0)
+    b.drain()
+    assert job not in b.writer.calls  # b respects the claim while it is fresh
+    wall[0] += 7
+    local[0] += 7
+    b.client.get("/watch/api/state")  # b is being asked
+    b.drain()
+    assert job in b.writer.calls  # and takes the caption over once the claim is stale
+    assert b.client.get("/watch/api/captions").json()["captions"]["0"]["current"]
