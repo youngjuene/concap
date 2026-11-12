@@ -639,7 +639,11 @@ async function renderVideo(detail, renderID) {
     }
     listen(document, "visibilitychange", () => { if (document.hidden && !video.paused) pause("화면으로 돌아온 뒤 이어서 시청해 주세요."); });
     listen(document, "fullscreenchange", () => { if (!document.fullscreenElement && !video.paused) pause("전체 화면이 종료되었습니다. 이어서 시청해 주세요."); });
-    listen(video, "error", () => pause("영상을 재생하지 못했습니다. 연구자에게 문의해 주세요."));
+    // A pause from outside the page (a headset button, a media key, the browser's own controls) would
+    // leave a still picture with nothing to press: the overlay's button resumes it. The browser also
+    // fires "pause" at the clip's end, which is not one.
+    listen(video, "pause", () => { if (overlay.hidden && !video.ended) pause("영상이 멈췄습니다. 이어서 시청해 주세요."); });
+    listen(video, "error", () => pause("영상을 재생하지 못했습니다. 화면을 새로고침해 주세요."));
     listen(video, "ended", async () => {
       ending = true; clearInterval(timer);
       try {

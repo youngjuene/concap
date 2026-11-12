@@ -546,14 +546,28 @@ function render() {
   }
 }
 
-// A hidden tab pauses the watch behind phase 1's overlay; the sliders wait under it too.
-function pauseHidden() {
+// A hidden tab pauses the watch behind phase 1's overlay; the sliders wait under it too. So does a
+// pause from outside the page (a headset button, a media key) or a play() the browser refused: the
+// video has no controls, so the overlay's button is the only way on.
+const PAUSED = {
+  hidden: "화면으로 돌아온 뒤 이어서 시청해 주세요. 멈춘 동안의 자막 설정은 그대로 유지됩니다.",
+  stopped: "영상이 멈췄습니다. 아래 단추를 눌러 이어서 시청해 주세요.",
+};
+
+function pauseHidden(reason = "hidden") {
   const ms = positionMs();
   recordExposure(ms);
   shown.from = ms;
   video().pause();
+  $("paused-text").textContent = PAUSED[reason];
   $("paused").hidden = false;
+  $("resume").focus();
   flushExposures();
+}
+
+async function playWatch() {
+  $("paused").hidden = true;
+  try { await video().play(); } catch (error) { pauseHidden("stopped"); }
 }
 
 async function begin() {
@@ -587,7 +601,7 @@ function wire() {
     state = result.data;
     render();
     paint(0);
-    await video().play();
+    await playWatch();
     sendPlayback();
   });
   for (const axis of AXES) {
@@ -607,7 +621,12 @@ function wire() {
     clearInterval(ticker);
     ticker = setInterval(() => { sendPlayback(); flushExposures(); }, TICK_MS);
   });
-  video().addEventListener("pause", () => { sendPlayback(); clearInterval(ticker); });
+  video().addEventListener("pause", () => {
+    sendPlayback();
+    clearInterval(ticker);
+    // The browser also fires "pause" when the video ends; that is the end, not a stop.
+    if (state && state.stage === "watch" && !video().ended && $("paused").hidden) pauseHidden("stopped");
+  });
   video().addEventListener("ended", async () => {
     clearInterval(ticker);
     recordExposure(positionMs());
@@ -632,10 +651,7 @@ function wire() {
     if (document.hidden && state && state.stage === "watch" && !video().paused && !video().ended) pauseHidden();
     else if (!document.hidden && !$("paused").hidden) $("resume").focus();
   });
-  $("resume").addEventListener("click", async () => {
-    $("paused").hidden = true;
-    await video().play();
-  });
+  $("resume").addEventListener("click", playWatch);
 }
 
 wire();
