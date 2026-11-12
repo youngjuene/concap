@@ -249,6 +249,12 @@ def main() -> int:
     parser.add_argument("--closed", action="store_true", help="every request gets the closed page")
     parser.add_argument("--new-code", action="store_true", help="replace the access code (closes old links)")
     parser.add_argument("--dirty", action="store_true", help="stage uncommitted deploy/vercel files")
+    parser.add_argument(
+        "--entry",
+        choices=("id", "link"),
+        help="how a session starts: a typed participant ID, or a personal link only "
+        "(default: link for participants, id for smoke)",
+    )
     args = parser.parse_args()
 
     head = git("rev-parse", "HEAD").strip()
@@ -335,6 +341,7 @@ def main() -> int:
         "purpose": args.purpose,
         "database": DATABASES[args.purpose],
         "sessions": args.sessions,
+        "entry": args.entry or ("link" if args.purpose == "participant" else "id"),
         "phase1_setup": str(SETUP),
         "sources": str(SOURCES),
         "scenes": str(SCENES) if (REPO / SCENES).is_file() else None,

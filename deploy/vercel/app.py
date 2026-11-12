@@ -16,6 +16,9 @@ The app is the lab's (:func:`diff.participant_server.build_participant_app`), bu
   lost a session on the 2026-10-27 walk as soon as a request reached a second instance.
 - **An access code.** The production address is public, so only a browser that opened the
   study link (``/?code=…``) gets past :func:`_gate`.
+- **Personal links** (``entry: link`` in ``deploy.json``, participant deploys): a participant's
+  link is ``/?code=…&p=<token>``, issued by ``links.py``. The token names their ID, so nobody
+  types one and nobody can open another participant's session.
 - **Logs go to Postgres too** (:class:`pg_store.PgLogDir`), one row per line, since /tmp dies
   with the instance. ``pull.py`` writes them back out as the lab's files for ``diff export``.
 
@@ -65,6 +68,7 @@ def _gate(app: Any, code: str, *, open: bool = True) -> None:
     """
     import hashlib
     import hmac
+    from urllib.parse import urlencode
 
     from fastapi import Request
     from fastapi.responses import HTMLResponse, RedirectResponse
@@ -82,7 +86,10 @@ def _gate(app: Any, code: str, *, open: bool = True) -> None:
         if given is not None:
             if not hmac.compare_digest(given.strip().lower().encode(), code.encode()):
                 return closed()
-            response = RedirectResponse(request.url.path, status_code=303)
+            # The participant's own token (``p``) stays in the address for the page to enter with.
+            kept = [(name, value) for name, value in request.query_params.multi_items() if name != "code"]
+            target = request.url.path + ("?" + urlencode(kept) if kept else "")
+            response = RedirectResponse(target, status_code=303)
             # Lax, not strict: the link is opened from another site (a message, a mail).
             response.set_cookie(
                 ACCESS_COOKIE, admitted, max_age=ACCESS_SECONDS, httponly=True, secure=True, samesite="lax"
@@ -172,6 +179,7 @@ def _build() -> Any:
         tweak_for=tweak_for,
         secret=os.environ["DIFF_SECRET"].encode(),
         source_draw=(lambda session_id: draw(session_id, scenes, videos)) if scenes is not None else None,
+        entry=DEPLOY.get("entry", "id"),
     )
     _gate(app, DEPLOY["access_code"], open=DEPLOY.get("open", True))
     return app

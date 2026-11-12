@@ -3,6 +3,12 @@
 Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
 - **Entry:** the experimenter types the participant ID on the start screen.
   The same ID resumes an unfinished session; a finished one is refused.
+  Since 2026-11-12 a remote participant opens a personal link instead
+  (``/?p=<token>``; ``entry="link"``): the token stands for their ID
+  (``SessionStore.link_issue``), nobody types an ID, and an ID sent by hand is
+  refused, so one participant cannot open another's session by changing a
+  number. Opening the link again resumes the session, or shows the end screen
+  once it is finished.
 - **Writer:** each session claims a writer service when the ID is entered, so a
   full machine shows before the participant starts, not at the handoff (a GPU
   with Trida until 2026-10-27; ``live serve --sessions`` of them since).
@@ -108,6 +114,8 @@ HEADERS: Final = {
 NO_SESSION: Final = "세션이 없습니다. 처음부터 다시 시작해 주세요."
 FINISHED: Final = "이미 완료된 참가자 번호입니다. 다른 번호를 입력해 주세요."
 BAD_ID: Final = "참가자 번호는 P1, P2와 같은 형식입니다."
+BAD_LINK: Final = "링크를 확인할 수 없습니다. 연구자에게 받은 링크로 다시 접속해 주세요."
+ENTRIES: Final = ("id", "link")
 NOT_YET: Final = "아직 이 단계가 아닙니다."
 UNREQUESTED: Final = "요청을 확인할 수 없습니다. 화면을 새로고침해 주세요."
 
@@ -182,6 +190,7 @@ def build_participant_app(
     secret: bytes | None = None,
     clock: Callable[[], float] = time.time,
     source_draw: SourceDraw | None = None,
+    entry: str = "id",
 ) -> Any:
     """The whole session's app; without ``phase1`` (smoke runs) an entry goes straight to the watch.
 
@@ -189,7 +198,12 @@ def build_participant_app(
     phase 1 needs it. The session's live service writes them: Claude through the API since
     2026-10-27, which also writes phase 2's live captions (on 2026-10-26 to 27 phase 1 had its own
     writer pool, while phase 2 stayed on Trida). ``source_draw`` is the perceived-source block's draw.
+
+    ``entry``: ``"id"`` (the lab: the experimenter types the participant ID) or ``"link"`` (remote
+    participants: a personal link's token is the only way in).
     """
+    if entry not in ENTRIES:
+        raise ValueError(f"entry is one of {ENTRIES}, not {entry!r}")
     from fastapi import FastAPI, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
@@ -298,13 +312,22 @@ def build_participant_app(
         if request.headers.get("x-study-request") != "1":
             return error(401, UNREQUESTED)
         body = await request.json() if await request.body() else {}
-        participant = body.get("participant") if isinstance(body, Mapping) else None
+        link = body.get("link") if isinstance(body, Mapping) else None
+        if isinstance(link, str):
+            participant = store.link_participant(link)
+            if participant is None:
+                return error(404, BAD_LINK)
+        elif entry == "link":
+            return error(403, BAD_LINK)  # no typed IDs: only a link's token names a participant
+        else:
+            participant = body.get("participant") if isinstance(body, Mapping) else None
         if not isinstance(participant, str):
             return error(400, BAD_ID)
         try:
             session, _ = store.enter(participant, initial(participant))
         except SessionFinished:
-            return error(409, FINISHED)
+            # A personal link opened again after the end: its own end screen, not an error.
+            return JSONResponse({"error": FINISHED, "finished": True}, status_code=409)
         except ValueError:
             return error(400, BAD_ID)
         if pool.acquire(session.session_id) is None:
@@ -320,7 +343,7 @@ def build_participant_app(
     def phase1_state(request: Request) -> Response:
         session = store.by_token(request.cookies.get(COOKIE))
         if session is None or (session.finished_at is not None and session.state["stage"] != "phase2"):
-            return error(401, NO_SESSION)
+            return JSONResponse({"error": NO_SESSION, "entry": entry}, status_code=401)
         if session.state["stage"] == "phase2":  # a finished session's browser lands on its end screen
             return JSONResponse({"kind": "moved", "next_url": WATCH_URL})
         submit_pending(session.session_id)

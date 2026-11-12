@@ -4,7 +4,9 @@
  *
  * Changed from regen's copy:
  * - paths are relative (api/p1, api/enter), so the app can sit behind any prefix;
- * - a start screen where the experimenter types the participant ID (P1, P2, …);
+ * - a start screen where the experimenter types the participant ID (P1, P2, …) in the lab; a
+ *   remote participant's personal link (/?p=<token>) enters for them, and without one the page
+ *   only asks for the link (researcher, 2026-11-12);
  * - P0 shows the introduction with a start button until consent text exists;
  * - two stages (every clip's first viewing, then every second viewing): while a
  *   clip's second caption is still being written the page waits with regen's
@@ -745,11 +747,35 @@ function renderEntry(message = "") {
   input.focus();
 }
 
+function renderNotice(heading, text) {
+  shell.hidden = false;
+  const head = node("div", undefined, "head");
+  head.append(node("span", "소리 자막 연구", "eyebrow"), node("h1", heading), node("p", text, "lede"));
+  shell.replaceChildren(head);
+}
+
+// A personal link (/?p=<token>) enters for its participant; the token then leaves the address bar.
+async function enterByLink(link) {
+  try {
+    const entered = await post("api/enter", {link});
+    history.replaceState(null, "", window.location.pathname);
+    if (entered.next_url) { window.location.assign(entered.next_url); return true; }
+    return false;
+  } catch (error) {
+    history.replaceState(null, "", window.location.pathname);
+    if (error.detail?.finished) renderNotice("참여가 완료되었습니다", "감사합니다. 이 창은 닫으셔도 됩니다.");
+    else renderNotice("접속할 수 없습니다", error.message);
+    return true;
+  }
+}
+
 export async function boot() {
   document.documentElement.lang = "ko";
   document.title = "소리 자막 연구";
   shell = document.getElementById("shell"); shell.hidden = false;
   shell.replaceChildren(node("p", "실험 정보를 불러오고 있습니다…", "lede"));
+  const link = new URLSearchParams(window.location.search).get("p");
+  if (link && await enterByLink(link)) return;
   // The experimenter opens /#enter to switch participants on this browser.
   if (window.location.hash === "#enter") { renderEntry(); return; }
   try {
@@ -757,7 +783,8 @@ export async function boot() {
     try { detail = await request("state"); }
     catch (error) {
       if (error.status !== 401) throw error;
-      renderEntry();
+      if (error.detail?.entry === "link") renderNotice("링크로 접속해 주세요", "연구자에게 받은 개인 링크를 열면 실험이 시작됩니다.");
+      else renderEntry();
       return;
     }
     await render(detail);

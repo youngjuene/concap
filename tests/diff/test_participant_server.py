@@ -369,3 +369,39 @@ def test_security_headers(lab: Lab) -> None:
     assert page.headers["content-security-policy"] == "frame-ancestors 'none'"
     assert lab.enter(client).headers["cache-control"] == "no-store"
     assert client.cookies.get(COOKIE)
+
+
+def test_a_personal_link_enters_for_its_participant_and_no_typed_id_does(tmp_path: Path) -> None:
+    lab = Lab(tmp_path)
+    store = SessionStore(tmp_path / "sessions.sqlite", clock=lambda: lab.now[0])
+    lab.app = build_participant_app(
+        store=store,
+        pool=LivePool([lab.service]),
+        videos=[LiveVideo(VIDEO, lab.media, stream())],
+        items=rating_items(ITEMS),
+        log_dir=tmp_path / "logs",
+        job_for=job_for,
+        phase1=Phase1(lab.setup, root=tmp_path),
+        tweak_for=lambda clip, slots, rung: tweak_job_for(clip, slots, "smoke", rung),
+        secret=b"test-secret",
+        entry="link",
+    )
+    token = store.link_issue("P7")
+    assert store.link_issue("P7") == token and store.links() == [("P7", token)]
+    client = lab.client()
+    no_session = client.get("/api/p1/state")
+    assert no_session.status_code == 401 and no_session.json()["entry"] == "link"
+    assert lab.enter(client, "P7").status_code == 403  # nobody types an ID here
+    assert client.post("/api/enter", json={"link": "not-a-token"}, headers=HEADERS).status_code == 404
+    assert client.post("/api/enter", json={"link": token}).status_code == 401  # still needs the header
+    assert client.post("/api/enter", json={"link": token}, headers=HEADERS).json() == {"stage": "phase1"}
+    assert lab.state(client)["page"] == "P0"
+    (session,) = store.sessions()
+    assert session.participant == "P7"
+    # Opened again, the link resumes the same session; once it is finished it says so.
+    again = lab.client()
+    assert again.post("/api/enter", json={"link": token}, headers=HEADERS).status_code == 200
+    assert len(store.sessions()) == 1
+    store.finish(session.session_id)
+    done = again.post("/api/enter", json={"link": token}, headers=HEADERS)
+    assert done.status_code == 409 and done.json()["finished"] is True

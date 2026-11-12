@@ -659,6 +659,20 @@ def phase1_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+def links_run(args: argparse.Namespace) -> int:
+    """Issue (or list) the personal links of a lab store: one random token per participant ID."""
+    from diff.session_store import SessionStore
+
+    store = SessionStore(args.store)
+    for participant in args.participants:
+        store.link_issue(participant)
+    print("participant,link")
+    for participant, token in store.links():
+        if not args.participants or participant in args.participants:
+            print(f"{participant},{args.base.rstrip('/')}/?p={token}")
+    return 0
+
+
 def export_run(args: argparse.Namespace) -> int:
     """Write the research export from the session store and the live logs (this machine only)."""
     from diff.export_bundle import export
@@ -985,6 +999,7 @@ def live_serve(args: argparse.Namespace) -> int:
         phase1=phase1,
         tweak_for=tweak_for,
         source_draw=(lambda session_id: draw(session_id, scenes, videos)) if scenes is not None else None,
+        entry=args.entry,
     )
     first = "phase 1, then the watch" if phase1 else "the watch (no phase 1)"
     print(f"participant app on http://{args.host}:{args.port}/: {first}", flush=True)
@@ -1201,6 +1216,13 @@ def parser() -> argparse.ArgumentParser:
     exported.add_argument("--phase1-setup", type=Path, required=True, help="the setup the sessions ran with")
     exported.add_argument("--out", type=Path, required=True, help="a new, empty directory")
     exported.set_defaults(handler=export_run)
+    links = commands.add_parser(
+        "links", help="issue or list participants' personal links (live serve --entry link)"
+    )
+    links.add_argument("participants", nargs="*", help="participant IDs (P1, P2, …); none lists every link")
+    links.add_argument("--store", type=Path, default=PARTICIPANT_STORE)
+    links.add_argument("--base", default="http://127.0.0.1:8780", help="the app's address")
+    links.set_defaults(handler=links_run)
     live = commands.add_parser(
         "live", help="live phase 2: Claude rewrites captions while a participant watches"
     )
@@ -1229,6 +1251,12 @@ def parser() -> argparse.ArgumentParser:
         help="the cues' scene parts (python -m diff phase2 scene); without it every cue is acousmatic",
     )
     serve_live.add_argument("--purpose", choices=("participant", "smoke"), default="participant")
+    serve_live.add_argument(
+        "--entry",
+        choices=("id", "link"),
+        default="id",
+        help="how a session starts: the experimenter types an ID, or a personal link only (diff links)",
+    )
     serve_live.add_argument("--log-dir", type=Path, required=True)
     serve_live.add_argument("--host", default="127.0.0.1")
     serve_live.add_argument("--port", type=int, default=8782)
