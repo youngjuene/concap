@@ -291,3 +291,27 @@ def test_a_server_nobody_asks_does_not_write_and_a_quiet_writer_s_caption_is_tak
     b.drain()
     assert job in b.writer.calls  # and takes the caption over once the claim is stale
     assert b.client.get("/watch/api/captions").json()["captions"]["0"]["current"]
+
+
+def test_a_watch_request_reads_the_live_part_of_the_session_not_its_whole_state(
+    two: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = two["a"]
+    a.client.post("/watch/api/session", json={})
+    a.drain()
+    a.client.post("/watch/api/start")
+    whole: list[str] = []
+    for name in ("by_token", "get", "sessions"):
+        monkeypatch.setattr(SessionStore, name, lambda self, *args, name=name: whole.append(name))
+    # What a watch page sends every second: none of it loads the stored state.
+    assert a.client.get("/watch/api/captions").status_code == 200
+    assert (
+        a.client.post("/watch/api/playback", json={"position_ms": 1000, "playing": True}).status_code == 200
+    )
+    assert a.client.get("/watch/api/state").json()["stage"] == "watch"
+    shown = {"entries": [{"cue": 0, "token": "x", "from_ms": 0, "to_ms": 900}]}
+    assert a.client.post("/watch/api/exposures", json=shown).status_code == 200
+    assert whole == []
+    found = two["store"].watch_session(a.client.cookies["diff_session"])
+    assert found["stage"] == "phase2" and found["live"]["stage"] == "watch" and not found["finished"]
+    assert found["calibration"]["system_message"] and two["store"].watch_session("no-such-token") is None

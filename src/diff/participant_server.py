@@ -255,14 +255,18 @@ def build_participant_app(
         if outcome["status"] == "next":  # the gate refused it: queue the next rung now
             submit_pending(request.session_id)
 
-    def submit_pending(session_id: str) -> None:
-        """Queue every pending second caption on the session's writer (already queued ones are skipped)."""
+    def submit_pending(session_id: str, state: Mapping[str, Any] | None = None) -> None:
+        """Queue every pending second caption on the session's writer (already queued ones are skipped).
+
+        ``state``: the session's state when the caller has just read it, so it is not read again.
+        """
         if phase1 is None or tweak_for is None:
             return
-        session = store.get(session_id)
-        if session.state.get("stage") != "phase1":
+        if state is None:
+            state = store.get(session_id).state
+        if state.get("stage") != "phase1":
             return
-        pending = phase1.pending_tweaks(session.state)
+        pending = phase1.pending_tweaks(state)
         if not pending:
             return
         service = pool.acquire(session_id)  # also tells the writer this server is being asked
@@ -332,7 +336,7 @@ def build_participant_app(
             return error(400, BAD_ID)
         if pool.acquire(session.session_id) is None:
             return error(503, BUSY_MESSAGE)
-        submit_pending(session.session_id)
+        submit_pending(session.session_id, session.state)
         reply = {"next_url": WATCH_URL} if session.state["stage"] == "phase2" else {"stage": "phase1"}
         response = JSONResponse(reply)
         response.set_cookie(COOKIE, session.token, httponly=True, samesite="strict", path="/")
@@ -346,7 +350,7 @@ def build_participant_app(
             return JSONResponse({"error": NO_SESSION, "entry": entry}, status_code=401)
         if session.state["stage"] == "phase2":  # a finished session's browser lands on its end screen
             return JSONResponse({"kind": "moved", "next_url": WATCH_URL})
-        submit_pending(session.session_id)
+        submit_pending(session.session_id, session.state)
         return JSONResponse(page(session.state))
 
     @app.get("/api/p1/media/{token}")
@@ -363,9 +367,11 @@ def build_participant_app(
     async def phase1_action(action: str, request: Request) -> Response:
         if request.headers.get("x-study-request") != "1":
             return error(401, UNREQUESTED)
-        session = stored(request)
-        if session is None or phase1 is None:
+        # The cookie's session, without its state: the store reads that once, inside the change.
+        session = store.watch_session(request.cookies.get(COOKIE))
+        if session is None or session["finished"] or phase1 is None:
             return error(401, NO_SESSION)
+        session_id = str(session["session_id"])
         if action not in ACTIONS:
             return error(404, UNREQUESTED)
         body = await request.json()
@@ -373,11 +379,13 @@ def build_participant_app(
         if not isinstance(data, dict):
             return error(400, "Action data must be an object")
         flow = phase1
+        waiting: list[bool] = []  # whether the action left a second caption to write
 
         def apply(state: dict[str, Any]) -> tuple[dict[str, Any], Mapping[str, Any]]:
             now = clock()
             if action != "handoff":
                 event = flow.apply(state, action, data, now)
+                waiting.append(bool(flow.pending_tweaks(state)))
                 return page(state), event
             if data.get("page") != "handoff":
                 raise Conflict("This answer belongs to another page")
@@ -388,7 +396,7 @@ def build_participant_app(
 
         try:
             reply = store.mutate(
-                session.session_id,
+                session_id,
                 body.get("key"),
                 body.get("revision"),
                 {"action": action, "data": data},
@@ -398,7 +406,11 @@ def build_participant_app(
             return error(409, str(exc))
         except (ValueError, KeyError, TypeError) as exc:
             return error(400, str(exc))
-        submit_pending(session.session_id)
+        # Only then is the state read again to queue them: most actions leave none, and the state
+        # is hundreds of kilobytes by stage B. A retried request (no apply) is covered by the
+        # page's own polling while it waits.
+        if waiting and waiting[-1]:
+            submit_pending(session_id)
         return JSONResponse(reply)
 
     # -- live phase 2 ----------------------------------------------------------
@@ -413,30 +425,30 @@ def build_participant_app(
         Nothing but a cache lives in this server's memory: any server may take any request (Vercel),
         and each brings its copy and its writer up to the store before it answers.
         """
-        session = store.by_token(request.cookies.get(COOKIE))
-        if session is None:
+        # Only the session's live part is read: the whole state, with phase 1's record, is hundreds
+        # of kilobytes, and a watch page asks several times a second.
+        found = store.watch_session(request.cookies.get(COOKIE))
+        if found is None:
             raise HTTPException(status_code=401, detail=NO_SESSION)
-        if session.state["stage"] != "phase2":
+        if found["stage"] != "phase2":
             raise HTTPException(status_code=409, detail=NOT_YET)
-        progress = session.state["live"]
+        session_id, finished, progress = found["session_id"], found["finished"], found["live"]
         with lock:
-            live = live_sessions.get(session.session_id)
+            live = live_sessions.get(session_id)
             joined = live is None
             if live is None:
-                live = LiveSession(
-                    session.session_id, pool.services[0], calibration_of(session.state["calibration"])
-                )
-                if session.finished_at is None:
-                    live_sessions[session.session_id] = live
+                live = LiveSession(session_id, pool.services[0], calibration_of(found["calibration"]))
+                if not finished:
+                    live_sessions[session_id] = live
             live.stage, live.video_index = progress["stage"], progress["video_index"]
             live.texture, live.context = progress["texture"], progress["context"]
             live.answers = dict(progress["answers"])
             live.source = progress.get("source")
             live.source_answers = list(progress.get("source_answers", []))
-        if session.finished_at is not None:
+        if finished:
             return live  # the end screen, for a reload or a retried last answer: nothing is stored
         if live.stage in WATCHING:
-            service = pool.acquire(session.session_id)
+            service = pool.acquire(session_id)
             if service is None:
                 raise HTTPException(status_code=503, detail=BUSY_MESSAGE)
             live.service = service
@@ -448,7 +460,7 @@ def build_participant_app(
                 store.watch_open(live.session_id, video.video_id, live.texture, live.context)
                 service.settings(spec_of(live))
         else:
-            pool.release(session.session_id)  # the last video released the writer; these pages need none
+            pool.release(session_id)  # the last video released the writer; these pages need none
         if joined and not progress["started"]:
             live_event(
                 log_dir, clock(), live.session_id, "session_started", calibration=live.calibration.record

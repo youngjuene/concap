@@ -41,6 +41,25 @@ predictor are not one variable.
   caption whose stored outcome failed stayed pending for good; settings were accepted after the
   videos and off the three stops; a browser gone quiet left the writers writing to the video's end.
 
+**The stress test, and what it cost (2026-11-12).** Four simultaneous sessions were walked at real
+speed on a smoke preview (phase 1, three 5-minute videos, the source block).
+- **Passed:** all four finished; no video restarted, while another instance took over a session's
+  requests 60 times (`server_joined`); 612 live captions, none written twice; every exposure
+  token resolved; watched shares 0.99–1.00.
+- **Found: suspended writers.** A quarter of the live calls took over 6 s by the instance's clock
+  (the longest 557 s, median 2 s): Vercel suspends an instance between requests, and a writer
+  thread stopped mid-call kept its claim while the cue went by. On Vercel a server now writes
+  only while it is being asked (3 s) and a live claim lapses after 6 s. Not yet verified on
+  Vercel, for the next reason.
+- **Found: the database quota.** Every watch request read the session's whole state (about
+  440 KB by phase 2), three or four times a second: over a gigabyte of database transfer per
+  participant. The run exhausted the Neon project's quota, so the second run could not start and
+  production answered 500 until the quota is restored (the researcher's account). Three or four
+  real participants would have done the same. A watch request now reads only the session's live
+  part (`SessionStore.watch_session`), and phase 1 no longer reads the state twice per action:
+  about 0.1 GB a participant by estimate. The Postgres form of that query has only been run on
+  SQLite's equivalent; a smoke walk on Vercel must confirm it once the database answers again.
+
 **Found and left as they are** (not chosen for this batch):
 - the page does not retry a lost slider move, a lost ratings or source answer, or a failed
   `video-ended`, and the long video has no stall or error message;

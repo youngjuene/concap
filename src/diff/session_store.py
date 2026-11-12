@@ -125,6 +125,13 @@ class Session:
 
 
 class SessionStore:
+    # What a watch request needs of a session: its stage, live progress and calibration, cut out of
+    # the state by the database (Postgres spells it differently, ``deploy/vercel/pg_store.py``).
+    WATCH_SESSION: Final = (
+        "SELECT session_id, finished_at, json_extract(state, '$.stage'), json_extract(state, '$.live'),"
+        " json_extract(state, '$.calibration') FROM sessions WHERE token = ?"
+    )
+
     def __init__(self, path: Path, *, clock: Callable[[], float] = time.time) -> None:
         self.path = path
         self.clock = clock
@@ -198,6 +205,29 @@ class SessionStore:
         with self._connection() as db:
             row = db.execute("SELECT * FROM sessions WHERE token = ?", (token,)).fetchone()
         return None if row is None else self._session(row)
+
+    def watch_session(self, token: str | None) -> dict[str, Any] | None:
+        """The session behind a cookie as the watch needs it, without its phase-1 record.
+
+        A watch page asks three or four times a second for fifteen minutes, and by then the whole
+        state is about 440 KB: read whole each time, that was over a gigabyte of database transfer
+        per participant, and it exhausted the Neon project's quota on 2026-11-12. This reads a few
+        kilobytes.
+        """
+        if not token:
+            return None
+        with self._connection() as db:
+            row = db.execute(self.WATCH_SESSION, (token,)).fetchone()
+        if row is None:
+            return None
+        session_id, finished_at, stage, live, calibration = row
+        return {
+            "session_id": session_id,
+            "finished": finished_at is not None,
+            "stage": stage,
+            "live": json.loads(live) if live else None,
+            "calibration": json.loads(calibration) if calibration else None,
+        }
 
     def get(self, session_id: str) -> Session:
         with self._connection() as db:

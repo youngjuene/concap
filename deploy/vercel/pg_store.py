@@ -64,6 +64,11 @@ class _Db:
 
 
 class PgSessionStore(SessionStore):
+    WATCH_SESSION = (
+        "SELECT session_id, finished_at, state::json->>'stage', state::json->>'live',"
+        " state::json->>'calibration' FROM sessions WHERE token = ?"
+    )
+
     def __init__(self, url: str, *, clock: Callable[[], float] = time.time, max_size: int = 4) -> None:
         from psycopg_pool import ConnectionPool
 

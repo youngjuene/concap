@@ -18,6 +18,14 @@ video starts again only when the participant's browser lost it (a reload), logge
 `video_restarted`; `pull.py` counts both. The writer pool grows with the sessions an instance
 meets, so `--sessions` is only how many writers an instance starts with.
 
+**The database has a transfer quota.** On 2026-11-12 a four-session stress test exhausted the
+Neon project's quota: every watch request read the session's whole state, over a gigabyte per
+participant. Neon then refuses every connection ("exceeded the quota"), for smoke and
+participants alike, since both databases are one project, and the site answers 500. A watch
+request now reads a few kilobytes (`SessionStore.watch_session`); by estimate a participant costs
+about 0.1 GB. Check the project's usage in Neon's console before a batch of sessions, and keep
+tests off the participants' month if the plan is the free one.
+
 ## What is where
 
 | Thing | Where |
