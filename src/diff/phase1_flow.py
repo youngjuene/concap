@@ -100,7 +100,7 @@ INTERLUDE_TEXT: Final = "앞에서 본 영상 {count}편을 한 번 더 봅니�
 HANDOFF_TITLE: Final = "이제 긴 영상 {count}편을 봅니다"
 HANDOFF_TEXT: Final = "보는 동안 자막을 직접 조절할 수 있습니다."
 # The session's segments, in order (the browser holds their labels):
-# intro, practice, first viewings, second viewings, long videos, interview.
+# intro, practice, first viewings, second viewings, long videos, done.
 SEGMENT: Final = {"P0": 0, "practice": 1, "A": 2, "B": 3, INTERLUDE: 3, "handoff": 4}
 # Regen's waiting message while a clip's second caption is prepared (sheet_questionnaire.js).
 PREPARING: Final = "다음 영상을 준비하고 있습니다…"

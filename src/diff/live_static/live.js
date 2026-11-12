@@ -12,8 +12,8 @@
 // - a hidden tab pauses the video behind phase 1's overlay, so no caption counts as seen unseen;
 // - the ratings use phase 1's scale cards and sticky bar;
 // - the perceived-source block (researcher, 2026-11-03) replays cues without captions after the ratings;
-// - the last screen keeps the participant for the oral interview, and a held
-//   button takes the experimenter back to the entry.
+// - the last screen says the session is complete and nothing else (researcher, 2026-11-12: participants
+//   are remote, so there is no experimenter to call and no next participant on this browser).
 "use strict";
 
 const POLL_MS = 500;  // a written caption reaches the screen within half a second
@@ -23,17 +23,16 @@ const MIN_READ_MS = 3000;
 const TICK_MS = 1000;
 const DEBOUNCE_MS = 300;
 const APPLIED_MS = 2000;
-const HOLD_MS = 1000;
 const GROUP = 3;
 // The session's segments, sized by expected time in the CSS; phase1_pages.js holds the same list.
-const SEGMENTS = ["도입", "연습", "첫 번째 시청", "두 번째 시청", "긴 영상", "인터뷰"];
+const SEGMENTS = ["도입", "연습", "첫 번째 시청", "두 번째 시청", "긴 영상", "완료"];
 const AXES = ["texture", "context"];
 const STOP_LABELS = {
   texture: ["없이", "조금", "많이"],
   context: ["넓은 범주로", "구체적인 음원", "위치와 관계까지"],
 };
 const CHIP = {
-  idle: "조절 막대는 영상을 보는 동안 언제든 움직일 수 있습니다",
+  idle: "슬라이더는 영상을 보는 동안 언제든 움직일 수 있습니다",
   pending: "새 설정으로 자막을 고쳐 쓰고 있습니다",
   applied: "새 설정이 반영되었습니다",
   waiting: "새 자막을 준비하는 동안 이전 설정의 자막이 표시됩니다",
@@ -445,7 +444,7 @@ async function playClip() {
     player.pause();
     measures.played_ms = Math.round(player.currentTime * 1000) - trial.start_ms;
     $("source-answers").disabled = false;
-    $("source-question").scrollIntoView({ block: "nearest" });
+    $("source-answers").scrollIntoView({ block: "nearest" });
   }, SOURCE_POLL_MS);
 }
 
@@ -453,6 +452,8 @@ function showTrial() {
   const trial = source.page.trials[source.index];
   source.measures = { played_ms: 0, waited_ms: 0, stalls: 0, restarts: 0 };
   $("source-eyebrow").textContent = `2스테이지 · 소리가 나는 곳 ${source.index + 1} / ${source.page.trials.length}`;
+  // Two trials in a row can name the same sound, so the count sits by the name too.
+  $("source-count").textContent = `${source.index + 1} / ${source.page.trials.length}`;
   $("source-sound").textContent = trial.sound;
   $("source-trial").hidden = false;
   $("source-lede").hidden = source.index > 0;
@@ -511,7 +512,7 @@ function render() {
     $("ready-status").textContent = "첫 자막을 준비하고 있습니다…";
     $("ready-eyebrow").textContent = where;
     $("ready-lede").textContent = state.video.number > 1
-      ? "헤드폰을 착용해 주세요. 조절 막대 설정은 앞 영상에서 이어집니다."
+      ? "헤드폰을 착용해 주세요. 슬라이더 설정은 앞 영상에서 이어집니다."
       : "헤드폰을 착용해 주세요.";
     $("watch-eyebrow").textContent = where;
     $("clock").textContent = `${clock(0)} / ${clock(state.video.duration_ms)}`;
@@ -553,28 +554,6 @@ function pauseHidden() {
   video().pause();
   $("paused").hidden = false;
   flushExposures();
-}
-
-// The experimenter holds the button for a second to return to the entry for the next participant.
-function wireHold() {
-  const hold = $("hold");
-  let timer = null;
-  const start = () => {
-    if (timer !== null) return;
-    hold.classList.add("holding");
-    timer = setTimeout(() => window.location.assign("../#enter"), HOLD_MS);
-  };
-  const stop = () => {
-    clearTimeout(timer);
-    timer = null;
-    hold.classList.remove("holding");
-  };
-  hold.addEventListener("pointerdown", start);
-  for (const name of ["pointerup", "pointerleave", "pointercancel"]) hold.addEventListener(name, stop);
-  hold.addEventListener("keydown", (event) => {
-    if ((event.key === "Enter" || event.key === " ") && !event.repeat) { event.preventDefault(); start(); }
-  });
-  hold.addEventListener("keyup", (event) => { if (event.key === "Enter" || event.key === " ") stop(); });
 }
 
 async function begin() {
@@ -657,7 +636,6 @@ function wire() {
     $("paused").hidden = true;
     await video().play();
   });
-  wireHold();
 }
 
 wire();

@@ -14,6 +14,7 @@
   --rule: #83878C;
   --ahead: #676C71;
   --hairline: #DEE0E1;
+  --track: #A3A7AB;
   --seam: #EDEEEF;
   --accent: #2F5EA8;
   --accent-press: #274F8C;
@@ -120,14 +121,14 @@ p.lede {
   line-height: 1.6;
   color: var(--body-ink);
   text-wrap: pretty;
+  word-break: keep-all;
 }
+/* diff: a heading kept for screen readers and focus on pages that show no title. */
+.unseen { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .actions { display: flex; gap: 12px; align-items: center; margin-top: 26px; flex-wrap: wrap; }
-.actions .spacer { flex: 1; }
-.actions .note { color: var(--body-ink); font: 12.5px/1.45 var(--mono); }
 
 .sheet-questionnaire .head { margin-bottom: 24px; }
 .sheet-questionnaire .lede { white-space: pre-line; }
-.sheet-questionnaire .sheet-progress { margin-bottom: 24px; color: var(--dim); }
 .sheet-questionnaire .sheet-item {
   min-width: 0;
   border: 1px solid var(--hairline);
@@ -159,14 +160,12 @@ p.lede {
 .sheet-questionnaire .sheet-score { font-size: 18px; font-weight: 600; }
 .sheet-questionnaire .sheet-label { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; word-break: keep-all; }
 .sheet-questionnaire .sheet-choices { display: grid; gap: 10px; }
-.sheet-questionnaire .sheet-text { width: 100%; min-height: 120px; font: inherit; padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius-sm); }
 .sheet-questionnaire .sheet-hint { color: var(--body-ink); font-size: 14px; margin-top: 12px; }
 .sheet-questionnaire .sheet-invalid { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .sheet-questionnaire .sheet-feedback { min-height: 1.7em; margin-top: 14px; color: var(--body-ink); white-space: pre-line; }
 .sheet-questionnaire .sheet-submitbar { position: sticky; bottom: 0; background: var(--ground); border-top: 1px solid var(--hairline); padding: 16px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; z-index: 2; }
 .sheet-questionnaire .sheet-submitbar .sheet-hint { margin: 0; }
 .sheet-questionnaire .sheet-setup { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 22px; }
-.sheet-questionnaire .sheet-setup ul { padding-left: 22px; margin: 12px 0; overflow-wrap: anywhere; }
 .sheet-questionnaire .sheet-consent { white-space: pre-line; background: var(--panel); padding: 20px; margin-bottom: 24px; border: 1px solid var(--hairline); border-radius: var(--radius); }
 .sheet-questionnaire .sheet-consent-check { margin-top: 20px; }
 .sheet-questionnaire .sheet-frame { position: relative; width: 100%; padding: 0; border: 1px solid var(--rule); border-radius: var(--radius-sm); overflow: hidden; cursor: crosshair; touch-action: manipulation; }
@@ -182,10 +181,10 @@ p.lede {
    2026-10-19): position, size and occlusion are part of the stimulus, and phase 1's S1–S3
    seed the live tuner. Phase 1 shows the prepared captions raw (researcher, 2026-10-18), so
    the band keeps line breaks and grows past two lines while the video gives way. */
-.sheet-caption { display: flex; justify-content: center; align-items: center; min-height: var(--caption-band); background: var(--stage); color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; white-space: pre-line; }
+.sheet-caption { display: flex; justify-content: center; align-items: center; min-height: var(--caption-band); background: var(--stage); color: white; font-size: 24px; line-height: var(--caption-leading); padding: 16px 28px; text-align: center; white-space: pre-line; word-break: keep-all; }
 .sheet-viewing .sheet-caption { flex: 0 0 auto; }
 .sheet-paused { position: absolute; inset: 0; background: rgb(0 0 0 / .88); color: white; display: grid; place-content: center; padding: 24px; text-align: center; gap: 18px; }
-.sheet-paused p { max-width: 54ch; }
+.sheet-paused p { max-width: 54ch; word-break: keep-all; }
 @media (max-width: 620px) {
   .sheet-questionnaire .sheet-item { padding: 18px 12px; }
   .sheet-questionnaire .sheet-scale { grid-template-columns: 1fr; }
@@ -215,7 +214,7 @@ p.lede {
 /* The whole session's progress: six segments sized by expected time, not by page count. */
 .session-progress { margin-bottom: 40px; }
 .session-progress .bars, .session-progress .labels { display: grid; grid-template-columns: 0.6fr 0.6fr 2fr 2fr 1.6fr 0.6fr; gap: 4px; }
-.session-progress .bars span { height: 5px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) 0 var(--fill, 0%), var(--hairline) var(--fill, 0%)); }
+.session-progress .bars span { height: 5px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) 0 var(--fill, 0%), var(--track) var(--fill, 0%)); }
 .session-progress .labels { margin-top: 7px; font-size: 11.5px; line-height: 1.4; color: var(--dim); word-break: keep-all; }
 .session-progress .labels .current { color: var(--ink); font-weight: 600; }
 
@@ -223,7 +222,7 @@ p.lede {
 .head .eyebrow-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 9px; }
 .head .eyebrow-row .eyebrow { margin-bottom: 0; }
 .clip-dots { display: flex; flex-wrap: wrap; gap: 4px; }
-.clip-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--hairline); }
+.clip-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--track); }
 .clip-dots .done { background: var(--accent); }
 .clip-dots .current { background: var(--panel); box-shadow: inset 0 0 0 2px var(--accent); }
 
@@ -240,7 +239,7 @@ p.lede {
 .figure-cues .moved::after { content: ""; position: absolute; left: 55%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
 .figure-cues .applied { background: var(--accent-wash); border: 2px solid var(--accent); }
 .figure-cues .swap { background: linear-gradient(90deg, var(--muted-fill) 62%, var(--accent-wash) 62%); border-color: var(--accent); }
-.figure-marks { font-size: 11.5px; color: var(--dim); text-align: center; }
+.figure-marks { font-size: 11.5px; color: var(--dim); text-align: center; word-break: keep-all; white-space: nowrap; }
 .figure-marks .applied { color: var(--accent); }
 
 /* Waiting for a second caption: a quiet indeterminate bar, still under reduced motion. */
@@ -262,28 +261,17 @@ p.lede {
 /* The missing-item message lives in the sticky bar, so it stays in view while the field scrolls. */
 .sheet-questionnaire .sheet-submitbar .sheet-feedback { margin: 0 0 0 auto; min-height: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; color: var(--ink); }
 .sheet-questionnaire .sheet-submitbar .sheet-feedback .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-button.link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: 600 14px/1.4 var(--body); text-decoration: underline; }
+button.link { min-height: 32px; padding: 4px 6px; border: 0; background: none; color: var(--accent); font: 600 14px/1.4 var(--body); text-decoration: underline; }
 button.link:hover:not(:disabled) { color: var(--accent-press); }
 button.link:active:not(:disabled) { background: none; }
-
-/* The end of the screens: the oral interview and the debrief follow, outside the app. */
-.notice { display: flex; align-items: center; gap: 18px; padding: 26px 24px; }
-.notice .mark { flex: none; width: 44px; height: 44px; border-radius: 50%; background: var(--accent-wash); border: 2px solid var(--accent); display: grid; place-items: center; font: 600 15px var(--mono); color: var(--accent); }
-.notice strong { display: block; font-size: 20px; font-weight: 600; line-height: 1.4; word-break: keep-all; }
-.notice span { display: block; margin-top: 4px; font-size: 14.5px; color: var(--body-ink); }
-.experimenter { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 64px; }
-.experimenter .note { font: 12.5px/1.45 var(--mono); color: var(--dim); }
-button.hold { position: relative; overflow: hidden; font-size: 14px; color: var(--body-ink); }
-button.hold::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 120ms; }
-button.hold.holding::after { transform: scaleX(1); transition: transform 1s linear; }
 
 /* The live watch: video, the shared caption band, and two three-stop sliders. */
 .watch { position: relative; max-width: 1000px; margin: 0 auto; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 14px; }
 .watch-head { display: flex; flex-direction: column; gap: 8px; }
 .watch-head .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .watch-head .eyebrow, .watch-head .clock { font: 12px/1.4 var(--mono); color: var(--dim); }
-.watch-elapsed { position: relative; height: 3px; border-radius: 2px; background: var(--hairline); overflow: hidden; }
-.watch-elapsed span { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: var(--rule); }
+.watch-elapsed { position: relative; height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; }
+.watch-elapsed span { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px; background: var(--dim); }
 .watch-stage { border-radius: var(--radius); overflow: hidden; background: var(--stage); display: flex; flex-direction: column; }
 .watch-stage video { display: block; width: 100%; height: clamp(220px, calc(100vh - 430px), 560px); object-fit: contain; background: var(--stage); }
 .steppers { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; padding: 4px 8px 0; }
@@ -335,7 +323,8 @@ button.hold.holding::after { transform: scaleX(1); transition: transform 1s line
 
 /* The perceived-source block: the sound's name above a captionless replay, then two fixed answers. */
 .source-trial { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
-.source-sound { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.5; color: var(--ink, inherit); }
+.source-sound { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.5; color: var(--ink, inherit); display: flex; align-items: baseline; gap: 12px; }
+.source-count { font: 12px/1.4 var(--mono); font-weight: 400; color: var(--dim); }
 .source-trial .watch-stage video { height: clamp(200px, calc(100vh - 480px), 480px); }
 .source-answers { margin: 0; padding: 0; border: 0; }
 .source-answers legend { padding: 0; margin-bottom: 10px; font-weight: 600; }

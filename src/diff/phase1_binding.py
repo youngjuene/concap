@@ -65,8 +65,8 @@ follows a stratified plan (``stratified-v2``, researcher, 2026-10-28, the design
 review's C14), drawn from the order seed once the recommendations are in: within
 the scene-recommended clips and within the acousmatic-recommended clips, half
 take the recommended mode and half the other one. Each mode is shown with
-probability 1/2 whatever P(b) is, and every participant sees both modes in both
-strata (5–7 scene-aware captions of 12, where the balanced plan drawn at entry
+probability 1/2 whatever P(b) is, and every participant sees both modes in each
+stratum of two or more clips (5–7 scene-aware captions of 12, where the balanced plan drawn at entry
 gave 3 or fewer, or 9 or more, to 13.7% of participants). The model's inputs
 enter only through the recommendation.
 
@@ -134,8 +134,9 @@ def assignment_plan(seed: int, recommended: Sequence[str]) -> list[str]:
     """Follow or counter per clip, in stage-A order, given each clip's recommended mode.
 
     Within each recommendation, half the clips follow. When both strata are odd, one seeded coin
-    gives the remaining follow to one of them, so follows are exactly half overall (an odd count's
-    odd one out counters, as the balanced plan did) and each clip follows with probability 1/2.
+    gives the remaining follow to one of them, so follows are exactly half overall and, with an even
+    number of clips (the study's 12), each clip follows with probability 1/2. With an odd number the
+    odd one out counters, as the balanced plan did, so the odd stratum's clips follow less often.
     """
     if any(mode not in MODES for mode in recommended):
         raise ValueError(f"recommendations must be in {MODES}")

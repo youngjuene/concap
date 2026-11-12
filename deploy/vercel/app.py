@@ -92,7 +92,7 @@ ACCESS_COOKIE = "diff_access"
 ACCESS_SECONDS = 12 * 3600
 CLOSED = (
     '<!doctype html><html lang="ko"><meta charset="utf-8">'
-    '<meta name="viewport" content="width=device-width, initial-scale=1"><title>ConCap</title>'
+    '<meta name="viewport" content="width=device-width, initial-scale=1"><title>소리 자막 연구</title>'
     '<p style="font: 18px/1.6 sans-serif; margin: 20vh auto; max-width: 32em; padding: 0 16px">'
     "지금은 이 주소로 참여할 수 없습니다. 연구자에게 받은 링크로 접속해 주세요.</p></html>"
 )

@@ -3,15 +3,14 @@
 Pages, in order:
 1. ready: the calibrated settings are written as Trida's rewrite of the first
    cues before playback, and Start waits for cue 0's caption;
-2. watch: the video plays, the two sliders can be moved at any time, and the
-   caption changes only at cue boundaries (the previous caption stays when
-   nothing new is ready);
+2. watch: the video plays, the two sliders can be moved at any time, and each
+   cue shows its own caption as :mod:`diff.live_generation` serves it (a
+   caption written under the current settings swaps in mid-cue);
 3. the next video (settings carry over), or the researcher's rating items once
    the last video ends;
 4. the perceived-source block, when the serve has one (:mod:`diff.source_check`);
-5. done: the screens are over, but the oral interview (P12) and debrief (P13)
-   follow outside the app, so the page asks the participant to stay and call
-   the experimenter (UI review of 2026-10-19).
+5. done: the page says the session is complete (researcher, 2026-11-12:
+   participants are remote, so nothing asks them to call an experimenter).
 
 The sliders snap to the three steps each axis really has (texture 0–2,
 context broad/specific/relation): the browser sends 0, 0.5 or 1, which

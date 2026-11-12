@@ -45,7 +45,7 @@
       <p class="lede" id="source-lede">앞서 본 영상의 장면을 짧게 다시 보여 드립니다. 자막 없이 보고 들은 뒤, 적힌 소리가 어디에서 나는 것처럼 들렸는지 골라 주세요. 정답은 없습니다.</p>
     </div>
     <div class="source-trial" id="source-trial" hidden>
-      <p class="source-sound" id="source-sound"></p>
+      <p class="source-sound"><span class="source-count" id="source-count"></span><span id="source-sound"></span></p>
       <div class="watch-stage"><video id="source-video" playsinline preload="auto" disablepictureinpicture></video></div>
       <p class="sheet-hint" id="source-status" role="status"></p>
       <fieldset class="source-answers" id="source-answers" disabled>
@@ -58,16 +58,9 @@
 
   <section id="done" hidden>
     <div class="head">
-      <span class="eyebrow">2스테이지 완료</span>
-      <h1 tabindex="-1">화면 과제가 끝났습니다</h1>
-    </div>
-    <div class="card notice">
-      <span class="mark" aria-hidden="true">!</span>
-      <div><strong>자리에서 헤드폰을 벗고 연구자에게 알려 주세요</strong><span>짧은 인터뷰가 이어집니다.</span></div>
-    </div>
-    <div class="experimenter">
-      <span class="note" id="hold-note">1초간 누르고 있기</span>
-      <button class="hold" id="hold" type="button" aria-describedby="hold-note">연구자 확인 · 다음 참가자</button>
+      <span class="eyebrow">소리 자막 연구</span>
+      <h1 tabindex="-1">참여가 완료되었습니다</h1>
+      <p class="lede">감사합니다. 이 창은 닫으셔도 됩니다.</p>
     </div>
   </section>
 </main>
