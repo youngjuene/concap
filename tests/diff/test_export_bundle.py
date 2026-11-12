@@ -26,6 +26,9 @@ def finished(tmp_path: Path) -> Lab:
     client.post("/watch/api/session", json={})
     drain(lab.service)
     client.post("/watch/api/start")
+    for position in (0, 1000, 2000):  # two seconds of the 15 are played before the video is ended
+        client.post("/watch/api/playback", json={"position_ms": position, "playing": True})
+        lab.now[0] += 1
     client.post("/watch/api/video-ended")
     client.post("/watch/api/ratings", json={"answers": {"L1": 4}})
     lab.enter(lab.client(), "P2")  # a second, unfinished session
@@ -44,6 +47,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         "phase1_rows": 102,
         "second_caption_rows": 3,
         "post_watch_rows": 1,
+        "phase2_video_rows": 1,
         "source_check_rows": 0,  # this serve has no scene parts, so no block
         "r2_coding_rows": 6,  # three shown captions, two R2 options each
     }
@@ -122,6 +126,11 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
                 "answer": "4",
             }
         ]
+    with (out / "phase2_videos.csv").open(encoding="utf-8") as handle:
+        (video,) = list(csv.DictReader(handle))
+    assert video["participant"] == "P1" and video["duration_ms"] == "15000"
+    assert (video["watched_ms"], video["watched_share"], video["furthest_ms"]) == ("2000", "0.1333", "2000")
+    assert video["restarts"] == "0"
     for name, digest in manifest["files"].items():
         assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest
 

@@ -50,7 +50,7 @@ class Lab:
             FakeAttempt(), self.root / "logs", tweak_check=check_record, clock=lambda: 0.0
         )
         self.app = build_participant_app(
-            store=SessionStore(self.root / "sessions.sqlite"),
+            store=SessionStore(self.root / "sessions.sqlite", clock=lambda: self.now[0]),
             pool=LivePool([self.service]),
             videos=[LiveVideo(VIDEO, self.media, stream())],
             items=rating_items(ITEMS),

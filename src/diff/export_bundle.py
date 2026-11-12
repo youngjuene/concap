@@ -38,6 +38,12 @@ Files written to ``--out``:
   first caption names one of its R2 distractors). It carries no participant,
   mode or intended key, so the coding is blind; ``caption_id`` joins it back.
 - ``post_watch.csv``: one row per participant × post-watch item.
+- ``phase2_videos.csv``: one row per participant × long video reached: how much of it was played
+  (``watched_ms`` and ``watched_share``, counted on the server from the page's playback reports:
+  new territory only, and no faster than the clock), how far playback got, and how often the video
+  started again after a reload. The server never blocks on it (researcher, 2026-11-12): a video
+  with a low share is excluded at analysis. A session that ended before a video's end has no row
+  for that video.
 - ``manifest.json``: counts, the setup's hash and each file's SHA-256.
 """
 
@@ -57,7 +63,8 @@ from diff.study_protocol import sha256_of
 
 # v9 (2026-10-26): the delivering rung's wording, not its τ. v10 (2026-10-27): the model that wrote it.
 # v11 (2026-11-03): the perceived-source block, source_check.csv.
-EXPORT_SCHEMA: Final = "diff.export/v11"
+# v12 (2026-11-12): how much of each long video was played, phase2_videos.csv.
+EXPORT_SCHEMA: Final = "diff.export/v12"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -128,6 +135,17 @@ R2_CODING_COLUMNS: Final = ("caption_id", "clip", "caption", "option", "label", 
 SOUND_ITEMS: Final = frozenset({"A1s", "A2s"})
 POINT_ITEMS: Final = frozenset({"V1", "V2"})
 POST_WATCH_COLUMNS: Final = ("participant", "session_id", "finished", "item", "answer")
+PHASE2_VIDEO_COLUMNS: Final = (
+    "participant",
+    "session_id",
+    "finished",
+    "video_id",
+    "duration_ms",
+    "watched_ms",
+    "watched_share",
+    "furthest_ms",
+    "restarts",
+)
 SOURCE_CHECK_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -199,6 +217,22 @@ def source_check_rows(
             },
         }
         for answer in live.get("source_answers", [])
+    ]
+
+
+def phase2_video_rows(
+    participant: str, session_id: str, finished: bool, live: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """One row per long video the session reached, from the coverage kept when a video ended.
+
+    The record made at a video's end also lists the next video, just opened and unplayed; the last
+    record of each video stands, so only a video still open when the session stopped reads 0.
+    """
+    latest = {video["video_id"]: video for video in live.get("coverage", [])}
+    return [
+        {"participant": participant, "session_id": session_id, "finished": finished}
+        | {column: video[column] for column in PHASE2_VIDEO_COLUMNS[3:]}
+        for video in latest.values()
     ]
 
 
@@ -379,6 +413,7 @@ def export(
     seconds: list[dict[str, Any]] = []
     post_watch: list[dict[str, Any]] = []
     source_check: list[dict[str, Any]] = []
+    phase2_videos: list[dict[str, Any]] = []
     with (out / "participants.jsonl").open("w", encoding="utf-8") as handle:
         for session in sessions:
             finished = session.finished_at is not None
@@ -397,6 +432,9 @@ def export(
             phase1 += phase1_rows(session.participant, session.session_id, finished, session.state, clips)
             seconds += second_caption_rows(
                 session.participant, session.session_id, finished, session.state, clips
+            )
+            phase2_videos += phase2_video_rows(
+                session.participant, session.session_id, finished, session.state.get("live", {})
             )
             source_check += source_check_rows(
                 session.participant, session.session_id, finished, session.state.get("live", {})
@@ -417,6 +455,7 @@ def export(
         "phase1_rows": _write_csv(out / "phase1.csv", PHASE1_COLUMNS, phase1),
         "second_caption_rows": _write_csv(out / "second_captions.csv", SECOND_CAPTION_COLUMNS, seconds),
         "post_watch_rows": _write_csv(out / "post_watch.csv", POST_WATCH_COLUMNS, post_watch),
+        "phase2_video_rows": _write_csv(out / "phase2_videos.csv", PHASE2_VIDEO_COLUMNS, phase2_videos),
         "source_check_rows": _write_csv(out / "source_check.csv", SOURCE_CHECK_COLUMNS, source_check),
         "r2_coding_rows": _write_csv(
             out / "r2_coding.csv", R2_CODING_COLUMNS, r2_coding_rows(seconds, clips)
