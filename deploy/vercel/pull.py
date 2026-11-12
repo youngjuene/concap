@@ -14,8 +14,10 @@ Each pull is a new directory under ``artifacts/diff/vercel/pulls/`` holding:
 
 ``--purpose`` picks the database (:data:`pg_store.DATABASES`): the participants' by default, the
 smoke tests' with ``smoke``. The pull ends with a health line: sessions started and finished, and
-every live watch that resumed with its video restarted, which happens when a request reaches
-another Vercel instance than the one that ran the watch (README, "One caveat for phase 2").
+every long video that started again. Since 2026-11-12 that happens only when the participant's
+browser lost the video (a reload, logged as ``video_restarted``); a request that reaches another
+Vercel instance carries on (``server_joined``), where until then it restarted the video
+(``session_resumed`` with ``video_restarted``). Both spellings are counted.
 
 The connection string is ``DATABASE_URL``, or the line of that name in
 ``artifacts/diff/vercel/.env.production`` (``vercel env pull`` there, kept out of git). The pull
@@ -52,14 +54,20 @@ def database_url() -> str:
 
 
 def restarted_watches(files: dict[str, list[str]]) -> list[str]:
-    """``session (video n)`` for every live watch that resumed with its video restarted."""
+    """``session at time`` for every long video that started again."""
     found = []
     for lines in files.values():
         for line in lines:
             event = json.loads(line)
-            if event.get("event") == "session_resumed" and event.get("video_restarted"):
+            old = event.get("event") == "session_resumed" and event.get("video_restarted")
+            if old or event.get("event") == "video_restarted":
                 found.append(f"{event.get('session_id')} at {event.get('at')}")
     return found
+
+
+def joined_servers(files: dict[str, list[str]]) -> int:
+    """How often a server other than the session's first took one of its watch requests."""
+    return sum(json.loads(line).get("event") == "server_joined" for lines in files.values() for line in lines)
 
 
 def main() -> int:
@@ -126,6 +134,7 @@ def main() -> int:
         "counts": counts,
         "finished": finished,
         "restarted_watches": restarted,
+        "servers_joined": joined_servers(files),
     }
     (out / "pull.json").write_text(json.dumps(record, indent=2) + "\n")
     out.rename(final)
@@ -134,9 +143,12 @@ def main() -> int:
         f"pulled {counts['sessions']} {args.purpose} sessions, {counts['events']} events, "
         f"{counts['log_lines']} log lines into {out}"
     )
-    print(f"health: {finished} of {counts['sessions']} sessions finished; {len(restarted)} restarted watches")
+    print(
+        f"health: {finished} of {counts['sessions']} sessions finished; {len(restarted)} videos started "
+        f"again; {record['servers_joined']} requests carried on by another server"
+    )
     for watch in restarted:
-        print(f"  !! a live watch restarted its video: {watch}")
+        print(f"  !! a long video started again (a reload): {watch}")
     where = out.resolve().relative_to(REPO) if out.resolve().is_relative_to(REPO) else out.resolve()
     print(
         f"next: uv run python -m diff export --store {where}/sessions.sqlite "

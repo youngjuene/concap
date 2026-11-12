@@ -4,6 +4,55 @@ Phase A deliverable, revised 2026-10-09 for Dream and again on 2026-10-12 back
 to Trida-7B (both model changes below). Written against `main` at `3842302`.
 Where the brief and the PRD disagree, the brief wins.
 
+## Remote sessions — review and decisions of 2026-11-12
+
+The researcher asked for a review of both phases' screens and of the algorithms behind them, then
+decided the following in an interview. The study now runs **remotely, on desktop, with no
+experimenter in the room**; a narrow window or a phone is neither blocked nor warned.
+
+**What the review found in the equations: nothing wrong.** Checked numerically against the code:
+the attention ratios (4.8 at the area floor, 0.8 for a miss), the congruence ratio (at most 9),
+`P₀` monotone in `q` so that `share ≥ 0.5 ⇔ P₀ ≥ 0.5`, the gap between `logit q` and `logit P₀`
+(at most 0.765), the stratified plan (each of 12 clips follows with probability 1/2), and the
+phase-2 scene file (90 cues, 59 scene-aware, pools 59 on and 30 off). Two things to know when
+reading results: 30 of the 58 click frames that show a source are under the 5% area floor, so over
+half of all possible hits carry the same ratio; and 3 lead sounds are off screen by the 2 s rule
+while `q ≥ 0.5` (a mask on target but under 0.2% of the frame), so the block's stratum and its
+predictor are not one variable.
+
+**Decided and built:**
+- **A long video's state is in the store** (`diff.session_store`, `watch_*`), so a server restart
+  or a request that reaches another Vercel instance carries on with the same video and captions,
+  and no caption is written twice. Until now such a request restarted the video. Tested with two
+  servers over one store (`tests/diff/test_shared_watch.py`).
+- **An interrupted video starts again from 0**, and only when the browser itself lost it (a
+  reload): `video_restarted` in the log, `restarts` in the export.
+- **The time played per long video is counted on the server and exported**
+  (`phase2_videos.csv`, export v12): new territory only, no faster than the clock. Nothing
+  blocks on it; the exclusion threshold is the analysis's, to fix before outcomes are read.
+- **Personal links.** A participant's link carries a random token for their ID
+  (`python -m diff links`, `deploy/vercel/links.py`); participant deploys take no typed ID.
+- **The end screen says the session is complete and nothing else.** A finished browser keeps it
+  after a reload.
+- **Wording:** the control is 슬라이더; a changed setting is applied 잠시 후; question and viewing
+  pages show no title (the sheet's page names stay in the export); phase 1 keeps the published
+  scale's seven labels, and the two post-watch items take its ends (전혀 그렇지 않다, 완전히 그렇다).
+- **Also fixed:** a pause from outside the page left a viewing with nothing to press; a second
+  caption whose stored outcome failed stayed pending for good; settings were accepted after the
+  videos and off the three stops; a browser gone quiet left the writers writing to the video's end.
+
+**Found and left as they are** (not chosen for this batch):
+- the page does not retry a lost slider move, a lost ratings or source answer, or a failed
+  `video-ended`, and the long video has no stall or error message;
+- the source block stores whatever played time the page reports (`played_ms`), so the analysis
+  must filter on it;
+- the second-caption gate refuses a caption that ends on a noun in 서 or 고 (경찰서, 광고), and
+  takes "바다 소리, 파도 소리" for a sentence;
+- `cue_steer` would fail on a cue with no sounds (none exists), and the 2 s window stretches if
+  audio mask files are missing (the current run is complete);
+- phase 2's slider moves and per-window exposures are only in `participants.jsonl`;
+- the intro text from the sheet still mentions an interview.
+
 ## Phase 1's second caption — a Bayesian binding model (researcher, 2026-10-23)
 
 **Asked:** the second caption takes one mode per clip, scene-aware or acousmatic,

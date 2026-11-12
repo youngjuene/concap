@@ -1221,7 +1221,7 @@ def parser() -> argparse.ArgumentParser:
     )
     links.add_argument("participants", nargs="*", help="participant IDs (P1, P2, …); none lists every link")
     links.add_argument("--store", type=Path, default=PARTICIPANT_STORE)
-    links.add_argument("--base", default="http://127.0.0.1:8780", help="the app's address")
+    links.add_argument("--base", default="http://127.0.0.1:8782", help="the app's address")
     links.set_defaults(handler=links_run)
     live = commands.add_parser(
         "live", help="live phase 2: Claude rewrites captions while a participant watches"

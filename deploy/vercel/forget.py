@@ -3,8 +3,8 @@
     uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/forget.py P12 [--purpose smoke] [--yes]
 
 Without ``--yes`` it only counts what would go. With it, the participant's sessions, receipts,
-events and live logs (``logs/sessions/session-<id>.jsonl`` and ``live-<id>.jsonl``) are deleted in
-one transaction. The lab's copies are not touched: it lists every pull and export that still holds
+events, live logs (``logs/sessions/session-<id>.jsonl`` and ``live-<id>.jsonl``), shared watch
+record (playback, written captions, claims) and personal link are deleted in one transaction. The lab's copies are not touched: it lists every pull and export that still holds
 the participant, to delete by hand (then pull and export again).
 """
 
@@ -19,6 +19,13 @@ from pull import REPO, VERCEL, database_url
 
 sys.path.insert(0, str(REPO / "src"))
 
+# The shared watch record and the links exist from the first deploy after 2026-11-12.
+LATER_ROWS = {
+    "watch_now": "DELETE FROM watch_now WHERE session_id = ANY(%s)",
+    "watch_results": "DELETE FROM watch_results WHERE session_id = ANY(%s)",
+    "watch_claims": "DELETE FROM watch_claims WHERE session_id = ANY(%s)",
+    "links": "DELETE FROM links WHERE participant = ANY(%s)",
+}
 ROWS = {
     "logs": "DELETE FROM logs WHERE name = ANY(%s)",
     "events": "DELETE FROM events WHERE session_id = ANY(%s)",
@@ -63,8 +70,13 @@ def main() -> int:
         ]
         names = [f"sessions/{kind}-{session_id}.jsonl" for session_id in ids for kind in ("session", "live")]
         counts = {}
-        for table, statement in ROWS.items():
-            keys = names if table == "logs" else ids
+        later = {
+            table: statement
+            for table, statement in LATER_ROWS.items()
+            if pg.execute("SELECT to_regclass(%s) IS NOT NULL", (table,)).fetchone()[0]
+        }
+        for table, statement in (later | ROWS).items():
+            keys = names if table == "logs" else [args.participant] if table == "links" else ids
             count = statement.replace("DELETE", "SELECT count(*)", 1)
             counts[table] = pg.execute(count, (keys,)).fetchone()[0]
             if args.yes:

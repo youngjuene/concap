@@ -8,13 +8,15 @@ Blob.
 **Both phases, smoke only (2026-10-27).** The app serves `purpose: smoke` until the
 researcher's participant gates are lifted.
 
-**One caveat for phase 2.** The live watch keeps its session in the instance's memory (its
-writer, its schedule, its caption tokens); only its progress is in the store. A watch request
-that reaches another instance rebuilds the session at the start of the video it was in, so the
-participant's video restarts, and a `video-ended` from the old video is refused there. Vercel
-offers no session affinity. On the 2026-10-27 walk (P909, three 5-minute videos at real speed)
-every request stayed on one instance: one `session_started`, no `session_resumed`. A
-`session_resumed` with `video_restarted: true` in the logs is how it would show.
+**Any instance serves any request (2026-11-12).** Vercel offers no session affinity, and until
+this date the live watch kept its session in one instance's memory: a request that reached
+another instance put the participant's video back at its start. The watch's state is now in
+the store (`diff.session_store`, the `watch_*` tables): the sliders and playback reports per
+video, every caption written, and a claim per caption being written. A second instance carries
+on with the same video and captions (`server_joined` in the log) and writes nothing twice. A
+video starts again only when the participant's browser lost it (a reload), logged as
+`video_restarted`; `pull.py` counts both. The writer pool grows with the sessions an instance
+meets, so `--sessions` is only how many writers an instance starts with.
 
 ## What is where
 
@@ -56,6 +58,23 @@ cd artifacts/diff/vercel/site && vercel deploy --prod
   close the study, and deploy again without it to reopen (same code, so old links work again).
 - `vercel deploy` without `--prod` makes a preview, behind Vercel's login
   (`vercel curl <path> --deployment <url>`).
+
+## Personal links
+
+A participant deploy takes no typed IDs (`entry: link` in `deploy.json`; `stage.py --entry` to
+override). Each participant gets their own link, which carries the access code and a random
+token that stands for their ID:
+
+```sh
+uv run --with "psycopg[binary]==3.3.6" --with psycopg-pool python deploy/vercel/links.py --range 1 24
+uv run --with "psycopg[binary]==3.3.6" --with psycopg-pool python deploy/vercel/links.py   # list them
+```
+
+It prints `participant,link` rows: keep that table, it is the only place a link is tied to an ID
+outside the database. Asking again gives the same links. Opening a link starts the session,
+opening it again resumes it, and after the end it shows the completion page. A new access code
+(`--new-code`) changes every link's `code`, so issue the list again after one. Smoke deploys
+keep the typed entry (`/#enter`), so a walker needs no link.
 
 ## Smoke and participant sessions
 
@@ -103,7 +122,8 @@ uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/forget.py P12       
 uv run --with "psycopg[binary]==3.3.6" python deploy/vercel/forget.py P12 --yes   # deletes
 ```
 
-It deletes the sessions, receipts, events and live logs from Neon in one transaction. It then lists
+It deletes the sessions, receipts, events, live logs, shared watch record and personal link from
+Neon in one transaction. It then lists
 every pull and export on this machine that still holds the participant. Delete those, then pull
 and export again.
 
@@ -114,4 +134,5 @@ and export again.
 - videos answered by a 307 to their Blob copy (a function's response is at most 4.5 MB);
 - one `DIFF_SECRET` for every instance, so a media token issued by one opens on another;
 - the lab's session store on Postgres (`pg_store.py`), shared by every instance;
+- a writer pool that grows instead of refusing, and personal links instead of typed IDs;
 - the live logs as rows of a `logs` table, one per line, since `/tmp` dies with the instance.

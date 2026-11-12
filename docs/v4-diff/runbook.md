@@ -292,6 +292,18 @@ uv run python -m diff live serve \
   --sessions 1 --log-dir artifacts/diff/live-$(date +%Y%m%d) --port 8782
 ```
 
+**Entry.** By default the experimenter types the participant ID on the start screen (`/#enter`
+switches participants). For participants who are not in the room, add `--entry link` and send each
+their own link (researcher, 2026-11-12): the link's random token stands for their ID, a typed ID is
+refused, and a browser without a link is asked for one. Opening the link again resumes the session.
+
+```sh
+uv run python -m diff links P1 P2 P3 --store <the serve's store> --base http://<host>:8782
+uv run python -m diff links --store <the serve's store>     # list every link issued
+```
+
+The Vercel study issues its links with `deploy/vercel/links.py` (its README).
+
 **Phase-2 scene parts** (gate 5, 2026-10-28; 2026-11-03). Each cue's mode comes from the masks alone,
 and the same file draws the perceived-source block after the items; without the file a smoke run writes
 every cue acousmatic and skips the block (plan.md, "Phase 2's scene profile"). Build the file once the
@@ -433,9 +445,16 @@ sessions" otherwise. `serve` itself now reports every unmet gate at once too.
   overlay.
 - **After a server restart:** phase 1 continues exactly where it was, and any
   second caption still pending is queued again when the participant's page
-  next talks to the server. A watch
-  in progress restarts its current video from the start, with its settings
-  (logged as `session_resumed`, `video_restarted: true`).
+  next talks to the server. A watch in progress carries on too (since
+  2026-11-12): the sliders, the playback position and the captions written are
+  in the store, and the log notes `server_joined`.
+- **After a reload in the middle of a long video:** the browser has lost the
+  video, so that video returns to its ready screen and starts again from 0,
+  with its sliders and its captions (logged as `video_restarted`, counted in
+  the export's `phase2_videos.csv`). A pause from outside the page (a headset
+  button) shows the resume overlay, as a hidden tab does.
+- **After the end:** the browser keeps the completion page, also after a
+  reload. Nothing asks the participant to call anyone.
 
 **Writer services:**
 - A session claims a writer service when the ID is typed, and holds it through
@@ -531,6 +550,9 @@ It reads the store (`--store`, default the participant store) and every
   shown caption can drop a named sound or keep a wrong one from the first
   caption (amsterdam_057's first caption names one of its R2 distractors);
 - `post_watch.csv`;
+- `phase2_videos.csv`: per participant and long video, the time played as the server counted it
+  (`watched_share`), how far playback got and how often the video started again; the server never
+  blocks on it, so decide the exclusion threshold before looking at outcomes;
 - `manifest.json`, with file hashes.
 
 This is the only way data leave the app.
