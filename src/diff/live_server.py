@@ -28,6 +28,14 @@ These routes serve the watch under ``/watch/`` for the session that app hands
 them through ``current``, and report each change through ``changed`` so that
 it is stored.
 
+Since 2026-11-12 (participants are remote; on Vercel any instance may take any
+request) nothing a video needs lives in one server's memory alone: ``current``
+rebuilds the session from the store on every request, and the sliders, the
+playback reports and the captions written go through the store's shared watch
+record (``watch``, :mod:`diff.session_store`), which every server's writer
+follows. A video starts again from 0 only when the browser itself lost it (a
+reload: ``api/restart``), and that is logged as ``video_restarted``.
+
 Every response the browser can fetch carries opaque tokens, caption text and
 timing only. Job IDs, the model, the decoding condition, step names and media
 file names never leave the server (plan §6.5). Participant-facing text is
@@ -52,7 +60,15 @@ from typing import Any, Final
 from diff.caption_sources import CaptionSource
 from diff.job_plan import Job
 from diff.live_calibration import Calibration
-from diff.live_generation import LiveScheduler, LiveService, LiveStream, Spec, opaque_token, slider_steps
+from diff.live_generation import (
+    LiveScheduler,
+    LiveService,
+    LiveStream,
+    SharedWatch,
+    Spec,
+    opaque_token,
+    slider_steps,
+)
 from diff.source_check import ANSWERS, QUESTION
 from diff.study_protocol import CONTEXT_STEPS
 
@@ -61,6 +77,8 @@ STATIC: Final = Path(__file__).with_name("live_static")
 WATCH: Final = "/watch"
 BUSY_MESSAGE: Final = "지금은 다른 참가자가 참여하고 있습니다. 잠시 후 다시 시도해 주세요."
 ORIGINS: Final = ("slider:texture", "slider:context", "reset")
+WATCHING: Final = ("ready", "watch")  # the stages in which a video is open and its captions are written
+STOPS: Final = (0.0, 0.5, 1.0)  # what the page's three-stop sliders send
 
 
 @dataclass(frozen=True)
@@ -113,25 +131,55 @@ def rating_items(document: Mapping[str, Any]) -> tuple[RatingItem, ...]:
 
 
 class LivePool:
-    """The live services, one per GPU; a session claims a free one at entry or is refused."""
+    """The writer services; a session claims a free one at entry or is refused.
 
-    def __init__(self, services: Sequence[LiveService]) -> None:
+    In the lab the pool is as large as ``live serve --sessions`` and a full one refuses the next
+    participant. With ``spawn`` (Vercel) it grows instead: each instance serves whichever sessions
+    reach it, so a fixed size would refuse a participant in the middle of a video. A grown pool
+    takes back a service whose session has sent this instance nothing for ``idle_s``; that session
+    simply claims one again on its next request, since its state is in the store.
+    """
+
+    def __init__(
+        self,
+        services: Sequence[LiveService],
+        *,
+        spawn: Callable[[], LiveService] | None = None,
+        idle_s: float = 600.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.services = list(services)
+        self.spawn, self.idle_s, self.clock = spawn, idle_s, clock
+        self.seen: dict[str, float] = {}
         self.lock = threading.Lock()
 
     def holder(self, session_id: str) -> LiveService | None:
         return next((service for service in self.services if service.session_id == session_id), None)
 
     def acquire(self, session_id: str) -> LiveService | None:
-        """The GPU this session holds, else a free one now claimed for it, else ``None``."""
+        """The service this session holds, else a free one now claimed for it, else ``None``."""
         with self.lock:
+            now = self.clock()
+            self.seen[session_id] = now
             held = self.holder(session_id)
             if held is not None:
                 return held
-            return next((service for service in self.services if service.claim(session_id)), None)
+            if self.spawn is not None:
+                for service in self.services:
+                    idle = service.session_id
+                    if idle is not None and now - self.seen.get(idle, now) > self.idle_s:
+                        service.detach(idle)
+                        self.seen.pop(idle, None)
+            free = next((service for service in self.services if service.claim(session_id)), None)
+            if free is None and self.spawn is not None:
+                free = self.spawn()
+                free.claim(session_id)
+                self.services.append(free)
+            return free
 
     def release(self, session_id: str) -> None:
         with self.lock:
+            self.seen.pop(session_id, None)
             for service in self.services:
                 service.detach(session_id)
 
@@ -168,10 +216,24 @@ def spec_of(session: LiveSession) -> Spec:
     return Spec(texture, context, session.calibration.system_message)
 
 
-def open_video(session: LiveSession, videos: Sequence[LiveVideo], job_for: JobFor) -> None:
-    """Attach the video's scheduler and write its first cues at the current settings."""
-    scheduler = LiveScheduler(videos[session.video_index].stream, job_for)
-    session.service.attach(session.session_id, scheduler)
+def open_video(
+    session: LiveSession,
+    videos: Sequence[LiveVideo],
+    job_for: JobFor,
+    watch: Any | None = None,
+    shared: SharedWatch | None = None,
+) -> None:
+    """Attach the video's scheduler and write its first cues at the current settings.
+
+    With the store's shared record (``watch``, and ``shared`` bound to the session) the video is
+    marked as the one being watched, and the scheduler then follows that record: a server joining a
+    video that is already playing picks up its position and the captions already written.
+    """
+    video = videos[session.video_index]
+    scheduler = LiveScheduler(video.stream, job_for)
+    session.service.attach(session.session_id, scheduler, shared)
+    if watch is not None:
+        watch.watch_open(session.session_id, video.video_id, session.texture, session.context)
     session.service.settings(spec_of(session), 0)
 
 
@@ -188,6 +250,8 @@ def add_live_routes(
     clock: Callable[[], float] = time.time,
     after_phase1: bool = False,
     source_draw: SourceDraw | None = None,
+    watch: Any | None = None,
+    reopen: Callable[[LiveSession], None] | None = None,
 ) -> None:
     """The watch's routes under ``/watch/``; ``current(request)`` raises HTTPException without a session.
 
@@ -196,6 +260,9 @@ def add_live_routes(
 
     ``source_draw``: the session's perceived-source draw, asked after the items; without one (a smoke
     run with no scene parts) the items end the session.
+
+    ``watch``: the store's shared watch record (``watch_*`` methods), which the sliders and playback
+    reports go through. ``reopen(session)`` opens the session's current video on this server.
     """
     from fastapi import APIRouter, HTTPException, Request, Response
     from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -268,6 +335,31 @@ def add_live_routes(
                 )
         raise HTTPException(status_code=404)
 
+    def open_current(session: LiveSession) -> None:
+        if reopen is not None:
+            reopen(session)
+        else:
+            open_video(session, videos, job_for)
+
+    @router.post("/api/restart")
+    def restart_watch(request: Request) -> dict[str, Any]:
+        """The browser lost the video it was playing (a reload): back to its ready screen, from 0.
+
+        The captions already written stay, so the video opens at once.
+        """
+        session = current(request)
+        if session.stage == "watch":
+            video = videos[session.video_index]
+            session.stage = "ready"
+            if watch is not None:
+                watch.watch_restart(session.session_id, video.video_id)
+            session.service.playback(0, False)
+            log(session, "video_restarted", video_index=session.video_index)
+            changed(session, "video_restarted")
+        elif session.stage != "ready":
+            raise HTTPException(status_code=409, detail="지금은 시청 단계가 아닙니다.")
+        return view(session)
+
     @router.post("/api/start")
     def start_watch(request: Request) -> dict[str, Any]:
         session = current(request)
@@ -285,6 +377,9 @@ def add_live_routes(
     @router.post("/api/settings")
     async def settings(request: Request) -> dict[str, Any]:
         session = current(request)
+        if session.stage not in WATCHING:
+            # After the last video the sliders are a record of what was watched: nothing moves them.
+            raise HTTPException(status_code=409, detail="지금은 설정을 바꿀 수 없습니다.")
         body = await request.json()
         try:
             texture, context = float(body["texture"]), float(body["context"])
@@ -292,10 +387,12 @@ def add_live_routes(
             slider_steps(texture, context)
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail="설정 값을 읽을 수 없습니다.") from exc
-        if origin not in ORIGINS:
+        if origin not in ORIGINS or texture not in STOPS or context not in STOPS:
             raise HTTPException(status_code=422, detail="설정 값을 읽을 수 없습니다.")
         session.texture, session.context = texture, context
         spec = spec_of(session)
+        if watch is not None:
+            watch.watch_settings(session.session_id, videos[session.video_index].video_id, texture, context)
         session.service.settings(spec, position)
         log(
             session,
@@ -319,6 +416,16 @@ def add_live_routes(
             hidden = bool(body.get("hidden", False))
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise HTTPException(status_code=422, detail="재생 정보를 읽을 수 없습니다.") from exc
+        if session.stage not in WATCHING:
+            return {"ok": True}  # a report that arrived after its video ended
+        if watch is not None:
+            # Only a video being watched earns watched time; the ready screen's reports do not.
+            watch.watch_playback(
+                session.session_id,
+                videos[session.video_index].video_id,
+                position,
+                playing and session.stage == "watch",
+            )
         session.service.playback(position, playing)
         # ``hidden``: the page paused itself because the tab was hidden (it never plays unseen).
         log(
@@ -355,6 +462,12 @@ def add_live_routes(
         entries = body.get("entries") if isinstance(body, Mapping) else None
         if not isinstance(entries, list):
             raise HTTPException(status_code=422, detail="표시 기록을 읽을 수 없습니다.")
+        if session.stage == "done":
+            return {"ok": True}
+        if any(isinstance(e, Mapping) and str(e.get("token")) not in session.tokens for e in entries):
+            # A token another server issued: tokens are keyed hashes of job IDs, so they are found again.
+            for job_id in session.service.job_ids():
+                session.tokens.setdefault(opaque_token(key, session.session_id, job_id), job_id)
         resolved = [
             {**entry, "job_id": session.tokens.get(str(entry.get("token")))}
             for entry in entries
@@ -369,11 +482,13 @@ def add_live_routes(
         if session.stage != "watch":
             raise HTTPException(status_code=409, detail="지금은 영상을 마칠 수 없습니다.")
         log(session, "video_ended", video_index=session.video_index)
+        if watch is not None:
+            watch.watch_close(session.session_id, videos[session.video_index].video_id)
         if session.video_index + 1 < len(videos):
             session.service.stop(session.session_id)
             session.video_index += 1
             session.stage = "ready"
-            open_video(session, videos, job_for)
+            open_current(session)
         else:
             # The last video frees the GPU for the next participant while this one rates.
             session.service.detach(session.session_id)
@@ -389,10 +504,16 @@ def add_live_routes(
     @router.post("/api/ratings")
     async def ratings(request: Request) -> dict[str, Any]:
         session = current(request)
-        if session.stage != "ratings":
-            raise HTTPException(status_code=409, detail="지금은 응답할 수 없습니다.")
         body = await request.json()
         answers = body.get("answers") if isinstance(body, Mapping) else None
+        if (
+            session.stage in ("source", "done")
+            and isinstance(answers, Mapping)
+            and answers == session.answers
+        ):
+            return {"stage": session.stage}  # a retried request, already kept
+        if session.stage != "ratings":
+            raise HTTPException(status_code=409, detail="지금은 응답할 수 없습니다.")
         if not isinstance(answers, Mapping) or set(answers) != {item.item_id for item in items}:
             raise HTTPException(status_code=422, detail="모든 문항에 답해 주세요.")
         for item in items:
@@ -439,7 +560,7 @@ def add_live_routes(
     @router.post("/api/source-answer")
     async def source_answer(request: Request) -> dict[str, Any]:
         session = current(request)
-        if session.stage != "source" or session.source is None:
+        if session.stage not in ("source", "done") or session.source is None:
             raise HTTPException(status_code=409, detail="지금은 응답할 수 없습니다.")
         body = await request.json()
         try:
@@ -453,6 +574,8 @@ def add_live_routes(
         done = len(session.source_answers)
         if index == done - 1 and session.source_answers[index]["answer"] == answer:
             return {"stage": session.stage, "next": done}  # a retried request, already kept
+        if session.stage == "done":
+            raise HTTPException(status_code=409, detail="지금은 응답할 수 없습니다.")
         if index != done:
             raise HTTPException(status_code=409, detail="이미 다른 장면의 차례입니다.")
         trial = session.source["trials"][index]

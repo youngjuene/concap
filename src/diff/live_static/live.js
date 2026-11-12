@@ -46,6 +46,7 @@ let debounce = null;
 let poller = null;
 let ticker = null;
 let segments = false;            // the watch follows phase 1, so the session's progress shows
+let restarted = false;           // this page was reloaded in the middle of a video, which starts again
 let stops = { texture: 1, context: 1 };
 let sent = { texture: 1, context: 1 };
 let epoch = 0;                   // bumps when the captions served change meaning: new settings, a new video
@@ -511,9 +512,12 @@ function render() {
     $("start").disabled = true;
     $("ready-status").textContent = "첫 자막을 준비하고 있습니다…";
     $("ready-eyebrow").textContent = where;
-    $("ready-lede").textContent = state.video.number > 1
-      ? "헤드폰을 착용해 주세요. 슬라이더 설정은 앞 영상에서 이어집니다."
-      : "헤드폰을 착용해 주세요.";
+    $("ready-lede").textContent = restarted
+      ? "시청이 중단되어 이 영상을 처음부터 다시 봅니다. 헤드폰을 착용해 주세요. 슬라이더 설정은 그대로입니다."
+      : state.video.number > 1
+        ? "헤드폰을 착용해 주세요. 슬라이더 설정은 앞 영상에서 이어집니다."
+        : "헤드폰을 착용해 주세요.";
+    restarted = false;
     $("watch-eyebrow").textContent = where;
     $("clock").textContent = `${clock(0)} / ${clock(state.video.duration_ms)}`;
     $("elapsed").style.width = "0%";
@@ -583,6 +587,12 @@ async function begin() {
     return;
   }
   state = result.data;
+  if (state.stage === "watch") {
+    // The page was loaded while a video was playing: a reload, or a browser reopened. The video and
+    // its position are gone with the old page, so the server puts this video back on its ready screen.
+    const again = await call("api/restart", {});
+    if (again.ok) { state = again.data; restarted = true; }
+  }
   segments = Boolean(state.progress);
   poller = setInterval(poll, POLL_MS);
   render();

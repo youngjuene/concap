@@ -19,6 +19,11 @@ The app is the lab's (:func:`diff.participant_server.build_participant_app`), bu
 - **Logs go to Postgres too** (:class:`pg_store.PgLogDir`), one row per line, since /tmp dies
   with the instance. ``pull.py`` writes them back out as the lab's files for ``diff export``.
 
+- **Any instance serves any request.** The watch's state is in the store's shared record
+  (``diff.session_store``, since 2026-11-12), so a request that reaches another instance carries on
+  with the same video and captions. The writer pool therefore grows with the sessions an instance
+  meets instead of refusing them; ``sessions`` in ``deploy.json`` is only how many start with it.
+
 Writer threads (``LiveService``) start at import. The browser polls ``/api/p1/state`` while it
 waits for a second caption, which keeps the instance running while the thread writes.
 """
@@ -148,16 +153,17 @@ def _build() -> Any:
     store = PgSessionStore(on_database(os.environ["DATABASE_URL"], DEPLOY["database"]))
     logs = store.log_dir() / "sessions"
     writer = ClaudeWriter()
-    services = [
-        LiveService(writer.attempt, logs, check=check, tweak_check=check_record)
-        for _ in range(DEPLOY["sessions"])
-    ]
-    for service in services:
+
+    def spawn() -> Any:
+        service = LiveService(writer.attempt, logs, check=check, tweak_check=check_record)
         service.start()
+        return service
+
+    services = [spawn() for _ in range(DEPLOY["sessions"])]
     _redirect_videos(DEPLOY["media"])
     app = build_participant_app(
         store=store,
-        pool=LivePool(services),
+        pool=LivePool(services, spawn=spawn),
         videos=videos,
         items=items,
         log_dir=logs,

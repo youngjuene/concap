@@ -179,7 +179,14 @@ def test_the_block_follows_the_ratings_and_ends_the_session(lab: dict[str, Any])
         assert answer(client, index).json() == {"stage": "source", "next": index + 1}
     assert answer(client, TRIALS - 1, OFF_SCREEN_ANSWER).json()["stage"] == "done"
     session = lab["store"].by_participant("P1") if hasattr(lab["store"], "by_participant") else None
-    assert client.get("/watch/api/source").status_code == 401  # the session is finished
+    assert client.get("/watch/api/source").status_code == 409  # the block is over
+    # The finished session's browser keeps its end screen: a reload, or the last answer sent again
+    # because its reply was lost, never meets "no session".
+    assert client.get("/watch/api/state").json()["stage"] == "done"
+    assert answer(client, TRIALS - 1, OFF_SCREEN_ANSWER).json() == {"stage": "done", "next": TRIALS}
+    assert answer(client, TRIALS - 1, ON_SCREEN_ANSWER).status_code == 409  # a different answer is not kept
+    assert client.get("/api/p1/state").json() == {"kind": "moved", "next_url": "watch/"}
+    assert len(lab["store"].sessions()[0].state["live"]["source_answers"]) == TRIALS
     assert session is None or session.finished_at is not None
 
 

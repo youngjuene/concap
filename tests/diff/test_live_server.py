@@ -38,14 +38,14 @@ ITEMS = {
 }
 
 
-def stream(cues: int = 3) -> LiveStream:
+def stream(cues: int = 3, video: str = VIDEO) -> LiveStream:
     document = {
         "schema": "diff.caption-sources/v1",
         "sources": [
             {
                 "schema": "diff.caption-source/v1",
                 "phase": 2,
-                "unit": {"kind": "video", "key": VIDEO},
+                "unit": {"kind": "video", "key": video},
                 "cue_index": index,
                 "start_ms": index * 5000,
                 "end_ms": (index + 1) * 5000,
@@ -64,7 +64,7 @@ def stream(cues: int = 3) -> LiveStream:
             for index in range(cues)
         ],
     }
-    return LiveStream.from_sources(parse_sources(document).sources, VIDEO)
+    return LiveStream.from_sources(parse_sources(document).sources, video)
 
 
 def job_for(source: CaptionSource, spec: Spec) -> Job:

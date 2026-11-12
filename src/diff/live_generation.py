@@ -63,6 +63,15 @@ session's flow queues the new job), and ends the tweak only on the last rung.
 Since 2026-10-27 the attempt is the Claude API writer (:mod:`diff.claude_writer`)
 rather than a worker, for both phases; the API's record of each call is logged with
 it, and a busy or unreachable API counts as transient.
+
+**Shared between servers** (researcher, 2026-11-12). Participants are remote, and on Vercel any
+instance may take any request, so one server's memory cannot be the watch's state. A service that
+is given the session's shared record (:class:`SharedWatch`, the store's ``watch_*`` tables) reads
+the sliders and the last playback report from it, replays the captions other servers wrote, and
+claims a caption before writing it, so the same captions are served everywhere and none is paid for
+twice. A playback report older than :data:`STALE_PLAY_S` means the browser is gone, and the
+scheduler stops writing ahead. Without a shared record the service works from its own memory, as
+before.
 """
 
 from __future__ import annotations
@@ -71,6 +80,7 @@ import bisect
 import hashlib
 import hmac
 import json
+import secrets
 import threading
 import time
 import traceback
@@ -78,7 +88,7 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from diff.caption_sources import CaptionSource
 from diff.generation_worker import TRANSIENT, WorkerStartupError
@@ -101,6 +111,9 @@ LOOKAHEAD_CUES: Final = 3
 # A tweak for the cue playing needs this long left at p + L: the page's 3 s reading minimum + its 0.5 s poll.
 MIN_SHOWN_MS: Final = 3500
 LIVE_DEADLINE_S: Final = 30.0
+SYNC_S: Final = 0.25  # how often a service re-reads the shared record
+STALE_PLAY_S: Final = 15.0  # the page reports playback every second: silence this long means it is gone
+CLAIM_TTL_S: Final = LIVE_DEADLINE_S + 10  # a writer that never reports back loses its claim
 TEXTURE_STEPS: Final = LIVE_TEXTURE_MAX
 
 
@@ -278,14 +291,26 @@ class LiveScheduler:
         return not failed or (len(failed) == 1 and failed[0] in TRANSIENT)
 
     def complete(self, request: LiveRequest, result: Mapping[str, Any]) -> None:
-        self.in_flight.discard(request.job.job_id)
+        self.absorb(request.cue, request.job.job_id, result)
+        if result.get("status") == "completed" and result.get("latency_ms") is not None:
+            self.estimator.observe(int(result["latency_ms"]))
+
+    def absorb(self, cue: int, job_id: str, result: Mapping[str, Any]) -> None:
+        """An attempt that ended, here or on another server: its caption, or its failure."""
+        self.in_flight.discard(job_id)
         if result.get("status") == "completed":
-            self.results[request.job.job_id] = dict(result)
-            self.written.setdefault(request.cue, []).append(request.job.job_id)
-            if result.get("latency_ms") is not None:
-                self.estimator.observe(int(result["latency_ms"]))
+            if job_id not in self.results:
+                self.results[job_id] = dict(result)
+                self.written.setdefault(cue, []).append(job_id)
         else:
-            self.failures.setdefault(request.job.job_id, []).append(str(result.get("status")))
+            self.failures.setdefault(job_id, []).append(str(result.get("status")))
+
+    def job_ids(self) -> list[str]:
+        """Every caption this video can have shown: the written ones and each cue's starting caption."""
+        starting = [
+            f"{STARTING_CAPTION}:{self.stream.video_id}:{cue}" for cue in range(len(self.stream.cues))
+        ]
+        return [*self.results, *starting]
 
     def ready(self) -> dict[int, dict[str, Any]]:
         """Every cue's caption as the browser would show it now, each about its own window.
@@ -319,6 +344,16 @@ class LiveScheduler:
 def opaque_token(secret: bytes, session_id: str, internal_id: str) -> str:
     """What the browser sees instead of a job ID (plan §6.5)."""
     return hmac.new(secret, f"{session_id}\0{internal_id}".encode(), hashlib.sha256).hexdigest()[:20]
+
+
+class SharedWatch(Protocol):
+    """One session's shared record (``diff.session_store``'s ``watch_*`` tables, bound to the session)."""
+
+    def now(self, video_id: str) -> Mapping[str, Any] | None: ...
+    def rows(self, after: int) -> Sequence[Mapping[str, Any]]: ...
+    def put(self, video_id: str, cue: int, job_id: str, origin: str, result: Mapping[str, Any]) -> None: ...
+    def claim(self, key: str, ttl_s: float) -> bool: ...
+    def release(self, key: str) -> None: ...
 
 
 Attempt = Callable[[Mapping[str, Any], float], dict[str, Any]]
@@ -413,14 +448,32 @@ class LiveService:
         self.finished_tweaks: set[tuple[str, int, int]] = set()
         self.stopping = False
         self.thread = threading.Thread(target=self._run, daemon=True)
+        self.origin = secrets.token_hex(6)  # this service, among those writing for the same session
+        self.shared: SharedWatch | None = None
+        self._forget_shared()
+
+    def _forget_shared(self) -> None:
+        self.cursor = 0  # the last shared result row replayed into the scheduler
+        self.spec_at = self.play_at = 0.0  # the shared record's reports already applied
+        self.synced_at = float("-inf")
+        self.foreign: dict[str, float] = {}  # captions another server claimed, and since when
 
     # -- session slot ---------------------------------------------------------
-    def attach(self, session_id: str, scheduler: LiveScheduler) -> None:
+    def attach(self, session_id: str, scheduler: LiveScheduler, shared: SharedWatch | None = None) -> None:
+        """Serve this video for the session; with ``shared``, as one of the servers that may."""
         with self.lock:
             if self.session_id not in (None, session_id):
                 raise RuntimeError("this live service already serves a session")
             self.session_id, self.scheduler = session_id, scheduler
+            self.shared = shared if shared is not None else self.shared
+            self._forget_shared()
             self.lock.notify_all()
+
+    def share(self, session_id: str, shared: SharedWatch | None) -> None:
+        """The claimed session's shared record, for its second captions before any video is attached."""
+        with self.lock:
+            if self.session_id == session_id and shared is not None and self.shared is None:
+                self.shared = shared
 
     def claim(self, session_id: str) -> bool:
         """Hold this GPU for a session from its entry on; ``False`` if another session holds it."""
@@ -439,7 +492,7 @@ class LiveService:
     def detach(self, session_id: str) -> None:
         with self.lock:
             if self.session_id == session_id:
-                self.session_id, self.scheduler = None, None
+                self.session_id, self.scheduler, self.shared = None, None, None
                 self.tweaks = deque(item for item in self.tweaks if item[0].session_id != session_id)
                 self.finished_tweaks = set()
 
@@ -448,9 +501,17 @@ class LiveService:
         return self.session_id is None
 
     # -- calls from the participant server -------------------------------------
-    def settings(self, spec: Spec, position_ms: int) -> None:
+    def settings(self, spec: Spec, position_ms: int | None = None) -> None:
+        """The spec in force; without a position (a server catching up) playback stays where it is."""
         with self.lock:
-            if self.scheduler is not None and self.scheduler.set_spec(spec, position_ms, self.clock()):
+            scheduler = self.scheduler
+            if scheduler is None:
+                return
+            if position_ms is None:
+                if spec != scheduler.spec:
+                    scheduler.spec, scheduler.revision = spec, scheduler.revision + 1
+                    self.lock.notify_all()
+            elif scheduler.set_spec(spec, position_ms, self.clock()):
                 self.lock.notify_all()
 
     def playback(self, position_ms: int, playing: bool) -> None:
@@ -461,7 +522,62 @@ class LiveService:
 
     def ready(self) -> dict[int, dict[str, Any]]:
         with self.lock:
+            self._sync()
             return {} if self.scheduler is None else self.scheduler.ready()
+
+    def video_id(self) -> str | None:
+        with self.lock:
+            return None if self.scheduler is None else self.scheduler.stream.video_id
+
+    def spec(self) -> Spec | None:
+        with self.lock:
+            return None if self.scheduler is None else self.scheduler.spec
+
+    def job_ids(self) -> list[str]:
+        with self.lock:
+            self._sync(force=True)
+            return [] if self.scheduler is None else self.scheduler.job_ids()
+
+    def _sync(self, force: bool = False) -> None:
+        """Bring the scheduler up to the shared record (the lock is held): what other servers wrote,
+        the sliders in force, and where playback is."""
+        scheduler, shared = self.scheduler, self.shared
+        if scheduler is None or shared is None:
+            return
+        local = self.clock()
+        if not force and local - self.synced_at < SYNC_S:
+            return
+        self.synced_at = local
+        video_id = scheduler.stream.video_id
+        for row in shared.rows(self.cursor):
+            self.cursor = int(row["id"])
+            if row["origin"] == self.origin or row["video_id"] != video_id:
+                continue
+            scheduler.absorb(int(row["cue"]), str(row["job_id"]), row["result"])
+            self.foreign.pop(str(row["job_id"]), None)
+        for job_id, since in list(self.foreign.items()):
+            if local - since > CLAIM_TTL_S:  # its writer never reported back: ours to try
+                del self.foreign[job_id]
+                scheduler.in_flight.discard(job_id)
+        now = shared.now(video_id)
+        if now is None:
+            return
+        if not now["is_open"]:
+            scheduler.spec = None  # the session has left this video: nothing more is written for it
+            return
+        if now["spec_at"] > self.spec_at and scheduler.spec is not None:
+            self.spec_at = float(now["spec_at"])
+            texture, context = slider_steps(float(now["texture"]), float(now["context"]))
+            spec = Spec(texture, context, scheduler.spec.system_message)
+            if spec != scheduler.spec:
+                scheduler.spec, scheduler.revision = spec, scheduler.revision + 1
+        age = float(now["now"]) - float(now["play_at"])
+        if now["play_at"] > self.play_at:
+            self.play_at = float(now["play_at"])
+            playing = bool(now["playing"]) and age < STALE_PLAY_S
+            scheduler.set_playback(int(now["position_ms"]), playing, local - age)
+        elif scheduler.playing and age >= STALE_PLAY_S:
+            scheduler.set_playback(scheduler.position(local), False, local)  # the browser went quiet
 
     def submit_tweak(self, request: TweakRequest, done: TweakDone) -> bool:
         """Queue a clip's second caption for the claimed session; ``False`` if not claimed, queued,
@@ -495,7 +611,8 @@ class LiveService:
         A video's requests come first; a queued tweak runs when the video has none.
         """
         with self.lock:
-            scheduler, session_id = self.scheduler, self.session_id
+            self._sync()
+            scheduler, session_id, shared = self.scheduler, self.session_id, self.shared
             request = scheduler.next_request(self.clock()) if scheduler is not None else None
             tweak = None
             if request is None and self.tweaks and self.tweaks[0][0].session_id == session_id:
@@ -506,12 +623,34 @@ class LiveService:
             return True
         if request is None or scheduler is None or session_id is None:
             return False
-        result = self._call(request.job)
-        if self.check and result.get("output"):  # the scheduler shows a caption only if it is usable
-            source = scheduler.stream.cues[request.cue]
-            result = {**result, "checks": dict(self.check(source, request.job, result))}
+        job_id = request.job.job_id
+        if shared is not None:
+            # One claim per attempt: a transient failure's retry is a new one.
+            tried = len(scheduler.failures.get(job_id, []))
+            try:
+                claimed = shared.claim(f"live:{job_id}:{tried}", CLAIM_TTL_S)
+            except Exception:
+                with self.lock:
+                    scheduler.in_flight.discard(job_id)
+                raise
+            if not claimed:  # another server is writing it; its result arrives through the record
+                with self.lock:
+                    self.foreign[job_id] = self.clock()
+                return True
+        try:
+            result = self._call(request.job)
+            if self.check and result.get("output"):  # the scheduler shows a caption only if it is usable
+                source = scheduler.stream.cues[request.cue]
+                result = {**result, "checks": dict(self.check(source, request.job, result))}
+        except Exception:
+            with self.lock:
+                scheduler.in_flight.discard(job_id)
+            raise
         with self.lock:
             scheduler.complete(request, result)
+        if shared is not None:
+            shared.put(scheduler.stream.video_id, request.cue, job_id, self.origin, result)
+        with self.lock:
             self._log(session_id, scheduler, request, result)
         return True
 
@@ -523,6 +662,18 @@ class LiveService:
             return {"status": "worker_lost", "error": f"worker did not start: {exc}"}
 
     def _tweak(self, request: TweakRequest, done: TweakDone) -> None:
+        shared = self.shared
+        claim = "tweak:{}:{}:{}".format(*tweak_key(request), request.attempt)
+        try:
+            claimed = shared is None or shared.claim(claim, CLAIM_TTL_S)
+        except Exception:
+            with self.lock:
+                self.running_tweak = None
+            raise
+        if not claimed:  # another server is writing this attempt; the session's next poll asks again
+            with self.lock:
+                self.running_tweak = None
+            return
         result = self._call(request.job)
         checks = None
         if result.get("status") == "completed" and result.get("output") and self.tweak_check is not None:
@@ -539,6 +690,8 @@ class LiveService:
                 # An outcome the session never received (the store refused the write) is not
                 # finished: the page's next poll submits the attempt again. Marking it finished
                 # left the clip pending for good, and the participant on the waiting screen.
+                if not delivered and shared is not None:
+                    shared.release(claim)
                 if delivered:
                     self.finished_tweaks.add((*tweak_key(request), request.attempt))
                     if outcome["status"] == "retry" and self.session_id == request.session_id:

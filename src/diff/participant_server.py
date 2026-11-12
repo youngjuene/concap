@@ -25,8 +25,13 @@ Routes:
 - ``/watch/…``: the live routes (:func:`diff.live_server.add_live_routes`).
 
 Sessions are durable (:mod:`diff.session_store`). A server restart keeps
-phase-1 progress exactly. A live watch resumes at the start of the video it
-was in, with its settings, and the restart is logged.
+phase-1 progress exactly. Since 2026-11-12 a live watch survives one too, and a
+request that reaches another server (Vercel): the session is rebuilt from the
+store on every request, and the video's playback, sliders and written captions
+are in the store's shared watch record, so the video carries on where it is.
+Only a browser that lost its video (a reload) starts that video again
+(``/watch/api/restart``), which is logged as ``video_restarted``. A finished
+session's browser still gets its end screen, and nothing else.
 
 **Blindness:** nothing a browser can fetch carries a clip key, a sound family,
 an R2 answer key, the model or the decoding condition. Media go through
@@ -50,6 +55,7 @@ from diff.live_calibration import Calibration, calibrate
 from diff.live_generation import TweakRequest, opaque_token
 from diff.live_server import (
     BUSY_MESSAGE,
+    WATCHING,
     JobFor,
     LivePool,
     LiveSession,
@@ -59,6 +65,7 @@ from diff.live_server import (
     add_live_routes,
     live_event,
     open_video,
+    spec_of,
 )
 from diff.phase1_flow import Phase1
 from diff.session_store import Conflict, Session, SessionFinished, SessionStore
@@ -80,7 +87,17 @@ ACTIONS: Final = frozenset(
 )
 TweakFor = Callable[[Mapping[str, Any], Mapping[str, str], int], tuple[CaptionSource, Job, dict[str, Any]]]
 WATCH_URL: Final = "watch/"
-AFTER_WATCH: Final = ("ratings", "source")
+# What each live event may change in the stored progress. An update writes only these, so two servers
+# handling two requests of one session cannot overwrite each other's part.
+PROGRESS_KEYS: Final = {
+    "session_started": (),
+    "settings": ("texture", "context"),
+    "watch_started": ("stage",),
+    "video_restarted": ("stage",),
+    "video_ended": ("stage", "video_index", "coverage"),
+    "ratings": ("answers", "stage", "source"),
+    "source_answer": ("source_answers", "stage"),
+}
 PHASE2_ONLY: Final = "diff.phase2-only/v1"
 MEDIA_TYPES: Final = {".png": "image/png", ".mp4": "video/mp4", ".webm": "video/webm"}
 HEADERS: Final = {
@@ -115,6 +132,29 @@ def calibration_of(record: Mapping[str, Any]) -> Calibration:
     )
 
 
+class SessionShare:
+    """One session's shared watch record: the store's ``watch_*`` tables bound to the session
+    (``live_generation.SharedWatch``)."""
+
+    def __init__(self, store: SessionStore, session_id: str) -> None:
+        self.store, self.session_id = store, session_id
+
+    def now(self, video_id: str) -> dict[str, Any] | None:
+        return self.store.watch_now(self.session_id, video_id)
+
+    def rows(self, after: int) -> list[dict[str, Any]]:
+        return self.store.watch_rows(self.session_id, after)
+
+    def put(self, video_id: str, cue: int, job_id: str, origin: str, result: Mapping[str, Any]) -> None:
+        self.store.watch_put(self.session_id, video_id, cue, job_id, origin, result)
+
+    def claim(self, key: str, ttl_s: float) -> bool:
+        return self.store.watch_claim(self.session_id, key, ttl_s)
+
+    def release(self, key: str) -> None:
+        self.store.watch_release(self.session_id, key)
+
+
 def live_progress(calibration: Calibration) -> dict[str, Any]:
     return {
         "stage": "ready",
@@ -125,6 +165,7 @@ def live_progress(calibration: Calibration) -> dict[str, Any]:
         "started": False,
         "source": None,
         "source_answers": [],
+        "coverage": [],
     }
 
 
@@ -213,6 +254,7 @@ def build_participant_app(
         service = pool.holder(session_id) or pool.acquire(session_id)
         if service is None:
             return
+        service.share(session_id, SessionShare(store, session_id))
         for clip_key, slots, attempt, rung in pending:
             source, job, steer = tweak_for(phase1.clips[clip_key], slots, rung)
             service.submit_tweak(TweakRequest(session_id, clip_key, source, job, steer, attempt), tweak_done)
@@ -276,10 +318,10 @@ def build_participant_app(
     # -- phase 1 ---------------------------------------------------------------
     @app.get("/api/p1/state")
     def phase1_state(request: Request) -> Response:
-        session = stored(request)
-        if session is None:
+        session = store.by_token(request.cookies.get(COOKIE))
+        if session is None or (session.finished_at is not None and session.state["stage"] != "phase2"):
             return error(401, NO_SESSION)
-        if session.state["stage"] == "phase2":
+        if session.state["stage"] == "phase2":  # a finished session's browser lands on its end screen
             return JSONResponse({"kind": "moved", "next_url": WATCH_URL})
         submit_pending(session.session_id)
         return JSONResponse(page(session.state))
@@ -337,55 +379,85 @@ def build_participant_app(
         return JSONResponse(reply)
 
     # -- live phase 2 ----------------------------------------------------------
+    durations = {video.video_id: video.stream.duration_ms for video in videos}
+
+    def reopen(live: LiveSession) -> None:
+        open_video(live, videos, job_for, store, SessionShare(store, live.session_id))
+
     def current(request: Request) -> LiveSession:
-        session = stored(request)
+        """The request's live session, as the store has it now.
+
+        Nothing but a cache lives in this server's memory: any server may take any request (Vercel),
+        and each brings its copy and its writer up to the store before it answers.
+        """
+        session = store.by_token(request.cookies.get(COOKIE))
         if session is None:
             raise HTTPException(status_code=401, detail=NO_SESSION)
         if session.state["stage"] != "phase2":
             raise HTTPException(status_code=409, detail=NOT_YET)
+        progress = session.state["live"]
         with lock:
             live = live_sessions.get(session.session_id)
-            progress = session.state["live"]
-            if live is not None:
-                if progress["stage"] in AFTER_WATCH:
-                    # Another instance may have taken the last answer (Vercel); the store has it.
-                    live.stage = progress["stage"]
-                    live.answers = dict(progress["answers"])
-                    live.source = progress.get("source")
-                    live.source_answers = list(progress.get("source_answers", []))
-                return live
-            if progress["stage"] in AFTER_WATCH:
-                # The last video already released the writer; these pages need none.
-                service = pool.holder(session.session_id) or pool.services[0]
-            else:
-                acquired = pool.acquire(session.session_id)
-                if acquired is None:
-                    raise HTTPException(status_code=503, detail=BUSY_MESSAGE)
-                service = acquired
-            interrupted = progress["stage"] == "watch"
-            live = LiveSession(
-                session.session_id,
-                service,
-                calibration_of(session.state["calibration"]),
-                stage="ready" if interrupted else progress["stage"],
-                video_index=progress["video_index"],
-                texture=progress["texture"],
-                context=progress["context"],
-                answers=dict(progress["answers"]),
-                source=progress.get("source"),
-                source_answers=list(progress.get("source_answers", [])),
-            )
-            live_sessions[session.session_id] = live
-        if not progress["started"]:
+            joined = live is None
+            if live is None:
+                live = LiveSession(
+                    session.session_id, pool.services[0], calibration_of(session.state["calibration"])
+                )
+                if session.finished_at is None:
+                    live_sessions[session.session_id] = live
+            live.stage, live.video_index = progress["stage"], progress["video_index"]
+            live.texture, live.context = progress["texture"], progress["context"]
+            live.answers = dict(progress["answers"])
+            live.source = progress.get("source")
+            live.source_answers = list(progress.get("source_answers", []))
+        if session.finished_at is not None:
+            return live  # the end screen, for a reload or a retried last answer: nothing is stored
+        if live.stage in WATCHING:
+            service = pool.acquire(session.session_id)
+            if service is None:
+                raise HTTPException(status_code=503, detail=BUSY_MESSAGE)
+            live.service = service
+            video = videos[live.video_index]
+            if service.video_id() != video.video_id or service.spec() is None:
+                reopen(live)
+            elif service.spec() != spec_of(live):
+                # Another server took a slider move: the record first, so every writer follows it.
+                store.watch_open(live.session_id, video.video_id, live.texture, live.context)
+                service.settings(spec_of(live))
+        else:
+            pool.release(session.session_id)  # the last video released the writer; these pages need none
+        if joined and not progress["started"]:
             live_event(
                 log_dir, clock(), live.session_id, "session_started", calibration=live.calibration.record
             )
-        else:
-            live_event(log_dir, clock(), live.session_id, "session_resumed", video_restarted=interrupted)
-        changed(live, "session_started" if not progress["started"] else "session_resumed")
-        if live.stage == "ready":
-            open_video(live, videos, job_for)
+            changed(live, "session_started")
+        elif joined:
+            # A server restart, or another server's first request of this session: nothing restarts.
+            live_event(
+                log_dir,
+                clock(),
+                live.session_id,
+                "server_joined",
+                stage=live.stage,
+                video_index=live.video_index,
+                video_id=videos[live.video_index].video_id,
+            )
         return live
+
+    def coverage(session_id: str) -> list[dict[str, Any]]:
+        """How much of each video was played, from the shared record's playback reports."""
+        return [
+            {
+                "video_id": row["video_id"],
+                "duration_ms": durations[row["video_id"]],
+                "watched_ms": row["watched_ms"],
+                "watched_share": round(min(1.0, row["watched_ms"] / durations[row["video_id"]]), 4),
+                "furthest_ms": row["max_position_ms"],
+                "restarts": row["restarts"],
+            }
+            for row in store.watch_videos(session_id)
+            if row["video_id"] in durations
+        ]
 
     def changed(live: LiveSession, event: str) -> None:
         progress = {
@@ -394,12 +466,14 @@ def build_participant_app(
             "texture": live.texture,
             "context": live.context,
             "answers": dict(live.answers),
-            "started": True,
             "source": live.source,
             "source_answers": list(live.source_answers),
         }
+        if event == "video_ended":
+            progress["coverage"] = coverage(live.session_id)
+        kept = {name: progress[name] for name in PROGRESS_KEYS[event]} | {"started": True}
         note = None if event == "settings" else {"event": f"live_{event}", "video_index": live.video_index}
-        store.update(live.session_id, lambda state: state.update(live=progress), note)
+        store.update(live.session_id, lambda state: state["live"].update(kept), note)
         if live.stage == "done":
             store.finish(live.session_id)
             pool.release(live.session_id)
@@ -418,5 +492,7 @@ def build_participant_app(
         clock=clock,
         after_phase1=phase1 is not None,
         source_draw=source_draw,
+        watch=store,
+        reopen=reopen,
     )
     return app

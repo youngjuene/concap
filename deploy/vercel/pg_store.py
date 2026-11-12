@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from typing import Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
-from diff.session_store import STORE_SCHEMA, SessionStore
+from diff.session_store import SHARED_TABLES, STORE_SCHEMA, SessionStore
 
 # neondb is the one the Neon integration made; participant was created on 2026-10-28.
 DATABASES: Final = {"smoke": "neondb", "participant": "participant"}
@@ -35,6 +35,10 @@ TABLES: Final = (
     " at DOUBLE PRECISION NOT NULL, PRIMARY KEY (session_id, key))",
     "CREATE TABLE IF NOT EXISTS events ("
     " id BIGSERIAL PRIMARY KEY, session_id TEXT NOT NULL, at DOUBLE PRECISION NOT NULL, body TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS watch_results ("
+    " id BIGSERIAL PRIMARY KEY, session_id TEXT NOT NULL, video_id TEXT NOT NULL, cue INTEGER NOT NULL,"
+    " job_id TEXT NOT NULL, origin TEXT NOT NULL, result TEXT NOT NULL, at DOUBLE PRECISION NOT NULL)",
+    *SHARED_TABLES,
 )
 
 

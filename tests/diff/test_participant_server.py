@@ -279,7 +279,12 @@ def test_a_failed_second_caption_skips_its_step_through_http(lab: Lab) -> None:
     assert events.count("tweak_failed") == 3
 
 
-def test_a_watch_interrupted_by_a_restart_restarts_its_video(lab: Lab) -> None:
+def live_log(lab: Lab) -> list[dict[str, Any]]:
+    lines = next((lab.root / "logs").glob("session-*.jsonl")).read_text().splitlines()
+    return [json.loads(line) for line in lines]
+
+
+def test_a_server_restart_leaves_the_video_playing_and_a_reload_starts_it_again(lab: Lab) -> None:
     client = lab.client()
     lab.enter(client)
     lab.act(client, through_phase_one(lab, client), "handoff")
@@ -290,21 +295,25 @@ def test_a_watch_interrupted_by_a_restart_restarts_its_video(lab: Lab) -> None:
     )
     drain(lab.service)
     assert client.post("/watch/api/start").json()["stage"] == "watch"
-    lab.start()
-    resumed = lab.client()
-    assert lab.enter(resumed).json() == {"next_url": "watch/"}
-    view = resumed.post("/watch/api/session", json={}).json()
-    assert view["stage"] == "ready"
+    cookies = dict(client.cookies)
+    lab.start()  # the server restarts: the browser's page, and its cookie, are as they were
+    same = lab.client()
+    same.cookies.update(cookies)
+    view = same.get("/watch/api/state").json()
+    assert view["stage"] == "watch"
     assert view["sliders"] == {"texture": 1.0, "context": 0.0, "stops": {"texture": 2, "context": 0}}
-    assert view["progress"] == {"segment": 4, "fraction": 0.0}
-    log = next((lab.root / "logs").glob("session-*.jsonl")).read_text().splitlines()
-    assert json.loads(log[-1]) | {"at": 0} == {
-        "schema": "diff.live-event/v1",
-        "at": 0,
-        "session_id": json.loads(log[0])["session_id"],
-        "event": "session_resumed",
-        "video_restarted": True,
-    }
+    captions = same.get("/watch/api/captions").json()["captions"]
+    assert captions["0"]["current"]  # written before the restart, served after it
+    log = live_log(lab)
+    assert log[-1]["event"] == "server_joined" and log[-1]["stage"] == "watch"
+    assert "video_restarted" not in [line["event"] for line in log]
+    # A reload is different: the browser has lost the video, so it starts again from 0.
+    view = same.post("/watch/api/restart", json={}).json()
+    assert view["stage"] == "ready" and view["progress"] == {"segment": 4, "fraction": 0.0}
+    assert same.post("/watch/api/restart", json={}).json()["stage"] == "ready"  # asked twice, once done
+    log = live_log(lab)
+    assert [line["event"] for line in log].count("video_restarted") == 1
+    assert same.post("/watch/api/start").json()["stage"] == "watch"  # its captions are still there
 
 
 def test_entry_refusals(lab: Lab) -> None:
