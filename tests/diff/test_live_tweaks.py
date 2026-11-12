@@ -4,6 +4,7 @@ the log."""
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -221,3 +222,49 @@ def test_a_video_s_requests_come_before_tweaks_and_detach_drops_them(
     assert len(fake.calls) == 2 and requests[0].job.job_id not in fake.calls
     service.detach("s1")
     assert not service.tweaks
+
+
+def test_an_outcome_the_store_refused_is_asked_again_and_the_writer_survives(
+    requests: list[TweakRequest], tmp_path: Path
+) -> None:
+    caption = "가까운 곳에서 사람들의 말소리가 겹쳐 들린다."
+    service = service_with(Scripted(written(caption), written(caption)), tmp_path)
+    outcomes: list[dict[str, Any]] = []
+
+    def refuse_once(request: TweakRequest, outcome: dict[str, Any]) -> None:
+        if not outcomes:
+            outcomes.append({"status": "lost"})
+            raise RuntimeError("the store did not take the write")
+        outcomes.append(outcome)
+
+    service.submit_tweak(requests[0], refuse_once)
+    with pytest.raises(RuntimeError):
+        service.step()
+    # Not finished: the page's next poll may submit the same attempt, and it runs.
+    assert service.running_tweak is None and not service.finished_tweaks
+    assert service.submit_tweak(requests[0], refuse_once)
+    run(service)
+    assert len(outcomes) == 2 and outcomes[1]["attempt"] == 1
+    assert not service.submit_tweak(requests[0], refuse_once)  # delivered now
+
+
+def test_the_writer_thread_outlives_a_failing_step(tmp_path: Path) -> None:
+    service = LiveService(Scripted(), tmp_path / "logs", idle_wait_s=0.01)
+    calls = []
+
+    def failing_step() -> bool:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the log store is away")
+        return False
+
+    service.step = failing_step  # type: ignore[method-assign]
+    service.start()
+    try:
+        for _ in range(200):
+            if len(calls) >= 3:
+                break
+            time.sleep(0.01)
+        assert len(calls) >= 3 and service.thread.is_alive()
+    finally:
+        service.close()

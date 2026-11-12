@@ -73,6 +73,7 @@ import hmac
 import json
 import threading
 import time
+import traceback
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -527,16 +528,22 @@ class LiveService:
         if result.get("status") == "completed" and result.get("output") and self.tweak_check is not None:
             checks = dict(self.tweak_check(request.source, request.steer, result))
         outcome = tweak_outcome(request, result, checks)
-        self._log_tweak(request, result, checks, outcome)
+        delivered = False
         try:
+            self._log_tweak(request, result, checks, outcome)
             done(request, outcome)
+            delivered = True
         finally:
             with self.lock:
-                self.finished_tweaks.add((*tweak_key(request), request.attempt))
                 self.running_tweak = None
-                if outcome["status"] == "retry" and self.session_id == request.session_id:
-                    self.tweaks.appendleft((replace(request, attempt=request.attempt + 1), done))
-                    self.lock.notify_all()
+                # An outcome the session never received (the store refused the write) is not
+                # finished: the page's next poll submits the attempt again. Marking it finished
+                # left the clip pending for good, and the participant on the waiting screen.
+                if delivered:
+                    self.finished_tweaks.add((*tweak_key(request), request.attempt))
+                    if outcome["status"] == "retry" and self.session_id == request.session_id:
+                        self.tweaks.appendleft((replace(request, attempt=request.attempt + 1), done))
+                        self.lock.notify_all()
 
     def _log_tweak(
         self,
@@ -576,7 +583,14 @@ class LiveService:
             with self.lock:
                 if self.stopping:
                     return
-            if not self.step():
+            try:
+                ran = self.step()
+            except Exception:  # noqa: BLE001 — a failed log or store write must not end the writer
+                # The thread is the session's only writer: if it died, every later caption would wait
+                # for ever. The request it was on is lost; the next poll or cue asks again.
+                traceback.print_exc()
+                ran = False
+            if not ran:
                 with self.lock:
                     if not self.stopping:
                         self.lock.wait(self.idle_wait_s)
