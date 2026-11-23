@@ -8,9 +8,10 @@
 ``check`` runs on every pilot and participant session before analysis. The answer side is
 recomputed here rather than by diff: the object under each P2 point (re-reading the masks), the
 binding model over the whole stage A (the point against the noticed sound's click mask, E1/E3
-centred on the participant's mean, the tendency from the other clips' points, P(bound)), the
-balanced plan from the order seed, each clip's mode, restorative emphasis (the subscale the clip
-stands highest on, centred on the participant's own means) and slots, the V2 point against the
+centred on the participant's mean, the direct report A1o, the tendency from the other clips' whole
+evidence, P(bound), and the binding trait B), the balanced plan from the order seed, each clip's
+mode, texture level (its fascination against the participant's own level, and the participant's
+Φ; the restorative emphasis until 2026-11-23) and slots, the V2 point against the
 noticed source, the attended sound, the tuner's heard families and rating means. diff's own
 prompt functions then render what those values should have produced, and every logged call is
 compared with that, so new prompt wording needs no change here. A session that ran an older
@@ -72,14 +73,16 @@ from diff.phase1_binding import (  # noqa: E402
     CONGRUENCE_SPAN,
     DRAWN,
     GRID_SIZE,
+    REPORT_ITEM,
+    REPORT_RELIABILITY,
     THRESHOLD,
 )
 from diff.phase1_setup import read_setup  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
     ELEMENTS_KO,
-    EMPHASIS_KO,
     OFFSCREEN_KO,
     RECORDING_ARTEFACTS,
+    TEXTURE_DELTA,
     tweak_job_for,
     tweak_source,
 )
@@ -89,6 +92,7 @@ from diff.rewrite_prompts import (  # noqa: E402
     LIVE_MODE_PROMPTS,
     LIVE_RULES_VERSION,
     NOT_SEEN,
+    TEXTURE_KO,  # noqa: E402
     TUNER_SYSTEM,
     TWEAK_LADDER,
     TWEAK_PROMPTS,
@@ -107,16 +111,12 @@ SECOND_FIELDS = (
     "variant_id",
     "rung",
     "writer_model",
-    "emphasis",
+    "texture",
     *SECOND_SLOTS,
     *SECOND_MODEL,
 )
-# The emphasis's subscales (P4, Payne 2013), in the order that breaks a tie left after the raw means.
-SUBSCALES = {
-    "fascination": ("F1", "F2", "F3"),
-    "being_away_from": ("BF1", "BF2", "BF3"),
-    "extent_coherence": ("E1", "E2", "E3"),
-}
+FASCINATION_ITEMS = ("F1", "F2", "F3")  # the texture level's subscale (P4, Payne 2013)
+REPORT_ANSWERS = {"on_screen": 1, "off_screen": -1}
 RATINGS = ("S1", "S2", "S3")
 MASK_THRESHOLD = 127
 SUPERSEDED_MS = 1500  # a setting replaced this soon may never get a call: Trida takes about 1 s
@@ -284,19 +284,32 @@ def expected_bindings(
     ]
     fits = [statistics.mean(float(given[item]) for item in CONGRUENCE_ITEMS) for given in answers]
     centre = statistics.mean(fits)
-    results = []
-    for index in range(len(clips)):
+    k = math.log(REPORT_RELIABILITY / (1 - REPORT_RELIABILITY))
+    reports = [
+        k * REPORT_ANSWERS[str(given[REPORT_ITEM])] if REPORT_ITEM in given else 0.0 for given in answers
+    ]
+    evidence = [
+        seen[j][1] + reports[j] + CONGRUENCE_K * (fits[j] - centre) / CONGRUENCE_SPAN
+        for j in range(len(clips))
+    ]
+
+    def learnt(others: Sequence[int]) -> list[float]:
         weights = [1.0] * GRID_SIZE
-        for other in range(len(clips)):
-            if other == index:
-                continue
-            ratio = math.exp(seen[other][1])
+        for other in others:
+            ratio = math.exp(evidence[other])
             weights = [
                 w * (1 - bound_given(pi, visibility[other]) + bound_given(pi, visibility[other]) * ratio)
                 for w, pi in zip(weights, grid, strict=True)
             ]
             weights = [w / sum(weights) for w in weights]
-        log_ratio = seen[index][1] + CONGRUENCE_K * (fits[index] - centre) / CONGRUENCE_SPAN
+        return weights
+
+    everyone = learnt(range(len(clips)))
+    trait = sum(w * logit(pi) for w, pi in zip(everyone, grid, strict=True))
+    results = []
+    for index in range(len(clips)):
+        weights = learnt([other for other in range(len(clips)) if other != index])
+        log_ratio = evidence[index]
         q = visibility[index]
         bound = sum(w * bound_given(pi, q) * math.exp(log_ratio) for w, pi in zip(weights, grid, strict=True))
         detached = sum(w * (1 - bound_given(pi, q)) for w, pi in zip(weights, grid, strict=True))
@@ -310,30 +323,30 @@ def expected_bindings(
                 "moderator_scene": logit(q),
                 "moderator_participant": logit(p_bound) - logit(no_answers),
                 "recommended": "scene" if p_bound >= THRESHOLD else "acousmatic",
+                "trait": trait,
             }
         )
     return results
 
 
-def expected_emphases(answers: Sequence[Mapping[str, Any]]) -> list[str]:
-    """Each clip's reflected subscale: its mean minus the participant's own mean of it, highest wins."""
-    means = [
-        {name: statistics.mean(float(given[i]) for i in items) for name, items in SUBSCALES.items()}
-        for given in answers
+def expected_textures(answers: Sequence[Mapping[str, Any]]) -> tuple[list[int], float]:
+    """Each clip's texture level (fascination against the participant's own level, ±δ) and Φ."""
+    means = [statistics.mean(float(given[i]) for i in FASCINATION_ITEMS) for given in answers]
+    centre = statistics.mean(means)
+    levels = [
+        1 + (round(m - centre, 6) >= TEXTURE_DELTA) - (round(m - centre, 6) <= -TEXTURE_DELTA) for m in means
     ]
-    centre = {name: statistics.mean(m[name] for m in means) for name in SUBSCALES}
-    order = list(SUBSCALES)
-    return [min(order, key=lambda n: (-round(m[n] - centre[n], 6), -m[n], order.index(n))) for m in means]
+    return levels, (centre - 3) / 3
 
 
 def expected_slots(
     clip: Mapping[str, Any],
     records: Mapping[str, Mapping[str, Any]],
     mode: str,
-    emphasis: str,
+    texture: int,
 ) -> dict[str, str]:
-    """The tweak slots for the mode, recomputed from the clip's first-step answers, its reflected
-    subscale and its scene part."""
+    """The tweak slots for the mode, recomputed from the clip's first-step answers, its texture
+    level and its scene part."""
     answers: dict[str, Any] = {}
     for page in STEP1_PAGES:
         answers.update(records[page]["answers"])
@@ -343,7 +356,7 @@ def expected_slots(
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(option["label"] for option in clip["options"]["R2"] if option.get("mentioned")),
         "attended_sound": sounds.get(answers.get("A1s"), NOT_SEEN),
-        "emphasis": EMPHASIS_KO[emphasis],
+        "texture": TEXTURE_KO[texture],
     }
     if mode == "acousmatic":
         return slots
@@ -453,7 +466,16 @@ def audit_phase1(
             stored == plan,
             f"{who}: the stored plan is not the seed's for these recommendations",
         )
-    emphases = expected_emphases(answers_of)
+    levels, phi = expected_textures(answers_of)
+    predictions = state.get("predictions") or {}
+    audit.ok(
+        "tweak-model",
+        abs(float((predictions.get("binding") or {}).get("B", math.inf)) - bindings[0]["trait"]) <= 1e-3
+        and abs(float((predictions.get("fascination") or {}).get("Phi", math.inf)) - phi) <= 1e-3,
+        f"{who}: stored predictions {predictions.get('binding', {}).get('B')}, "
+        f"{predictions.get('fascination', {}).get('Phi')}; "
+        f"recomputed B {bindings[0]['trait']:.4f}, Φ {phi:.4f}",
+    )
     for index, key in enumerate(order):
         clip, step1 = clips[key], steps[index]
         entry = state["second_captions"].get(key)
@@ -508,11 +530,11 @@ def audit_phase1(
         )
         audit.ok(
             "tweak-model",
-            model.get("emphasis", {}).get("chosen") == emphases[index],
-            f"{who} {key}: stored emphasis {model.get('emphasis', {}).get('chosen')}, "
-            f"recomputed {emphases[index]}",
+            model.get("texture", {}).get("level") == levels[index],
+            f"{who} {key}: stored texture {model.get('texture', {}).get('level')}, "
+            f"recomputed {levels[index]}",
         )
-        expect = expected_slots(clip, step1, mode, emphases[index])
+        expect = expected_slots(clip, step1, mode, levels[index])
         audit.ok(
             "tweak-slots",
             entry["slots"] == expect,
@@ -1015,7 +1037,7 @@ def audit_export(
                 "variant_id": entry.get("variant_id", ""),
                 "rung": str(entry.get("rung", "")) if entry.get("source", "trida") == "trida" else "",
                 "writer_model": served.get(clip, "") if entry["status"] == "ready" else "",
-                "emphasis": model.get("emphasis", {}).get("chosen", ""),
+                "texture": str(model.get("texture", {}).get("level", "")),
                 **{name: slots.get(name, "") for name in SECOND_SLOTS},
                 **{name: str(model.get(name, "")) for name in SECOND_MODEL},
             }

@@ -23,7 +23,7 @@ from diff.session_store import SessionStore
 
 HEADERS = {"x-study-request": "1"}
 ANSWERS: dict[str, dict[str, Any]] = {
-    "P3": {"A1s": "s1"},
+    "P3": {"A1s": "s1", "A1o": "on_screen"},
     "P4": {item: 2 for item in ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")},
     "P5": {"FA1": "unsure", "FA2": 1, "FA3": 4},
     "P8": {"A2s": "s2"},

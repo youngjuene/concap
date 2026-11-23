@@ -7,8 +7,9 @@
         --drafts DRAFTS.json --sheet SHEET.csv
 
 A second caption's prompt depends on the participant only through the clip's mode (the binding
-model's and the plan's), the sound they attended to (A1s, a required choice) and the restorative
-emphasis their P4 ratings reflect (one of three, since ``diff.phase1-tweak/v7``). The set of prompts
+model's and the plan's), the sound they attended to (A1s, a required choice) and the texture level
+their fascination ratings set (one of three, since ``diff.phase1-tweak/v11``; the restorative emphasis
+from v7 to v10). The set of prompts
 is therefore small and finite. Since 2026-10-26 captions are written live and shown once they pass the
 gate (``diff.phase1_usable``); from 2026-10-24 to 26 the researcher reviewed every one before the
 study instead, on the sheet this script wrote.
@@ -51,23 +52,22 @@ from diff_prompt_bench import apply_candidate, manipulation, measure  # noqa: E4
 from diff import rewrite_prompts  # noqa: E402
 from diff.output_checks import readable, shown_text  # noqa: E402
 from diff.phase1_tweak import (  # noqa: E402
-    EMPHASIS_KO,
     TWEAK_POLICY,
     reachable_slots,
     tweak_job_for,
     variant_id,
 )
 from diff.phase1_usable import DAMAGE, check_record  # noqa: E402
-from diff.rewrite_prompts import TWEAK_LADDER  # noqa: E402
+from diff.rewrite_prompts import TEXTURE_KO, TWEAK_LADDER  # noqa: E402
 
-VARIANTS_SCHEMA = "diff.second-caption-variants/v2"  # v2: one variant per emphasis too
+VARIANTS_SCHEMA = "diff.second-caption-variants/v3"  # v2: one per emphasis; v3: one per texture level
 DRAFTS_SCHEMA = "diff.second-caption-drafts/v2"  # v2: each variant down the ladder, the gate's verdicts
 PURPOSE = "smoke"  # drafts for review, not participant data
 MODES = ("scene", "acousmatic")
 WORDING_NAMES = ("LIVE_CELL_PROMPTS", "TWEAK_PROMPTS", "TWEAK_WORDINGS", "TUNER_SYSTEM")
 ODD_SOURCE = re.compile(r"(하늘|나무|풀|땅|인도)(에서|에서부터)\s*(들려|울려|울린|들린|흐른)")
 FILLED = ("note",)  # the sheet's column for the reader
-EMPHASIS_OF = {sentence: name for name, sentence in EMPHASIS_KO.items()}
+TEXTURE_OF = {sentence: level for level, sentence in TEXTURE_KO.items()}
 
 
 def sha256_file(path: Path) -> str:
@@ -84,7 +84,7 @@ def variants(args: argparse.Namespace) -> int:
             "attended": next(
                 o["value"] for o in clip["options"]["A1s"] if o["label"] == slots["attended_sound"]
             ),
-            "emphasis": EMPHASIS_OF[slots["emphasis"]],
+            "texture": TEXTURE_OF[slots["texture"]],
             "slots": slots,
         }
         for clip in setup["clips"]
@@ -99,7 +99,7 @@ def variants(args: argparse.Namespace) -> int:
             clip["key"]: {name: clip[name] for name in ("key", "caption", "options", "scene")}
             for clip in setup["clips"]
         },
-        "variants": sorted(listed, key=lambda v: (v["clip"], v["mode"], v["attended"], v["emphasis"])),
+        "variants": sorted(listed, key=lambda v: (v["clip"], v["mode"], v["attended"], v["texture"])),
     }
     args.out.write_text(json.dumps(document, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     counts = {mode: sum(v["mode"] == mode for v in listed) for mode in MODES}
@@ -306,7 +306,7 @@ def write_sheet(
         "clip",
         "mode",
         "attended_sound",
-        "emphasis",
+        "texture",
         "seen",
         "scene_elements",
         "visible_sounds",
@@ -330,7 +330,7 @@ def write_sheet(
                 "clip": variant["clip"],
                 "mode": variant["mode"],
                 "attended_sound": slots["attended_sound"],
-                "emphasis": variant["emphasis"],
+                "texture": variant["texture"],
                 "seen": slots.get("seen", ""),
                 "scene_elements": slots.get("scene_elements", ""),
                 "visible_sounds": slots.get("visible_sounds", ""),

@@ -602,12 +602,25 @@ def render_phase2(source: CaptionSource, quality_limit: int, context: str) -> Re
 # Every wording ends with {emphasis}'s sentence, the same under both modes, and keeps the 80-character
 # limit's margin. The scene-aware 4 / acousmatic 5 "tweak-p1" texts they replace had the slots as
 # "label: value" lines, which Trida answered with lists of names.
+# Since 2026-11-23 (researcher, docs/v4-diff/chain-spec.md) the {texture} slot takes the emphasis's
+# place: phase 2's sentence for the clip's texture stop (TEXTURE_KO, from _LIVE_TEXTURE), the same
+# under both modes, so both phases write in one caption space (mode, context, texture). The
+# acousmatic texts no longer ask for how the sounds are heard (size, pitch, distance, continuity):
+# that is texture, which both modes now take from the slot, so the mode only decides whether the
+# screen is spoken of. Scene-aware every-sound/checklist/prose v3, acousmatic v2.
+# Phase 2's texture stops as one sentence each (the "- " bullet and line end dropped), for phase 1's
+# {texture} slot: the same words at the same level in both phases.
+# Phase 2's "원래 자막" is phase 1's "처음 자막".
+TEXTURE_KO: Final[dict[int, str]] = {
+    level: text.removeprefix("- ").strip().replace("원래 자막", "처음 자막")
+    for level, text in _LIVE_TEXTURE.items()
+}
 TWEAK_PROVISIONAL: Final = True
 TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
     "every-sound": {
         "scene": PromptTemplate(
             template_id="tweak-p1-every-sound",
-            version=2,
+            version=3,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
                 "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
@@ -619,7 +632,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
                 "이 시청자가 주의를 기울인 소리를 중심에 두고, 장면의 배경을 소리가 들리는 곳으로 쓰세요. "
                 "음원이 보이는 소리는 그 소리를 내는 대상과만 이어 주세요.{offscreen} 화면에 없는 대상이나 "
                 "장소는 지어내지 마세요. "
-                "{emphasis}\n"
+                "{texture}\n"
                 "이 시청자가 주의를 기울인 소리부터 쓰세요. "
                 "위에 적힌 소리를 빠짐없이 한 번씩 쓰고 그 밖의 소리는 쓰지 말고, 처음 자막에 있더라도 "
                 "위에 없는 소리는 빼세요. "
@@ -630,17 +643,16 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
         ),
         "acousmatic": PromptTemplate(
             template_id="tweak-p1-every-sound",
-            version=1,
+            version=2,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
-                "화면을 보지 않고 귀로만 듣는 것처럼, 소리가 어떻게 들리는지 쓰는 것이 목표입니다.\n"
+                "화면을 보지 않고 귀로만 듣는 것처럼 쓰는 것이 목표입니다.\n"
                 "처음 자막은 「{caption}」입니다.\n"
                 "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
                 "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
                 "이 시청자가 주의를 기울인 소리를 중심에 두고, 각 소리가 무슨 소리인지는 밝히되 화면 속 "
                 "대상이나 장소는 말하지 마세요. "
-                "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요. "
-                "{emphasis}\n"
+                "{texture}\n"
                 "이 시청자가 주의를 기울인 소리부터 쓰세요. "
                 "위에 적힌 소리를 빠짐없이 한 번씩 쓰고 그 밖의 소리는 쓰지 말고, 처음 자막에 있더라도 "
                 "위에 없는 소리는 빼세요. "
@@ -653,7 +665,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
     "checklist": {
         "scene": PromptTemplate(
             template_id="tweak-p1-checklist",
-            version=2,
+            version=3,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
                 "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
@@ -666,7 +678,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
                 "1. 이 시청자가 주의를 기울인 소리부터 쓰세요.\n"
                 "2. 음원이 보이는 소리는 그 소리를 내는 대상과만 잇고, 화면에 없는 대상이나 장소는 "
                 "지어내지 마세요.\n"
-                "3. {emphasis}\n"
+                "3. {texture}\n"
                 "4. 위에 적힌 소리를 빠짐없이 한 번씩 쓰고, 그 밖의 소리는 쓰지 마세요. "
                 "처음 자막에 있더라도 위에 없는 소리는 빼세요.\n"
                 "5. 처음 자막의 문장을 그대로 옮기지 마세요.\n"
@@ -676,18 +688,17 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
         ),
         "acousmatic": PromptTemplate(
             template_id="tweak-p1-checklist",
-            version=1,
+            version=2,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
-                "화면을 보지 않고 귀로만 듣는 것처럼, 소리가 어떻게 들리는지 쓰는 것이 목표입니다.\n"
+                "화면을 보지 않고 귀로만 듣는 것처럼 쓰는 것이 목표입니다.\n"
                 "처음 자막은 「{caption}」입니다.\n"
                 "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
                 "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
                 "지킬 것:\n"
                 "1. 이 시청자가 주의를 기울인 소리부터 쓰세요.\n"
-                "2. 각 소리가 무슨 소리인지는 밝히되 화면 속 대상이나 장소는 말하지 말고, 소리가 어떻게 "
-                "들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요.\n"
-                "3. {emphasis}\n"
+                "2. 각 소리가 무슨 소리인지는 밝히되 화면 속 대상이나 장소는 말하지 마세요.\n"
+                "3. {texture}\n"
                 "4. 위에 적힌 소리를 빠짐없이 한 번씩 쓰고, 그 밖의 소리는 쓰지 마세요. "
                 "처음 자막에 있더라도 위에 없는 소리는 빼세요.\n"
                 "5. 처음 자막의 문장을 그대로 옮기지 마세요.\n"
@@ -699,7 +710,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
     "prose": {
         "scene": PromptTemplate(
             template_id="tweak-p1-prose",
-            version=2,
+            version=3,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
                 "소리가 화면 속 장면에서 나는 것으로 들리게 쓰는 것이 목표입니다.\n"
@@ -711,7 +722,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
                 "이 시청자가 주의를 기울인 소리를 중심에 두고, 장면의 배경을 소리가 들리는 곳으로 쓰세요. "
                 "음원이 보이는 소리는 그 소리를 내는 대상과만 이어 주세요.{offscreen} 화면에 없는 대상이나 "
                 "장소는 지어내지 마세요. "
-                "{emphasis}\n"
+                "{texture}\n"
                 "이 시청자가 주의를 기울인 소리부터 쓰세요. "
                 "위에 적힌 소리만 쓰고, 처음 자막에 있더라도 위에 없는 소리는 빼세요. "
                 "처음 자막의 문장을 그대로 옮기지 마세요. "
@@ -721,17 +732,16 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
         ),
         "acousmatic": PromptTemplate(
             template_id="tweak-p1-prose",
-            version=1,
+            version=2,
             text=(
                 "이 시청자를 위해 영상의 소리 자막을 새로 쓰세요. "
-                "화면을 보지 않고 귀로만 듣는 것처럼, 소리가 어떻게 들리는지 쓰는 것이 목표입니다.\n"
+                "화면을 보지 않고 귀로만 듣는 것처럼 쓰는 것이 목표입니다.\n"
                 "처음 자막은 「{caption}」입니다.\n"
                 "이 영상에서 실제로 들리는 소리는 {sounds}입니다. "
                 "이 시청자는 그중 {attended_sound}에 가장 주의를 기울였습니다.\n"
                 "이 시청자가 주의를 기울인 소리를 중심에 두고, 각 소리가 무슨 소리인지는 밝히되 화면 속 "
                 "대상이나 장소는 말하지 마세요. "
-                "소리가 어떻게 들리는지(크기, 높낮이, 거리, 이어짐)를 살려 쓰세요. "
-                "{emphasis}\n"
+                "{texture}\n"
                 "이 시청자가 주의를 기울인 소리부터 쓰세요. "
                 "위에 적힌 소리만 쓰고, 처음 자막에 있더라도 위에 없는 소리는 빼세요. "
                 "처음 자막의 문장을 그대로 옮기지 마세요. "
@@ -743,7 +753,7 @@ TWEAK_WORDINGS: Final[dict[str, dict[str, PromptTemplate]]] = {
 }
 TWEAK_LADDER: Final = ("every-sound", "every-sound", "checklist", "prose")
 TWEAK_PROMPTS: Final = TWEAK_WORDINGS[TWEAK_LADDER[0]]  # the first rung's, by mode
-_TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound", "emphasis")
+_TWEAK_COMMON: Final = ("mode", "caption", "sounds", "attended_sound", "texture")
 TWEAK_SLOTS: Final[dict[str, tuple[str, ...]]] = {
     "scene": (*_TWEAK_COMMON, "scene_elements", "seen", "visible_sounds", "offscreen"),
     "acousmatic": _TWEAK_COMMON,

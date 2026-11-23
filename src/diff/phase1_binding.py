@@ -58,6 +58,20 @@ sound with no plausible source in view is rarely bound to what is seen.
   so how someone uses the scale moves nothing, and a clip rated 3 points
   above their own level gives ratio 3.
 
+**v4, 2026-11-23** (researcher, ``docs/v4-diff/chain-spec.md``; ρ set by its simulation,
+``artifacts/diff/chain-sim``):
+- *Direct report* (P3 A1o, "이 소리는 어디에서 나는 것처럼 들렸나요?", asked right after the
+  noticed sound): ``+ln(ρ/(1−ρ))`` for "on screen", ``−ln(ρ/(1−ρ))`` for "not", with
+  :data:`REPORT_RELIABILITY` ρ = 0.8, so a report weighs ``ln 4``, as much as a hit on a small
+  source. A session without the item (begun under v3) gets 0. In simulation on the real clips the
+  report lifts the recovery of the tendency from r = .41 to .65.
+- The tendency is learnt from the other clips' whole evidence (report, attention and the centred
+  congruence), not their attention alone: centred on the participant's own mean, congruence can no
+  longer carry a rating level from clip to clip, which is why v2 left it out.
+- :func:`binding_trait`: ``B_i``, the posterior mean of ``logit π`` from all twelve clips, the
+  chain's prediction for phase 2's context slider (H2) and for the source block (R). It is 0 for a
+  participant who binds sounds to the scene exactly as the masks predict.
+
 **Decision.** P(b) sums over the grid. Its recommendation is scene-aware when
 P(b) ≥ 0.5 and acousmatic otherwise, so that the caption matches how the sound
 is heard (compatibility, in attention restoration theory). Each participant
@@ -104,7 +118,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any, Final
 
-BINDING_POLICY: Final = "diff.phase1-binding/v3"
+BINDING_POLICY: Final = "diff.phase1-binding/v4"
 BINDING_PROVISIONAL: Final = False
 ASSIGNMENT_POLICY: Final = "diff.phase1-assignment/stratified-v2"
 BALANCED_POLICY: Final = "diff.phase1-assignment/balanced-v1"  # sessions begun before 2026-10-28
@@ -115,6 +129,10 @@ AREA_FLOOR: Final = 0.05
 CONGRUENCE_ITEMS: Final = ("E1", "E3")
 CONGRUENCE_K: Final = math.log(3)
 CONGRUENCE_SPAN: Final = 3  # scale points above the participant's own mean that give ratio exp(K)
+REPORT_ITEM: Final = "A1o"
+REPORT_RELIABILITY: Final = 0.8
+REPORT_K: Final = math.log(REPORT_RELIABILITY / (1 - REPORT_RELIABILITY))
+REPORT_ANSWERS: Final = {"on_screen": 1, "off_screen": -1}
 THRESHOLD: Final = 0.5
 MODES: Final = ("scene", "acousmatic")
 FOLLOW, COUNTER = "follow", "counter"
@@ -262,6 +280,35 @@ def congruence(answers: Mapping[str, Any], centre: float) -> dict[str, Any]:
     }
 
 
+def report(answers: Mapping[str, Any]) -> dict[str, Any]:
+    """The direct report (A1o) and its log ratio; a clip without one says nothing."""
+    answer = answers.get(REPORT_ITEM)
+    if answer is None:
+        return {"answer": None, "log_ratio": 0.0}
+    return {"answer": str(answer), "log_ratio": round(REPORT_K * REPORT_ANSWERS[str(answer)], 6)}
+
+
+def binding_trait(history: Sequence[tuple[float, float]]) -> dict[str, Any]:
+    """``B_i``: the posterior mean of ``logit π`` from every clip's (visibility, log ratio), with
+    its central 90% interval on the same scale."""
+    weights = tendency(history)
+    cumulative, low, high = 0.0, _logit(GRID[0]), _logit(GRID[-1])
+    for pi, w in zip(GRID, weights, strict=True):
+        before = cumulative
+        cumulative += w
+        if before < 0.05 <= cumulative:
+            low = _logit(pi)
+        if before < 0.95 <= cumulative:
+            high = _logit(pi)
+    return {
+        "policy": BINDING_POLICY,
+        "B": round(sum(_logit(pi) * w for pi, w in zip(GRID, weights, strict=True)), 4),
+        "low": round(low, 4),
+        "high": round(high, 4),
+        "clips": len(history),
+    }
+
+
 def baseline(answers: Mapping[str, Any]) -> dict[str, float]:
     return {name: round(mean(float(answers[item]) for item in items), 4) for name, items in BASELINE.items()}
 
@@ -292,12 +339,19 @@ def decide_all(
     visibility = [float(sound["visibility"]["mean"]) for sound in sounds]
     seen = [attention(sound, match, root) for sound, match in zip(sounds, matches, strict=True)]
     centre = mean(congruence_mean(given) for given in answers)
+    reports = [report(given) for given in answers]
+    fits = [congruence(given, centre) for given in answers]
+    evidence = [
+        round(seen[j]["log_ratio"] + reports[j]["log_ratio"] + fits[j]["log_ratio"], 6)
+        for j in range(len(clips))
+    ]
     records = []
-    for index, given in enumerate(answers):
-        others = [(visibility[j], seen[j]["log_ratio"]) for j in range(len(clips)) if j != index]
+    for index in range(len(answers)):
+        given = answers[index]
+        others = [(visibility[j], evidence[j]) for j in range(len(clips)) if j != index]
         weights = tendency(others)
-        fit = congruence(given, centre)
-        log_ratio = round(seen[index]["log_ratio"] + fit["log_ratio"], 6)
+        fit = fits[index]
+        log_ratio = evidence[index]
         probability = p_bound(weights, visibility[index], log_ratio)
         no_answers = p_bound(tendency(()), visibility[index], 0.0)
         recommended = MODES[0] if probability >= THRESHOLD else MODES[1]
@@ -314,6 +368,7 @@ def decide_all(
                 },
                 "visibility": visibility[index],
                 "measured_visibility": sounds[index]["visibility"]["share"],
+                "report": reports[index],
                 "attention": seen[index],
                 "congruence": fit,
                 "log_ratio": log_ratio,

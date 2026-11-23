@@ -34,7 +34,7 @@ from dpo.regen.study_store import Conflict as RegenConflict
 
 RATED = ("F1", "F2", "F3", "BF1", "BF2", "BF3", "E1", "E2", "E3", "P1", "P2")
 ANSWERS: dict[str, dict[str, Any]] = {
-    "P3": {"A1s": "s1"},
+    "P3": {"A1s": "s1", "A1o": "on_screen"},
     "P4": {item: 4 for item in RATED},
     "P5": {"FA1": "no", "FA2": 3, "FA3": 5},
     "P8": {"A2s": "s2"},
@@ -416,7 +416,7 @@ def test_the_clip_must_be_watched_to_the_end(flow: Phase1) -> None:
 def test_answers_belong_to_their_page(flow: Phase1) -> None:
     state = flow.new_state("s-test", "P1", seed=3)
     with pytest.raises(Conflict, match="another page"):
-        flow.apply(state, "submit", {"page": "P3", "answers": {"A1s": "s1"}}, 1.0)
+        flow.apply(state, "submit", {"page": "P3", "answers": {"A1s": "s1", "A1o": "on_screen"}}, 1.0)
     with pytest.raises(ValueError, match="three practice responses"):
         flow.apply(state, "intro-complete", {"page": "P0"}, 1.0)
         flow.apply(state, "practice-complete", {"page": "practice", "answers": {"practice_rating": 3}}, 2.0)

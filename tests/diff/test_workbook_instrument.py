@@ -37,6 +37,9 @@ def test_the_snapshot_is_regen_s_with_only_r1_and_the_read_date_changed() -> Non
 def test_every_page_is_regen_s_but_for_r1(page: str) -> None:
     ours = workbook_instrument.page_spec(page, options=OPTIONS)
     regen = regen_instrument.page_spec(page, options=OPTIONS)
+    if page == "P3":  # A1o, added after A1s on 2026-11-23 (chain spec), is not in the workbook
+        added = ours["items"].pop()
+        assert added["id"] == workbook_instrument.SOURCE_ITEM and ours["item_order"].pop() == added["id"]
     for item in regen["items"]:
         if item["id"] == "R1":
             assert item["text"] == R1_REGEN
@@ -69,3 +72,23 @@ def test_the_snapshot_names_its_own_provenance() -> None:
     assert snapshot["schema"] == "diff.workbook-instrument/v1"
     assert snapshot["provenance"].endswith("-2026-10-18")
     assert snapshot["hash"] != regen_instrument.snapshot()["hash"]
+
+
+def test_the_direct_report_asks_the_source_block_s_question_with_its_answers_in_a_session_order() -> None:
+    import diff.source_check as source_check
+
+    (item,) = [i for i in workbook_instrument.page_spec("P3", options=OPTIONS)["items"] if i["id"] == "A1o"]
+    assert item["text"] == source_check.QUESTION and item["type"] == "choice" and item["required"]
+    assert {o["value"]: o["label"] for o in item["options"]} == source_check.ANSWERS
+    orders = {
+        tuple(
+            o["value"]
+            for o in workbook_instrument.page_spec("P3", options=OPTIONS, session_key=f"s{n}")["items"][1][
+                "options"
+            ]
+        )
+        for n in range(20)
+    }
+    assert len(orders) == 2  # both orders occur across sessions, each fixed within one
+    with pytest.raises(ValueError, match="missing answers"):
+        workbook_instrument.validate_answers("P3", {"A1s": "s1"}, options=OPTIONS)

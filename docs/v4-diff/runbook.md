@@ -368,8 +368,8 @@ nothing records it.
   - **What leaves the machine:** every prompt goes to Anthropic, and none holds
     a participant ID or a raw answer.
     - A second-caption prompt holds the clip's first caption, its sound and
-      scene words, the sound the participant attended to, and the emphasis
-      sentence their P4 ratings chose.
+      scene words, the sound the participant attended to, and the texture
+      sentence their fascination ratings chose.
     - A live prompt holds the window's starting caption, the slider cell's
       instructions, and the session's tuner text, built from the families the
       participant heard and their rating means.
@@ -564,11 +564,14 @@ It reads the store (`--store`, default the participant store) and every
     - its `variant_id`.
 
     (`approved` marks a caption from the sessions of 2026-10-24 to 26.)
-  - the attended sound, the restorative `emphasis` with the three centred
-    subscale means, and the binding model's inputs, P(bound),
+  - the attended sound, the `texture` level with `fascination_centred` (the
+    restorative emphasis until 2026-11-23), the direct report (`report`,
+    `report_log_ratio`), and the binding model's inputs, P(bound),
     recommendation, follow or counter, mode and caption type;
   - the two pre-registered moderators: `moderator_scene` (`logit q`) and
     `moderator_participant` (what the answers add to `logit P(bound)`);
+  - the participant's two predictions for phase 2, fixed when stage A closed:
+    `binding_B` and `fascination_Phi` (`docs/v4-diff/chain-spec.md`);
   - the intended R2 key, the template hash and whether it was provisional;
   - the job and the check flags;
   - `v2_attention`, whether the V2 point fell on the noticed sound's source;
@@ -601,7 +604,7 @@ Run it on the pilot and on every participant session before analysis. It
 opens the store read-only and exits 1 on any mismatch. From each
 participant's answers it recomputes:
 - the object under each P2 point, by re-reading the masks;
-- each clip's mode, restorative emphasis and the other tweak slots;
+- each clip's mode, texture level and the other tweak slots, and the predictions `B` and `Φ`;
 - the tuner's heard families and rating means.
 
 diff's own prompt functions render what those values should produce, and the
@@ -670,9 +673,10 @@ path (`diff.phase1_approved`, `phase1 import-second-captions`) is retired.
 The prompt depends on the participant through three things:
 - the clip's mode (the binding model's and the plan's);
 - the sound they attended to (A1s);
-- the restorative emphasis their P4 ratings reflect: the soundscape subscale
-  this clip stands highest on, centred on their own means
-  (`phase1_tweak.emphases`).
+- the texture level their fascination sets (since 2026-11-23, in place of the
+  restorative emphasis): F1–F3's mean on this clip against their own mean,
+  level 2 at +0.5 or more, 0 at −0.5 or less, else 1 (`phase1_tweak.textures`).
+  The prompt takes phase 2's sentence for that texture stop, under both modes.
 
 The writer is Claude Sonnet 5.5 through the Claude API at low effort
 (`diff.claude_writer`; researcher, 2026-10-27). The local models' failures that
@@ -711,7 +715,8 @@ uv run python scripts/diff_second_captions.py draft \
 variants at once and reports the calls' latency, tokens and fallbacks.
 
 `variants` lists every slot set with `phase1_tweak.reachable_slots`, one per
-mode, sound and emphasis: 174 on the setup, against 58 before the emphasis.
+mode, sound and texture level: 174 on the setup (also 174 under the emphasis, which had
+three values too).
 `draft` runs each one down the ladder until the gate passes it. It reports
 how many were delivered at each rung and how many of those still carry one
 of the bench's rougher issues. The sheet is for reading only: one row per
@@ -724,8 +729,8 @@ It says when a changed gate would have left a ladder at an earlier rung, so
 that the bench should be drafted again.
 
 The export records each second caption's delivering rung and its wording
-(`rung`, `wording`), its emphasis and the three centred subscale means.
-The audit recomputes the emphasis and checks the whole ladder:
+(`rung`, `wording`), its texture level and the clip's centred fascination.
+The audit recomputes the texture level, the binding trait `B` and `Φ`, and checks the whole ladder:
 - each attempt is the recomputed job at its rung;
 - re-running the check and the gate gives the logged verdict;
 - each rung was left only after a refusal;

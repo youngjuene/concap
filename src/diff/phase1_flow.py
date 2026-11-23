@@ -26,7 +26,9 @@ Researcher's decisions of 2026-10-18 (plan "Phase 1 — 2026-10-18"):
   binding model over every clip's first step at once (design review,
   2026-10-24: each clip's tendency comes from the other eleven, and E1/E3 are
   centred on the participant's own mean), and records each result, its
-  restorative emphasis and its steering slots. Every clip's second caption is
+  texture level and its steering slots (the restorative emphasis until 2026-11-23), and the
+  chain's two predictions for phase 2 (``predictions``: the binding trait ``B`` and the
+  fascination level ``Φ``). Every clip's second caption is
   then marked pending in stage-B order; the server queues its job and writes the
   outcome back (:meth:`Phase1.record_tweak`). Since 2026-10-26 every caption is
   written live (from 2026-10-24 the researcher's approved captions were shown
@@ -68,13 +70,20 @@ from typing import Any, Final
 
 import diff.workbook_instrument as workbook_instrument
 import dpo.regen.points as points
-from diff.phase1_binding import ASSIGNMENT_POLICY, attention
+from diff.phase1_binding import ASSIGNMENT_POLICY, attention, binding_trait
 from diff.phase1_setup import stripped_options
-from diff.phase1_tweak import stratified_plan, template_record, tweak_steer_all, variant_id
+from diff.phase1_tweak import (
+    step_answers,
+    stratified_plan,
+    template_record,
+    textures,
+    tweak_steer_all,
+    variant_id,
+)
 from diff.session_store import Conflict
 from diff.study_protocol import sha256_of
 
-PROTOCOL: Final = "diff.phase1/v7"
+PROTOCOL: Final = "diff.phase1/v8"  # v8 (2026-11-23): A1o on P3, texture, predictions
 STEP_A: Final = ("P1", "P2", "P3", "P4", "P5")
 STEP_B: Final = ("P6", "P7", "P8", "P9", "P10", "P11")
 CLIP_PAGES: Final = STEP_A + STEP_B
@@ -444,7 +453,8 @@ class Phase1:
         if type(rating) is not int or not 0 <= rating <= 6:
             raise ValueError("연습 척도에서 0~6 중 하나를 선택해 주세요.")
         sounds = stripped_options(self.setup["practice"]["options"]["A1s"])
-        self.instrument.validate_answers("P3", {"A1s": raw.get("practice_sound")}, options={"A1s": sounds})
+        if raw.get("practice_sound") not in {option["value"] for option in sounds}:
+            raise ValueError("practice_sound: select exactly one configured option")
         visual = self.instrument.validate_answers("P2", {"V1": raw.get("practice_visual")})["V1"]
         points.parse_points(
             [dict(point, frame=int(point["frame_id"])) for point in visual],
@@ -561,6 +571,13 @@ class Phase1:
             seed = int(state["order_seed"])
             state["assignment"]["plan"] = stratified_plan(clips, records, seed, root=self.root)
         steered = tweak_steer_all(clips, records, state["assignment"]["plan"], root=self.root)
+        # The chain's predictions for phase 2 (chain spec, 2026-11-23), fixed before it begins.
+        answers = [step_answers(step, str(clip["key"])) for clip, step in zip(clips, records, strict=True)]
+        state["predictions"] = {
+            "binding": binding_trait([(model["visibility"], model["log_ratio"]) for _, model in steered]),
+            "fascination": textures(answers)[1],
+            "at": now,
+        }
         for index, (clip, (slots, model)) in enumerate(zip(clips, steered, strict=True)):
             state["second_captions"][clip["key"]] = {
                 "status": "pending",
@@ -670,4 +687,9 @@ class Phase1:
         if state.get("stage") != "phase1" or state["page"] != "handoff":
             raise Conflict("Complete the short clips first")
         state.update(stage="phase2", calibration=dict(calibration), handoff_at=now)
-        return {"event": "handoff", "phase": 1, "calibration_sha256": calibration.get("sha256")}
+        return {
+            "event": "handoff",
+            "phase": 1,
+            "calibration_sha256": calibration.get("sha256"),
+            "predictions": state.get("predictions"),
+        }

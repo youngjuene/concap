@@ -11,6 +11,11 @@ stands, and it had changed since regen froze it on 2026-10-04 (R1 now reads
 it reads, ``SCHEMA`` and ``PROVENANCE``; ``items/workbook-20261018.json`` is
 regen's snapshot with that one cell updated, checked cell by cell against the
 sheet's export of 2026-10-18.
+
+**One item added outside the workbook** (researcher, 2026-11-23, ``docs/v4-diff/chain-spec.md``):
+``A1o`` on P3, right after the noticed sound (A1s), asks where that sound seemed to come from, in
+the perceived-source block's approved wording and answers (:mod:`diff.source_check`). It is the
+binding model's direct report. Its two answers are shown in an order fixed per session.
 """
 
 from __future__ import annotations
@@ -23,9 +28,15 @@ from functools import lru_cache
 from importlib.resources import files
 from typing import Any
 
+import diff.source_check as source_check
+
 SCHEMA = "diff.workbook-instrument/v1"
 PROVENANCE = "google-sheet-1JP44YNkE2hgOTHUUJ69WrseeD8_fqXHDxYZ5_cMI-5Q-2026-10-18"
 UNKNOWN_MEMORY = {"value": "memory_unknown", "label": "기억나지 않음", "exclusive": True}
+# The direct report (chain spec, 2026-11-23): the source block's question and answers, word for word.
+SOURCE_ITEM = "A1o"
+SOURCE_QUESTION = source_check.QUESTION
+SOURCE_OPTIONS = tuple({"value": value, "label": label} for value, label in source_check.ANSWERS.items())
 PAGE_KINDS = {
     "P0": "intro",
     "P1": "video",
@@ -141,6 +152,18 @@ def _catalogue() -> dict[str, Any]:
                 if item_id == "D2":
                     item["condition"] = "D1 reports a change"
             page["items"].append(item)
+    pages["P3"]["items"].append(
+        {
+            "id": SOURCE_ITEM,
+            "text": SOURCE_QUESTION,
+            "required": True,
+            "reverse": False,
+            "subscale": "지각된 음원 위치",
+            "source": "chain-spec 2026-11-23 (diff.source_check wording)",
+            "type": "choice",
+            "options": [dict(option) for option in SOURCE_OPTIONS],
+        }
+    )
     pages["P0"]["requires_config"] = ["consent_text", "practice"]
     pages["P9"]["randomize_items"] = True
     pages["P12"]["after"] = "both-phases"
@@ -258,6 +281,11 @@ def page_spec(
                 item["options"].append(dict(UNKNOWN_MEMORY))
             item["requires_options"] = False
     if session_key is not None:
+        for item in spec["items"]:
+            if item["id"] == SOURCE_ITEM:
+                item["options"].sort(
+                    key=lambda option: _digest([PROVENANCE, session_key, SOURCE_ITEM, option["value"]])
+                )
         order = page_item_order(page, session_key)
         spec["items"] = sorted(spec["items"], key=lambda item: order.index(item["id"]))
     spec["item_order"] = [item["id"] for item in spec["items"]]

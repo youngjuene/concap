@@ -23,13 +23,16 @@ Files written to ``--out``:
   delivered it and ``writer_model``, the model that wrote it: Claude through the API since
   2026-10-27, Anthropic's fallback model if Claude's safeguards declined, Qwen3.5-9B on
   2026-10-26; ``approved`` in sessions of 2026-10-24 to 26), what steered it
-  (the attended sound; the restorative emphasis it reflects and each subscale's
-  centred mean; the binding model's evidence and P(bound), the recommended mode,
+  (the attended sound; the texture level and the clip's fascination against the
+  participant's own level, which set it since 2026-11-23, when it replaced the restorative
+  emphasis; the direct report A1o; the binding model's evidence and P(bound), the recommended mode,
   follow or counter, the mode used and the caption type), the
   analysis's two moderators (``moderator_scene``, ``logit q``, and
   ``moderator_participant``, what the answers add; ``diff.phase1_binding``), its
   check flags, and whether the V2 point (P7) fell on the noticed sound's source,
-  the behavioural check of the mode. ``caption_id`` names the shown caption,
+  the behavioural check of the mode. Each row also carries the participant's two
+  predictions for phase 2 (``binding_B`` and ``fascination_Phi``, the chain spec's ``B_i`` and
+  ``Φ_i``), recorded when stage A closed. ``caption_id`` names the shown caption,
   and ``r2_named_auto`` lists the R2 options it seems to name
   (``phase1_tweak.named_in``, rough).
 - ``r2_coding.csv``: one row per distinct shown second caption × R2 option,
@@ -56,7 +59,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from diff.phase1_tweak import RESTORATIVE, named_in
+from diff.phase1_tweak import named_in
 from diff.rewrite_prompts import TWEAK_LADDER
 from diff.session_store import SessionStore
 from diff.study_protocol import sha256_of
@@ -64,7 +67,8 @@ from diff.study_protocol import sha256_of
 # v9 (2026-10-26): the delivering rung's wording, not its τ. v10 (2026-10-27): the model that wrote it.
 # v11 (2026-11-03): the perceived-source block, source_check.csv.
 # v12 (2026-11-12): how much of each long video was played, phase2_videos.csv.
-EXPORT_SCHEMA: Final = "diff.export/v12"
+# v13 (2026-11-23): the texture level for the emphasis, the direct report, B_i and Φ_i (chain spec).
+EXPORT_SCHEMA: Final = "diff.export/v13"
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -101,11 +105,10 @@ SECOND_CAPTION_COLUMNS: Final = (
     "variant_id",
     "approved_from",
     "attended_sound",
-    "emphasis",
-    "emphasis_tied",
+    "texture",
     "fascination_centred",
-    "being_away_from_centred",
-    "extent_coherence_centred",
+    "report",
+    "report_log_ratio",
     "noticed_audioset_label",
     "on_screen",
     "visibility",
@@ -117,6 +120,8 @@ SECOND_CAPTION_COLUMNS: Final = (
     "p_bound",
     "moderator_scene",
     "moderator_participant",
+    "binding_B",
+    "fascination_Phi",
     "recommended",
     "assignment",
     "mode",
@@ -298,7 +303,8 @@ def second_caption_rows(
         clip = clips.get(key, {})
         slots = entry.get("slots", {})
         model = entry.get("model", {})
-        emphasis = model.get("emphasis", {})
+        texture = model.get("texture", {})
+        predictions = state.get("predictions") or {}
         delivered = (
             {
                 "wording": TWEAK_LADDER[entry["rung"]],
@@ -331,12 +337,10 @@ def second_caption_rows(
             "variant_id": entry.get("variant_id", ""),
             "approved_from": entry.get("approved", {}).get("approved_from", ""),
             "attended_sound": slots.get("attended_sound", ""),
-            "emphasis": emphasis.get("chosen", ""),
-            "emphasis_tied": emphasis.get("tied", ""),
-            **{
-                f"{name}_centred": emphasis.get("subscales", {}).get(name, {}).get("centred", "")
-                for name in RESTORATIVE
-            },
+            "texture": texture.get("level", ""),
+            "fascination_centred": texture.get("centred", ""),
+            "report": (model.get("report") or {}).get("answer") or "",
+            "report_log_ratio": (model.get("report") or {}).get("log_ratio", ""),
             "noticed_audioset_label": model.get("noticed", {}).get("audioset_label", ""),
             "on_screen": model.get("noticed", {}).get("on_screen", ""),
             "visibility": model.get("visibility", ""),
@@ -348,6 +352,8 @@ def second_caption_rows(
             "p_bound": model.get("p_bound", ""),
             "moderator_scene": model.get("moderator_scene", ""),
             "moderator_participant": model.get("moderator_participant", ""),
+            "binding_B": (predictions.get("binding") or {}).get("B", ""),
+            "fascination_Phi": (predictions.get("fascination") or {}).get("Phi", ""),
             "recommended": model.get("recommended", ""),
             "assignment": model.get("assignment", ""),
             "mode": model.get("mode", ""),

@@ -13,8 +13,8 @@ audio caption from what the scene holds to what this participant perceived and
 preferred, in the attention-restorative direction; it is not a scene-descriptive
 rewrite. Two answers steer the text, in both modes alike: the noticed sound (A1s),
 which the caption centres, and the restorative appraisal (P4), whose emphasis
-*reflects* the quality the participant perceived most in this clip
-(:func:`emphases`). Each caption is written when stage A ends and shown once it
+*reflected* the quality the participant perceived most in this clip (until v10; since v11 the
+texture level, below). Each caption is written when stage A ends and shown once it
 passes the gate (:mod:`diff.phase1_usable`); the researcher no longer approves
 every caption before the study (that design, 2026-10-24, is retired). The writer is
 Claude through the API since 2026-10-27 (:mod:`diff.claude_writer`), after the local
@@ -26,6 +26,16 @@ same text in 61 of 86 retries).
 Phase 1 tests the mode (follow or counter); the emphasis is applied the same way under
 either mode, and testing it is phase 2's role, under the same rule.
 
+**Texture replaces the emphasis** (researcher, 2026-11-23, ``docs/v4-diff/chain-spec.md``): both
+phases now write in one caption space (mode, context, texture). The clip's texture level follows
+how fascinating the participant found it against their own level, ``f = F − F̄`` on the mean of
+F1–F3 (P4): ``t = 1 + [f ≥ δ] − [f ≤ −δ]`` with :data:`TEXTURE_DELTA` δ = 0.5 scale points (set by
+the chain simulation: 28/43/29% of clips at 0/1/2). The prompt takes phase 2's sentence for that
+texture stop (``rewrite_prompts.TEXTURE_KO``), the same under both modes, so the mode's contrast
+stays clean. The acousmatic prompt no longer asks on its own for how the sounds are heard: that is
+texture, which both modes now share. ``Φ_i = (F̄ − 3)/3`` is recorded as the chain's prediction for
+phase 2's texture slider (H3) (:func:`textures`).
+
 The slots, for one participant and clip:
 - ``mode``: ``scene`` or ``acousmatic``;
 - ``caption``: the raw first caption the participant saw;
@@ -33,8 +43,8 @@ The slots, for one participant and clip:
   ``orig_text`` names. The prompt names them, so they are R2's key (the
   researcher's "key from the prompt");
 - ``attended_sound``: the A1s answer's label (P3);
-- ``emphasis``: the sentence of :data:`EMPHASIS_KO` for the clip's reflected
-  subscale;
+- ``texture``: phase 2's sentence for the clip's texture level (until v10, ``emphasis``: a
+  sentence for the restorative subscale the clip stood highest on for this participant);
 - scene-aware only: ``scene_elements``, the clip's distinctive element, then
   its largest other element; ``seen``, the scene's setting: the distinctive
   element (researcher, 2026-10-24: one setting per clip; it was the object the
@@ -71,6 +81,7 @@ from diff.job_plan import Job, tweak_job
 from diff.phase1_binding import BASELINE, FOLLOW, assignment_plan, decide_all
 from diff.rewrite_prompts import (
     NOT_SEEN,
+    TEXTURE_KO,
     TWEAK_LADDER,
     TWEAK_PROMPTS,
     TWEAK_PROVISIONAL,
@@ -85,8 +96,11 @@ from diff.rewrite_prompts import (
 # v8 (2026-10-26): Qwen3.5-9B writes them, and the ladder's rungs are wordings.
 # v9 (2026-10-27): Claude writes them through the API, on the same ladder.
 # v10 (2026-10-27): the first wording is tried twice, since Claude's retries vary.
-TWEAK_POLICY: Final = "diff.phase1-tweak/v10"
-EMPHASIS_POLICY: Final = "diff.phase1-emphasis/reflect-v1"
+# v11 (2026-11-23): the texture level from fascination replaces the emphasis (chain spec).
+TWEAK_POLICY: Final = "diff.phase1-tweak/v11"
+TEXTURE_POLICY: Final = "diff.phase1-texture/fascination-v1"
+TEXTURE_DELTA: Final = 0.5
+FASCINATION: Final = "fascination"
 STEP1_PAGES: Final = ("P2", "P3", "P4", "P5")
 # The scene's elements (phase1_scene.ELEMENTS) in Korean.
 ELEMENTS_KO: Final[dict[str, str]] = {
@@ -104,17 +118,6 @@ OFFSCREEN_KO: Final = (
 )
 # AudioSet labels for sounds of the recording, not of the place: never placed in the scene.
 RECORDING_ARTEFACTS: Final = frozenset({"Wind noise (microphone)"})
-# The restorative appraisal that steers the emphasis: the soundscape subscales of P4 (Payne, 2013),
-# in the questionnaire's order, which breaks a tie left after the raw means. The place's being away
-# (P1–P2, Hartig et al., 1997) rates the picture, not the sounds the caption describes.
-RESTORATIVE: Final = ("fascination", "being_away_from", "extent_coherence")
-# Each subscale's emphasis, one wording for everyone and both modes. None uses the P4/P9 items' own
-# words (``phase1_usable.ITEM_STEMS``), which a caption must not echo before P9 rates them.
-EMPHASIS_KO: Final[dict[str, str]] = {
-    "fascination": "소리에서 귀를 사로잡는 점이 살아나도록 쓰세요.",
-    "being_away_from": "소리를 들으며 잠시 다른 곳에 와 있는 듯한 느낌이 살아나도록 쓰세요.",
-    "extent_coherence": "소리들이 따로 놀지 않고 서로 이어져 들리는 느낌이 살아나도록 쓰세요.",
-}
 # For named_in: a label's words that describe its sound rather than name it, by their ending (a
 # verb before a noun, "달리는"; an adverb, "멀리서", "크게"; an object, "도로를") or as listed.
 DESCRIBING: Final = re.compile(r"(?:는|서|게|를|을)$")
@@ -148,40 +151,30 @@ def step_answers(records: Mapping[str, Mapping[str, Any]], clip_key: str) -> dic
     return answers
 
 
-def emphases(answers: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Each clip's reflected subscale, from the participant's whole stage A (in stage-A order).
+def textures(answers: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Each clip's texture level (in stage-A order) and the participant's fascination level ``Φ``.
 
-    A subscale's mean on a clip is centred on the participant's own mean of it over their clips,
-    so how someone uses the scale, or rates one subscale above another everywhere, moves nothing.
-    The clip's emphasis is the subscale it stands highest on; a tie goes to the higher raw mean,
-    then to the order of :data:`RESTORATIVE`.
+    ``f`` is the clip's mean of F1–F3 against the participant's own mean over their clips, so how
+    someone uses the scale moves nothing; ``Φ = (F̄ − 3)/3`` runs from −1 to +1 and is 0 at the
+    scale's middle.
     """
-    means = [
-        {name: mean(float(given[item]) for item in BASELINE[name]) for name in RESTORATIVE}
-        for given in answers
-    ]
-    centre = {name: mean(clip[name] for clip in means) for name in RESTORATIVE}
+    means = [mean(float(given[item]) for item in BASELINE[FASCINATION]) for given in answers]
+    centre = mean(means)
     records = []
-    for clip in means:
-        centred = {name: round(clip[name] - centre[name], 6) for name in RESTORATIVE}
-        rank = sorted(RESTORATIVE, key=lambda n: (-centred[n], -clip[n], RESTORATIVE.index(n)))
+    for value in means:
+        f = round(value - centre, 6)
+        level = 1 + (f >= TEXTURE_DELTA) - (f <= -TEXTURE_DELTA)
         records.append(
             {
-                "policy": EMPHASIS_POLICY,
-                "rule": "reflect",
-                "chosen": rank[0],
-                "tied": centred[rank[0]] == centred[rank[1]],
-                "subscales": {
-                    name: {
-                        "mean": round(clip[name], 4),
-                        "centre": round(centre[name], 4),
-                        "centred": centred[name],
-                    }
-                    for name in RESTORATIVE
-                },
+                "policy": TEXTURE_POLICY,
+                "level": level,
+                "fascination": round(value, 4),
+                "centre": round(centre, 4),
+                "centred": f,
+                "delta": TEXTURE_DELTA,
             }
         )
-    return records
+    return records, {"policy": TEXTURE_POLICY, "Phi": round((centre - 3) / 3, 4), "clips": len(means)}
 
 
 def scene_slots(clip: Mapping[str, Any], mode: str) -> dict[str, str]:
@@ -238,22 +231,22 @@ def tweak_steer_all(
     """Each clip's prompt slots and steering record, from the participant's whole stage A.
 
     ``clips`` and ``records`` (each clip's first-step records, by page) run in stage-A order. The
-    record is the binding model's, with the clip's ``emphasis`` and ``caption`` variant added.
+    record is the binding model's, with the clip's ``texture`` and ``caption`` variant added.
     """
     answers = [step_answers(step, str(clip["key"])) for clip, step in zip(clips, records, strict=True)]
     matches = [(step["P2"].get("matches") or [None])[0] for step in records]
     models = decide_all(clips, answers, matches, plan, root=root)
     steered = []
-    for clip, given, model, emphasis in zip(clips, answers, models, emphases(answers), strict=True):
-        model["emphasis"] = emphasis
-        slots = tweak_slots(clip, model["mode"], given.get("A1s"), emphasis["chosen"])
+    for clip, given, model, texture in zip(clips, answers, models, textures(answers)[0], strict=True):
+        model["texture"] = texture
+        slots = tweak_slots(clip, model["mode"], given.get("A1s"), texture["level"])
         model["caption"] = caption_variant(clip, model["mode"])
         steered.append((slots, model))
     return steered
 
 
-def tweak_slots(clip: Mapping[str, Any], mode: str, attended: str | None, emphasis: str) -> dict[str, str]:
-    """One clip's prompt slots in ``mode``, from the attended sound (A1s) and the reflected subscale."""
+def tweak_slots(clip: Mapping[str, Any], mode: str, attended: str | None, texture: int) -> dict[str, str]:
+    """One clip's prompt slots in ``mode``, from the attended sound (A1s) and the texture level."""
     sounds = {option["value"]: option["label"] for option in clip["options"]["A1s"]}
     if str(attended) not in sounds:
         # A1s is a required choice among the clip's options; the prompt must never name "no sound" as the
@@ -267,7 +260,7 @@ def tweak_slots(clip: Mapping[str, Any], mode: str, attended: str | None, emphas
         "caption": clip["caption"]["text"],
         "sounds": ", ".join(mentioned),
         "attended_sound": sounds[str(attended)],
-        "emphasis": EMPHASIS_KO[emphasis],
+        "texture": TEXTURE_KO[texture],
         **scene_slots(clip, mode),
     }
 
@@ -279,12 +272,12 @@ def on_screen(clip: Mapping[str, Any], option: Mapping[str, Any]) -> bool:
 
 def reachable_slots(clip: Mapping[str, Any]) -> list[dict[str, str]]:
     """Every slot set a participant can reach on this clip, so every second caption it can show:
-    one per mode, attended sound (A1s, a required choice) and emphasis."""
+    one per mode, attended sound (A1s, a required choice) and texture level."""
     found: dict[str, dict[str, str]] = {}
     for option in clip["options"]["A1s"]:
         for mode in TWEAK_PROMPTS:
-            for emphasis in RESTORATIVE:
-                slots = tweak_slots(clip, mode, option["value"], emphasis)
+            for texture in sorted(TEXTURE_KO):
+                slots = tweak_slots(clip, mode, option["value"], texture)
                 found.setdefault(variant_id(slots), slots)
     return list(found.values())
 

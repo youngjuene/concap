@@ -16,12 +16,15 @@ from diff.phase1_binding import (
     DRAWN,
     FOLLOW,
     GRID_SIZE,
+    REPORT_K,
     assignment_plan,
     attention,
     balanced_plan,
+    binding_trait,
     congruence,
     decide_all,
     p_bound,
+    report,
     summary,
     tendency,
 )
@@ -129,9 +132,18 @@ def test_congruence_counts_from_the_participant_s_own_level() -> None:
     }
 
 
-def stage_a(setup: dict[str, Any], fits: tuple[int, ...], sound: str = "s1") -> tuple[list[Any], ...]:
+def stage_a(
+    setup: dict[str, Any],
+    fits: tuple[int, ...],
+    sound: str = "s1",
+    reports: tuple[str | None, ...] | None = None,
+) -> tuple[list[Any], ...]:
+    """Three clips' first steps; without ``reports`` no clip has a direct report (a v3 session)."""
     clips = setup["clips"]
-    steps = [first_step(sound=sound, fit=fit) for fit in fits]
+    reports = reports or (None,) * len(fits)
+    steps = [
+        first_step(sound=sound, fit=fit, report=report) for fit, report in zip(fits, reports, strict=True)
+    ]
     answers = [
         {k: v for page in ("P2", "P3", "P4", "P5") for k, v in step[page]["answers"].items()}
         for step in steps
@@ -193,3 +205,32 @@ def test_decide_follows_or_counters_the_recommendation(setup: dict[str, Any], ro
         decide_all(clips, answers, matches, ["maybe"] * 3, root=root)
     with pytest.raises(ValueError, match="one clip"):
         decide_all(clips, answers, matches, [FOLLOW], root=root)
+
+
+def test_the_direct_report_weighs_ln_4_and_teaches_the_other_clips_tendency(
+    setup: dict[str, Any], root: Path
+) -> None:
+    assert pytest.approx(math.log(4)) == REPORT_K
+    assert report({"A1o": "on_screen"}) == {"answer": "on_screen", "log_ratio": pytest.approx(math.log(4))}
+    assert report({"A1o": "off_screen"})["log_ratio"] == pytest.approx(-math.log(4))
+    assert report({}) == {"answer": None, "log_ratio": 0.0}  # a session begun under v3
+    plan = [FOLLOW] * 3
+    clips, answers, matches = stage_a(setup, (3, 3, 3), sound="s2")
+    none = decide_all(clips, answers, [None] * 3, plan, root=root)
+    on = decide_all(*stage_a(setup, (3, 3, 3), "s2", ("on_screen",) * 3)[:2], [None] * 3, plan, root=root)
+    off = decide_all(*stage_a(setup, (3, 3, 3), "s2", ("off_screen",) * 3)[:2], [None] * 3, plan, root=root)
+    assert off[2]["p_bound"] < none[2]["p_bound"] < on[2]["p_bound"]
+    assert on[2]["log_ratio"] == pytest.approx(math.log(4)) and on[2]["report"]["answer"] == "on_screen"
+    # The other clips' reports move this clip's tendency, not only its own evidence.
+    assert on[2]["tendency"]["mean"] > none[2]["tendency"]["mean"] > off[2]["tendency"]["mean"]
+
+
+def test_the_binding_trait_is_logit_pi_from_every_clip_and_zero_when_the_answers_say_nothing() -> None:
+    silent = binding_trait([(0.3, 0.0), (0.7, 0.0)])
+    assert silent["B"] == pytest.approx(0.0, abs=1e-9) and silent["clips"] == 2
+    assert silent["low"] < 0 < silent["high"]
+    binds = binding_trait([(0.3, math.log(4))] * 12)
+    detaches = binding_trait([(0.3, -math.log(4))] * 12)
+    assert detaches["B"] < 0 < binds["B"] and binds["low"] > silent["low"]
+    # Binding a sound that the masks put on screen says less about the listener than binding one they do not.
+    assert binding_trait([(0.9, math.log(4))] * 12)["B"] < binds["B"]

@@ -13,7 +13,7 @@ from test_participant_server import Lab, through_phase_one
 
 from diff.__main__ import main
 from diff.export_bundle import PHASE1_COLUMNS, R2_CODING_COLUMNS, SECOND_CAPTION_COLUMNS, caption_id, export
-from diff.phase1_tweak import ELEMENTS_KO, RESTORATIVE
+from diff.phase1_tweak import ELEMENTS_KO
 from diff.session_store import SessionStore
 
 
@@ -44,7 +44,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
     assert manifest["counts"] == {
         "sessions": 2,
         "finished": 1,
-        "phase1_rows": 102,
+        "phase1_rows": 105,  # 102 until 2026-11-23, then one A1o row per clip
         "second_caption_rows": 3,
         "post_watch_rows": 1,
         "phase2_video_rows": 1,
@@ -90,8 +90,9 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         clip["caption"]["text"],
     )
     assert (row["rung"], row["wording"]) == ("0", "every-sound")
-    assert row["emphasis"] in RESTORATIVE and row["emphasis_tied"] in ("True", "False")
-    assert all(row[f"{name}_centred"] != "" for name in RESTORATIVE)
+    assert row["texture"] in ("0", "1", "2") and row["fascination_centred"] != ""
+    assert row["binding_B"] != "" and row["fascination_Phi"] != ""
+    assert row["report"] in ("", "on_screen", "off_screen")
     assert row["attended_sound"] == clip["options"]["A1s"][0]["label"]
     assert (row["caption_source"], row["approved_from"]) == ("trida", "") and len(row["variant_id"]) == 12
     assert row["noticed_audioset_label"] == clip["options"]["A1s"][0]["audioset_label"]
