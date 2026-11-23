@@ -82,6 +82,17 @@ function draftFor(detail) {
   return {...saved, answers: answers && typeof answers === "object" && !Array.isArray(answers) ? answers : {}};
 }
 
+// A UUID for a submission. crypto.randomUUID exists only on HTTPS and localhost; the lab app may
+// be opened by its IP address over plain HTTP, where getRandomValues still works.
+function requestKey() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 async function action(name, data = {}, detail = current) {
   const key = scope(detail);
   const saved = draftFor(detail);
@@ -89,7 +100,7 @@ async function action(name, data = {}, detail = current) {
   const signature = JSON.stringify({name, body, revision: detail.revision});
   // If the reply is lost, retries keep the same key and original submission.
   const pending = saved.pending?.signature === signature ? saved.pending : {
-    signature, payload: {key: crypto.randomUUID(), revision: detail.revision, data: body},
+    signature, payload: {key: requestKey(), revision: detail.revision, data: body},
   };
   storage.write(key, {...saved, pending});
   const result = await request(name, pending.payload);
@@ -617,7 +628,7 @@ async function renderVideo(detail, renderID) {
         // Hidden playback is never credited. Rewind to the acknowledged
         // position so the remaining interval is actually watched on return.
         if (sample.hidden) sample.position_ms = checkpoint.position_ms || 0;
-        if (!await send({key: crypto.randomUUID(), revision: detail.revision, data: {...sample, sequence: ++sequence}})) return;
+        if (!await send({key: requestKey(), revision: detail.revision, data: {...sample, sequence: ++sequence}})) return;
         if (sample.hidden) video.currentTime = checkpoint.position_ms / 1000;
       });
       chain = task.catch(() => {});
