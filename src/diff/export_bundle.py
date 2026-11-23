@@ -47,6 +47,15 @@ Files written to ``--out``:
   started again after a reload. The server never blocks on it (researcher, 2026-11-12): a video
   with a low share is excluded at analysis. A session that ended before a video's end has no row
   for that video.
+- ``phase2_sliders.csv`` (v14, 2026-11-23, ``docs/v4-diff/chain-spec.md``): one row per participant ×
+  long video reached × slider (``axis``: ``texture`` or ``context``, stops 0–2): the stop it started
+  at (counterbalanced), the stop it settled on (``settled``: the mean stop over the video's
+  position after its first :data:`SETTLE_MS`, each stop weighted by how long it was in force), the
+  share of that span at each stop (to show the rival direction of H2 between stops 1 and 2), how
+  often the participant moved it, and the participant's predictions ``binding_B`` and
+  ``fascination_Phi``. The span is video position, not wall time; after a reload the video starts
+  again from 0 with the stop then in force, and only that last pass counts. These are H2's and
+  H3's outcomes (``scripts/diff_chain_analysis.py``).
 - ``manifest.json``: counts, the setup's hash and each file's SHA-256.
 """
 
@@ -62,13 +71,33 @@ from typing import Any, Final
 from diff.phase1_tweak import named_in
 from diff.rewrite_prompts import TWEAK_LADDER
 from diff.session_store import SessionStore
-from diff.study_protocol import sha256_of
+from diff.study_protocol import CONTEXT_STEPS, sha256_of
 
 # v9 (2026-10-26): the delivering rung's wording, not its τ. v10 (2026-10-27): the model that wrote it.
 # v11 (2026-11-03): the perceived-source block, source_check.csv.
 # v12 (2026-11-12): how much of each long video was played, phase2_videos.csv.
 # v13 (2026-11-23): the texture level for the emphasis, the direct report, B_i and Φ_i (chain spec).
-EXPORT_SCHEMA: Final = "diff.export/v13"
+# v14 (2026-11-23): the sliders' settled stops per video, phase2_sliders.csv.
+EXPORT_SCHEMA: Final = "diff.export/v14"
+SETTLE_MS: Final = 30_000  # the chain simulation found 0 to 120 s alike; 30 s as registered
+SLIDER_COLUMNS: Final = (
+    "participant",
+    "session_id",
+    "finished",
+    "video_index",
+    "video_id",
+    "axis",
+    "start",
+    "settled",
+    "share_0",
+    "share_1",
+    "share_2",
+    "changes",
+    "window_ms",
+    "duration_ms",
+    "binding_B",
+    "fascination_Phi",
+)
 PHASE1_COLUMNS: Final = (
     "participant",
     "session_id",
@@ -239,6 +268,74 @@ def phase2_video_rows(
         | {column: video[column] for column in PHASE2_VIDEO_COLUMNS[3:]}
         for video in latest.values()
     ]
+
+
+def _stop(axis: str, steps: Mapping[str, Any]) -> int:
+    value = steps[axis]
+    return int(value) if axis == "texture" else CONTEXT_STEPS.index(str(value))
+
+
+def phase2_slider_rows(
+    participant: str,
+    session_id: str,
+    finished: bool,
+    state: Mapping[str, Any],
+    events: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """One row per long video reached × slider: its start, settled stop and time at each stop."""
+    live = state.get("live", {})
+    starts = (state.get("calibration") or {}).get("starts") or []
+    predictions = state.get("predictions") or {}
+    durations = {video["video_id"]: int(video["duration_ms"]) for video in live.get("coverage", [])}
+    rows = []
+    for index, video_id in enumerate(durations):
+        mine = [
+            e
+            for e in events
+            if e.get("video_id") == video_id and e.get("event") in ("settings", "video_restarted")
+        ]
+        restarts = [i for i, e in enumerate(mine) if e["event"] == "video_restarted"]
+        begin = restarts[-1] + 1 if restarts else 0
+        duration = durations[video_id]
+        span = max(duration - SETTLE_MS, 0)
+        for axis_index, axis in enumerate(("texture", "context")):
+            start = round(float(starts[index][axis_index]) * 2) if index < len(starts) else 1
+            # The stop in force when the last pass began: the start, or the last move before it.
+            stop = start
+            for e in mine[:begin]:
+                if e["event"] == "settings":
+                    stop = _stop(axis, e["steps"])
+            changes, at, held = 0, 0, [0.0, 0.0, 0.0]
+            for e in mine[begin:]:
+                if e["event"] != "settings":
+                    continue
+                new = _stop(axis, e["steps"])
+                if new == stop:
+                    continue
+                position = min(max(int(e["position_ms"]), at), duration)
+                held[stop] += max(0, position - max(at, SETTLE_MS))
+                at, stop, changes = position, new, changes + 1
+            held[stop] += max(0, duration - max(at, SETTLE_MS))
+            total = sum(held)
+            rows.append(
+                {
+                    "participant": participant,
+                    "session_id": session_id,
+                    "finished": finished,
+                    "video_index": index,
+                    "video_id": video_id,
+                    "axis": axis,
+                    "start": start,
+                    "settled": round(sum(k * h for k, h in enumerate(held)) / total, 6) if total else "",
+                    **{f"share_{k}": round(h / total, 6) if total else "" for k, h in enumerate(held)},
+                    "changes": changes,
+                    "window_ms": span,
+                    "duration_ms": duration,
+                    "binding_B": (predictions.get("binding") or {}).get("B", ""),
+                    "fascination_Phi": (predictions.get("fascination") or {}).get("Phi", ""),
+                }
+            )
+    return rows
 
 
 def phase1_rows(
@@ -420,6 +517,7 @@ def export(
     post_watch: list[dict[str, Any]] = []
     source_check: list[dict[str, Any]] = []
     phase2_videos: list[dict[str, Any]] = []
+    sliders: list[dict[str, Any]] = []
     with (out / "participants.jsonl").open("w", encoding="utf-8") as handle:
         for session in sessions:
             finished = session.finished_at is not None
@@ -432,9 +530,12 @@ def export(
                 "revision": session.revision,
                 "state": session.state,
                 "store_events": store.events(session.session_id),
-                "live": live_logs(log_dirs, session.session_id),
+                "live": (logs := live_logs(log_dirs, session.session_id)),
             }
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            sliders += phase2_slider_rows(
+                session.participant, session.session_id, finished, session.state, logs["events"]
+            )
             phase1 += phase1_rows(session.participant, session.session_id, finished, session.state, clips)
             seconds += second_caption_rows(
                 session.participant, session.session_id, finished, session.state, clips
@@ -463,6 +564,7 @@ def export(
         "post_watch_rows": _write_csv(out / "post_watch.csv", POST_WATCH_COLUMNS, post_watch),
         "phase2_video_rows": _write_csv(out / "phase2_videos.csv", PHASE2_VIDEO_COLUMNS, phase2_videos),
         "source_check_rows": _write_csv(out / "source_check.csv", SOURCE_CHECK_COLUMNS, source_check),
+        "phase2_slider_rows": _write_csv(out / "phase2_sliders.csv", SLIDER_COLUMNS, sliders),
         "r2_coding_rows": _write_csv(
             out / "r2_coding.csv", R2_CODING_COLUMNS, r2_coding_rows(seconds, clips)
         ),

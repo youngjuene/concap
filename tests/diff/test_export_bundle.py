@@ -12,7 +12,15 @@ from test_live_server import drain
 from test_participant_server import Lab, through_phase_one
 
 from diff.__main__ import main
-from diff.export_bundle import PHASE1_COLUMNS, R2_CODING_COLUMNS, SECOND_CAPTION_COLUMNS, caption_id, export
+from diff.export_bundle import (
+    PHASE1_COLUMNS,
+    R2_CODING_COLUMNS,
+    SECOND_CAPTION_COLUMNS,
+    SETTLE_MS,
+    caption_id,
+    export,
+    phase2_slider_rows,
+)
 from diff.phase1_tweak import ELEMENTS_KO
 from diff.session_store import SessionStore
 
@@ -49,6 +57,7 @@ def test_the_export_holds_every_session_and_its_answer_keys(finished: Lab, tmp_p
         "post_watch_rows": 1,
         "phase2_video_rows": 1,
         "source_check_rows": 0,  # this serve has no scene parts, so no block
+        "phase2_slider_rows": 2,  # one video reached, two sliders
         "r2_coding_rows": 6,  # three shown captions, two R2 options each
     }
 
@@ -170,3 +179,32 @@ def test_the_cli_exports(finished: Lab, tmp_path: Path, capsys: pytest.CaptureFi
                 str(tmp_path / "o2"),
             ]
         )
+
+
+def test_a_slider_s_settled_stop_weighs_each_stop_by_video_time_after_the_window() -> None:
+    # A 90 s video: texture starts at stop 0 and moves to 2 at 60 s; context starts at 1 and stays.
+    state = {
+        "calibration": {"starts": [[0.0, 0.5]]},
+        "predictions": {"binding": {"B": 0.4}, "fascination": {"Phi": -0.2}},
+        "live": {"coverage": [{"video_id": "v1", "duration_ms": 90_000}]},
+    }
+
+    def move(texture: int, at: int, context: str = "specific") -> dict:
+        steps = {"texture": texture, "context": context}
+        return {"event": "settings", "video_id": "v1", "position_ms": at, "steps": steps}
+
+    texture, context = phase2_slider_rows("P1", "s", True, state, [move(2, 60_000)])
+    assert SETTLE_MS == 30_000
+    assert (texture["start"], texture["share_0"], texture["share_2"], texture["changes"]) == (0, 0.5, 0.5, 1)
+    assert texture["settled"] == 1.0 and texture["window_ms"] == 60_000
+    assert (context["start"], context["settled"], context["changes"]) == (1, 1.0, 0)
+    assert (texture["binding_B"], texture["fascination_Phi"]) == (0.4, -0.2)
+    # A move inside the first 30 s counts only from 30 s on.
+    early = phase2_slider_rows("P1", "s", True, state, [move(2, 10_000)])[0]
+    assert early["settled"] == 2.0 and early["share_2"] == 1.0
+    # A reload replays the video from 0 with the stop then in force: only that last pass counts.
+    restarted = [move(2, 20_000), {"event": "video_restarted", "video_id": "v1"}, move(1, 60_000)]
+    again = phase2_slider_rows("P1", "s", True, state, restarted)[0]
+    assert (again["share_2"], again["share_1"], again["changes"]) == (0.5, 0.5, 1)
+    # Another video's events are not this video's.
+    assert phase2_slider_rows("P1", "s", True, state, [{**move(2, 0), "video_id": "v2"}])[0]["settled"] == 0.0

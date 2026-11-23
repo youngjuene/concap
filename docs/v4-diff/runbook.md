@@ -592,9 +592,38 @@ It reads the store (`--store`, default the participant store) and every
 - `phase2_videos.csv`: per participant and long video, the time played as the server counted it
   (`watched_share`), how far playback got and how often the video started again; the server never
   blocks on it, so decide the exclusion threshold before looking at outcomes;
+- `phase2_sliders.csv` (export v14): per participant, long video and slider (`axis`), the stop it
+  started at, the stop it settled on (the mean stop over the video's position after its first
+  30 s, each stop weighted by how long it was in force), the share of that span at each stop, how
+  often it moved, and the participant's `binding_B` and `fascination_Phi`. After a reload only the
+  last pass through the video counts;
 - `manifest.json`, with file hashes.
 
 This is the only way data leave the app.
+
+### 8.1 The chain's analysis
+
+`docs/v4-diff/chain-spec.md` §5's tests, from an export (`diff.chain_analysis`):
+
+```sh
+uv run python scripts/diff_chain_analysis.py fit --export artifacts/diff/export-YYYYMMDD --out report.json
+uv run python scripts/diff_chain_analysis.py simulate --out DIR [--participants 48 --follow 0.3 …]
+```
+
+- **H1** (confirmatory): P9's F + BF on P4's, follow ±½, participant and clip as fixed effects,
+  standard error cluster-robust by participant on N − 1 df.
+- **H2, H3** (estimates): each video's settled stop net of the slider's start and the video,
+  averaged per participant, regressed on `B` (context) or `Φ` (texture). The mean share of time at
+  each stop is reported beside H2, for the rival direction between stops 1 and 2.
+- **D** (estimate): the cross terms when both traits are in.
+- **R** (confirmatory): Pearson's r between `B` and the source block's `a_i`, estimated as `B` is
+  from the block's reports; Fisher-z interval.
+
+Every test reports its estimate, 90% interval and one-sided p. The registered models are
+Bayesian multilevel; this is their pre-specified least-squares check. On 300 simulated null
+exports at N = 48 each interval missed 0 in 9–12% of them (nominal 10%); at the planned effects
+the power was H1 .96, R .96, H2 .25, H3 .43, as the chain simulation found. `simulate` writes
+the four tables `fit` reads, with known effects, for running the analysis before any session.
 
 ## 9. Audit before analysis
 
