@@ -6,8 +6,9 @@ Pages, in order:
 2. watch: the video plays, the two sliders can be moved at any time, and each
    cue shows its own caption as :mod:`diff.live_generation` serves it (a
    caption written under the current settings swaps in mid-cue);
-3. the next video (settings carry over), or the researcher's rating items once
-   the last video ends;
+3. the next video, whose sliders start at that video's counterbalanced stops
+   (``Calibration.start``; until 2026-11-23 the settings carried over), or the
+   researcher's rating items once the last video ends;
 4. the perceived-source block, when the serve has one (:mod:`diff.source_check`);
 5. done: the page says the session is complete (researcher, 2026-11-12:
    participants are remote, so nothing asks them to call an experimenter).
@@ -490,6 +491,7 @@ def add_live_routes(
         if session.video_index + 1 < len(videos):
             session.service.stop(session.session_id)
             session.video_index += 1
+            session.texture, session.context = session.calibration.start(session.video_index)
             session.stage = "ready"
             open_current(session)
         else:

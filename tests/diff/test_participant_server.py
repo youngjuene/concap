@@ -19,6 +19,7 @@ from diff.participant_server import COOKIE, build_participant_app
 from diff.phase1_flow import HANDOFF_TEXT, Phase1
 from diff.phase1_tweak import tweak_job_for
 from diff.phase1_usable import check_record
+from diff.rewrite_prompts import TUNER_SYSTEM
 from diff.session_store import SessionStore
 
 HEADERS = {"x-study-request": "1"}
@@ -181,7 +182,8 @@ def test_a_whole_session_hands_phase_one_answers_to_the_tuner(lab: Lab) -> None:
         json.loads(line) for line in next((lab.root / "logs").glob("live-*.jsonl")).read_text().splitlines()
     ]
     live = [line for line in attempts if line.get("kind") != "tweak"]
-    assert "소리 표현 4" in live[0]["system_message"]
+    # The tuner is one fixed sentence (2026-11-23): phase 1's answers are recorded, never sent.
+    assert live[0]["system_message"] == TUNER_SYSTEM.text and "소리 표현" not in live[0]["system_message"]
     assert [line["kind"] for line in attempts if line.get("kind") == "tweak"] == ["tweak"] * 3
 
     store = SessionStore(lab.root / "sessions.sqlite")

@@ -352,8 +352,12 @@ nothing records it.
   The user test's long videos are `data/phase2/viewing-1..3.mp4` (not in git),
   served as `--video viewing-1=data/phase2/viewing-1.mp4` and so on, in watch
   order.
-- `--video` gives one `ID=PATH` per video, in watch order. Settings carry over
-  between videos.
+- `--video` gives one `ID=PATH` per video, in watch order. Each slider starts
+  at stop 0 on one video, 1 on one and 2 on one, in an order set by the
+  participant number (`live_calibration.start_orders`: every block of six
+  participants is balanced, and the two sliders' orders are unrelated). A smoke
+  ID without a number starts both at the midpoint. Until 2026-11-23 the
+  settings carried over between videos.
 - `--items` holds the post-watch items:
   `{"items": [{"id", "text", "min", "max", "anchors": [low, high]}]}`.
   The text is Korean.
@@ -371,8 +375,9 @@ nothing records it.
       scene words, the sound the participant attended to, and the texture
       sentence their fascination ratings chose.
     - A live prompt holds the window's starting caption, the slider cell's
-      instructions, and the session's tuner text, built from the families the
-      participant heard and their rating means.
+      instructions, and the tuner sentence, one fixed text for everyone since
+      2026-11-23 (until then built from the families the participant heard and
+      their rating means).
   - **If the API is busy or unreachable,** the call is tried once more (a
     transient failure). After that, a clip's second step is skipped, and a live
     window shows its caption under earlier settings or its starting caption.
@@ -605,7 +610,7 @@ opens the store read-only and exits 1 on any mismatch. From each
 participant's answers it recomputes:
 - the object under each P2 point, by re-reading the masks;
 - each clip's mode, texture level and the other tweak slots, and the predictions `B` and `Φ`;
-- the tuner's heard families and rating means.
+- the tuner's heard families and rating means (recorded, sent to no prompt since 2026-11-23).
 
 diff's own prompt functions render what those values should produce, and the
 audit compares that with every logged call. It also checks that:

@@ -433,24 +433,21 @@ LIVE_MODE_PROMPTS: Final[dict[str, dict[tuple[int, str], PromptTemplate]]] = {
 }
 
 
-# The live session's system message: our own "audio caption tuner" role, built
-# once per session from the participant's phase-1 ratings and answers (researcher,
-# 2026-10-12). The researcher writes the role text; the slots are
-# {heard_families} (the sound families most attended to in phase 1, in Korean,
-# or "없음") and {s1}, {s2}, {s3} (the phase-1 caption-rating means on 0-6, or
-# "없음"). Until the researcher's text lands, the wording below is provisional
-# and participant sessions are refused.
+# The live session's system message: our own "audio caption tuner" role (researcher, 2026-10-12).
+# Version 0 was built per session from the participant's phase-1 answers ({heard_families}, the
+# sound families most attended to, and {s1}-{s3}, the caption-rating means). Since 2026-11-23
+# (researcher, docs/v4-diff/chain-spec.md) it is one fixed sentence for everyone, with no slot: the
+# sliders are phase 2's only personal input, so that phase 1 reaches phase 2 only as the chain's
+# predictions (H2, H3) and never through the captions themselves, which would make the test
+# circular. The wording waits for the researcher's approval; until then participant sessions are
+# refused.
 TUNER_PROVISIONAL: Final = True
 TUNER_SYSTEM: Final = PromptTemplate(
     template_id="tuner-system",
-    version=0,
-    text=(
-        "당신은 영상의 소리 자막을 시청자에게 맞게 다듬는 오디오 자막 조정기입니다. "
-        "이 시청자가 앞 단계에서 가장 주의를 기울인 소리: {heard_families}. "
-        "앞 단계 자막 평가(0-6점): 소리 표현 {s1}, 장면과의 일치 {s2}, 이해에 준 도움 {s3}."
-    ),
+    version=1,
+    text="당신은 영상의 소리 자막을 시청자가 고른 설정에 맞게 바꿔 쓰는 오디오 자막 조정기입니다.",
 )
-TUNER_SLOTS: Final = ("heard_families", "s1", "s2", "s3")
+TUNER_SLOTS: Final = ()
 
 
 @dataclass(frozen=True)

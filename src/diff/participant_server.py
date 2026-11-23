@@ -100,7 +100,8 @@ PROGRESS_KEYS: Final = {
     "settings": ("texture", "context"),
     "watch_started": ("stage",),
     "video_restarted": ("stage",),
-    "video_ended": ("stage", "video_index", "coverage"),
+    # A new video's sliders start at its own stops (2026-11-23), so they are stored with it.
+    "video_ended": ("stage", "video_index", "coverage", "texture", "context"),
     "ratings": ("answers", "stage", "source"),
     "source_answer": ("source_answers", "stage"),
 }
@@ -127,6 +128,7 @@ def calibration_record(calibration: Calibration) -> dict[str, Any]:
         "system_message": calibration.system_message,
         "provisional": calibration.provisional,
         "record": dict(calibration.record),
+        "starts": [list(start) for start in calibration.starts],
     }
 
 
@@ -137,6 +139,7 @@ def calibration_of(record: Mapping[str, Any]) -> Calibration:
         record["system_message"],
         record["provisional"],
         record["record"],
+        tuple(tuple(start) for start in record.get("starts", ())),
     )
 
 
@@ -281,7 +284,7 @@ def build_participant_app(
         def make(session_id: str) -> dict[str, Any]:
             if phase1 is not None:
                 return phase1.new_state(session_id, participant)
-            calibration = calibrate([], [])
+            calibration = calibrate([], [], participant)
             return {
                 "protocol": PHASE2_ONLY,
                 "session_id": session_id,
@@ -389,7 +392,7 @@ def build_participant_app(
                 return page(state), event
             if data.get("page") != "handoff":
                 raise Conflict("This answer belongs to another page")
-            calibration = calibrate(*flow.profile_inputs(state))
+            calibration = calibrate(*flow.profile_inputs(state), participant=state.get("participant"))
             event = flow.hand_off(state, calibration_record(calibration), now)
             state["live"] = live_progress(calibration)
             return {"next_url": WATCH_URL}, event

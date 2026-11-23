@@ -514,9 +514,7 @@ function render() {
     $("ready-eyebrow").textContent = where;
     $("ready-lede").textContent = restarted
       ? "시청이 중단되어 이 영상을 처음부터 다시 봅니다. 헤드폰을 착용해 주세요. 슬라이더 설정은 그대로입니다."
-      : state.video.number > 1
-        ? "헤드폰을 착용해 주세요. 슬라이더 설정은 앞 영상에서 이어집니다."
-        : "헤드폰을 착용해 주세요.";
+      : "헤드폰을 착용해 주세요.";  // each video's sliders start at its own stops (2026-11-23)
     restarted = false;
     $("watch-eyebrow").textContent = where;
     $("clock").textContent = `${clock(0)} / ${clock(state.video.duration_ms)}`;

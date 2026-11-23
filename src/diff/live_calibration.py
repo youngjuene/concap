@@ -1,4 +1,4 @@
-"""Where a live phase-2 session starts: the calibrated sliders and the tuner system message.
+"""Where a live phase-2 session starts: each video's slider stops and the tuner system message.
 
 Researcher's decisions:
 - 2026-10-11: copy regen's sheet-handoff rule for the sliders. No explicit
@@ -7,6 +7,12 @@ Researcher's decisions:
   once per session at the phase 1 → phase 2 handoff from the participant's
   phase-1 ratings and answers, and fixed through the watch. It replaces the
   guidance sentence the live prompt used to carry.
+- **2026-11-23** (``docs/v4-diff/chain-spec.md``): the sliders are the method of adjustment with
+  varied starts. Each slider starts at stop 0 on one video, 1 on one and 2 on one; the order is
+  counterbalanced across participants and has nothing to do with their phase 1
+  (:func:`start_orders`), so the pull of the starting stop is measured and removed in the
+  analysis instead of being read as preference. The tuner is one fixed sentence for everyone; the
+  heard families and the rating means below are still recorded, but reach no prompt.
 
 The profile comes from phase-1 records:
 - per short clip, the sound family behind the most-attended sound (P3 ``A1s``,
@@ -23,6 +29,8 @@ refused (see ``python -m diff live serve``).
 
 from __future__ import annotations
 
+import itertools
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -33,10 +41,14 @@ from diff.caption_sources import CATEGORIES_KO
 from diff.rewrite_prompts import TUNER_PROVISIONAL, TUNER_SYSTEM, render_tuner_system
 from diff.study_protocol import sha256_of
 
-CALIBRATION_POLICY: Final = "diff.live-calibration/v4"  # v4 (2026-11-03): no scene profile
-CALIBRATION_SOURCE: Final = "regen sheet handoff for the sliders; phase-1 ratings and answers for the tuner"
-START_TEXTURE: Final = 0.5
+# v4 (2026-11-03): no scene profile. v5 (2026-11-23): counterbalanced starts, a fixed tuner.
+CALIBRATION_POLICY: Final = "diff.live-calibration/v5"
+CALIBRATION_SOURCE: Final = "counterbalanced start orders by participant number; a fixed tuner sentence"
+START_TEXTURE: Final = 0.5  # the midpoint, for a session with no participant number (smoke)
 START_CONTEXT: Final = 0.5
+# The six orders of stops 0, 1, 2 over the three videos, as the page's slider positions.
+ORDERS: Final = tuple(tuple(stop / 2 for stop in order) for order in itertools.permutations(range(3)))
+NUMBER: Final = re.compile(r"P(\d+)")
 RATING_ITEMS: Final = ("S1", "S2", "S3")
 NOT_OBSERVED: Final = "없음"
 
@@ -48,6 +60,29 @@ class Calibration:
     system_message: str
     provisional: bool
     record: Mapping[str, Any] = field(default_factory=dict)
+    # Each video's starting (texture, context), in watch order; the first is (texture, context).
+    starts: tuple[tuple[float, float], ...] = ()
+
+    def start(self, video_index: int) -> tuple[float, float]:
+        """Where video ``video_index``'s sliders start (the session's first start when unset)."""
+        if video_index < len(self.starts):
+            return self.starts[video_index]
+        return (self.texture, self.context)
+
+
+def start_orders(participant: str | None, videos: int = 3) -> tuple[tuple[float, float], ...] | None:
+    """The participant's (texture, context) start per video, or None without a participant number.
+
+    Participant ``P{k+1}`` takes texture order ``k mod 6`` and context order ``(k + k div 6) mod 6``:
+    every block of six participants starts each slider at each stop on each video equally often,
+    and 36 participants meet all 36 pairs of orders once, so the two sliders' starts are unrelated.
+    """
+    found = NUMBER.fullmatch(participant or "")
+    if found is None or videos != 3:
+        return None
+    k = int(found.group(1)) - 1
+    texture, context = ORDERS[k % 6], ORDERS[(k + k // 6) % 6]
+    return tuple(zip(texture, context, strict=True))
 
 
 def heard_families_text(heard: Mapping[str, int]) -> str:
@@ -87,8 +122,10 @@ def profile_slots(heard: Mapping[str, int], means: Mapping[str, float | None]) -
 def calibrate(
     observations: Sequence[Mapping[str, Any]],
     ratings: Sequence[Mapping[str, Any]] = (),
+    participant: str | None = None,
 ) -> Calibration:
-    """Midpoint sliders and the session's tuner system message from phase-1 answers and ratings."""
+    """Each video's starting stops (:func:`start_orders`; the midpoint without a participant number)
+    and the session's tuner system message; the phase-1 profile is recorded, not used."""
     heard: Counter[str] = Counter()
     labels: Counter[str] = Counter()
     for observation in observations:
@@ -96,13 +133,16 @@ def calibrate(
         labels.update(set(observation.get("labels", [])))
     means = rating_means(ratings)
     slots = profile_slots(heard, means)
-    system_message = render_tuner_system(slots)
+    system_message = render_tuner_system({})
+    starts = start_orders(participant) or ((START_TEXTURE, START_CONTEXT),) * 3
     record = {
         "policy": CALIBRATION_POLICY,
         "source": CALIBRATION_SOURCE,
         "sample_count": len(observations),
         "rated_clips": len(ratings),
-        "start": {"texture": START_TEXTURE, "context": START_CONTEXT},
+        "start": {"texture": starts[0][0], "context": starts[0][1]},
+        "starts": [{"texture": texture, "context": context} for texture, context in starts],
+        "counterbalanced": start_orders(participant) is not None,
         "heard_observations": dict(sorted(heard.items())),
         "visual_observations": dict(sorted(labels.items())),
         "unmapped_families": sorted(family for family in heard if family not in CATEGORIES_KO),
@@ -117,9 +157,10 @@ def calibrate(
         "system_message": system_message,
     }
     return Calibration(
-        START_TEXTURE,
-        START_CONTEXT,
+        starts[0][0],
+        starts[0][1],
         system_message,
         TUNER_PROVISIONAL,
         {**record, "sha256": sha256_of(record)},
+        starts,
     )

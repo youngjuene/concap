@@ -145,8 +145,8 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert keep(enter(client)).json() == {"next_url": "watch/"}
     started = keep(client.post("/watch/api/session", json={}))
     assert started.status_code == 200 and started.json()["stage"] == "ready"
-    # The calibrated start (0.5, 0.5) is the middle stop of each slider; no phase 1, no session progress.
-    assert started.json()["sliders"]["stops"] == {"texture": 1, "context": 1}
+    # P1's counterbalanced start for the first video (texture order 0, context order 0): stop 0 on both.
+    assert started.json()["sliders"]["stops"] == {"texture": 0, "context": 0}
     assert started.json()["video"]["duration_ms"] == 15000 and "progress" not in started.json()
     assert keep(client.post("/watch/api/start")).status_code == 409  # cue 0 is not written yet
     drain(service)
@@ -212,7 +212,7 @@ def test_a_whole_watch_without_leaking_internals(app_parts: dict[str, Any]) -> N
     assert settings_event["steps"] == {"texture": 2, "context": "relation"}  # texture capped at step 2
     live_log = next(app_parts["logs"].glob("live-*.jsonl"))
     attempts = [json.loads(line) for line in live_log.read_text(encoding="utf-8").splitlines()]
-    assert attempts[0]["system_message"].startswith("당신은") and "없음" in attempts[0]["system_message"]
+    assert attempts[0]["system_message"].startswith("당신은") and "없음" not in attempts[0]["system_message"]
     assert attempts[-1]["spec"] == {"texture": 2, "context": "relation"}
 
 

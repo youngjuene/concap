@@ -62,6 +62,7 @@ from diff.claude_writer import request_body  # noqa: E402
 from diff.export_bundle import caption_id  # noqa: E402
 from diff.generation_worker import TRANSIENT  # noqa: E402
 from diff.job_plan import live_job  # noqa: E402
+from diff.live_calibration import start_orders  # noqa: E402
 from diff.live_generation import STARTING_CAPTION, usable  # noqa: E402
 from diff.output_checks import DISPLAY_RULE, readable, shown_text  # noqa: E402
 from diff.phase1_binding import (  # noqa: E402
@@ -708,9 +709,16 @@ def audit_tuner(audit: Audit, who: str, state: Mapping[str, Any], clips: Mapping
     else:
         audit.ok(
             "tuner",
-            render_tuner_system(slots) == calibration["system_message"],
-            f"{who}: the system message is not the tuner rendered from the recomputed slots",
+            render_tuner_system({}) == calibration["system_message"],
+            f"{who}: the system message is not the fixed tuner sentence",
         )
+    # Each video's starting stops, from the participant number alone (2026-11-23).
+    expected = start_orders(state.get("participant")) or ((0.5, 0.5),) * 3
+    audit.ok(
+        "tuner",
+        [tuple(start) for start in calibration.get("starts", ())] == list(expected),
+        f"{who}: slider starts {calibration.get('starts')}, recomputed {list(expected)}",
+    )
     return str(calibration["system_message"])
 
 

@@ -57,7 +57,7 @@ def test_rewrite_v3_asks_for_new_wording_without_label_lines() -> None:
 def test_live_prompt_is_its_slider_cell_s_own_under_the_session_tuner(development_sources: SourceSet) -> None:
     # Researcher, 2026-10-21: nine prompts, one per slider cell, written as soundscape descriptors.
     source = development_sources.phase(1)[0]
-    tuner = render_tuner_system({"heard_families": "사람 소리 1번", "s1": "4", "s2": "3", "s3": "5"})
+    tuner = render_tuner_system({})  # one fixed sentence since 2026-11-23
     rendered = {
         (t, c): render_live(source, t, c, tuner) for t in (0, 1, 2) for c in ("broad", "specific", "relation")
     }
