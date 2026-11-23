@@ -171,6 +171,15 @@ the source block, the 2 s on-screen rule.
 4. Write the export tables and the analysis script, and run it on simulated exports.
 5. Pre-register sections 3 to 5 and 7.
 
+**Status (2026-11-23):** steps 1–4 are built (`288390b`, `e3b4e6d`, `2c2719b`; runbook §7, §8.1).
+Before any participant session:
+- the second-caption delivery bench on the new texture wordings
+  (`scripts/diff_second_captions.py draft`), which needs `ANTHROPIC_API_KEY`;
+- the researcher's approval of the fixed tuner sentence (`rewrite_prompts.TUNER_SYSTEM` v1) and
+  of the phase-1 wordings with the texture slot (both still provisional);
+- the phase-1 setup re-stamped with the instrument's new hash, since A1o changed the instrument;
+- step 5, the pre-registration.
+
 ## Sources
 
 Checked on 2026-11-18 and 2026-11-23 (bibliographic record and abstract; the full texts of Gaver
