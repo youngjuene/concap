@@ -27,6 +27,16 @@ the analysis. Sessions wait until it is built.
   researcher before pre-registration; the values below are its starting points;
 - the cited sources were checked on 2026-11-23 (Sources).
 
+**Set by the simulation (2026-11-23, `artifacts/diff/chain-sim/`; researcher's choice of strategy):**
+- `ρ = 0.8`, `δ = 0.5` (texture levels 0/1/2 on 28/43/29% of clips), settling window 30 s (power
+  did not change between 0 and 120 s, since the start is counterbalanced and in the model);
+- the report lifts the recovery of the binding trait from r = .41 (click and E1/E3) to .65;
+- **H1 and R are confirmatory; H2, H3 and D are registered estimates** (direction stated, posterior
+  and 90% interval reported, the small sample stated), because between-person links from three
+  slider settings each are underpowered: at N = 48 and γ = .3, H2 .26 and H3 .45, against H1 .97
+  and R .94; 80% would need N ≈ 130 for H3 and over 200 for H2;
+- **N = 48** (a multiple of the six start orders), which gives H1 and R over .9.
+
 ## 1. The idea in one paragraph
 
 A caption for a sound can say two different things: *what makes the sound and where it is*, and *what
@@ -110,9 +120,9 @@ effects; the models are Bayesian multilevel, as already planned.
 |---|---|---|---|
 | H1 | a caption in the matching mode restores more (phase 1, experiment) | `P9 ~ P4 + follow + (1 \| i) + (1 \| j)` | `follow > 0` |
 | H1′ | and its two sources | `P9 ~ P4 + m × (v + u) + …` (as planned) | `m × u > 0`, `m × v > 0` |
-| H2 | perception predicts preference, source axis (phase 2) | `X_iv ~ B_i + start + (1 \| i) + (1 \| video)` | `B > 0` |
-| H3 | perception predicts preference, quality axis (phase 2) | `T_iv ~ Φ_i + start + (1 \| i) + (1 \| video)` | `Φ > 0` |
-| D | the two axes are distinct | add `Φ_i` to H2 and `B_i` to H3 | cross terms near 0 |
+| H2 | perception predicts preference, source axis (phase 2; estimate) | `X_iv ~ B_i + start + (1 \| i) + (1 \| video)` | `B > 0` |
+| H3 | perception predicts preference, quality axis (phase 2; estimate) | `T_iv ~ Φ_i + start + (1 \| i) + (1 \| video)` | `Φ > 0` |
+| D | the two axes are distinct (estimate) | add `Φ_i` to H2 and `B_i` to H3 | cross terms near 0 |
 | R | binding is a stable trait of the listener | source-block intercept `a_i` (phase 2) against `B_i` (phase 1) | positive correlation |
 
 `X_iv` and `T_iv` are the stops participant `i` settled on in video `v`: the time-weighted mean stop
