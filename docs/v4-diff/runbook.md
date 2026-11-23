@@ -504,6 +504,37 @@ no key is needed and no call is made. The captions are placeholders marked "시�
 never research data. Playwright's Chromium has no H.264, so a headless walk
 needs WebM copies of the clips in a walk-only copy of the setup.
 
+### 7.1 One command for either place: this machine or Vercel
+
+`deploy/study.py` starts the same app from the same materials in either place (researcher,
+2026-11-23, when Neon's quota kept Vercel down). The setup, cues, scene parts, items and videos are
+named once, in `deploy/vercel/stage.py`; both places read that list.
+
+```sh
+make local                      # this machine, in tmux `diff-local`; prints how to open it
+make local ARGS="--fake"        # placeholder captions, no API key
+make local ARGS="--direct"      # listen on this machine's address instead of loopback
+make local ARGS="--purpose participant"
+make where                      # what serves the study now: local and Vercel
+make local-stop
+uv run python deploy/study.py links P1 P2     # personal links for the running local app
+uv run python deploy/study.py vercel [--prod] # prints the stage + deploy commands; --yes runs them
+```
+
+- **SSH tunnel (default).** The app listens on loopback only. On your own computer run the printed
+  `ssh -N -L 8782:127.0.0.1:8782 <user>@<address>` and open `http://localhost:8782/`. A browser
+  treats `localhost` like HTTPS, so this is the closest to Vercel, and nothing is open to the network.
+- **By address (`--direct`).** `http://<address>:8782/` for anyone whose network reaches this
+  machine. The lab app has no access code, so entry is by personal link here.
+- **API key.** From the shell, else from `ANTHROPIC_API_KEY=…` in `.env` at the repository root
+  (untracked). Without one, only `--fake` starts.
+- **What differs from Vercel.** Local serves the working tree, Vercel the commit at HEAD. Sessions
+  are in SQLite here (`artifacts/diff/local/smoke/`, or the participant store) and in Neon there; the
+  two are separate, so a participant starts and ends in one place, and `python -m diff export` reads
+  the local store directly. Phase 2's videos are served as Vercel's web copies when they exist
+  (`artifacts/diff/vercel/web/`); phase 1's clips are the originals.
+- The local state directory is not dated, so stopping and starting again resumes its sessions.
+
 ## 8. Export
 
 ```sh

@@ -1,7 +1,8 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo open close status code dashboard
+PHONY_STUDY := local local-stop where
+.PHONY: $(PHONY_STUDY) sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo open close status code dashboard
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -57,6 +58,18 @@ code:
 # Researcher-only, separate loopback port; never part of the participant Funnel.
 dashboard:
 	uv run python -m dpo.regen.dashboard
+
+# The diff participant app, wherever it is served (deploy/study.py; docs/v4-diff/runbook.md §7.1).
+# local = serve on this machine for an SSH tunnel (ARGS="--fake", "--direct", "--purpose participant"),
+# where = what serves the study now and how to open it. Vercel: uv run python deploy/study.py vercel
+local:
+	uv run python deploy/study.py local $(ARGS)
+
+local-stop:
+	uv run python deploy/study.py stop
+
+where:
+	uv run python deploy/study.py status
 
 sync:
 	uv sync --dev

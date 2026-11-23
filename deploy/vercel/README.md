@@ -26,6 +26,9 @@ request now reads a few kilobytes (`SessionStore.watch_session`); by estimate a 
 about 0.1 GB. Check the project's usage in Neon's console before a batch of sessions, and keep
 tests off the participants' month if the plan is the free one.
 
+**When Vercel or Neon is down**, the same app runs on the lab machine from the same materials:
+`make local` (`deploy/study.py`, runbook §7.1). `make where` says which place answers.
+
 ## What is where
 
 | Thing | Where |
