@@ -3,9 +3,9 @@
 The media a study is staged from is archival: §4's stills are full-resolution
 PNGs because the masks were cut from those pixels. That is not what a browser
 should be asked to download — a strip of five is 6.4 MB of PNG for a picture
-drawn 880 px wide. On campus that is invisible. Over the published link of
-``deploy/edge`` it is the wait the participant reads as the instrument being
-slow.
+drawn 880 px wide. On campus that is invisible. Over a slow public link (the
+retired off-campus door, docs/v3-regen/runbook.md) it is the wait the
+participant reads as the instrument being slow.
 
 So nothing here is re-staged. The files under ``--media-dir`` stay exactly as
 ``scripts/stage_regen_media.py`` wrote them — they are the study's record —

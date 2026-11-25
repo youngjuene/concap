@@ -2,7 +2,7 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 PHONY_STUDY := local local-stop where
-.PHONY: $(PHONY_STUDY) sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo open close status code dashboard
+.PHONY: $(PHONY_STUDY) sync check test lint typecheck locks smoke canary golden annotate report session-demo console-demo regen-demo dashboard
 
 # Operator loop for the live study (configs/study/street-audio.toml).
 SPLIT ?= train
@@ -40,22 +40,7 @@ regen-demo:
 	uv run dpo regen serve --session tests/regen/fixtures/regen.json \
 	  --media-dir data/regen-demo/media --out data/regen-demo/responses --writer template
 
-# The regeneration instrument's public door (deploy/README.md):
-# open = instrument serving + Tailscale Funnel on + link printed, close =
-# Funnel off, status = what is up and why, code = new access code (old links die).
-open:
-	deploy/edge open
-
-close:
-	deploy/edge close
-
-status:
-	deploy/edge status
-
-code:
-	deploy/edge code
-
-# Researcher-only, separate loopback port; never part of the participant Funnel.
+# Researcher-only, local-only, on its own loopback port (8781).
 dashboard:
 	uv run python -m dpo.regen.dashboard
 

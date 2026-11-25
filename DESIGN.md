@@ -87,7 +87,7 @@ recorded item ID and explicitly indicate historical wording is unavailable.
 ## Implementation constraints
 Existing FastAPI/Python, SQLite read-only transactions, JSONL reads, vanilla JS/CSS
 and SVG. No new packages. Serve separately on localhost:8781, reject proxy/remote
-access; never mount under public Funnel. Do not emit session credentials, model
+access; local only, never part of a public deployment. Do not emit session credentials, model
 prompts or unrelated filesystem paths. Tests reconcile fixtures across protocol
 versions and prove data files remain unchanged, with browser rendering/interaction QA.
 

@@ -207,8 +207,10 @@ researcher's to write. What has been measured, decided and left open is in
 
 - **`dpo regen` is retired** (2026-10-19). `diff` replaced it as the study
   instrument. The code stays in `src/dpo/regen`, frozen, with
-  [`docs/v3-regen/`](docs/v3-regen/), and `make open`/`deploy/edge` still
-  describe its old public door.
+  [`docs/v3-regen/`](docs/v3-regen/). Its public door was removed in
+  2026-11; the participant app is published by Vercel
+  ([`deploy/vercel/README.md`](deploy/vercel/README.md); `make where` says
+  what serves it now).
 - **The `dpo session` and `dpo console` instruments**, and **the congruency-
   slider study** (`dpo study serve`), belong to the `dpo` pipeline below.
   [`docs/README.md`](docs/README.md) maps every instrument's documents.

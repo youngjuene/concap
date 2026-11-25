@@ -146,8 +146,8 @@ CUDA_VISIBLE_DEVICES=1 uv run dpo regen serve … \
 config the contract does not pin, on any machine, before it touches CUDA.
 
 It binds to loopback and should stay there: the instrument has no login of
-its own, and the way off campus reaches it, "Running it for someone off
-campus" below, reaches loopback.
+its own. The off-campus door it once had is retired; see "Running it for
+someone off campus" below.
 
 While §6 runs, the console draws a bar over the cues in the track — the same
 report the participant's waiting screen is polling, so the two cannot disagree
@@ -177,59 +177,24 @@ on a click, but the clip must start without a second gesture.
 
 ## Running it for someone off campus
 
-The instrument has no login and no TLS. Anyone who reaches it can enrol,
-which spends a sequence number that §1's alternation is balanced on, and can
-fetch any participant's log. So it is never bound to a public address, and
-it stays on loopback. Off campus it is published by **Tailscale Funnel**:
-`https://concap.<tailnet>.ts.net` goes to Tailscale's public ingress, from
-there encrypted to a Tailscale node running in a container on this machine,
-which ends the TLS connection and proxies to `127.0.0.1:8779`. The access
-control is a switch: `make open` publishes, `make close` withdraws, and
-nothing is handed to the person running sessions except the link. Everything
-for it is in `deploy/`, whose `README.md` is the operator's card.
+**Retired in 2026-11.** The Tailscale Funnel door that published this
+instrument (`deploy/edge`, `deploy/docker-compose.yml`, `make open`/`close`/
+`status`/`code`) has been removed from the repository; participants now reach
+the study app through Vercel ([`deploy/vercel/README.md`](../../deploy/vercel/README.md),
+`make where`). The instrument has no login and no TLS, so it stays on loopback.
 
-**What the instrument itself adds when published** (`--public`,
-`--access-code-file`; `src/dpo/regen/gate.py`). A kiosk has no login because
-the researcher is in the room; a tunnel has no room, so three things stand
-in: a new enrolment must carry the access code the link holds (`?code=…`),
-read from `data/live/access-code` on every enrolment, so `make code` closes
-every earlier link at once and restarts nothing, while an enrolled
-participant resumes without it; the log download on the done screen is
-offered and served only on this machine, since a guessable identifier would
-otherwise export any session to anyone; and requests are rate-limited by
-address, with a tighter limit on enrolment, the one request that spends a
-sequence number §1's alternation is balanced on. None of it is on for a
-kiosk run.
+The flags it was published with remain in the instrument
+(`src/dpo/regen/gate.py`): `--public` keeps the log download on this machine
+and rate-limits requests by address, and `--access-code-file` refuses a new
+enrolment that does not carry the code in that file.
 
-**Why this and not the website's proxy.** The lab website's Traefik on this
-machine was the first design; it worked and its fault isolation was tested,
-but a new name under `kaist.ac.kr` is a request to KAIST IT, and the
-alternative of reusing `www.tx.kaist.ac.kr` puts a study on the lab site's
-name. Funnel needs no name, no port, no certificate work and no contact with
-anyone: the node's ts.net name resolves publicly, Tailscale fetches its
-Let's Encrypt certificate, and this machine opens nothing inbound. The
-container runs with no privileges (userspace networking), and only the one
-served port is public; the website's proxy, certificate store and network are
-not involved at all.
+For sessions already collected through that link: a stray enrolment is
+identifiable in `roster.json` as an entry with no `viewings-<p>.jsonl`
+against it; exclude it and read the sequence numbers around it as they stand.
 
-**What it costs.** A Tailscale account, free, signed in once from the link
-`make open` prints. Funnel's bandwidth is capped at a figure Tailscale does
-not publish, and the feature is labelled beta. The cap changes how long
-*Preparing the clip…* takes before Start, not what plays: the page fetches
-the whole clip first and plays it from memory (below).
+**How the page copes with a slow connection.** These are the instrument's
+own behaviour and hold wherever it is served.
 
-**After a reboot.** The node's container restarts on its own and keeps its
-identity in a volume; whether Funnel is on is remembered too. The instrument
-does not restart on its own, and `make open` starts it.
-
-**While it is open.**
-
-- Anyone with the current link can enrol, run a session and spend one
-  regeneration on the GPU. Open it for the session block and close it after,
-  and `make code` if a link has gone somewhere it should not have. A stray
-  enrolment is identifiable in `roster.json` as an entry with no
-  `viewings-<p>.jsonl` against it; exclude it and read the sequence numbers
-  around it as they stand.
 - Start reads *Preparing the clip…* until the whole clip (5–7 MB) is in the
   browser; it then plays from memory. This is what keeps an off-campus
   viewing the same stimulus as an on-campus one: once started, nothing about

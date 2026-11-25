@@ -1,3 +1,5 @@
+> 이 기록의 Funnel 경로는 2026-11에 폐기됨 (현재 참가자 앱 공개는 Vercel: `deploy/vercel/README.md`).
+
 # Public viewing deployment verification
 
 Scope: the public Tailscale URL must support all six calibration pages, all three

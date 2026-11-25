@@ -1,4 +1,4 @@
-"""Local researcher console for existing Phase 1/2 records; never serves via Funnel."""
+"""Local researcher console for existing Phase 1/2 records; loopback only."""
 
 from __future__ import annotations
 

@@ -18,9 +18,9 @@ Open **http://127.0.0.1:8781/** on the study machine. Custom sources:
   --viewing-dir data/live/regen-viewing-responses --port 8781
 ```
 
-The dashboard accepts local requests only, checks the host/origin, rejects
-forwarding headers, and is not published by Tailscale Funnel. Do not add this
-port to the participant Funnel. Researcher access from a different machine would
+The dashboard accepts local requests only, checks the host/origin, and rejects
+forwarding headers. It is local-only: do not publish this port or put it behind
+any public deployment. Researcher access from a different machine would
 need a separately authorized private access arrangement.
 
 The dashboard launched in this session writes its process record and server log
